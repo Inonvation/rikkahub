@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,17 +21,25 @@ fun RikkaConfirmDialog(
         return
     }
 
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = text,
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+                onConfirm()
+            }) {
                 Text(confirmText)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+                onDismiss()
+            }) {
                 Text(dismissText)
             }
         }
