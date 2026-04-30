@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
@@ -76,6 +78,7 @@ class CardGroupScope {
     }
 }
 
+
 @Composable
 private fun CardGroupListItem(
     item: CardGroupItem,
@@ -87,6 +90,8 @@ private fun CardGroupListItem(
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
 
     val topCorner by animateDpAsState(
         targetValue = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner,
@@ -114,7 +119,10 @@ private fun CardGroupListItem(
                     Modifier.clickable(
                         interactionSource = interactionSource,
                         indication = LocalIndication.current,
-                        onClick = item.onClick,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+                            item.onClick.invoke()
+                        },
                     )
                 } else Modifier
             ),
