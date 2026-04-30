@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -49,33 +51,22 @@ fun Switch(
 ) {
     val dimensions = when (size) {
         SwitchSize.Small -> SwitchDimensions(
-            trackWidth = 36.dp,
-            trackHeight = 20.dp,
-            thumbSize = 16.dp,
-            thumbPadding = 2.dp
+            trackWidth = 36.dp, trackHeight = 20.dp, thumbSize = 16.dp, thumbPadding = 2.dp
         )
-
         SwitchSize.Medium -> SwitchDimensions(
-            trackWidth = 44.dp,
-            trackHeight = 24.dp,
-            thumbSize = 20.dp,
-            thumbPadding = 2.dp
+            trackWidth = 44.dp, trackHeight = 24.dp, thumbSize = 20.dp, thumbPadding = 2.dp
         )
-
         SwitchSize.Large -> SwitchDimensions(
-            trackWidth = 52.dp,
-            trackHeight = 28.dp,
-            thumbSize = 24.dp,
-            thumbPadding = 2.dp
+            trackWidth = 52.dp, trackHeight = 28.dp, thumbSize = 24.dp, thumbPadding = 2.dp
         )
     }
+
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
 
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) {
             dimensions.trackWidth - dimensions.thumbSize - dimensions.thumbPadding * 2
-        } else {
-            0.dp
-        },
+        } else { 0.dp },
         animationSpec = tween(durationMillis = 150),
         label = "thumbOffset"
     )
@@ -102,6 +93,7 @@ fun Switch(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() }
             ) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
                 onCheckedChange(!checked)
             },
         contentAlignment = Alignment.CenterStart
@@ -111,10 +103,7 @@ fun Switch(
                 .padding(dimensions.thumbPadding)
                 .offset(x = thumbOffset)
                 .size(dimensions.thumbSize)
-                .shadow(
-                    elevation = if (enabled) 2.dp else 0.dp,
-                    shape = CircleShape
-                )
+                .shadow(elevation = if (enabled) 2.dp else 0.dp, shape = CircleShape)
                 .clip(CircleShape)
                 .background(currentThumbColor)
         )
