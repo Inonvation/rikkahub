@@ -30,7 +30,7 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 
 @Composable
-fun <T> Select(
+fun Select(
     options: List<T>,
     selectedOption: T,
     onOptionSelected: (T) -> Unit,
@@ -41,6 +41,7 @@ fun <T> Select(
     trailing: @Composable () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
 
     ExposedDropdownMenuBox(
         modifier = modifier,
@@ -56,7 +57,10 @@ fun <T> Select(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable { expanded = true }
+                    .clickable {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+                        expanded = true
+                    }
                     .padding(vertical = 8.dp, horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -86,9 +90,7 @@ fun <T> Select(
                         onOptionSelected(option)
                         expanded = false
                     },
-                    text = {
-                        Text(text = optionToString(option), maxLines = 1)
-                    },
+                    text = { Text(text = optionToString(option), maxLines = 1) },
                     leadingIcon = optionLeading?.let {
                         { it(option) }
                     }
