@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -18,10 +20,14 @@ fun ToggleSurface(
     onClick: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
     val contentColor =
         if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Surface(
-        onClick = onClick,
+        onClick = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+            onClick()
+        },
         color = Color.Transparent,
         contentColor = contentColor,
         modifier = modifier,
