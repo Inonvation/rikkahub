@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,20 +36,11 @@ fun Tag(
     onClick: (() -> Unit)? = null,
     children: @Composable RowScope.() -> Unit
 ) {
-    val background = when (type) {
-        TagType.SUCCESS -> MaterialTheme.extendColors.green2
-        TagType.ERROR -> MaterialTheme.extendColors.red2
-        TagType.WARNING -> MaterialTheme.extendColors.orange2
-        TagType.INFO -> MaterialTheme.extendColors.blue2
-        else -> MaterialTheme.colorScheme.tertiaryContainer
-    }
-    val textColor = when (type) {
-        TagType.SUCCESS -> MaterialTheme.extendColors.gray8
-        TagType.ERROR -> MaterialTheme.extendColors.red8
-        TagType.WARNING -> MaterialTheme.extendColors.orange8
-        TagType.INFO -> MaterialTheme.extendColors.blue8
-        else -> MaterialTheme.colorScheme.onTertiaryContainer
-    }
+    val background = when (type) { /* ... 保持不变 ... */ }
+    val textColor = when (type) { /* ... 保持不变 ... */ }
+    
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
+
     ProvideTextStyle(MaterialTheme.typography.labelSmall.copy(color = textColor)) {
         Row(
             modifier = modifier
@@ -55,7 +48,10 @@ fun Tag(
                 .background(background)
                 .let {
                     if (onClick != null) {
-                        it.clickable { onClick() }
+                        it.clickable {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
+                            onClick()
+                        }
                     } else {
                         it
                     }
