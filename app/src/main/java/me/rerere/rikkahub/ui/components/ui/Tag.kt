@@ -46,16 +46,16 @@ fun Tag(
             modifier = modifier
                 .clip(RoundedCornerShape(50))
                 .background(background)
-                .let {
-                    if (onClick != null) {
-                        it.clickable {
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
-                            onClick()
-                        }
-                    } else {
-                        it
-                    }
-                }
+                .then(
+    if (onClick != null) {
+        Modifier.clickable {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onClick()
+        }
+    } else {
+        Modifier
+    }
+)
                 .padding(horizontal = 6.dp, vertical = 1.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
