@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.nav
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -15,13 +17,18 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 @Composable
 fun BackButton(modifier: Modifier = Modifier) {
     val navController = LocalNavController.current
+    val hapticFeedback = LocalHapticFeedback.current  // ← 新增
+
     FilledTonalIconButton(
         onClick = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) // ← 新增
             navController.popBackStack()
         },
         modifier = modifier,
         shapes = IconButtonDefaults.shapes(),
-        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = CustomColors.listItemColors.containerColor),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
     ) {
         Icon(
             imageVector = HugeIcons.ArrowLeft01,
