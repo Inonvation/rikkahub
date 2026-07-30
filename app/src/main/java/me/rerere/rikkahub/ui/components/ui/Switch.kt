@@ -25,9 +25,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 enum class SwitchSize {
     Small,
@@ -70,6 +72,7 @@ fun Switch(
         )
     }
 
+    val hapticController = rememberHaptic()
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) {
             dimensions.trackWidth - dimensions.thumbSize - dimensions.thumbPadding * 2
@@ -102,6 +105,7 @@ fun Switch(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() }
             ) {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
                 onCheckedChange(!checked)
             },
         contentAlignment = Alignment.CenterStart

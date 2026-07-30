@@ -57,7 +57,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +69,7 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalTTSState
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.pages.setting.components.ASRProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.TTSProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -320,16 +320,16 @@ private fun TTSProviderList(
                         .fillMaxWidth(),
                     provider = provider,
                     dragHandle = {
-                        val haptic = LocalHapticFeedback.current
+                        val hapticController = rememberHaptic()
                         IconButton(
                             onClick = {},
                             modifier = Modifier
                                 .longPressDraggableHandle(
                                     onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        hapticController.perform(HapticFeedbackType.GestureEnd)
                                     }
                                 )
                         ) {
@@ -397,16 +397,16 @@ private fun ASRProviderList(
                         .fillMaxWidth(),
                     provider = provider,
                     dragHandle = {
-                        val haptic = LocalHapticFeedback.current
+                        val hapticController = rememberHaptic()
                         IconButton(
                             onClick = {},
                             modifier = Modifier
                                 .longPressDraggableHandle(
                                     onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        hapticController.perform(HapticFeedbackType.GestureEnd)
                                     }
                                 )
                         ) {

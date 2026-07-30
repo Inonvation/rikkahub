@@ -28,9 +28,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 
 private val CardGroupCorner = 20.dp
@@ -104,6 +106,7 @@ private fun CardGroupListItem(
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val hapticController = rememberHaptic()
 
     val topCorner by animateDpAsState(
         targetValue = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner,
@@ -131,7 +134,10 @@ private fun CardGroupListItem(
                     Modifier.clickable(
                         interactionSource = interactionSource,
                         indication = LocalIndication.current,
-                        onClick = item.onClick,
+                        onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            item.onClick()
+                        },
                     )
                 } else Modifier
             ),

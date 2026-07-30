@@ -49,7 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +85,7 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.toDp
 import org.koin.compose.koinInject
@@ -398,7 +398,7 @@ private fun ColumnScope.ModelList(
             }
         }
     }
-    val haptic = LocalHapticFeedback.current
+    val hapticController = rememberHaptic()
 
     val providerPositions = remember(providers, favoriteModels, searchFilteredModelsByProvider) {
         var currentIndex = 0
@@ -522,10 +522,10 @@ private fun ColumnScope.ModelList(
                                 contentDescription = null,
                                 modifier = Modifier.longPressDraggableHandle(
                                     onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        hapticController.perform(HapticFeedbackType.GestureEnd)
                                     }
                                 )
                             )

@@ -60,7 +60,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,6 +78,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -201,16 +201,16 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 .fillMaxWidth(),
                             provider = provider,
                             dragHandle = {
-                                val haptic = LocalHapticFeedback.current
+                                val hapticController = rememberHaptic()
                                 IconButton(
                                     onClick = {},
                                     modifier = Modifier
                                         .longPressDraggableHandle(
                                             onDragStarted = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                                hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                             },
                                             onDragStopped = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                                hapticController.perform(HapticFeedbackType.GestureEnd)
                                             }
                                         )
                                 ) {

@@ -43,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,6 +56,7 @@ import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchCommonOptions
@@ -115,7 +115,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 )
             }
         }
-        val haptic = LocalHapticFeedback.current
+        val hapticController = rememberHaptic()
 
         LazyColumn(
             modifier = Modifier
@@ -151,10 +151,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                             .animateItem()
                             .longPressDraggableHandle(
                                 onDragStarted = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                 },
                                 onDragStopped = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                    hapticController.perform(HapticFeedbackType.GestureEnd)
                                 }
                             )
                     )
