@@ -351,19 +351,13 @@ internal fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
     onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -394,19 +388,13 @@ internal fun ExaOptions(
     options: SearchServiceOptions.ExaOptions,
     onUpdateOptions: (SearchServiceOptions.ExaOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -414,19 +402,13 @@ internal fun ZhipuOptions(
     options: SearchServiceOptions.ZhipuOptions,
     onUpdateOptions: (SearchServiceOptions.ZhipuOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -510,19 +492,13 @@ internal fun SearchLinkUpOptions(
     options: SearchServiceOptions.LinkUpOptions,
     onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -553,19 +529,13 @@ internal fun BraveOptions(
     options: SearchServiceOptions.BraveOptions,
     onUpdateOptions: (SearchServiceOptions.BraveOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -573,19 +543,13 @@ internal fun SerperOptions(
     options: SearchServiceOptions.SerperOptions,
     onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -593,19 +557,13 @@ internal fun MetasoOptions(
     options: SearchServiceOptions.MetasoOptions,
     onUpdateOptions: (SearchServiceOptions.MetasoOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -613,19 +571,13 @@ internal fun OllamaOptions(
     options: SearchServiceOptions.OllamaOptions,
     onUpdateOptions: (SearchServiceOptions.OllamaOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -633,19 +585,13 @@ internal fun PerplexityOptions(
     options: SearchServiceOptions.PerplexityOptions,
     onUpdateOptions: (SearchServiceOptions.PerplexityOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -683,19 +629,13 @@ internal fun FirecrawlOptions(
     options: SearchServiceOptions.FirecrawlOptions,
     onUpdateOptions: (SearchServiceOptions.FirecrawlOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -703,19 +643,13 @@ internal fun JinaOptions(
     options: SearchServiceOptions.JinaOptions,
     onUpdateOptions: (SearchServiceOptions.JinaOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -757,19 +691,13 @@ internal fun BochaOptions(
     options: SearchServiceOptions.BochaOptions,
     onUpdateOptions: (SearchServiceOptions.BochaOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -794,19 +722,13 @@ internal fun RikkaHubOptions(
     options: SearchServiceOptions.RikkaHubOptions,
     onUpdateOptions: (SearchServiceOptions.RikkaHubOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {
@@ -837,19 +759,13 @@ internal fun TinyfishOptions(
     options: SearchServiceOptions.TinyfishOptions,
     onUpdateOptions: (SearchServiceOptions.TinyfishOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 }
 
 @Composable
@@ -857,19 +773,13 @@ internal fun GrokOptions(
     options: SearchServiceOptions.GrokOptions,
     onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
 ) {
-    FormItem(
-        label = {
-            Text(stringResource(R.string.search_detail_api_key))
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    SearchApiKeyField(
+        serviceId = options.id.toString(),
+        apiKey = options.apiKey,
+        multipleKeys = options.multipleKeys,
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
+        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+    )
 
     FormItem(
         label = {

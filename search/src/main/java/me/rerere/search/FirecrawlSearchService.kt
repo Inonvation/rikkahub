@@ -24,6 +24,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -111,13 +112,15 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 }
             }
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url("https://api.firecrawl.dev/v2/search")
                 .post(body.toString().toRequestBody())
                 .addHeader("Content-Type", "application/json")
                 .apply {
-                    if (serviceOptions.apiKey.isNotBlank()) {
-                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                    if (apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer $apiKey")
                     }
                 }
                 .build()
@@ -174,13 +177,15 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 })
             }
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url("https://api.firecrawl.dev/v2/scrape")
                 .post(body.toString().toRequestBody())
                 .addHeader("Content-Type", "application/json")
                 .apply {
-                    if (serviceOptions.apiKey.isNotBlank()) {
-                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                    if (apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer $apiKey")
                     }
                 }
                 .build()

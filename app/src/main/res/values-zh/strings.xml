@@ -556,6 +556,9 @@
   <string name="search_ability_scrape">抓取</string>
   <string name="search_ability_search">搜索</string>
   <string name="search_detail_api_key">API密钥</string>
+  <string name="search_detail_new_api_key">新 API Key</string>
+  <string name="search_detail_add_api_key">添加 Key</string>
+  <string name="search_detail_multiple_keys">多 Key</string>
   <string name="search_detail_api_url">API URL</string>
   <string name="search_detail_custom_search_placeholder">我的自定义搜索</string>
   <string name="search_detail_custom_url">自定义网址</string>
@@ -577,6 +580,11 @@
   <string name="search_detail_system_prompt">系统提示</string>
   <string name="search_detail_unknown_error">未知错误</string>
   <string name="search_detail_username">用户名</string>
+  <string name="multi_key_manage_title">管理 Keys</string>
+  <string name="multi_key_manage_hint">添加多个 API key，请求时自动轮换使用</string>
+  <string name="multi_key_entry_title">多 Key</string>
+  <string name="multi_key_entry_count">已配置 %d 个 key</string>
+  <string name="multi_key_entry_empty">尚未配置 key</string>
   <string name="search_page_hint">输入关键词并点击搜索以查找消息</string>
   <string name="search_page_no_results">无结果</string>
   <string name="search_page_placeholder">搜索消息内容…</string>
@@ -910,6 +918,9 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_advanced_settings">高级设置</string>
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
+  <string name="setting_provider_page_new_api_key">新 API Key</string>
+  <string name="setting_provider_page_add_api_key">添加 Key</string>
+  <string name="setting_provider_page_multiple_keys">多 Key</string>
   <string name="setting_provider_page_api_path">API 路径</string>
   <string name="setting_provider_page_avaliable_models">可用模型</string>
   <string name="setting_provider_page_balance_api_path">余额 API 路径</string>

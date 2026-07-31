@@ -554,6 +554,9 @@
   <string name="search_ability_scrape">Собрать</string>
   <string name="search_ability_search">Поиск</string>
   <string name="search_detail_api_key">Ключ API</string>
+  <string name="search_detail_new_api_key">Новый ключ API</string>
+  <string name="search_detail_add_api_key">Добавить ключ</string>
+  <string name="search_detail_multiple_keys">Несколько ключей</string>
   <string name="search_detail_api_url">URL API</string>
   <string name="search_detail_custom_search_placeholder">Мой поиск</string>
   <string name="search_detail_custom_url">Пользовательский URL</string>
@@ -575,6 +578,11 @@
   <string name="search_detail_system_prompt">Системный запрос</string>
   <string name="search_detail_unknown_error">Неизвестная ошибка</string>
   <string name="search_detail_username">Имя пользователя</string>
+  <string name="multi_key_manage_title">Управление ключами</string>
+  <string name="multi_key_manage_hint">Добавьте несколько API-ключей, запросы будут автоматически ротироваться</string>
+  <string name="multi_key_entry_title">Несколько ключей</string>
+  <string name="multi_key_entry_count">Настроено ключей: %d</string>
+  <string name="multi_key_entry_empty">Ключи ещё не настроены</string>
   <string name="search_page_hint">Введите ключевые слова и нажмите «Поиск», чтобы найти сообщения</string>
   <string name="search_page_no_results">Нет результатов</string>
   <string name="search_page_placeholder">Искать в содержимом сообщений…</string>
@@ -876,6 +884,9 @@
   <string name="setting_provider_page_advanced_settings">Расширенные настройки</string>
   <string name="setting_provider_page_api_base_url">Базовый URL API</string>
   <string name="setting_provider_page_api_key">Ключ API</string>
+  <string name="setting_provider_page_new_api_key">Новый ключ API</string>
+  <string name="setting_provider_page_add_api_key">Добавить ключ</string>
+  <string name="setting_provider_page_multiple_keys">Несколько ключей</string>
   <string name="setting_provider_page_api_path">Путь API</string>
   <string name="setting_provider_page_avaliable_models">Доступные модели</string>
   <string name="setting_provider_page_balance_api_path">Путь API баланса</string>

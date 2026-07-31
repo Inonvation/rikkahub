@@ -21,6 +21,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -60,7 +61,8 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
         serviceOptions: SearchServiceOptions.GrokOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
-            if (serviceOptions.apiKey.isBlank()) {
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            if (apiKey.isBlank()) {
                 error("Grok API key is required")
             }
 
@@ -95,7 +97,7 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
             val request = Request.Builder()
                 .url(serviceOptions.customUrl)
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .build()
 

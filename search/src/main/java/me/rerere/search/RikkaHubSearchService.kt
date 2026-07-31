@@ -14,6 +14,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -54,10 +55,12 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
                 put("includeImages", JsonPrimitive("false"))
             }
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url("https://api.rikka-ai.com/v1/search")
                 .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .build()
 

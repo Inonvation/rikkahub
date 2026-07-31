@@ -16,6 +16,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 
 private const val TAG = "BraveSearchService"
@@ -59,10 +60,12 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     "?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
                     "&count=${commonOptions.resultSize}"
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url(url)
                 .addHeader("Accept", "application/json")
-                .addHeader("X-Subscription-Token", serviceOptions.apiKey)
+                .addHeader("X-Subscription-Token", apiKey)
                 .build()
 
             val response = httpClient.newCall(request).await()

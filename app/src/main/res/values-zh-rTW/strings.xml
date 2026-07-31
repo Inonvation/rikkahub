@@ -554,6 +554,9 @@
   <string name="search_ability_scrape">爬取</string>
   <string name="search_ability_search">搜尋</string>
   <string name="search_detail_api_key">API 金鑰</string>
+  <string name="search_detail_new_api_key">新 API Key</string>
+  <string name="search_detail_add_api_key">添加 Key</string>
+  <string name="search_detail_multiple_keys">多 Key</string>
   <string name="search_detail_api_url">API URL</string>
   <string name="search_detail_custom_search_placeholder">我的自訂搜尋</string>
   <string name="search_detail_custom_url">自訂網址</string>
@@ -575,6 +578,11 @@
   <string name="search_detail_system_prompt">系統提示</string>
   <string name="search_detail_unknown_error">未知錯誤</string>
   <string name="search_detail_username">使用者名稱</string>
+  <string name="multi_key_manage_title">管理 Keys</string>
+  <string name="multi_key_manage_hint">添加多個 API key，請求時自動輪換使用</string>
+  <string name="multi_key_entry_title">多 Key</string>
+  <string name="multi_key_entry_count">已配置 %d 個 key</string>
+  <string name="multi_key_entry_empty">尚未配置 key</string>
   <string name="search_page_hint">輸入關鍵字並按下搜尋以尋找訊息</string>
   <string name="search_page_no_results">沒有結果</string>
   <string name="search_page_placeholder">搜尋訊息內容…</string>
@@ -874,6 +882,9 @@
   <string name="setting_provider_page_advanced_settings">進階設定</string>
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
+  <string name="setting_provider_page_new_api_key">新 API Key</string>
+  <string name="setting_provider_page_add_api_key">添加 Key</string>
+  <string name="setting_provider_page_multiple_keys">多 Key</string>
   <string name="setting_provider_page_api_path">API 路徑</string>
   <string name="setting_provider_page_avaliable_models">可用模型</string>
   <string name="setting_provider_page_balance_api_path">餘額 API 路徑</string>

@@ -18,6 +18,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -64,10 +65,12 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 put("count", JsonPrimitive(commonOptions.resultSize))
             }
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url("https://api.bochaai.com/v1/web-search")
                 .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .build()
 

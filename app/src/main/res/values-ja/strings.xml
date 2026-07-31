@@ -554,6 +554,9 @@
   <string name="search_ability_scrape">スクレイピング</string>
   <string name="search_ability_search">検索</string>
   <string name="search_detail_api_key">APIキー</string>
+  <string name="search_detail_new_api_key">新しい API Key</string>
+  <string name="search_detail_add_api_key">Key を追加</string>
+  <string name="search_detail_multiple_keys">複数 Key</string>
   <string name="search_detail_api_url">API URL</string>
   <string name="search_detail_custom_search_placeholder">マイカスタム検索</string>
   <string name="search_detail_custom_url">カスタムURL</string>
@@ -575,6 +578,11 @@
   <string name="search_detail_system_prompt">システムプロンプト</string>
   <string name="search_detail_unknown_error">不明なエラー</string>
   <string name="search_detail_username">ユーザー名</string>
+  <string name="multi_key_manage_title">Key を管理</string>
+  <string name="multi_key_manage_hint">複数の API key を追加すると、リクエスト時に自動的にローテーションされます</string>
+  <string name="multi_key_entry_title">複数 Key</string>
+  <string name="multi_key_entry_count">%d 個の key を設定済み</string>
+  <string name="multi_key_entry_empty">key がまだ設定されていません</string>
   <string name="search_page_hint">キーワードを入力して検索ボタンを押すとメッセージを検索できます</string>
   <string name="search_page_no_results">検索結果なし</string>
   <string name="search_page_placeholder">メッセージ内容を検索…</string>
@@ -876,6 +884,9 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_provider_page_advanced_settings">詳細設定</string>
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
+  <string name="setting_provider_page_new_api_key">新しい API Key</string>
+  <string name="setting_provider_page_add_api_key">Key を追加</string>
+  <string name="setting_provider_page_multiple_keys">複数 Key</string>
   <string name="setting_provider_page_api_path">APIパス</string>
   <string name="setting_provider_page_avaliable_models">利用可能なモデル</string>
   <string name="setting_provider_page_balance_api_path">残高APIパス</string>

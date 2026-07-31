@@ -562,6 +562,9 @@
   <string name="search_ability_scrape">Scrape</string>
   <string name="search_ability_search">Search</string>
   <string name="search_detail_api_key">API Key</string>
+  <string name="search_detail_new_api_key">New API Key</string>
+  <string name="search_detail_add_api_key">Add Key</string>
+  <string name="search_detail_multiple_keys">Multiple Keys</string>
   <string name="search_detail_api_url">API URL</string>
   <string name="search_detail_custom_search_placeholder">My Custom Search</string>
   <string name="search_detail_custom_url">Custom URL</string>
@@ -583,6 +586,11 @@
   <string name="search_detail_system_prompt">System Prompt</string>
   <string name="search_detail_unknown_error">Unknown error</string>
   <string name="search_detail_username">Username</string>
+  <string name="multi_key_manage_title">Manage Keys</string>
+  <string name="multi_key_manage_hint">Add multiple API keys, requests will rotate between them automatically</string>
+  <string name="multi_key_entry_title">Multiple Keys</string>
+  <string name="multi_key_entry_count">%d keys configured</string>
+  <string name="multi_key_entry_empty">No keys configured yet</string>
   <string name="search_page_hint">Enter keywords and press Search to find messages</string>
   <string name="search_page_no_results">No results</string>
   <string name="search_page_placeholder">Search message content...</string>
@@ -930,6 +938,9 @@
   <string name="setting_provider_page_advanced_settings">Advanced Settings</string>
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
+  <string name="setting_provider_page_new_api_key">New API Key</string>
+  <string name="setting_provider_page_add_api_key">Add Key</string>
+  <string name="setting_provider_page_multiple_keys">Multiple Keys</string>
   <string name="setting_provider_page_api_path">API Path</string>
   <string name="setting_provider_page_avaliable_models">Avaliable Models</string>
   <string name="setting_provider_page_balance_api_path">Balance API Path</string>

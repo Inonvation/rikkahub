@@ -32,11 +32,14 @@ import com.dokar.sonner.ToastType
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.pages.setting.MultiKeyEntryCard
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.json.Json
@@ -204,6 +207,7 @@ private fun ProviderConfigureOpenAI(
     onEdit: (provider: ProviderSetting.OpenAI) -> Unit
 ) {
     val toaster = LocalToaster.current
+    val navController = LocalNavController.current
 
     provider.description()
 
@@ -215,19 +219,42 @@ private fun ProviderConfigureOpenAI(
     )
 
     var keyVisible by remember { mutableStateOf(false) }
-    OutlinedTextField(
-        value = provider.apiKey,
-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-        modifier = Modifier.fillMaxWidth(),
-        maxLines = 3,
-        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = { keyVisible = !keyVisible }) {
-                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+    if (provider.multipleKeys) {
+        MultiKeyEntryCard(
+            apiKey = provider.apiKey,
+            onClick = {
+                navController.navigate(
+                    Screen.SettingMultiKeyManage("provider", provider.id.toString())
+                )
             }
-        },
-    )
+        )
+    } else {
+        OutlinedTextField(
+            value = provider.apiKey,
+            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+            label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { keyVisible = !keyVisible }) {
+                    Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+                }
+            },
+        )
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(stringResource(R.string.setting_provider_page_multiple_keys))
+        Switch(
+            checked = provider.multipleKeys,
+            onCheckedChange = { onEdit(provider.copy(multipleKeys = it)) }
+        )
+    }
 
     OutlinedTextField(
         value = provider.baseUrl,
@@ -306,6 +333,8 @@ private fun ProviderConfigureClaude(
     provider: ProviderSetting.Claude,
     onEdit: (provider: ProviderSetting.Claude) -> Unit
 ) {
+    val navController = LocalNavController.current
+
     provider.description()
 
     OutlinedTextField(
@@ -317,19 +346,42 @@ private fun ProviderConfigureClaude(
     )
 
     var keyVisible by remember { mutableStateOf(false) }
-    OutlinedTextField(
-        value = provider.apiKey,
-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-        modifier = Modifier.fillMaxWidth(),
-        maxLines = 3,
-        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = { keyVisible = !keyVisible }) {
-                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+    if (provider.multipleKeys) {
+        MultiKeyEntryCard(
+            apiKey = provider.apiKey,
+            onClick = {
+                navController.navigate(
+                    Screen.SettingMultiKeyManage("provider", provider.id.toString())
+                )
             }
-        },
-    )
+        )
+    } else {
+        OutlinedTextField(
+            value = provider.apiKey,
+            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+            label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { keyVisible = !keyVisible }) {
+                    Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+                }
+            },
+        )
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(stringResource(R.string.setting_provider_page_multiple_keys))
+        Switch(
+            checked = provider.multipleKeys,
+            onCheckedChange = { onEdit(provider.copy(multipleKeys = it)) }
+        )
+    }
 
     OutlinedTextField(
         value = provider.baseUrl,
@@ -395,6 +447,7 @@ private fun ProviderConfigureGoogle(
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val navController = LocalNavController.current
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->

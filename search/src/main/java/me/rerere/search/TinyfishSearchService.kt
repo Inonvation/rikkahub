@@ -17,6 +17,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
+import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -68,9 +69,11 @@ object TinyfishSearchService : SearchService<SearchServiceOptions.TinyfishOption
             val url = "https://api.search.tinyfish.ai" +
                     "?query=${java.net.URLEncoder.encode(query, "UTF-8")}"
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url(url)
-                .addHeader("X-API-Key", serviceOptions.apiKey)
+                .addHeader("X-API-Key", apiKey)
                 .build()
 
             val response = httpClient.newCall(request).await()
@@ -112,10 +115,12 @@ object TinyfishSearchService : SearchService<SearchServiceOptions.TinyfishOption
                 put("format", "markdown")
             }
 
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+
             val request = Request.Builder()
                 .url("https://api.fetch.tinyfish.ai")
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .addHeader("X-API-Key", serviceOptions.apiKey)
+                .addHeader("X-API-Key", apiKey)
                 .build()
 
             val response = httpClient.newCall(request).await()
