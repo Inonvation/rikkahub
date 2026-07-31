@@ -45,7 +45,7 @@ fun rememberHaptic(): HapticController {
 }
 
 /**
- * 创建用于 AI 消息生成开始和完成时的 [HapticController]。
+ * 创建用于 AI 消息生成完成后的 [HapticController]。
  *
  * 需要同时满足总开关 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableHapticFeedback]
  * 和 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableMessageGenerationHapticEffect] 开启。
@@ -60,6 +60,27 @@ fun rememberMessageGenerationHaptic(): HapticController {
             enabled = {
                 settings.displaySetting.enableHapticFeedback &&
                         settings.displaySetting.enableMessageGenerationHapticEffect
+            },
+        )
+    }
+}
+
+/**
+ * 创建用于 AI 消息生成开始时的 [HapticController]。
+ *
+ * 需要同时满足总开关 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableHapticFeedback]
+ * 和 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableMessageGenerationStartedHapticEffect] 开启。
+ */
+@Composable
+fun rememberMessageGenerationStartedHaptic(): HapticController {
+    val hapticFeedback = LocalHapticFeedback.current
+    val settings = LocalSettings.current
+    return remember(hapticFeedback, settings) {
+        HapticController(
+            hapticFeedback = hapticFeedback,
+            enabled = {
+                settings.displaySetting.enableHapticFeedback &&
+                        settings.displaySetting.enableMessageGenerationStartedHapticEffect
             },
         )
     }

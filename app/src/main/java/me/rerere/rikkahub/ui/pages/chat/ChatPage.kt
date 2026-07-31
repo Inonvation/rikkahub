@@ -109,6 +109,7 @@ import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.rememberMessageGenerationHaptic
+import me.rerere.rikkahub.ui.hooks.rememberMessageGenerationStartedHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
@@ -171,6 +172,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val inputState = vm.inputState
 
     val hapticController = rememberHaptic()
+    val messageGenerationStartedHapticController = rememberMessageGenerationStartedHaptic()
     val messageGenerationHapticController = rememberMessageGenerationHaptic()
 
     // AI 消息生成开始时触发一次触感反馈
@@ -178,7 +180,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(loadingJob) {
         val currentLoading = loadingJob != null
         if (currentLoading && !previousLoading) {
-            messageGenerationHapticController.perform(HapticFeedbackType.Confirm)
+            messageGenerationStartedHapticController.perform(HapticFeedbackType.Confirm)
         }
         previousLoading = currentLoading
     }

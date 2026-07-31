@@ -600,6 +600,7 @@ data class DisplaySetting(
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,
+    val enableMessageGenerationStartedHapticEffect: Boolean = false,
     val enableMessageGenerationHapticEffect: Boolean = false,
     val enableUiHapticFeedback: Boolean = true,
     val skipCropImage: Boolean = true,
