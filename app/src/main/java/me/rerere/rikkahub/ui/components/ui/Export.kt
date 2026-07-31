@@ -14,12 +14,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File01
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.export.ExporterState
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun <T> ExportDialog(
@@ -31,9 +33,11 @@ fun <T> ExportDialog(
         onDismissRequest = onDismiss,
         title = { Text(title ?: stringResource(R.string.export_title)) },
         text = {
+            val hapticController = rememberHaptic()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedCard(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         exporter.exportToFile()
                         onDismiss()
                     },
@@ -62,6 +66,7 @@ fun <T> ExportDialog(
                 }
                 OutlinedCard(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         exporter.exportAndShare()
                         onDismiss()
                     },

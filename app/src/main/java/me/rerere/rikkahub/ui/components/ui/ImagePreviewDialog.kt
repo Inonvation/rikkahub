@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -27,6 +28,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import org.koin.compose.koinInject
 
 @Composable
@@ -39,6 +41,7 @@ fun ImagePreviewDialog(
     val state = rememberZoomablePagerState { images.size }
     val toaster = LocalToaster.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val hapticController = rememberHaptic()
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
@@ -65,6 +68,7 @@ fun ImagePreviewDialog(
             ) {
                 IconButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         lifecycleOwner.lifecycleScope.launch {
                             runCatching {
                                 toaster.show("正在保存")

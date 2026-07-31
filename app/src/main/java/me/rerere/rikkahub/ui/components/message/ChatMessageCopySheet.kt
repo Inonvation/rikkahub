@@ -23,6 +23,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +35,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.utils.copyMessageToClipboard
 
 @Composable
@@ -42,6 +44,7 @@ fun ChatMessageCopySheet(
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
+    val hapticController = rememberHaptic()
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
@@ -62,6 +65,7 @@ fun ChatMessageCopySheet(
             ) {
                 IconButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         onDismissRequest()
                     }
                 ) {
@@ -75,6 +79,7 @@ fun ChatMessageCopySheet(
 
                 TextButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         context.copyMessageToClipboard(message)
                         onDismissRequest()
                     }

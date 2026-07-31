@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -45,6 +46,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatErrorSolution
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.uuid.Uuid
 
 @Composable
@@ -60,6 +62,7 @@ fun ErrorCardsDisplay(
         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
     ) {
+        val hapticController = rememberHaptic()
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.End,
@@ -67,7 +70,10 @@ fun ErrorCardsDisplay(
             // 清除全部按钮（当有多个错误时显示）
             if (errors.size > 1) {
                 Surface(
-                    onClick = onClearAllErrors,
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        onClearAllErrors()
+                    },
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
                 ) {
@@ -111,6 +117,7 @@ fun ErrorCard(
     val clipboard = LocalClipboard.current
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
     val checkTitleModelSettings = stringResource(R.string.chat_page_check_title_model_settings)
     val linkColor = MaterialTheme.colorScheme.primary
 
@@ -180,6 +187,7 @@ fun ErrorCard(
             }
             IconButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch {
                         clipboard.setClipEntry(
                             ClipEntry(
@@ -198,7 +206,10 @@ fun ErrorCard(
                 )
             }
             IconButton(
-                onClick = onDismiss,
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onDismiss()
+                },
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(

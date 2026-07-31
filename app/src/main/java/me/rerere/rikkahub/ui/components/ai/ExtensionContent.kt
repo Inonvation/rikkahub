@@ -13,13 +13,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ExternalLink
@@ -31,6 +31,8 @@ import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.ui.components.ui.Switch
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun ModeInjectionsContent(
@@ -191,13 +193,17 @@ fun QuickMessagesContent(
 
 @Composable
 private fun ManageButton(onClick: () -> Unit) {
+    val hapticController = rememberHaptic()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        TextButton(onClick = onClick) {
+        TextButton(onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            onClick()
+        }) {
             Icon(Lucide.ExternalLink, contentDescription = null, modifier = Modifier.size(16.dp))
             Text(
                 text = stringResource(R.string.extension_content_manage),
@@ -214,6 +220,7 @@ fun ExtensionEmptyState(
     buttonText: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
+    val hapticController = rememberHaptic()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,7 +234,10 @@ fun ExtensionEmptyState(
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
         if (buttonText != null && onAction != null) {
-            TextButton(onClick = onAction) {
+            TextButton(onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                onAction()
+            }) {
                 Icon(HugeIcons.Link01, contentDescription = null)
                 Text(buttonText)
             }

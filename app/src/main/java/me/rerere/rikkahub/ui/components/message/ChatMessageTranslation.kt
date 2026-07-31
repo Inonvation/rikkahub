@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import java.util.Locale
 
 @Composable
@@ -95,6 +97,7 @@ fun LanguageSelectionDialog(
         onDismissRequest = onDismissRequest,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
     ) {
+        val hapticController = rememberHaptic()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,6 +119,7 @@ fun LanguageSelectionDialog(
                 items(languages) { language ->
                     Card(
                         onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             onLanguageSelected(language)
                         },
                         shape = MaterialTheme.shapes.medium
@@ -143,6 +147,7 @@ fun LanguageSelectionDialog(
                 item {
                     Card(
                         onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             onClearTranslation()
                         },
                         shape = MaterialTheme.shapes.medium
@@ -177,6 +182,7 @@ fun CollapsibleTranslationText(
 ) {
     if (content.isNotBlank()) {
         var isCollapsed by remember { mutableStateOf(false) }
+        val hapticController = rememberHaptic()
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -211,7 +217,7 @@ fun CollapsibleTranslationText(
 
             // 折叠/展开按钮
             IconButton(
-                onClick = { isCollapsed = !isCollapsed },
+                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); isCollapsed = !isCollapsed },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(

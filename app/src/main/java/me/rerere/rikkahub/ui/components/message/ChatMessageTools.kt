@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,7 @@ import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -94,6 +96,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(true) }
+    val hapticController = rememberHaptic()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
@@ -134,7 +137,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     FilledTonalIconButton(
-                        onClick = { showDenyDialog = true },
+                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showDenyDialog = true },
                         modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
@@ -144,7 +147,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         )
                     }
                     FilledTonalIconButton(
-                        onClick = { onToolApproval(tool.toolCallId, true, "") },
+                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onToolApproval(tool.toolCallId, true, "") },
                         modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
@@ -459,6 +462,7 @@ private fun ToolDenyReasonDialog(
     onConfirm: (String) -> Unit
 ) {
     var reason by remember { mutableStateOf("") }
+    val hapticController = rememberHaptic()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -477,12 +481,12 @@ private fun ToolDenyReasonDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(reason) }) {
+            TextButton(onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onConfirm(reason) }) {
                 Text(stringResource(R.string.chat_message_tool_deny))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onDismiss() }) {
                 Text(stringResource(android.R.string.cancel))
             }
         }

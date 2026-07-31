@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -47,6 +48,7 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 private val LocalCardColor = staticCompositionLocalOf { Color.White }
 
@@ -77,6 +79,7 @@ fun <T> ChainOfThought(
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
@@ -113,7 +116,7 @@ fun <T> ChainOfThought(
                                 }
                             )
                             .clip(MaterialTheme.shapes.small)
-                            .clickable { expanded = !expanded }
+                            .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -291,6 +294,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
     ) {
         val hasContent = content != null
         val shouldFillMaxWidth = !collapsedAdaptiveWidth || contentVisible
+        val hapticController = rememberHaptic()
 
         Column(
             modifier = Modifier.then(
@@ -315,11 +319,11 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         if (onClick != null) {
                             Modifier
                                 .clip(MaterialTheme.shapes.small)
-                                .clickable { onClick() }
+                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() }
                         } else if (hasContent) {
                             Modifier
                                 .clip(MaterialTheme.shapes.small)
-                                .clickable { onExpandedChange(!expanded) }
+                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onExpandedChange(!expanded) }
                         } else {
                             Modifier
                         }

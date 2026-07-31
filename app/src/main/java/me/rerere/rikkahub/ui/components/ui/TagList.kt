@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.uuid.Uuid
 
 @Composable
@@ -45,6 +47,7 @@ fun TagsInput(
     onValueChange: (value: List<Uuid>, tags: List<Tag>) -> Unit,
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
 
     // 根据value获取对应的tags
     val selectedTags = tags.filter { tag -> value.contains(tag.id) }
@@ -66,6 +69,7 @@ fun TagsInput(
                     modifier = Modifier
                         .size(16.dp)
                         .clickable {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             onValueChange(
                                 value.filter { it != tag.id }, tags
                             )
@@ -81,7 +85,7 @@ fun TagsInput(
             tonalElevation = 2.dp,
             modifier = Modifier
                 .clip(CircleShape)
-                .clickable { showAddDialog = true }) {
+                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); showAddDialog = true }) {
             Icon(
                 imageVector = HugeIcons.Add01,
                 contentDescription = stringResource(R.string.add),
@@ -127,6 +131,7 @@ fun TagsInput(
                         unselectedTags.forEach { tag ->
                             InputChip(
                                 onClick = {
+                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                                     onValueChange(value + tag.id, tags)
                                     showAddDialog = false
                                     tagName = ""
@@ -174,6 +179,7 @@ fun TagsInput(
         }, confirmButton = {
             TextButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     if (tagName.isNotBlank()) {
                         val trimmedName = tagName.trim()
                         // 检查是否已存在同名标签

@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun ToggleSurface(
@@ -18,10 +20,14 @@ fun ToggleSurface(
     onClick: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     val contentColor =
         if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Surface(
-        onClick = onClick,
+        onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            onClick()
+        },
         color = Color.Transparent,
         contentColor = contentColor,
         modifier = modifier,

@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +33,7 @@ import me.rerere.hugeicons.stroke.Tick02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.pages.extensions.workspace.toShellStatusLabel
 
 @Composable
@@ -49,6 +51,7 @@ internal fun WorkspaceSelectSheet(
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
         ),
     ) {
+        val hapticController = rememberHaptic()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -104,7 +107,7 @@ internal fun WorkspaceSelectSheet(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.large)
-                    .clickable { onManage() },
+                    .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onManage() },
             )
         }
     }
@@ -117,6 +120,7 @@ private fun WorkspaceSelectRow(
     onClick: () -> Unit,
     status: String? = null,
 ) {
+    val hapticController = rememberHaptic()
     ListItem(
         leadingContent = {
             Icon(HugeIcons.Codesandbox, contentDescription = null)
@@ -157,6 +161,6 @@ private fun WorkspaceSelectRow(
         ),
         modifier = Modifier
             .clip(MaterialTheme.shapes.large)
-            .clickable { onClick() },
+            .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() },
     )
 }

@@ -18,11 +18,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.Assistant
@@ -71,6 +73,7 @@ fun ExtensionSelector(
 
     val pagerState = rememberPagerState { 4 }
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
 
     Column(
         modifier = modifier
@@ -84,6 +87,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 0,
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(0) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_quick_messages)) }
@@ -91,6 +95,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 1,
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(1) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_mode_injections)) }
@@ -98,6 +103,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 2,
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(2) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_lorebooks)) }
@@ -105,6 +111,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 3,
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(3) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_skills)) }

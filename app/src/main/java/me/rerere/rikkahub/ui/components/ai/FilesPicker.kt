@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -81,6 +82,7 @@ import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -110,6 +112,7 @@ internal fun FilesPicker(
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
+    val hapticController = rememberHaptic()
 
     Column(
         modifier = Modifier
@@ -205,6 +208,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onShowInjectionSheetChange(true)
                 },
         )
@@ -235,6 +239,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onShowCompressDialogChange(true)
                 },
         )
@@ -246,7 +251,7 @@ internal fun FilesPicker(
         if (boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name) {
             var showCwdSheet by remember { mutableStateOf(false) }
             TextButton(
-                onClick = { showCwdSheet = true },
+                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showCwdSheet = true },
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             ) {
@@ -496,11 +501,15 @@ private fun BigIconTextButton(
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val hapticController = rememberHaptic()
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(
-                interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick
+                interactionSource = interactionSource, indication = LocalIndication.current, onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onClick()
+                }
             )
             .semantics {
                 role = Role.Button

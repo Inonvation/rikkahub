@@ -19,12 +19,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.DatabaseRestore
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun BackupReminderCard(
@@ -33,13 +35,17 @@ fun BackupReminderCard(
 ) {
     val config = settings.backupReminderConfig
     var dismissed by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
 
     val isDue = config.enabled &&
         (System.currentTimeMillis() - config.lastBackupTime) > config.intervalDays * 24L * 60 * 60 * 1000
 
     if (!isDue || dismissed) return
 
-    Card(onClick = onClick) {
+    Card(onClick = {
+        hapticController.perform(HapticFeedbackType.KeyboardTap)
+        onClick()
+    }) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -71,7 +77,10 @@ fun BackupReminderCard(
                 )
             }
             IconButton(
-                onClick = { dismissed = true },
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    dismissed = true
+                },
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(

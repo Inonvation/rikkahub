@@ -43,6 +43,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +87,7 @@ import me.rerere.rikkahub.ui.context.Navigator
 import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.rememberIsPlayStoreVersion
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
@@ -676,10 +678,14 @@ fun ChatDrawerContent(
 
 @Composable
 private fun DrawerActions(navController: Navigator) {
+    val hapticController = rememberHaptic()
     Column {
         // 搜索入口
         Surface(
-            onClick = { navController.navigate(Screen.MessageSearch) },
+            onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                navController.navigate(Screen.MessageSearch)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp),
@@ -709,7 +715,10 @@ private fun DrawerActions(navController: Navigator) {
 
         // 历史记录入口
         Surface(
-            onClick = { navController.navigate(Screen.History) },
+            onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                navController.navigate(Screen.History)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp),
@@ -746,8 +755,12 @@ private fun DrawerAction(
     label: @Composable () -> Unit,
     onClick: () -> Unit,
 ) {
+    val hapticController = rememberHaptic()
     Surface(
-        onClick = onClick,
+        onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            onClick()
+        },
         modifier = modifier,
         color = MaterialTheme.colorScheme.primaryContainer,
         shape = CircleShape,
@@ -846,6 +859,7 @@ private fun FolderChip(
     onLongClick: () -> Unit,
     icon: ImageVector? = null,
 ) {
+    val hapticController = rememberHaptic()
     Surface(
         shape = CircleShape,
         color = if (selected) {
@@ -856,7 +870,10 @@ private fun FolderChip(
         modifier = Modifier
             .clip(CircleShape)
             .combinedClickable(
-                onClick = onClick,
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onClick()
+                },
                 onLongClick = onLongClick,
             )
     ) {
@@ -884,8 +901,12 @@ private fun AssistantItem(
     isCurrentAssistant: Boolean,
     onClick: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Surface(
-        onClick = onClick,
+        onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            onClick()
+        },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = if (isCurrentAssistant) {

@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAssistantState
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.uuid.Uuid
 
 @Composable
@@ -62,6 +64,7 @@ fun AssistantPicker(
     val state = rememberAssistantState(settings, onUpdateSettings)
     val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
     var showPicker by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
 
     NavigationDrawerItem(
         icon = {
@@ -87,6 +90,7 @@ fun AssistantPicker(
             }
         },
         onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
             showPicker = true
         },
         modifier = modifier,
@@ -137,6 +141,7 @@ private fun AssistantPickerSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        val hapticController = rememberHaptic()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -159,6 +164,7 @@ private fun AssistantPickerSheet(
                     items(settings.assistantTags, key = { tag -> tag.id }) { tag ->
                         FilterChip(
                             onClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 selectedTagIds = if (tag.id in selectedTagIds) {
                                     selectedTagIds - tag.id
                                 } else {
@@ -183,7 +189,7 @@ private fun AssistantPickerSheet(
                 items(filteredAssistants, key = { it.id }) { assistant ->
                     val checked = assistant.id == currentAssistant.id
                     Card(
-                        onClick = { onAssistantSelected(assistant) },
+                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onAssistantSelected(assistant) },
                         modifier = Modifier.animateItem(),
                         shape = MaterialTheme.shapes.large,
                         colors = CardDefaults.cardColors(
@@ -215,6 +221,7 @@ private fun AssistantItem(
     defaultAssistantName: String,
     onEdit: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     ListItem(
         headlineContent = {
             Text(
@@ -233,6 +240,7 @@ private fun AssistantItem(
         trailingContent = {
             IconButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onEdit()
                 }
             ) {

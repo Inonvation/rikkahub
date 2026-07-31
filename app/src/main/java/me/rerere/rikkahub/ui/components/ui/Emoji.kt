@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +53,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.utils.Emoji
 import me.rerere.rikkahub.utils.EmojiData
 import org.koin.compose.koinInject
@@ -238,11 +240,15 @@ private fun EmojiItem(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
+    val hapticController = rememberHaptic()
     Box(
         modifier = Modifier
             .size(40.dp)
             .combinedClickable(
-                onClick = onClick,
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onClick()
+                },
                 onLongClick = onLongClick
             )
             .clip(RoundedCornerShape(8.dp))
@@ -267,6 +273,7 @@ private fun EmojiModifierPicker(
     onEmojiSelected: (Emoji) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Popup(
         onDismissRequest = onDismiss,
         properties = PopupProperties(
@@ -300,7 +307,7 @@ private fun EmojiModifierPicker(
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .clickable { onEmojiSelected(variant) }
+                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onEmojiSelected(variant) }
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                             contentAlignment = Alignment.Center

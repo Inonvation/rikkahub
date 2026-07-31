@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -85,6 +86,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
@@ -720,6 +722,7 @@ private fun TopBar(
     val titleState = useEditState<String> {
         onUpdateTitle(it)
     }
+    val hapticController = rememberHaptic()
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -727,6 +730,7 @@ private fun TopBar(
             if (!bigScreen) {
                 IconButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         scope.launch { drawerState.open() }
                     }
                 ) {
@@ -738,6 +742,7 @@ private fun TopBar(
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
             Surface(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     if (conversation.messageNodes.isNotEmpty()) {
                         titleState.open(conversation.title)
                     } else {
@@ -773,6 +778,7 @@ private fun TopBar(
         actions = {
             IconButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onClickMenu()
                 }
             ) {
@@ -781,6 +787,7 @@ private fun TopBar(
 
             IconButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onNewChat()
                 }
             ) {
@@ -807,6 +814,7 @@ private fun TopBar(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         titleState.confirm()
                     }
                 ) {
@@ -816,6 +824,7 @@ private fun TopBar(
             dismissButton = {
                 TextButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         titleState.dismiss()
                     }
                 ) {

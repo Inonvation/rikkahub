@@ -20,11 +20,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Setting07
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun ConversationSystemPromptButton(
@@ -35,13 +37,14 @@ fun ConversationSystemPromptButton(
     var editText by rememberSaveable(customSystemPrompt) {
         mutableStateOf(customSystemPrompt ?: "")
     }
+    val hapticController = rememberHaptic()
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         TextButton(
-            onClick = { expanded = !expanded },
+            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded },
         ) {
             Icon(
                 imageVector = HugeIcons.Setting07,
@@ -81,6 +84,7 @@ fun ConversationSystemPromptButton(
                     if (!customSystemPrompt.isNullOrBlank()) {
                         TextButton(
                             onClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 editText = ""
                                 onSystemPromptChange(null)
                             },
@@ -90,6 +94,7 @@ fun ConversationSystemPromptButton(
                     }
                     TextButton(
                         onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             onSystemPromptChange(editText.ifBlank { null })
                             expanded = false
                         },

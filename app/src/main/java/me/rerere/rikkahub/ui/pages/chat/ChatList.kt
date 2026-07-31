@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -100,6 +101,7 @@ import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.utils.plus
 import kotlin.math.roundToInt
@@ -752,6 +754,7 @@ private fun BoxScope.MessageJumper(
     scope: CoroutineScope,
     state: LazyListState
 ) {
+    val hapticController = rememberHaptic()
     AnimatedVisibility(
         visible = show,
         modifier = Modifier.align(if (onLeft) Alignment.CenterStart else Alignment.CenterEnd),
@@ -768,6 +771,7 @@ private fun BoxScope.MessageJumper(
         ) {
             Surface(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch {
                         state.scrollToItem(0)
                     }
@@ -787,6 +791,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
@@ -810,6 +815,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch {
                         state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                     }
@@ -828,6 +834,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }

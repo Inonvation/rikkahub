@@ -17,11 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun ChatMessageBranchSelector(
@@ -35,6 +37,7 @@ fun ChatMessageBranchSelector(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (node.messages.size > 1) {
+            val hapticController = rememberHaptic()
             val actionColor = MaterialTheme.colorScheme.onSurfaceVariant
 
             Icon(
@@ -48,6 +51,7 @@ fun ChatMessageBranchSelector(
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex > 0) {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 onUpdate(
                                     node.copy(
                                         selectIndex = node.selectIndex - 1
@@ -78,6 +82,7 @@ fun ChatMessageBranchSelector(
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex < node.messages.lastIndex) {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 onUpdate(
                                     node.copy(
                                         selectIndex = node.selectIndex + 1

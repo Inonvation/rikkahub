@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +42,7 @@ import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
@@ -57,6 +59,7 @@ fun WorkspaceCwdPickerSheet(
     var browsePath by remember { mutableStateOf(fromAbsolutePath(currentCwd)) }
     var entries by remember { mutableStateOf<List<WorkspaceFileEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    val hapticController = rememberHaptic()
 
     LaunchedEffect(browsePath) {
         loading = true
@@ -100,6 +103,7 @@ fun WorkspaceCwdPickerSheet(
                 IconButton(
                     enabled = browsePath.isNotBlank(),
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         browsePath = browsePath.substringBeforeLast('/', missingDelimiterValue = "")
                     },
                 ) {
@@ -142,6 +146,7 @@ fun WorkspaceCwdPickerSheet(
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             browsePath = entry.path
                         },
                     )
@@ -168,6 +173,7 @@ fun WorkspaceCwdPickerSheet(
             ) {
                 if (currentCwd != null) {
                     TextButton(onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         onSelectCwd(null)
                         onDismiss()
                     }) {
@@ -175,6 +181,7 @@ fun WorkspaceCwdPickerSheet(
                     }
                 }
                 FilledTonalButton(onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onSelectCwd(toAbsolutePath(browsePath))
                     onDismiss()
                 }) {

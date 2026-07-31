@@ -24,12 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun CompressContextDialog(
@@ -39,6 +41,7 @@ fun CompressContextDialog(
     var additionalPrompt by remember { mutableStateOf("") }
     var selectedTokens by remember { mutableIntStateOf(2000) }
     var keepRecentMessages by remember { mutableIntStateOf(32) }
+    val hapticController = rememberHaptic()
     val tokenOptions = listOf(500, 1000, 2000, 4000)
     var currentJob by remember { mutableStateOf<Job?>(null) }
     val isLoading = currentJob?.isActive == true
@@ -92,7 +95,7 @@ fun CompressContextDialog(
                         tokenOptions.forEachIndexed { index, tokens ->
                             SegmentedButton(
                                 selected = selectedTokens == tokens,
-                                onClick = { selectedTokens = tokens },
+                                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); selectedTokens = tokens },
                                 shape = SegmentedButtonDefaults.itemShape(
                                     index = index,
                                     count = tokenOptions.size
@@ -137,6 +140,7 @@ fun CompressContextDialog(
         confirmButton = {
             if (isLoading) {
                 TextButton(onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     currentJob?.cancel()
                     currentJob = null
                 }) {
@@ -144,6 +148,7 @@ fun CompressContextDialog(
                 }
             } else {
                 TextButton(onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     currentJob = onConfirm(additionalPrompt, selectedTokens, keepRecentMessages)
                 }) {
                     Text(stringResource(R.string.confirm))
@@ -152,7 +157,10 @@ fun CompressContextDialog(
         },
         dismissButton = {
             if (!isLoading) {
-                TextButton(onClick = onDismiss) {
+                TextButton(onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onDismiss()
+                }) {
                     Text(stringResource(R.string.cancel))
                 }
             }

@@ -348,8 +348,10 @@ fun ChatInput(
                                     .combinedClickable(
                                         enabled = loading || !state.isEmpty(),
                                         onClick = {
+                                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                                             sendMessage()
                                         }, onLongClick = {
+                                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                                             sendMessageWithoutAnswer()
                                         }
                                     )
@@ -400,8 +402,12 @@ private fun ActionIconButton(
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val hapticController = rememberHaptic()
     Surface(
-        onClick = onClick,
+        onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            onClick()
+        },
         modifier = Modifier.size(30.dp),
         shape = CircleShape,
         tonalElevation = 0.dp,
@@ -422,6 +428,7 @@ private fun TextInputRow(
     onSendMessage: () -> Unit,
 ) {
     val settings = LocalSettings.current
+    val hapticController = rememberHaptic()
     val filesManager: FilesManager = koinInject()
     val assistant = settings.getCurrentAssistant()
     val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
@@ -448,7 +455,7 @@ private fun TextInputRow(
                     Icon(
                         imageVector = HugeIcons.Cancel01,
                         contentDescription = stringResource(R.string.cancel_edit),
-                        modifier = Modifier.clickable { state.clearInput() }
+                        modifier = Modifier.clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); state.clearInput() }
                     )
                 }
             }
@@ -575,6 +582,7 @@ private fun TextInputRow(
                 if (isFocused) {
                     IconButton(
                         onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
                             isFullScreen = !isFullScreen
                         }) {
                         Icon(HugeIcons.FullScreen, null)
@@ -600,6 +608,7 @@ private fun CompletionPopup(
     completionList: ChatCompletionList,
     onItemClick: (ChatCompletionItem) -> Unit,
 ) {
+    val hapticController = rememberHaptic()
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -619,7 +628,7 @@ private fun CompletionPopup(
                 key = { item -> "${item.label}:${item.insertText}" },
             ) { item ->
                 Surface(
-                    onClick = { onItemClick(item) },
+                    onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onItemClick(item) },
                     modifier = Modifier.fillMaxWidth(),
                     color = Color.Transparent,
                 ) {
@@ -682,8 +691,10 @@ private fun QuickMessageButton(
     state: ChatInputState,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
     IconButton(
         onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
             expanded = !expanded
         }) {
         Icon(HugeIcons.Zap, null)
@@ -696,6 +707,7 @@ private fun QuickMessageButton(
             quickMessages.forEach { quickMessage ->
                 Surface(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         state.appendText(quickMessage.content)
                         expanded = false
                     },
@@ -728,6 +740,7 @@ private fun QuickMessageButton(
 private fun FullScreenEditor(
     state: ChatInputState, onDone: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     BasicAlertDialog(
         onDismissRequest = {
             onDone()
@@ -759,6 +772,7 @@ private fun FullScreenEditor(
                     Row {
                         TextButton(
                             onClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 onDone()
                             }) {
                             Text(stringResource(R.string.chat_page_save))

@@ -174,6 +174,7 @@ fun ModelSelector(
         type = type,
     )
     val model = state.currentModel
+    val hapticController = rememberHaptic()
 
     if (!onlyIcon) {
         Row(
@@ -181,6 +182,7 @@ fun ModelSelector(
         ) {
             TextButton(
                 onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     state.open()
                 },
                 modifier = modifier
@@ -216,6 +218,7 @@ fun ModelSelector(
     } else {
         IconButton(
             onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
                 state.open()
             },
         ) {
@@ -675,6 +678,7 @@ private fun ModelItem(
     dragHandle: @Composable (RowScope.() -> Unit)? = null
 ) {
     val navController = LocalNavController.current
+    val hapticController = rememberHaptic()
     val interactionSource = remember { MutableInteractionSource() }
     Card(
         modifier = modifier,
@@ -703,7 +707,10 @@ private fun ModelItem(
                                 )
                             )
                         },
-                        onClick = { onSelect(model) },
+                        onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            onSelect(model)
+                        },
                         interactionSource = interactionSource,
                         indication = LocalIndication.current
                     ),

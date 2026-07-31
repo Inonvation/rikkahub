@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ import androidx.compose.ui.util.fastForEach
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun <T> Select(
@@ -49,6 +51,7 @@ fun <T> Select(
     trailing: @Composable () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
 
     ExposedDropdownMenuBox(
         modifier = modifier,
@@ -64,7 +67,7 @@ fun <T> Select(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable { expanded = true }
+                    .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = true }
                     .padding(vertical = 8.dp, horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -91,6 +94,7 @@ fun <T> Select(
             options.fastForEach { option ->
                 DropdownMenuItem(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         onOptionSelected(option)
                         expanded = false
                     },
@@ -128,6 +132,7 @@ fun <T> SelectTextField(
     var expanded by remember { mutableStateOf(false) }
     var anchorWidth by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
+    val hapticController = rememberHaptic()
 
     Box(modifier = modifier) {
         OutlinedTextField(
@@ -139,7 +144,7 @@ fun <T> SelectTextField(
                 .fillMaxWidth()
                 .onGloballyPositioned { anchorWidth = it.size.width },
             trailingIcon = {
-                IconButton(onClick = { expanded = !expanded }) {
+                IconButton(onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded }) {
                     Icon(
                         imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                         contentDescription = "expand"
@@ -156,7 +161,7 @@ fun <T> SelectTextField(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { expanded = !expanded }
+                    ) { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded }
             )
         }
 
@@ -171,6 +176,7 @@ fun <T> SelectTextField(
                 DropdownMenuItem(
                     text = { Text(text = optionToString(option), maxLines = 1) },
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         expanded = false
                         onOptionSelected(option)
                     }

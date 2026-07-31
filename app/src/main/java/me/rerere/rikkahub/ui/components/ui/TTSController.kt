@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
@@ -35,6 +36,7 @@ import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.tts.model.PlaybackState
 import me.rerere.tts.model.PlaybackStatus
 
@@ -59,6 +61,7 @@ fun TTSController() {
     ) {
         val playbackState by ttsState.playbackState.collectAsState()
         var expand by remember { mutableStateOf(false) }
+        val hapticController = rememberHaptic()
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surface,
@@ -75,6 +78,7 @@ fun TTSController() {
 
                 IconButton(
                     onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         ttsState.stop()
                         isVisible = false
                     }
@@ -130,8 +134,10 @@ private fun PlayPauseButton(
     playbackState: PlaybackState,
     ttsState: CustomTtsState
 ) {
+    val hapticController = rememberHaptic()
     FilledTonalIconButton(
         onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
             when (playbackState.status) {
                 PlaybackStatus.Playing -> {
                     ttsState.pause()
@@ -186,8 +192,10 @@ private fun SpeedButton(
     playbackState: PlaybackState,
     ttsState: CustomTtsState
 ) {
+    val hapticController = rememberHaptic()
     TextButton(
         onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
             when (playbackState.speed) {
                 0.8f -> {
                     ttsState.setSpeed(1.0f)

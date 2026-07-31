@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 @Composable
 fun ListSelectableItem(
@@ -23,9 +25,11 @@ fun ListSelectableItem(
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         if (enabled) {
+            val hapticController = rememberHaptic()
             Checkbox(
                 checked = key in selectedKeys,
                 onCheckedChange = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onSelectChange(key)
                 }
             )
