@@ -63,6 +63,8 @@ sealed class ProviderSetting {
         var apiKey: String = "",
         var baseUrl: String = "https://api.openai.com/v1",
         var chatCompletionsPath: String = "/chat/completions",
+        var embeddingsPath: String = "/embeddings",
+        var rerankPath: String = "/rerank",
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
     ) : ProviderSetting() {

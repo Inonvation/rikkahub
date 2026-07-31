@@ -74,6 +74,8 @@ class SettingsStore(
         // 版本号
         val VERSION = intPreferencesKey("data_version")
 
+        val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
+
         // UI设置
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val THEME_ID = stringPreferencesKey("theme_id")
@@ -98,6 +100,8 @@ class SettingsStore(
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
+        val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
+        val RERANK_MODEL = stringPreferencesKey("rerank_model")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -183,6 +187,8 @@ class SettingsStore(
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+                embeddingModelId = preferences[EMBEDDING_MODEL]?.let { Uuid.parse(it) },
+                rerankModelId = preferences[RERANK_MODEL]?.let { Uuid.parse(it) },
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -349,6 +355,7 @@ class SettingsStore(
         }
         settingsFlow.value = settings
         dataStore.edit { preferences ->
+            preferences[ENABLE_HAPTIC_FEEDBACK] = settings.displaySetting.enableHapticFeedback
             preferences[DYNAMIC_COLOR] = settings.dynamicColor
             preferences[THEME_ID] = settings.themeId
             preferences[CUSTOM_THEMES] = JsonInstant.encodeToString(settings.customThemes)
@@ -375,6 +382,8 @@ class SettingsStore(
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
+            settings.embeddingModelId?.let { preferences[EMBEDDING_MODEL] = it.toString() }
+            settings.rerankModelId?.let { preferences[RERANK_MODEL] = it.toString() }
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -526,6 +535,8 @@ data class Settings(
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
+    val embeddingModelId: Uuid? = null,
+    val rerankModelId: Uuid? = null,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
@@ -573,6 +584,7 @@ enum class ChatFontFamily {
 
 @Serializable
 data class DisplaySetting(
+    val enableHapticFeedback: Boolean = true,
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
     val useAppIconStyleLoadingIndicator: Boolean = true,
@@ -585,7 +597,6 @@ data class DisplaySetting(
     val showTokenUsage: Boolean = true,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
-    val showUpdates: Boolean = true,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,

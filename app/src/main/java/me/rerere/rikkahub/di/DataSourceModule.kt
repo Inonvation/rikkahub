@@ -147,6 +147,18 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().knowledgeBaseDao()
+    }
+
+    single {
+        get<AppDatabase>().knowledgeDocumentDao()
+    }
+
+    single {
+        get<AppDatabase>().knowledgeChunkDao()
+    }
+
+    single {
         MessageFtsManager(get())
     }
 

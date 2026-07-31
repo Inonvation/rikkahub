@@ -26,7 +26,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            // abi filtering is handled by splits, ndk abiFilters conflicts with splits
         }
     }
 
@@ -37,8 +37,14 @@ android {
             val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
             isEnable = !isBuildingBundle
             reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = true
+            val allAbis = project.findProperty("allAbis") != null
+            if (allAbis) {
+                include("arm64-v8a", "x86_64")
+                isUniversalApk = true
+            } else {
+                include("arm64-v8a")
+                isUniversalApk = false
+            }
         }
     }
 
@@ -277,6 +283,7 @@ dependencies {
     implementation(project(":ai"))
     implementation(project(":web"))
     implementation(project(":document"))
+    implementation(project(":knowledge"))
     implementation(project(":highlight"))
     implementation(project(":search"))
     implementation(project(":speech"))

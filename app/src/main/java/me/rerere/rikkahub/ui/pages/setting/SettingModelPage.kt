@@ -167,6 +167,28 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 onSelect = { vm.updateSettings(settings.copy(compressModelId = it.id)) },
             )
         }
+        item {
+            ModelSettingItem(
+                title = "Embedding 模型",
+                description = "用于知识库文本向量化，未配置时知识库可单独设置",
+                modelId = settings.embeddingModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(embeddingModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(embeddingModelId = null)) },
+                modelType = ModelType.EMBEDDING,
+            )
+        }
+        item {
+            ModelSettingItem(
+                title = "Reranking 模型",
+                description = "用于知识库检索结果重排序，可选",
+                modelId = settings.rerankModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(rerankModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(rerankModelId = null)) },
+                modelType = ModelType.RERANKING,
+            )
+        }
     }
 }
 
@@ -250,11 +272,12 @@ private fun ModelSettingItem(
     providers: List<ProviderSetting>,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
+    modelType: ModelType = ModelType.CHAT,
 ) {
     val state = rememberModelListState(
         modelId = modelId,
         providers = providers,
-        type = ModelType.CHAT,
+        type = modelType,
     )
 
     Column {

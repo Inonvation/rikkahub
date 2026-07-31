@@ -237,15 +237,26 @@ private fun ProviderConfigureOpenAI(
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
     )
 
-    if (!provider.useResponseApi) {
-        OutlinedTextField(
-            value = provider.chatCompletionsPath,
-            onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
-            label = { Text(stringResource(R.string.setting_provider_page_api_path)) },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !provider.builtIn,
-        )
-    }
+    OutlinedTextField(
+        value = provider.chatCompletionsPath,
+        onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
+        label = { Text(stringResource(R.string.setting_provider_page_api_path)) },
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = provider.embeddingsPath,
+        onValueChange = { onEdit(provider.copy(embeddingsPath = it.trim())) },
+        label = { Text("Embedding 路径") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = provider.rerankPath,
+        onValueChange = { onEdit(provider.copy(rerankPath = it.trim())) },
+        label = { Text("Rerank 路径") },
+        modifier = Modifier.fillMaxWidth(),
+    )
 
     Row(
         modifier = Modifier.fillMaxWidth(),

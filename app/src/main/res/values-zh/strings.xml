@@ -677,10 +677,12 @@
   <string name="setting_display_page_enable_blur_effect_title">启用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 语法渲染数学表达式和公式</string>
   <string name="setting_display_page_enable_latex_rendering_title">启用 LaTeX 渲染</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">消息生成时启用触觉反馈效果</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">消息生成触觉反馈</string>
-  <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 触觉反馈</string>
-  <string name="setting_display_page_enable_ui_haptic_feedback_desc">为按钮点击、开关切换、列表选择等 UI 交互启用触觉反馈</string>
+  <string name="setting_display_page_enable_haptic_feedback_title">触感反馈</string>
+  <string name="setting_display_page_enable_haptic_feedback_desc">开启后，应用内的触感反馈才会生效</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">消息开始生成和生成完成后各触发一次触感反馈</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">消息生成时</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 及控件</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_desc">为按钮点击、开关切换、列表选择等 UI 交互启用触感反馈</string>
   <string name="setting_display_page_font_size_preview">凌晨四点钟，看到海棠花未眠。我常常这样，在无人的夜里独自醒着，想，若有人此刻也在想我，那就好了。</string>
   <string name="setting_display_page_font_size_title">聊天字体大小</string>
   <string name="setting_display_page_live_update_notification">实时更新通知</string>
@@ -708,8 +710,6 @@
   <string name="setting_display_page_show_thinking_content_title">显示思考内容</string>
   <string name="setting_display_page_show_token_usage_desc">显示token用量和消息数量</string>
   <string name="setting_display_page_show_token_usage_title">显示Token和上下文统计</string>
-  <string name="setting_display_page_show_updates_desc">是否显示应用更新通知</string>
-  <string name="setting_display_page_show_updates_title">显示更新</string>
   <string name="setting_display_page_show_user_avatar_desc">是否在聊天消息中显示用户头像</string>
   <string name="setting_display_page_show_user_avatar_title">显示用户头像</string>
   <string name="setting_display_page_skip_crop_image_desc">导入图片或拍照后跳过裁剪界面</string>
@@ -1113,11 +1113,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="translator_page_translate">翻译</string>
   <string name="tts">语音</string>
   <string name="unpin_chat">取消置顶聊天</string>
-  <string name="update_card_check_failed">检查更新失败</string>
-  <string name="update_card_close">关闭</string>
-  <string name="update_card_downloading">正在下载，请在状态栏查看进度</string>
-  <string name="update_card_new_version_found">发现新版本 %s</string>
-  <string name="update_card_unknown_error">未知错误</string>
   <string name="upload_file">上传文件</string>
   <string name="use_web_search">网络搜索</string>
   <string name="user_default_name">用户</string>

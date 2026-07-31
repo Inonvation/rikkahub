@@ -108,6 +108,7 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberMessageGenerationHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
@@ -168,6 +169,26 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val inputState = vm.inputState
+
+    val hapticController = rememberHaptic()
+    val messageGenerationHapticController = rememberMessageGenerationHaptic()
+
+    // AI 消息生成开始时触发一次触感反馈
+    var previousLoading by remember { mutableStateOf(loadingJob != null) }
+    LaunchedEffect(loadingJob) {
+        val currentLoading = loadingJob != null
+        if (currentLoading && !previousLoading) {
+            messageGenerationHapticController.perform(HapticFeedbackType.Confirm)
+        }
+        previousLoading = currentLoading
+    }
+
+    // AI 消息生成完成后触发一次触感反馈
+    LaunchedEffect(Unit) {
+        vm.generationDoneFlow.collect { _ ->
+            messageGenerationHapticController.perform(HapticFeedbackType.Confirm)
+        }
+    }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {

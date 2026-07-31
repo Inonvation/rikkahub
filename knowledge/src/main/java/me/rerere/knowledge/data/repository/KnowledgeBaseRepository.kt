@@ -1,0 +1,51 @@
+package me.rerere.knowledge.data.repository
+
+import kotlinx.coroutines.flow.Flow
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+import me.rerere.knowledge.data.dao.KnowledgeBaseDao
+import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
+import me.rerere.knowledge.data.entity.KnowledgeBaseWithDocumentCount
+
+class KnowledgeBaseRepository(
+    private val dao: KnowledgeBaseDao,
+) {
+    fun getAllWithDocumentCount(): Flow<List<KnowledgeBaseWithDocumentCount>> = dao.getAllWithDocumentCount()
+    @OptIn(ExperimentalUuidApi::class)
+    suspend fun create(
+        name: String,
+        description: String = "",
+        embeddingModelId: String? = null,
+        rerankModelId: String? = null,
+        chunkSize: Int = 1024,
+        chunkOverlap: Int = 200,
+        chunkStrategy: String = "fixed_size",
+        topK: Int = 10,
+        similarityThreshold: Float = 0f,
+    ): KnowledgeBaseEntity {
+        val entity = KnowledgeBaseEntity(
+            id = Uuid.random().toString(),
+            name = name,
+            description = description,
+            embeddingModelId = embeddingModelId,
+            rerankModelId = rerankModelId,
+            chunkSize = chunkSize,
+            chunkOverlap = chunkOverlap,
+            chunkStrategy = chunkStrategy,
+            topK = topK,
+            similarityThreshold = similarityThreshold,
+        )
+        dao.upsert(entity)
+        return entity
+    }
+
+    suspend fun update(entity: KnowledgeBaseEntity) = dao.update(entity)
+
+    suspend fun delete(id: String) = dao.deleteById(id)
+
+    suspend fun getById(id: String) = dao.getById(id)
+
+    fun getAll() = dao.getAll()
+
+    fun getByIdFlow(id: String) = dao.getByIdFlow(id)
+}

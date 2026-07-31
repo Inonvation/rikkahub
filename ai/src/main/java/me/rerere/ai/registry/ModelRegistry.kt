@@ -496,6 +496,52 @@ object ModelRegistry {
         tokens("qwen", "mt")
     }
 
+    // === Embedding Models ===
+    private val TEXT_EMBEDDING_3_SMALL = defineModel {
+        tokens("text", "embedding", "3", "small")
+    }
+
+    private val TEXT_EMBEDDING_3_LARGE = defineModel {
+        tokens("text", "embedding", "3", "large")
+    }
+
+    private val TEXT_EMBEDDING_ADA_002 = defineModel {
+        tokens("text", "embedding", "ada", "002")
+    }
+
+    private val BGE_M3 = defineModel {
+        tokens("bge", "m3")
+    }
+
+    private val BGE_LARGE = defineModel {
+        tokens("bge", "large")
+    }
+
+    val JINA_EMBEDDINGS = defineModel {
+        tokens("jina", "embeddings")
+    }
+
+    val EMBEDDING_MODELS = defineGroup {
+        add(TEXT_EMBEDDING_3_SMALL, TEXT_EMBEDDING_3_LARGE, TEXT_EMBEDDING_ADA_002, BGE_M3, BGE_LARGE, JINA_EMBEDDINGS)
+    }
+
+    // === Reranking Models ===
+    private val BGE_RERANKER_V2_M3 = defineModel {
+        tokens("bge", "reranker", "v2", "m3")
+    }
+
+    val JINA_RERANKER = defineModel {
+        tokens("jina", "reranker")
+    }
+
+    private val COHERE_RERANK = defineModel {
+        tokens("cohere", "rerank")
+    }
+
+    val RERANKING_MODELS = defineGroup {
+        add(BGE_RERANKER_V2_M3, JINA_RERANKER, COHERE_RERANK)
+    }
+
     private val ALL_MODELS = listOf(
         GPT4O,
         GPT_4_1,
@@ -576,7 +622,16 @@ object ModelRegistry {
         XIAOMI_MIMO_V2_5_PRO,
         HY3,
         LONGCAT_2,
-        QWEN_MT
+        QWEN_MT,
+        TEXT_EMBEDDING_3_SMALL,
+        TEXT_EMBEDDING_3_LARGE,
+        TEXT_EMBEDDING_ADA_002,
+        BGE_M3,
+        BGE_LARGE,
+        JINA_EMBEDDINGS,
+        BGE_RERANKER_V2_M3,
+        JINA_RERANKER,
+        COHERE_RERANK
     )
 
     val MODEL_INPUT_MODALITIES = ModelData { modelId ->

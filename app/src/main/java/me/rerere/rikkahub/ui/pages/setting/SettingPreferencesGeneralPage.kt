@@ -161,14 +161,22 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                }
+            }
+
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_display_page_enable_haptic_feedback_title)) },
+                ) {
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_haptic_feedback_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_haptic_feedback_desc)) },
                         trailingContent = {
                             Switch(
-                                checked = displaySetting.enableMessageGenerationHapticEffect,
+                                checked = displaySetting.enableHapticFeedback,
                                 onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(enableMessageGenerationHapticEffect = it))
+                                    updateDisplaySetting(displaySetting.copy(enableHapticFeedback = it))
                                 }
                             )
                         },
@@ -179,8 +187,22 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = displaySetting.enableUiHapticFeedback,
+                                enabled = displaySetting.enableHapticFeedback,
                                 onCheckedChange = {
                                     updateDisplaySetting(displaySetting.copy(enableUiHapticFeedback = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.enableMessageGenerationHapticEffect,
+                                enabled = displaySetting.enableHapticFeedback,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(enableMessageGenerationHapticEffect = it))
                                 }
                             )
                         },

@@ -647,8 +647,12 @@
   <string name="setting_display_page_enable_blur_effect_title">Включить эффект размытия</string>
   <string name="setting_display_page_enable_latex_rendering_desc">Отображать математические выражения и формулы с использованием синтаксиса LaTeX</string>
   <string name="setting_display_page_enable_latex_rendering_title">Включить рендеринг LaTeX</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Включить виброотклик при генерации сообщений</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">Тактильный эффект при генерации сообщения</string>
+  <string name="setting_display_page_enable_haptic_feedback_title">Тактильная обратная связь</string>
+  <string name="setting_display_page_enable_haptic_feedback_desc">Включить тактильную обратную связь в приложении</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Включить тактильную обратную связь при начале и завершении генерации сообщения</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">Во время генерации</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_title">UI и элементы управления</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_desc">Включить тактильную обратную связь для нажатий кнопок, переключателей, выбора в списках</string>
   <string name="setting_display_page_font_size_preview">Это **пример** текста чата</string>
   <string name="setting_display_page_font_size_title">Размер шрифта чата</string>
   <string name="setting_display_page_live_update_notification">Уведомление об обновлении в реальном времени</string>
@@ -676,8 +680,6 @@
   <string name="setting_display_page_show_thinking_content_title">Показывать содержание размышлений</string>
   <string name="setting_display_page_show_token_usage_desc">Отображать использование токенов и количество сообщений</string>
   <string name="setting_display_page_show_token_usage_title">Показывать статистику токенов и контекста</string>
-  <string name="setting_display_page_show_updates_desc">Отображать ли уведомления об обновлениях приложения</string>
-  <string name="setting_display_page_show_updates_title">Показывать обновления</string>
   <string name="setting_display_page_show_user_avatar_desc">Отображать аватар пользователя в сообщениях чата</string>
   <string name="setting_display_page_show_user_avatar_title">Показывать аватар пользователя</string>
   <string name="setting_display_page_skip_crop_image_desc">Пропустить обрезку после импорта изображений или съёмки</string>
@@ -1073,11 +1075,6 @@
   <string name="translator_page_translate">Перевести</string>
   <string name="tts">TTS</string>
   <string name="unpin_chat">Открепить чат</string>
-  <string name="update_card_check_failed">Проверка обновления не удалась</string>
-  <string name="update_card_close">Закрыть</string>
-  <string name="update_card_downloading">Идёт загрузка, следите за прогрессом в строке состояния</string>
-  <string name="update_card_new_version_found">Найдена новая версия %s</string>
-  <string name="update_card_unknown_error">Неизвестная ошибка</string>
   <string name="upload_file">Загрузить файл</string>
   <string name="use_web_search">Веб-поиск</string>
   <string name="user_default_name">Пользователь</string>

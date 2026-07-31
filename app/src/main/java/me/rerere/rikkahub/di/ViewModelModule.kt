@@ -10,6 +10,9 @@ import me.rerere.rikkahub.ui.pages.favorite.FavoriteVM
 import me.rerere.rikkahub.ui.pages.search.SearchVM
 import me.rerere.rikkahub.ui.pages.history.HistoryVM
 import me.rerere.rikkahub.ui.pages.stats.StatsVM
+import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBasesVM
+import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseDetailVM
+import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseSettingsVM
 import me.rerere.rikkahub.ui.pages.imggen.ImgGenVM
 import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
@@ -32,7 +35,6 @@ val viewModelModule = module {
             settingsStore = get(),
             conversationRepo = get(),
             chatService = get(),
-            updateChecker = get(),
             filesManager = get(),
             favoriteRepository = get(),
         )
@@ -75,4 +77,19 @@ val viewModelModule = module {
     viewModelOf(::FavoriteVM)
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
+    viewModelOf(::KnowledgeBasesVM)
+    viewModel<KnowledgeBaseDetailVM> { params ->
+        KnowledgeBaseDetailVM(
+            knowledgeManager = get(),
+            settingsStore = get(),
+            providerManager = get(),
+            baseId = params.get(),
+        )
+    }
+    viewModel<KnowledgeBaseSettingsVM> { params ->
+        KnowledgeBaseSettingsVM(
+            knowledgeManager = get(),
+            baseId = params.get(),
+        )
+    }
 }

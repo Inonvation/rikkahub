@@ -647,8 +647,12 @@
   <string name="setting_display_page_enable_blur_effect_title">啟用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 語法呈現數學表達式與公式</string>
   <string name="setting_display_page_enable_latex_rendering_title">啟用 LaTeX 渲染</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">訊息生成時啟用觸覺回饋效果</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">訊息生成觸覺回饋</string>
+  <string name="setting_display_page_enable_haptic_feedback_title">觸感回饋</string>
+  <string name="setting_display_page_enable_haptic_feedback_desc">開啟後，應用程式內的觸感回饋才會生效</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">訊息開始生成和生成完成後各發一次觸感回饋</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">訊息生成時</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 及控制項</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_desc">為按鈕點擊、開切換、列表選擇等 UI 操作啟用觸感回饋</string>
   <string name="setting_display_page_font_size_preview">凌晨四點鐘，看到海棠花未眠。我常常這樣，在無人的夜裡獨自醒著，想，若有人此刻也在想我，那就好了。</string>
   <string name="setting_display_page_font_size_title">聊天字體大小</string>
   <string name="setting_display_page_live_update_notification">即時更新通知</string>
@@ -676,8 +680,6 @@
   <string name="setting_display_page_show_thinking_content_title">顯示思考內容</string>
   <string name="setting_display_page_show_token_usage_desc">顯示token用量和消息數量</string>
   <string name="setting_display_page_show_token_usage_title">顯示Token和上下文統計</string>
-  <string name="setting_display_page_show_updates_desc">是否顯示應用更新通知</string>
-  <string name="setting_display_page_show_updates_title">顯示更新</string>
   <string name="setting_display_page_show_user_avatar_desc">是否在聊天消息中顯示用戶頭像</string>
   <string name="setting_display_page_show_user_avatar_title">顯示用戶頭像</string>
   <string name="setting_display_page_skip_crop_image_desc">匯入圖片或拍照後跳過裁剪介面</string>
@@ -1071,11 +1073,6 @@
   <string name="translator_page_translate">翻譯</string>
   <string name="tts">語音</string>
   <string name="unpin_chat">取消釘選聊天</string>
-  <string name="update_card_check_failed">檢查更新失敗</string>
-  <string name="update_card_close">關閉</string>
-  <string name="update_card_downloading">正在下載，請查看狀態列以瞭解進度</string>
-  <string name="update_card_new_version_found">發現新版本 %s</string>
-  <string name="update_card_unknown_error">未知錯誤</string>
   <string name="upload_file">上傳檔案</string>
   <string name="use_web_search">網路搜尋</string>
   <string name="user_default_name">用戶</string>

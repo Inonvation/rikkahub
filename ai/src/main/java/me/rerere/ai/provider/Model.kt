@@ -24,6 +24,7 @@ enum class ModelType {
     CHAT,
     IMAGE,
     EMBEDDING,
+    RERANKING,
 }
 
 @Serializable

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -34,16 +33,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.EmbeddingGenerationParams
+import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.RerankingGenerationParams
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import org.koin.compose.koinInject
@@ -52,155 +54,186 @@ import org.koin.compose.koinInject
 fun ProviderConnectionTester(
     internalProvider: ProviderSetting,
 ) {
-    var showTestDialog by remember { mutableStateOf(false) }
+    var showSheet by remember { mutableStateOf(false) }
     val providerManager = koinInject<ProviderManager>()
     val scope = rememberCoroutineScope()
 
-    IconButton(onClick = { showTestDialog = true }) {
+    IconButton(onClick = { showSheet = true }) {
         Icon(HugeIcons.Connect, null)
     }
 
-    if (showTestDialog) {
-        var model by remember(internalProvider) {
-            mutableStateOf(internalProvider.models.firstOrNull { it.type == ModelType.CHAT })
-        }
-        var nonStreamingState: UiState<String> by remember { mutableStateOf(UiState.Idle) }
-        var streamingState: UiState<String> by remember { mutableStateOf(UiState.Idle) }
-        var toolsState: UiState<String> by remember { mutableStateOf(UiState.Idle) }
-        var streamingText by remember { mutableStateOf("") }
+    if (showSheet) {
+        val allModels = internalProvider.models
+        var selectedModel by remember { mutableStateOf(allModels.firstOrNull()) }
+        var chatNonStreaming by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
+        var chatStreamingText by remember { mutableStateOf("") }
+        var chatTools by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
+        var embeddingState by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
+        var rerankingState by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
 
         fun resetStates() {
-            nonStreamingState = UiState.Idle
-            streamingState = UiState.Idle
-            toolsState = UiState.Idle
-            streamingText = ""
+            chatNonStreaming = UiState.Idle
+            chatStreamingText = ""
+            chatTools = UiState.Idle
+            embeddingState = UiState.Idle
+            rerankingState = UiState.Idle
         }
 
-        AlertDialog(
-            onDismissRequest = { showTestDialog = false },
-            title = {
-                Text(stringResource(R.string.setting_provider_page_test_connection))
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ModelSelector(
-                        modelId = model?.id,
-                        providers = listOf(internalProvider),
-                        type = ModelType.CHAT,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        model = it
-                    }
+        val sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Expanded,
+            enabledValues = setOf(SheetValue.Expanded, SheetValue.Hidden),
+        )
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(R.string.setting_provider_page_test_connection),
+                    style = MaterialTheme.typography.titleLarge,
+                )
 
-                    TestResultItem(
-                        label = "非流式",
-                        state = nonStreamingState,
-                        resultText = (nonStreamingState as? UiState.Success)?.data ?: ""
-                    )
-
-                    TestResultItem(
-                        label = "流式",
-                        state = streamingState,
-                        resultText = streamingText
-                    )
-
-                    TestResultItem(
-                        label = "工具调用",
-                        state = toolsState,
-                        resultText = (toolsState as? UiState.Success)?.data ?: ""
+                if (allModels.isEmpty()) {
+                    Text("暂无模型", modifier = Modifier.padding(vertical = 16.dp))
+                } else {
+                    Select(
+                        options = allModels,
+                        selectedOption = selectedModel ?: allModels.first(),
+                        onOptionSelected = {
+                            selectedModel = it
+                            resetStates()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        optionToString = { model ->
+                            val typeLabel = when (model.type) {
+                                ModelType.CHAT -> "对话"
+                                ModelType.EMBEDDING -> "向量"
+                                ModelType.RERANKING -> "重排序"
+                                ModelType.IMAGE -> "图像"
+                            }
+                            "${model.displayName}  [$typeLabel]"
+                        },
                     )
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTestDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (model == null) return@TextButton
-                        val provider = providerManager.getProviderByType(internalProvider)
-                        resetStates()
-                        scope.launch {
-                            launch {
-                                runCatching {
-                                    nonStreamingState = UiState.Loading
-                                    val chunk = provider.generateText(
-                                        providerSetting = internalProvider,
-                                        messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
-                                        params = TextGenerationParams(
-                                            model = model!!,
-                                            customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
-                                        )
-                                    )
-                                    val text = chunk.choices.firstOrNull()?.message?.parts
-                                        ?.filterIsInstance<UIMessagePart.Text>()
-                                        ?.joinToString("") { it.text } ?: ""
-                                    nonStreamingState = UiState.Success(text)
-                                }.onFailure { nonStreamingState = UiState.Error(it) }
-                            }
-                            launch {
-                                runCatching {
-                                    streamingState = UiState.Loading
-                                    val flow = provider.streamText(
-                                        providerSetting = internalProvider,
-                                        messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
-                                        params = TextGenerationParams(
-                                            model = model!!,
-                                            customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
-                                        )
-                                    )
-                                    flow.collect { chunk ->
-                                        chunk.choices.firstOrNull()?.delta?.parts
-                                            ?.filterIsInstance<UIMessagePart.Text>()
-                                            ?.forEach { streamingText += it.text }
-                                    }
-                                    streamingState = UiState.Success("")
-                                }.onFailure { streamingState = UiState.Error(it) }
-                            }
-                            launch {
-                                runCatching {
-                                    toolsState = UiState.Loading
-                                    val testTool = Tool(
-                                        name = "get_current_time",
-                                        description = "Get the current date and time.",
-                                        execute = { emptyList() }
-                                    )
-                                    val chunk = provider.generateText(
-                                        providerSetting = internalProvider,
-                                        messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("Use the get_current_time tool.")),
-                                        params = TextGenerationParams(
-                                            model = model!!,
-                                            tools = listOf(testTool),
-                                            customHeaders = model!!.customHeaders,
-                                            customBody = model!!.customBodies
-                                        )
-                                    )
-                                    val message = chunk.choices.firstOrNull()?.message
-                                    val toolCall = message?.parts
-                                        ?.filterIsInstance<UIMessagePart.Tool>()
-                                        ?.firstOrNull()
-                                    val result = if (toolCall != null) {
-                                        "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
-                                    } else {
-                                        val text = message?.parts
-                                            ?.filterIsInstance<UIMessagePart.Text>()
-                                            ?.joinToString("") { it.text } ?: ""
-                                        "未调用工具，响应: $text"
-                                    }
-                                    toolsState = UiState.Success(result)
-                                }.onFailure { toolsState = UiState.Error(it) }
-                            }
+
+                val model = selectedModel
+                if (model != null) {
+                    when (model.type) {
+                        ModelType.CHAT -> {
+                            TestResultItem("非流式", chatNonStreaming, (chatNonStreaming as? UiState.Success)?.data ?: "")
+                            TestResultItem("流式", chatNonStreaming, chatStreamingText)
+                            TestResultItem("工具调用", chatTools, (chatTools as? UiState.Success)?.data ?: "")
                         }
+                        ModelType.EMBEDDING -> {
+                            TestResultItem("嵌入", embeddingState, (embeddingState as? UiState.Success)?.data ?: "")
+                        }
+                        ModelType.RERANKING -> {
+                            TestResultItem("重排序", rerankingState, (rerankingState as? UiState.Success)?.data ?: "")
+                        }
+                        else -> {}
                     }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_test))
+
+                    TextButton(
+                        onClick = {
+                            resetStates()
+                            scope.launch {
+                                val provider = providerManager.getProviderByType(internalProvider)
+                                when (model.type) {
+                                    ModelType.CHAT -> {
+                                        launch {
+                                            runCatching {
+                                                chatNonStreaming = UiState.Loading
+                                                val chunk = provider.generateText(
+                                                    providerSetting = internalProvider,
+                                                    messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
+                                                    params = TextGenerationParams(model = model, customHeaders = model.customHeaders, customBody = model.customBodies)
+                                                )
+                                                val text = chunk.choices.firstOrNull()?.message?.parts
+                                                    ?.filterIsInstance<UIMessagePart.Text>()
+                                                    ?.joinToString("") { it.text } ?: ""
+                                                chatNonStreaming = UiState.Success(text)
+                                            }.onFailure { chatNonStreaming = UiState.Error(it) }
+                                        }
+                                        launch {
+                                            runCatching {
+                                                chatNonStreaming = if (chatNonStreaming is UiState.Success) chatNonStreaming else UiState.Loading
+                                                val flow = provider.streamText(
+                                                    providerSetting = internalProvider,
+                                                    messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
+                                                    params = TextGenerationParams(model = model, customHeaders = model.customHeaders, customBody = model.customBodies)
+                                                )
+                                                flow.collect { chunk ->
+                                                    chunk.choices.firstOrNull()?.delta?.parts
+                                                        ?.filterIsInstance<UIMessagePart.Text>()
+                                                        ?.forEach { chatStreamingText += it.text }
+                                                }
+                                            }.onFailure { chatNonStreaming = UiState.Error(it) }
+                                        }
+                                        launch {
+                                            runCatching {
+                                                chatTools = UiState.Loading
+                                                val testTool = Tool(name = "get_current_time", description = "Get the current date and time.", execute = { emptyList() })
+                                                val chunk = provider.generateText(
+                                                    providerSetting = internalProvider,
+                                                    messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("Use the get_current_time tool.")),
+                                                    params = TextGenerationParams(model = model, tools = listOf(testTool), customHeaders = model.customHeaders, customBody = model.customBodies)
+                                                )
+                                                val message = chunk.choices.firstOrNull()?.message
+                                                val toolCall = message?.parts?.filterIsInstance<UIMessagePart.Tool>()?.firstOrNull()
+                                                val result = if (toolCall != null) "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
+                                                else "未调用工具，响应: " + (message?.parts?.filterIsInstance<UIMessagePart.Text>()?.joinToString("") { it.text } ?: "")
+                                                chatTools = UiState.Success(result)
+                                            }.onFailure { chatTools = UiState.Error(it) }
+                                        }
+                                    }
+                                    ModelType.EMBEDDING -> {
+                                        runCatching {
+                                            embeddingState = UiState.Loading
+                                            val result = provider.generateEmbedding(
+                                                providerSetting = internalProvider,
+                                                params = EmbeddingGenerationParams(model = model, input = listOf("Hello world", "Test embedding"))
+                                            )
+                                            val dim = result.embeddings.firstOrNull()?.size ?: 0
+                                            val firstValues = result.embeddings.firstOrNull()?.take(3)?.joinToString(", ") { "%.4f".format(it) } ?: ""
+                                            embeddingState = UiState.Success("${result.embeddings.size} 向量, 维度=$dim, 前3: [$firstValues...]")
+                                        }.onFailure { embeddingState = UiState.Error(it) }
+                                    }
+                                    ModelType.RERANKING -> {
+                                        runCatching {
+                                            rerankingState = UiState.Loading
+                                            val result = provider.rerank(
+                                                providerSetting = internalProvider,
+                                                params = RerankingGenerationParams(
+                                                    model = model,
+                                                    query = "What is the capital of France?",
+                                                    documents = listOf("Paris is the capital of France.", "London is the capital of England.", "Tokyo is the capital of Japan."),
+                                                    topN = 3,
+                                                )
+                                            )
+                                            val top = result.results.firstOrNull()
+                                            val summary = if (top != null) "Top: doc[${top.index}] ${"%.1f".format(top.relevanceScore * 100)}%" else "无结果"
+                                            rerankingState = UiState.Success("${result.results.size} 结果, $summary")
+                                        }.onFailure { rerankingState = UiState.Error(it) }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        },
+                        enabled = !(chatNonStreaming is UiState.Loading || embeddingState is UiState.Loading || rerankingState is UiState.Loading || chatTools is UiState.Loading),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.setting_provider_page_test))
+                    }
                 }
             }
-        )
+        }
     }
 }
 
@@ -208,7 +241,7 @@ fun ProviderConnectionTester(
 private fun TestResultItem(
     label: String,
     state: UiState<String>,
-    resultText: String
+    resultText: String,
 ) {
     var showErrorSheet by remember { mutableStateOf(false) }
 
@@ -262,35 +295,33 @@ private fun TestResultItem(
     }
 
     if (showErrorSheet && state is UiState.Error) {
-        val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
-        val stackTrace = remember(state.error) {
-            state.error.stackTraceToString()
-        }
+        val errorSheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        )
+        val stackTrace = remember(state.error) { state.error.stackTraceToString() }
         ModalBottomSheet(
             onDismissRequest = { showErrorSheet = false },
-            sheetState = sheetState,
+            sheetState = errorSheetState,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.8f)
+                    .fillMaxHeight(0.6f)
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text(label, style = MaterialTheme.typography.titleMedium)
                 Text(
                     text = state.error.message ?: "Error",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.extendColors.red6
+                    color = MaterialTheme.extendColors.red6,
                 )
                 Text(
                     text = stackTrace,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

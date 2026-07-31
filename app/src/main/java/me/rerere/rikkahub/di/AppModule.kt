@@ -2,6 +2,7 @@ package me.rerere.rikkahub.di
 
 import kotlinx.serialization.json.Json
 import me.rerere.highlight.Highlighter
+import me.rerere.knowledge.KnowledgeManager
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -11,7 +12,6 @@ import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.SoundEffectPlayer
-import me.rerere.rikkahub.utils.UpdateChecker
 import me.rerere.rikkahub.web.WebServerManager
 import me.rerere.tts.provider.TTSManager
 import org.koin.dsl.module
@@ -32,10 +32,6 @@ val appModule = module {
     }
 
     single {
-        UpdateChecker(get())
-    }
-
-    single {
         AppScope()
     }
 
@@ -49,6 +45,10 @@ val appModule = module {
 
     single {
         SoundEffectPlayer(get())
+    }
+
+    single {
+        KnowledgeManager(get(), get(), get())
     }
 
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；
@@ -78,7 +78,8 @@ val appModule = module {
             filesManager = get(),
             skillManager = get(),
             workspaceRepository = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            knowledgeManager = get(),
         )
     }
 

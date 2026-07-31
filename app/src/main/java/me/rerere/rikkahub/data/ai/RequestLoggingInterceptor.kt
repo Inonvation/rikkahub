@@ -5,6 +5,7 @@ import me.rerere.common.android.Logging
 import okhttp3.Interceptor
 import okhttp3.Response
 import okio.Buffer
+import java.io.IOException
 
 class RequestLoggingInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -44,6 +45,11 @@ class RequestLoggingInterceptor : Interceptor {
 
         val durationMs = System.currentTimeMillis() - startTime
         val responseHeaders = response.headers.toMap()
+        val responseBody = try {
+            response.peekBody(Long.MAX_VALUE).string()
+        } catch (_: IOException) {
+            null
+        }
 
         Logging.logRequest(
             LogEntry.RequestLog(
@@ -54,6 +60,7 @@ class RequestLoggingInterceptor : Interceptor {
                 requestBody = requestBody,
                 responseCode = response.code,
                 responseHeaders = responseHeaders,
+                responseBody = responseBody,
                 durationMs = durationMs,
                 error = error
             )

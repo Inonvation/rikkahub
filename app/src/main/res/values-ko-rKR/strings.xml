@@ -647,8 +647,12 @@
   <string name="setting_display_page_enable_blur_effect_title">흐림 효과 활성화</string>
   <string name="setting_display_page_enable_latex_rendering_desc">LaTeX 구문을 사용해 수식과 공식을 렌더링합니다</string>
   <string name="setting_display_page_enable_latex_rendering_title">LaTeX 렌더링 활성화</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">메시지 생성 시 진동 피드백 활성화</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">메시지 생성 진동 효과 활성화</string>
+  <string name="setting_display_page_enable_haptic_feedback_title">햅틱 피드백</string>
+  <string name="setting_display_page_enable_haptic_feedback_desc">앱 내 햅틱 피드백을 활성화합니다</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">메시지 생성 시작과 완료 시 햅틱 피드백 실행</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">메시지 생성 중</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 및 컨트롤</string>
+  <string name="setting_display_page_enable_ui_haptic_feedback_desc">버튼 탭, 스위치 전환, 목록 선택 등의 UI 상호작용에 햅 피드백을 활성화합니다</string>
   <string name="setting_display_page_font_size_preview">새벽 네 시, 해당화가 잠들지 않은 것을 보았다. 나는 자주 이렇게, 아무도 없는 밤에 홀로 깨어, 생각한다 — 지금 이 순간 누군가도 나를 생각하고 있다면, 그것으로 충분하다.</string>
   <string name="setting_display_page_font_size_title">채팅 글꼴 크기</string>
   <string name="setting_display_page_live_update_notification">실시간 업데이트 알림</string>
@@ -676,8 +680,6 @@
   <string name="setting_display_page_show_thinking_content_title">생각 내용 표시</string>
   <string name="setting_display_page_show_token_usage_desc">토큰 사용량과 메시지 수를 표시합니다</string>
   <string name="setting_display_page_show_token_usage_title">토큰 및 컨텍스트 통계 표시</string>
-  <string name="setting_display_page_show_updates_desc">앱 업데이트 알림을 표시할지 여부</string>
-  <string name="setting_display_page_show_updates_title">업데이트 표시</string>
   <string name="setting_display_page_show_user_avatar_desc">채팅 메시지에 사용자 아바타를 표시할지 여부</string>
   <string name="setting_display_page_show_user_avatar_title">사용자 아바타 표시</string>
   <string name="setting_display_page_skip_crop_image_desc">이미지를 가져오거나 사진을 찍은 후 자르기 화면 건너뛰기</string>
@@ -1073,11 +1075,6 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="translator_page_translate">번역</string>
   <string name="tts">TTS</string>
   <string name="unpin_chat">채팅 고정 해제</string>
-  <string name="update_card_check_failed">업데이트 확인 실패</string>
-  <string name="update_card_close">닫기</string>
-  <string name="update_card_downloading">다운로드 중입니다. 진행 상황은 상태 표시줄을 확인하세요.</string>
-  <string name="update_card_new_version_found">새 버전 발견 %s</string>
-  <string name="update_card_unknown_error">알 수 없는 오류</string>
   <string name="upload_file">파일 업로드</string>
   <string name="use_web_search">웹 검색 사용</string>
   <string name="user_default_name">사용자</string>

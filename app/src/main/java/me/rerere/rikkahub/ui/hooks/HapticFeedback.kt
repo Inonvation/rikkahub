@@ -26,6 +26,7 @@ class HapticController(
  * 创建绑定到当前 [LocalSettings] 和 [LocalHapticFeedback] 的 [HapticController]。
  *
  * 返回的控制器受 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableUiHapticFeedback] 控制，
+ * 且必须同时满足总开关 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableHapticFeedback] 开启。
  * 在 perform 时惰性读取设置值，因此与 staticCompositionLocalOf 配合正常工作。
  */
 @Composable
@@ -35,7 +36,31 @@ fun rememberHaptic(): HapticController {
     return remember(hapticFeedback, settings) {
         HapticController(
             hapticFeedback = hapticFeedback,
-            enabled = { settings.displaySetting.enableUiHapticFeedback },
+            enabled = {
+                settings.displaySetting.enableHapticFeedback &&
+                        settings.displaySetting.enableUiHapticFeedback
+            },
+        )
+    }
+}
+
+/**
+ * 创建用于 AI 消息生成开始和完成时的 [HapticController]。
+ *
+ * 需要同时满足总开关 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableHapticFeedback]
+ * 和 [me.rerere.rikkahub.data.datastore.DisplaySetting.enableMessageGenerationHapticEffect] 开启。
+ */
+@Composable
+fun rememberMessageGenerationHaptic(): HapticController {
+    val hapticFeedback = LocalHapticFeedback.current
+    val settings = LocalSettings.current
+    return remember(hapticFeedback, settings) {
+        HapticController(
+            hapticFeedback = hapticFeedback,
+            enabled = {
+                settings.displaySetting.enableHapticFeedback &&
+                        settings.displaySetting.enableMessageGenerationHapticEffect
+            },
         )
     }
 }

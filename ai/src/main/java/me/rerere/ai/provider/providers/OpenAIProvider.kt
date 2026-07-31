@@ -19,8 +19,12 @@ import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.RerankResult
+import me.rerere.ai.provider.RerankingGenerationParams
+import me.rerere.ai.provider.RerankingGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.openai.ChatCompletionsAPI
 import me.rerere.ai.provider.providers.openai.ResponseAPI
@@ -78,9 +82,16 @@ class OpenAIProvider(
                 val modelObj = modelJson.jsonObject
                 val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
+                // Auto-detect embedding models by ID pattern
+                val isEmbedding = id.contains("embedding", ignoreCase = true) ||
+                        id.contains("bge", ignoreCase = true) ||
+                        id.contains("e5", ignoreCase = true) ||
+                        id.contains("gte", ignoreCase = true)
+
                 Model(
                     modelId = id,
                     displayName = id,
+                    type = if (isEmbedding) ModelType.EMBEDDING else ModelType.CHAT,
                 )
             }
         }
@@ -171,7 +182,7 @@ class OpenAIProvider(
         )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/embeddings")
+            .url("${providerSetting.baseUrl}${providerSetting.embeddingsPath}")
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
@@ -180,7 +191,7 @@ class OpenAIProvider(
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
+            error("Failed to generate embedding: ${response.code} ${response.body?.string()} (${request.url})")
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -197,6 +208,57 @@ class OpenAIProvider(
         EmbeddingGenerationResult(
             model = model,
             embeddings = embeddings
+        )
+    }
+
+    override suspend fun rerank(
+        providerSetting: ProviderSetting.OpenAI,
+        params: RerankingGenerationParams
+    ): RerankingGenerationResult = withContext(Dispatchers.IO) {
+        require(params.query.isNotBlank()) { "Reranking query cannot be empty" }
+        require(params.documents.isNotEmpty()) { "Reranking documents cannot be empty" }
+
+        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        val requestBody = json.encodeToString(
+            buildJsonObject {
+                put("model", params.model.modelId)
+                put("query", params.query)
+                putJsonArray("documents") {
+                    params.documents.forEach { add(JsonPrimitive(it)) }
+                }
+                params.topN?.let { put("top_n", it) }
+            }.mergeCustomBody(params.customBody)
+        )
+
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}${providerSetting.rerankPath}")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).await()
+        if (!response.isSuccessful) {
+            error("Failed to rerank: ${response.code} ${response.body?.string()}")
+        }
+
+        val bodyStr = response.body?.string() ?: ""
+        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
+        val results = bodyJson["results"]?.jsonArray?.map { resultJson ->
+            val obj = resultJson.jsonObject
+            RerankResult(
+                index = obj["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: error("Missing index in rerank result"),
+                relevanceScore = obj["relevance_score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    ?: error("Missing relevance_score in rerank result")
+            )
+        } ?: emptyList()
+
+        RerankingGenerationResult(
+            model = model,
+            results = results
         )
     }
 

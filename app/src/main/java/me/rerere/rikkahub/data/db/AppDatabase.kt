@@ -6,6 +6,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import me.rerere.ai.core.TokenUsage
+import me.rerere.knowledge.data.dao.KnowledgeBaseDao
+import me.rerere.knowledge.data.dao.KnowledgeChunkDao
+import me.rerere.knowledge.data.dao.KnowledgeDocumentDao
+import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
+import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
+import me.rerere.knowledge.data.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
@@ -37,8 +43,11 @@ import me.rerere.rikkahub.utils.JsonInstant
         FavoriteEntity::class,
         WorkspaceEntity::class,
         FolderEntity::class,
+        KnowledgeBaseEntity::class,
+        KnowledgeDocumentEntity::class,
+        KnowledgeChunkEntity::class,
     ],
-    version = 24,
+    version = 26,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -58,6 +67,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 21, to = 22),
         AutoMigration(from = 22, to = 23, spec = Migration_22_23::class),
         AutoMigration(from = 23, to = 24),
+        AutoMigration(from = 24, to = 25),
+        AutoMigration(from = 25, to = 26),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -77,6 +88,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun workspaceDao(): WorkspaceDAO
 
     abstract fun folderDao(): FolderDAO
+
+    abstract fun knowledgeBaseDao(): KnowledgeBaseDao
+
+    abstract fun knowledgeDocumentDao(): KnowledgeDocumentDao
+
+    abstract fun knowledgeChunkDao(): KnowledgeChunkDao
 }
 
 object TokenUsageConverter {

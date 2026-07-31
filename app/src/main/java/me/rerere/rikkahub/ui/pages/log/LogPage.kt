@@ -357,6 +357,34 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                     }
                 }
             }
+
+            log.responseBody?.let { body ->
+                item {
+                    HorizontalDivider()
+                    Text(
+                        text = "Response Body",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    val jsonElement = remember(body) {
+                        runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull()
+                    }
+                    if (jsonElement != null) {
+                        JsonTree(
+                            json = jsonElement,
+                            modifier = Modifier.padding(top = 4.dp),
+                            initialExpandLevel = 2
+                        )
+                    } else {
+                        Text(
+                            text = body,
+                            fontFamily = JetbrainsMono,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

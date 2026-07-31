@@ -286,6 +286,14 @@ fun ChatInput(
                                 model = chatModel,
                             )
 
+                            // Knowledge Base
+                            KnowledgeBasePickerButton(
+                                selectedIds = assistant.knowledgeBaseIds,
+                                onSelectionChange = { newIds ->
+                                    onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
+                                },
+                            )
+
                             // Reasoning
                             val model = settings.getCurrentChatModel()
                             if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
