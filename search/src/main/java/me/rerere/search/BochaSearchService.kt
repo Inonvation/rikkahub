@@ -15,6 +15,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -65,45 +67,50 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 put("count", JsonPrimitive(commonOptions.resultSize))
             }
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://api.bochaai.com/v1/web-search")
+                    .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
 
-            val request = Request.Builder()
-                .url("https://api.bochaai.com/v1/web-search")
-                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body.string()
-                val bochaResponse = runCatching {
-                    json.decodeFromString<BochaResponse>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
-                }.getOrThrow()
-
-                if (bochaResponse.code != 200) {
-                    error("Bocha API error: ${bochaResponse.msg ?: "Unknown error"}")
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val bodyRaw = response.body.string()
+                    runCatching {
+                        json.decodeFromString<BochaResponse>(bodyRaw)
+                    }.onFailure {
+                        it.printStackTrace()
+                        println(bodyRaw)
+                        error("Failed to decode response: $bodyRaw")
+                    }.getOrThrow()
+                } else {
+                    val code = response.code
+                    response.close()
+                    throw RetryableHttpException(code, "response failed #$code")
                 }
-
-                return@withContext Result.success(
-                    SearchResult(
-                        items = bochaResponse.data?.webPages?.value?.map {
-                            SearchResultItem(
-                                title = it.name,
-                                url = it.url,
-                                text = it.summary ?: it.snippet,
-                            )
-                        } ?: emptyList()
-                    )
-                )
-            } else {
-                println(response.body.string())
-                error("response failed #${response.code}")
             }
+
+            if (result.code != 200) {
+                error("Bocha API error: ${result.msg ?: "Unknown error"}")
+            }
+
+            return@withContext Result.success(
+                SearchResult(
+                    items = result.data?.webPages?.value?.map {
+                        SearchResultItem(
+                            title = it.name,
+                            url = it.url,
+                            text = it.summary ?: it.snippet,
+                        )
+                    } ?: emptyList()
+                )
+            )
         }
     }
 

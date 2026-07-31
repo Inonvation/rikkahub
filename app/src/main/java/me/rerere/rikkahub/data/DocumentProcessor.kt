@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data
 
 import android.util.Log
 import java.io.File
+import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.EmbeddingGenerationParams
@@ -58,6 +60,22 @@ class DocumentProcessor(
             if (fileSizeMB > 100) {
                 knowledgeManager.documentRepository.updateStatus(documentId, "failed", "文件过大 (${fileSizeMB}MB > 100MB)")
                 return
+            }
+
+            // 计算文件 hash，同库重复文档做覆盖处理
+            val fileHash = computeFileHash(file)
+            val duplicate = fileHash?.let { hash ->
+                knowledgeManager.documentRepository.getByFileHashAndKnowledgeBaseId(hash, baseId)
+                    ?.takeIf { it.id != documentId }
+            }
+            if (duplicate != null) {
+                // 删除旧文档的 chunk 和记录，当前文档继续处理并继承 hash
+                knowledgeManager.chunkDao.deleteByDocumentId(duplicate.id)
+                knowledgeManager.documentRepository.delete(duplicate.id)
+                knowledgeManager.invalidateVectorCache(baseId)
+            }
+            knowledgeManager.documentRepository.getById(documentId)?.let { doc ->
+                knowledgeManager.documentRepository.update(doc.copy(fileHash = fileHash))
             }
 
             // 1. Parse document
@@ -153,10 +171,15 @@ class DocumentProcessor(
             }
 
             knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
+            // 文档索引变更后，清除该知识库的向量缓存，避免检索命中旧数据
+            knowledgeManager.invalidateVectorCache(baseId)
         } catch (e: OutOfMemoryError) {
             // OOM 是 Error 不是 Exception，需单独捕获：标记失败而非崩溃
             Log.e(TAG, "processDocument OOM: $documentId", e)
             knowledgeManager.documentRepository.updateStatus(documentId, "failed", "内存不足，请将文档分割后再导入")
+        } catch (e: CancellationException) {
+            // 协程取消是正常控制流，不能误判为文档失败（否则会写入 "job was cancelled"）
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "processDocument failed: $documentId", e)
             knowledgeManager.documentRepository.updateStatus(documentId, "failed", e.message ?: "Unknown error")
@@ -175,20 +198,29 @@ class DocumentProcessor(
     ) {
         val doc = knowledgeManager.documentRepository.getById(documentId) ?: return
         knowledgeManager.chunkDao.deleteByDocumentId(documentId)
+        // 删除旧索引后立即失效缓存，避免中间状态被命中
+        knowledgeManager.invalidateVectorCache(baseId)
         knowledgeManager.documentRepository.updateChunkCount(documentId, 0, "pending")
         processDocument(doc.id, doc.filePath, doc.fileType, onProgress)
     }
 
     /**
      * 重新处理某知识库下全部文档（分块设置改动后调用）。
+     * onDocumentProgress 报告 (documentId, 0..1) 进度。
      */
-    suspend fun reprocessAll() {
+    suspend fun reprocessAll(
+        onDocumentProgress: (documentId: String, progress: Float) -> Unit = { _, _ -> },
+    ) {
         val docs = knowledgeManager.documentRepository.getByKnowledgeBaseIdList(baseId)
         if (docs.isEmpty()) return
         docs.forEach { doc ->
             knowledgeManager.chunkDao.deleteByDocumentId(doc.id)
+            // 每删除一个文档的索引就失效缓存，避免中间状态被命中
+            knowledgeManager.invalidateVectorCache(baseId)
             knowledgeManager.documentRepository.updateChunkCount(doc.id, 0, "pending")
-            processDocument(doc.id, doc.filePath, doc.fileType)
+            processDocument(doc.id, doc.filePath, doc.fileType) { p ->
+                onDocumentProgress(doc.id, p)
+            }
         }
     }
 
@@ -236,6 +268,25 @@ class DocumentProcessor(
     }
 
     /**
+     * 计算文件 SHA-256 哈希的十六进制字符串，用于同库去重。
+     */
+    private fun computeFileHash(file: File): String? {
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (input.read(buffer).also { read = it } > 0) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * 快速判断是否为二进制文件：采样前 8KB，若含多个 NUL 或非打印控制字符则视为二进制。
      */
     private fun isBinaryFile(file: File): Boolean {
@@ -260,3 +311,4 @@ class DocumentProcessor(
         const val TAG = "DocumentProcessor"
     }
 }
+

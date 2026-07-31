@@ -582,6 +582,12 @@
   <string name="search_detail_username">用户名</string>
   <string name="multi_key_manage_title">管理 Keys</string>
   <string name="multi_key_manage_hint">添加多个 API key，请求时自动轮换使用</string>
+  <string name="multi_key_manage_unsaved">有未保存的更改</string>
+  <string name="multi_key_duplicate">该 key 已存在</string>
+  <string name="multi_key_duplicate_hint">存在重复的 key，保存时会自动合并</string>
+  <string name="multi_key_delete">删除 key</string>
+  <string name="multi_key_show">显示 key</string>
+  <string name="multi_key_hide">隐藏 key</string>
   <string name="multi_key_entry_title">多 Key</string>
   <string name="multi_key_entry_count">已配置 %d 个 key</string>
   <string name="multi_key_entry_empty">尚未配置 key</string>
@@ -1076,6 +1082,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="skills_page_skill_content_label">SKILL.md内容</string>
   <string name="skills_page_skill_name">技能名称：%s</string>
   <string name="skills_page_title">代理技能</string>
+  <string name="skills_page_batch_select">批量选择</string>
+  <string name="skills_page_batch_cancel">取消</string>
+  <string name="skills_page_select_all">全选</string>
+  <string name="skills_page_deselect_all">取消全选</string>
+  <string name="skills_page_delete">删除</string>
+  <string name="skills_page_batch_delete_message">确定要删除选中的 %d 个技能吗？此操作不可撤销。</string>
   <string name="speech_page_title">语音</string>
   <string name="speech_tab_asr">语音识别</string>
   <string name="speech_tab_tts">文字转语音</string>

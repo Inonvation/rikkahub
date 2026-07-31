@@ -17,10 +17,10 @@ class KnowledgeBaseRepository(
         description: String = "",
         embeddingModelId: String? = null,
         rerankModelId: String? = null,
-        chunkSize: Int = 512,
-        chunkOverlap: Int = 80,
-        chunkStrategy: String = "sentence",
-        topK: Int = 10,
+        chunkSize: Int = KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE,
+        chunkOverlap: Int = KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP,
+        chunkStrategy: String = KnowledgeBaseEntity.DEFAULT_CHUNK_STRATEGY,
+        topK: Int = KnowledgeBaseEntity.DEFAULT_TOP_K,
         similarityThreshold: Float = 0f,
     ): KnowledgeBaseEntity {
         val entity = KnowledgeBaseEntity(

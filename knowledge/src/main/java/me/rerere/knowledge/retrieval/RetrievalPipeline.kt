@@ -98,11 +98,14 @@ class RetrievalPipeline(
         // RRF 融合
         val fused = rrfFusion(vectorResults, keywordResults, keywordWeight = keywordWeight)
 
+        // 文档级多样性：避免 top 结果全部来自同一份文档的连续 chunk
+        val diversified = diversifyByDocument(fused, candidateLimit)
+
         // 可选 reranking
         val results = if (reranker != null) {
-            reranker.rerank(query, fused.take(candidateLimit), topK)
+            reranker.rerank(query, diversified, topK)
         } else {
-            fused
+            diversified
         }
 
         // Threshold 过滤 + 裁剪
@@ -163,5 +166,32 @@ class RetrievalPipeline(
                     snippet = snippets[id],
                 )
             }
+    }
+
+    /**
+     * 文档级多样性控制：优先让 top 结果来自不同文档，避免同一份文档的连续 chunk 占据全部结果。
+     * 每个文档只取第一条，剩余结果按原顺序补位。
+     */
+    private fun diversifyByDocument(
+        results: List<RetrievalResult>,
+        maxResults: Int,
+    ): List<RetrievalResult> {
+        if (results.size <= 1) return results
+
+        val seenDocs = mutableSetOf<String>()
+        val diverse = mutableListOf<RetrievalResult>()
+        val extras = mutableListOf<RetrievalResult>()
+
+        for (result in results) {
+            val docId = result.chunk.documentId
+            if (docId !in seenDocs) {
+                diverse.add(result)
+                seenDocs.add(docId)
+            } else {
+                extras.add(result)
+            }
+        }
+
+        return (diverse + extras).take(maxResults)
     }
 }

@@ -7,21 +7,26 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,10 +39,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -59,11 +67,23 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
     val effectiveEmbeddingModelId = vm.embeddingModelId ?: settings.embeddingModelId?.toString()
     val effectiveRerankModelId = vm.rerankModelId ?: settings.rerankModelId?.toString()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showReprocessDialog by remember { mutableStateOf(false) }
 
-    // 数字输入框用本地 String 状态，允许清空编辑；仅在提交时校验
-    var chunkSizeText by remember { mutableStateOf(vm.chunkSize.toString()) }
-    var chunkOverlapText by remember { mutableStateOf(vm.chunkOverlap.toString()) }
-    var topKText by remember { mutableStateOf(vm.topK.toString()) }
+    // 数字输入框用本地 String 状态，允许清空编辑；仅在提交时校验。
+    // 以已加载实体为 key（顺带修复：原先实体异步加载前就初始化，自定义值从不回显）。
+    // 等于默认值则显示为空，placeholder 提示默认值，表示"用默认"。
+    var chunkSizeText by rememberDefaultableIntState(
+        value = base?.chunkSize ?: KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE,
+        defaultValue = KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE,
+    )
+    var chunkOverlapText by rememberDefaultableIntState(
+        value = base?.chunkOverlap ?: KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP,
+        defaultValue = KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP,
+    )
+    var topKText by rememberDefaultableIntState(
+        value = base?.topK ?: KnowledgeBaseEntity.DEFAULT_TOP_K,
+        defaultValue = KnowledgeBaseEntity.DEFAULT_TOP_K,
+    )
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -159,7 +179,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("分块策略") },
-                            description = { Text("文档切块方式：固定大小 / 按段落 / 按句子；改动保存后会自动重新处理全部文档") },
+                            description = { Text("文档切块方式：固定大小 / 按段落 / 按句子；改动保存后需手动重新处理全部文档生效") },
                         ) {
                             Select(
                                 options = CHUNK_STRATEGIES,
@@ -182,14 +202,16 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Chunk Size") },
-                            description = { Text("每块文本的字符数，越小检索越精准但碎片多；改动保存后会自动重新处理全部文档") },
+                            description = { Text("每块文本的字符数，越小检索越精准但碎片多；默认 ${KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE} · 不建议修改") },
                         ) {
                             OutlinedTextField(
                                 value = chunkSizeText,
                                 onValueChange = {
                                     chunkSizeText = it
-                                    it.toIntOrNull()?.let { v -> vm.updateChunkSize(v) }
+                                    // 清空 = 恢复默认；非空则防抖保存（钳制在落库时统一做）
+                                    it.applyDefaultableInt(KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE, vm::updateChunkSize)
                                 },
+                                placeholder = { Text("默认 ${KnowledgeBaseEntity.DEFAULT_CHUNK_SIZE}，不建议修改") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -201,14 +223,15 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Chunk Overlap") },
-                            description = { Text("相邻块的重叠字符数，避免切断语义；改动保存后会自动重新处理全部文档") },
+                            description = { Text("相邻块的重叠字符数，避免切断语义；默认 ${KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP}（约 chunk size 10%）· 不建议修改") },
                         ) {
                             OutlinedTextField(
                                 value = chunkOverlapText,
                                 onValueChange = {
                                     chunkOverlapText = it
-                                    it.toIntOrNull()?.let { v -> vm.updateChunkOverlap(v) }
+                                    it.applyDefaultableInt(KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP, vm::updateChunkOverlap)
                                 },
+                                placeholder = { Text("默认 ${KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP}，不建议修改") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -216,6 +239,28 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                         }
                     }
                 )
+                if (vm.hasPendingReprocess) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "分块设置已修改，文档索引尚未按新设置重建",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            ReprocessButton(
+                                reprocessing = vm.reprocessing,
+                                idleText = "立即重新处理全部文档",
+                                onClick = { showReprocessDialog = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
             }
 
             CardGroup(
@@ -226,14 +271,15 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Top K") },
-                            description = { Text("每次检索最多返回几条结果，越大越全但可能混入不相关的") },
+                            description = { Text("每次检索最多返回几条结果，越大越全但可能混入不相关的；默认 ${KnowledgeBaseEntity.DEFAULT_TOP_K}") },
                         ) {
                             OutlinedTextField(
                                 value = topKText,
                                 onValueChange = {
                                     topKText = it
-                                    it.toIntOrNull()?.let { v -> vm.updateTopK(v) }
+                                    it.applyDefaultableInt(KnowledgeBaseEntity.DEFAULT_TOP_K, vm::updateTopK)
                                 },
+                                placeholder = { Text("默认 ${KnowledgeBaseEntity.DEFAULT_TOP_K}") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -241,7 +287,28 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                         }
                     }
                 )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("HyDE 查询改写") },
+                            description = { Text("用 LLM 先生成一段假设答案，再用假设答案的向量做检索。对口吻化问题召回更准，但会多耗一次模型调用") },
+                        ) {
+                            Switch(
+                                checked = vm.useHyde,
+                                onCheckedChange = { vm.updateUseHyde(it) },
+                            )
+                        }
+                    }
+                )
             }
+
+            // 常驻手动重处理入口：分块设置或 embedding 模型改动后，需手动重建索引
+            ReprocessButton(
+                reprocessing = vm.reprocessing,
+                idleText = "重新处理全部文档",
+                onClick = { showReprocessDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             TextButton(
                 onClick = { showDeleteDialog = true },
@@ -251,6 +318,20 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 Text("  删除知识库", color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+
+    RikkaConfirmDialog(
+        show = showReprocessDialog,
+        title = "重新处理全部文档",
+        confirmText = "重新处理",
+        dismissText = "取消",
+        onConfirm = {
+            showReprocessDialog = false
+            vm.reprocessAll()
+        },
+        onDismiss = { showReprocessDialog = false },
+    ) {
+        Text("将删除「${base?.name}」下所有文档的现有索引并按当前设置重建，耗时取决于文档数量，是否继续？")
     }
 
     if (showDeleteDialog) {
@@ -268,5 +349,45 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 TextButton(onClick = { showDeleteDialog = false }) { Text("取消") }
             }
         )
+    }
+}
+
+/**
+ * 可回退默认值的数字输入框状态：等于默认值时显示为空（placeholder 提示默认值），
+ * 表示"用默认"；非默认值才回显实际值。以 value 为 key，实体加载后自动刷新。
+ */
+@Composable
+private fun rememberDefaultableIntState(value: Int, defaultValue: Int): MutableState<String> =
+    remember(value) { mutableStateOf(if (value == defaultValue) "" else value.toString()) }
+
+/** 数字输入框 onValueChange 统一处理：空 = 恢复默认；非空解析为 Int 交给 onValue。 */
+private fun String.applyDefaultableInt(defaultValue: Int, onValue: (Int) -> Unit) {
+    if (isBlank()) {
+        onValue(defaultValue)
+    } else {
+        toIntOrNull()?.let(onValue)
+    }
+}
+
+/** 重新处理按钮：reprocessing 时显示转圈 + "正在重新处理..."，空闲时显示图标 + idleText。 */
+@Composable
+private fun ReprocessButton(
+    reprocessing: Boolean,
+    idleText: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        enabled = !reprocessing,
+        modifier = modifier,
+    ) {
+        if (reprocessing) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(HugeIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(if (reprocessing) "正在重新处理..." else idleText)
     }
 }

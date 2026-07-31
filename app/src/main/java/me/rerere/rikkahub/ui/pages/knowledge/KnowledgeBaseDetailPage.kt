@@ -77,6 +77,7 @@ import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -106,6 +107,7 @@ fun KnowledgeBaseDetailPage(baseId: String) {
 
     var searchQuery by remember { mutableStateOf("") }
     var showSearchSheet by remember { mutableStateOf(false) }
+    var showReprocessDialog by remember { mutableStateOf(false) }
 
     // 导入被拒绝等一次性通知
     LaunchedEffect(Unit) {
@@ -166,6 +168,9 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                 title = { Text(base?.name ?: "知识库") },
                 navigationIcon = { BackButton() },
                 actions = {
+                    IconButton(onClick = { showReprocessDialog = true }) {
+                        Icon(HugeIcons.Refresh, contentDescription = "重新处理全部")
+                    }
                     IconButton(onClick = { showSearchSheet = true }) {
                         Icon(HugeIcons.Search01, contentDescription = "检索测试")
                     }
@@ -304,6 +309,21 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                 }
             }
         }
+    }
+
+    // 重新处理全部文档确认框
+    RikkaConfirmDialog(
+        show = showReprocessDialog,
+        title = "重新处理全部文档",
+        confirmText = "重新处理",
+        dismissText = "取消",
+        onConfirm = {
+            showReprocessDialog = false
+            vm.reprocessAll()
+        },
+        onDismiss = { showReprocessDialog = false },
+    ) {
+        Text("将删除「${base?.name}」下所有文档的现有索引并按当前设置重建，耗时取决于文档数量，是否继续？")
     }
 
     // Search test sheet

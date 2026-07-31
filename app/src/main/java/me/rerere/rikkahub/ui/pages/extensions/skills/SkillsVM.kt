@@ -54,6 +54,41 @@ class SkillsVM(
         }
     }
 
+    fun deleteSkills(names: List<String>) {
+        if (names.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            names.forEach { name -> skillManager.deleteSkill(name) }
+            _skills.value = skillManager.listSkills()
+            persistOrder()
+        }
+    }
+
+    /**
+     * 拖动排序：同步更新内存列表（reorderable 手势要求 onMove 回调立刻反映新顺序，
+     * 不能等异步的磁盘读 + flow 发射，否则拖动时会抽搐/跳动），持久化放到后台。
+     */
+    fun reorderSkill(name: String, newIndex: Int) {
+        val current = _skills.value
+        val oldIndex = current.indexOfFirst { it.name == name }
+        if (oldIndex < 0) return
+        val newList = current.toMutableList()
+        val item = newList.removeAt(oldIndex)
+        newList.add(newIndex.coerceIn(0, newList.size), item)
+        _skills.value = newList
+        viewModelScope.launch(Dispatchers.IO) {
+            skillManager.persistSkillOrder(newList.map { it.name })
+        }
+    }
+
+    /**
+     * 按当前内存顺序把排序持久化到 settings.skillOrder。
+     */
+    private fun persistOrder() {
+        viewModelScope.launch(Dispatchers.IO) {
+            skillManager.persistSkillOrder(_skills.value.map { it.name })
+        }
+    }
+
     fun getSkillsDir() = skillManager.getSkillsDir()
 
     fun importSkillFromFile(context: Context, uri: Uri, onResult: (Boolean, String) -> Unit) {

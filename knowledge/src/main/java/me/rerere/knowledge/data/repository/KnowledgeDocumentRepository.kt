@@ -34,6 +34,9 @@ class KnowledgeDocumentRepository(
 
     suspend fun getById(id: String) = dao.getById(id)
 
+    suspend fun getByFileHashAndKnowledgeBaseId(fileHash: String, knowledgeBaseId: String) =
+        dao.getByFileHashAndKnowledgeBaseId(fileHash, knowledgeBaseId)
+
     fun getByKnowledgeBaseId(knowledgeBaseId: String) = dao.getByKnowledgeBaseId(knowledgeBaseId)
 
     suspend fun getByKnowledgeBaseIdList(knowledgeBaseId: String) = dao.getByKnowledgeBaseIdList(knowledgeBaseId)

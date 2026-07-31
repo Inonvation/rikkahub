@@ -50,8 +50,9 @@ android {
 
     buildTypes {
         release {
-            // 用 debug 签名（用户指定），方便个人使用场景
+            // 用 debug 签名 + debug 包名后缀（用户指定），与 debug 包完全一致，可覆盖安装
             signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".debug"
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

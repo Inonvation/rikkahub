@@ -102,6 +102,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.ai.ModelAbilityTag
 import me.rerere.rikkahub.ui.components.ai.ModelModalityTag
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
@@ -240,7 +241,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         },
                         onDelete = {
                             onDelete()
-                        }
+                        },
                     )
                 }
 
@@ -259,9 +260,10 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
 ) {
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
+    val navController = LocalNavController.current
+    var internalProvider by remember(provider.id) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -276,6 +278,13 @@ private fun SettingProviderConfigPage(
             provider = internalProvider,
             onEdit = {
                 internalProvider = it
+            },
+            onOpenMultiKeyManager = {
+                // 进入多 key 子编辑器前先提交当前快照，避免子页面读到旧值
+                onEdit(internalProvider)
+                navController.navigate(
+                    Screen.SettingMultiKeyManage("provider", internalProvider.id.toString())
+                )
             }
         )
 

@@ -20,8 +20,8 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Key02
+import me.rerere.ai.util.splitApiKeys
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.pages.setting.components.splitKeys
 import me.rerere.rikkahub.ui.theme.CustomColors
 
 /**
@@ -34,7 +34,7 @@ internal fun MultiKeyEntryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val keyCount = splitKeys(apiKey).size
+    val keyCount = splitApiKeys(apiKey).size
 
     Card(
         colors = CardDefaults.cardColors(

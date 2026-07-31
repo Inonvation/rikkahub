@@ -13,6 +13,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -60,36 +62,43 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     "?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
                     "&count=${commonOptions.resultSize}"
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("X-Subscription-Token", apiKey)
+                    .build()
 
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("Accept", "application/json")
-                .addHeader("X-Subscription-Token", apiKey)
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string()
-                val searchResponse = json.decodeFromString<BraveSearchResponse>(responseBody)
-
-                val items = searchResponse.web?.results?.map { result ->
-                    SearchResultItem(
-                        title = result.title,
-                        url = result.url,
-                        text = result.description ?: ""
-                    )
-                } ?: emptyList()
-
-                return@withContext Result.success(
-                    SearchResult(
-                        answer = null,
-                        items = items
-                    )
-                )
-            } else {
-                error("Brave search failed with code ${response.code}: ${response.message}")
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    val responseBody = response.body.string()
+                    json.decodeFromString<BraveSearchResponse>(responseBody)
+                } else {
+                    val code = response.code
+                    val msg = "Brave search failed with code $code: ${response.message}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
+                }
             }
+
+            val items = result.web?.results?.map { res ->
+                SearchResultItem(
+                    title = res.title,
+                    url = res.url,
+                    text = res.description ?: ""
+                )
+            } ?: emptyList()
+
+            return@withContext Result.success(
+                SearchResult(
+                    answer = null,
+                    items = items
+                )
+            )
         }
     }
 

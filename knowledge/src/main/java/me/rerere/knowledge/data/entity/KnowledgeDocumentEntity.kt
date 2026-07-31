@@ -40,6 +40,9 @@ data class KnowledgeDocumentEntity(
     @ColumnInfo(name = "file_size")
     val fileSize: Long = 0,
 
+    @ColumnInfo(name = "file_hash")
+    val fileHash: String? = null,
+
     @ColumnInfo(name = "chunk_count")
     val chunkCount: Int = 0,
 

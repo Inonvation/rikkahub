@@ -11,6 +11,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -55,38 +57,45 @@ object RikkaHubSearchService : SearchService<SearchServiceOptions.RikkaHubOption
                 put("includeImages", JsonPrimitive("false"))
             }
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://api.rikka-ai.com/v1/search")
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
 
-            val request = Request.Builder()
-                .url("https://api.rikka-ai.com/v1/search")
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .build()
+                Log.i(TAG, "search: $query")
 
-            Log.i(TAG, "search: $query")
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<RikkaHubSearchResponse>(it)
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    response.body.string().let {
+                        json.decodeFromString<RikkaHubSearchResponse>(it)
+                    }
+                } else {
+                    val code = response.code
+                    val msg = "response failed #$code: ${response.body?.string()}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
                 }
-
-                return@withContext Result.success(
-                    SearchResult(
-                        answer = responseBody.answer,
-                        items = responseBody.sources.take(commonOptions.resultSize).map {
-                            SearchResultItem(
-                                title = it.name,
-                                url = it.url,
-                                text = it.snippet
-                            )
-                        }
-                    )
-                )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
             }
+
+            return@withContext Result.success(
+                SearchResult(
+                    answer = result.answer,
+                    items = result.sources.take(commonOptions.resultSize).map {
+                        SearchResultItem(
+                            title = it.name,
+                            url = it.url,
+                            text = it.snippet
+                        )
+                    }
+                )
+            )
         }
     }
 

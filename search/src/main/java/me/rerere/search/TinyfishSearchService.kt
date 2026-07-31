@@ -14,6 +14,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -69,35 +71,42 @@ object TinyfishSearchService : SearchService<SearchServiceOptions.TinyfishOption
             val url = "https://api.search.tinyfish.ai" +
                     "?query=${java.net.URLEncoder.encode(query, "UTF-8")}"
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("X-API-Key", apiKey)
+                    .build()
 
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("X-API-Key", apiKey)
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string()
-                val searchResponse = json.decodeFromString<TinyfishSearchResponse>(responseBody)
-
-                val items = searchResponse.results.map { result ->
-                    SearchResultItem(
-                        title = result.title,
-                        url = result.url,
-                        text = result.snippet
-                    )
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    val responseBody = response.body.string()
+                    json.decodeFromString<TinyfishSearchResponse>(responseBody)
+                } else {
+                    val code = response.code
+                    val msg = "Tinyfish search failed with code $code: ${response.message}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
                 }
-
-                return@withContext Result.success(
-                    SearchResult(
-                        answer = null,
-                        items = items
-                    )
-                )
-            } else {
-                error("Tinyfish search failed with code ${response.code}: ${response.message}")
             }
+
+            val items = result.results.map { r ->
+                SearchResultItem(
+                    title = r.title,
+                    url = r.url,
+                    text = r.snippet
+                )
+            }
+
+            return@withContext Result.success(
+                SearchResult(
+                    answer = null,
+                    items = items
+                )
+            )
         }
     }
 
@@ -115,37 +124,44 @@ object TinyfishSearchService : SearchService<SearchServiceOptions.TinyfishOption
                 put("format", "markdown")
             }
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://api.fetch.tinyfish.ai")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .addHeader("X-API-Key", apiKey)
+                    .build()
 
-            val request = Request.Builder()
-                .url("https://api.fetch.tinyfish.ai")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .addHeader("X-API-Key", apiKey)
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string()
-                val fetchResponse = json.decodeFromString<TinyfishFetchResponse>(responseBody)
-
-                return@withContext Result.success(
-                    ScrapedResult(
-                        urls = fetchResponse.results.map {
-                            ScrapedResultUrl(
-                                url = it.url,
-                                content = it.text ?: "",
-                                metadata = ScrapedResultMetadata(
-                                    title = it.title,
-                                    description = it.description,
-                                    language = it.language,
-                                )
-                            )
-                        }
-                    )
-                )
-            } else {
-                error("Tinyfish fetch failed with code ${response.code}: ${response.message}")
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    val responseBody = response.body.string()
+                    json.decodeFromString<TinyfishFetchResponse>(responseBody)
+                } else {
+                    val code = response.code
+                    val msg = "Tinyfish fetch failed with code $code: ${response.message}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
+                }
             }
+
+            return@withContext Result.success(
+                ScrapedResult(
+                    urls = result.results.map {
+                        ScrapedResultUrl(
+                            url = it.url,
+                            content = it.text ?: "",
+                            metadata = ScrapedResultMetadata(
+                                title = it.title,
+                                description = it.description,
+                                language = it.language,
+                            )
+                        )
+                    }
+                )
+            )
         }
     }
 

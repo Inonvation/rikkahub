@@ -25,7 +25,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 
 /**
  * 搜索服务的 API Key 编辑组件。
- * 单个 key 时为普通密码输入框；开启「多 Key」开关后显示入口卡片，跳转到多 Key 管理页。
+ * 关闭「多 Key」开关时为普通单 key 输入框；开启后显示多 Key 入口卡片。
  *
  * @param serviceId 搜索服务的 id
  * @param apiKey 当前 key 值
@@ -43,6 +43,8 @@ internal fun SearchApiKeyField(
     modifier: Modifier = Modifier,
 ) {
     val navController = LocalNavController.current
+    var keyVisible by remember { mutableStateOf(false) }
+
     FormItem(
         label = { Text(stringResource(R.string.search_detail_api_key)) },
         tail = {
@@ -62,7 +64,6 @@ internal fun SearchApiKeyField(
                 }
             )
         } else {
-            var keyVisible by remember { mutableStateOf(false) }
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = onApiKeyChange,

@@ -108,4 +108,32 @@ class ProviderConfigureConvertToTest {
         val converted = original.convertTo(ProviderSetting.OpenAI::class) as ProviderSetting.OpenAI
         assertEquals("not-a-url", converted.baseUrl)
     }
+
+    @Test
+    fun `convertTo should migrate multipleKeys true when switching type`() {
+        val original = ProviderSetting.OpenAI(
+            name = "Multi Key OpenAI",
+            apiKey = "sk-a\nsk-b",
+            baseUrl = "https://api.openai.com/v1",
+            multipleKeys = true,
+        )
+
+        val converted = original.convertTo(ProviderSetting.Google::class) as ProviderSetting.Google
+        assertTrue(converted.multipleKeys)
+        assertEquals("sk-a\nsk-b", converted.apiKey)
+    }
+
+    @Test
+    fun `convertTo should keep multipleKeys false when switching type`() {
+        val original = ProviderSetting.Google(
+            name = "Single Key Google",
+            apiKey = "google-key",
+            baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+            multipleKeys = false,
+        )
+
+        val converted = original.convertTo(ProviderSetting.Claude::class) as ProviderSetting.Claude
+        assertTrue(!converted.multipleKeys)
+        assertEquals("google-key", converted.apiKey)
+    }
 }

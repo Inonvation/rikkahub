@@ -52,6 +52,7 @@ data class Assistant(
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
     val knowledgeBaseIds: Set<Uuid> = emptySet(), // 绑定的知识库 ID 列表
+    val enableKnowledgeQueryRewrite: Boolean = true, // 检索前用 LLM 改写查询（默认开，追问/指代检索更准）
 )
 
 @Serializable

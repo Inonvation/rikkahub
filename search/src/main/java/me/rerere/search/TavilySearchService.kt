@@ -18,6 +18,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -95,34 +97,42 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                 put("include_answer", "advanced")
                 put("include_images", true)
             }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
-            val request = Request.Builder()
-                .url("https://api.tavily.com/search")
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
-                    json.decodeFromString<SearchResponse>(it)
+            val searchResponse = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://api.tavily.com/search")
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .build()
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    response.body.string().let {
+                        json.decodeFromString<SearchResponse>(it)
+                    }
+                } else {
+                    val code = response.code
+                    response.close()
+                    throw RetryableHttpException(code, "response failed #$code")
                 }
-
-                return@withContext Result.success(
-                    SearchResult(
-                        answer = response.answer,
-                        items = response.results.map {
-                            SearchResultItem(
-                                title = it.title,
-                                url = it.url,
-                                text = it.content
-                            )
-                        },
-                        images = response.images,
-                    ))
-            } else {
-                error("response failed #${response.code}")
             }
+
+            return@withContext Result.success(
+                SearchResult(
+                    answer = searchResponse.answer,
+                    items = searchResponse.results.map {
+                        SearchResultItem(
+                            title = it.title,
+                            url = it.url,
+                            text = it.content
+                        )
+                    },
+                    images = searchResponse.images,
+                )
+            )
         }
     }
 
@@ -138,30 +148,39 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                     add(url)
                 })
             }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
-            val request = Request.Builder()
-                .url("https://api.tavily.com/extract")
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
-                    json.decodeFromString<ScrapeResponse>(it)
+
+            val scrapeResponse = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://api.tavily.com/extract")
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .build()
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    response.body.string().let {
+                        json.decodeFromString<ScrapeResponse>(it)
+                    }
+                } else {
+                    val code = response.code
+                    response.close()
+                    throw RetryableHttpException(code, "response failed #$code")
                 }
-                return@withContext Result.success(
-                    ScrapedResult(
-                        urls = response.results.map {
-                            ScrapedResultUrl(
-                                url = it.url,
-                                content = it.rawContent,
-                            )
-                        }
-                    )
-                )
-            } else {
-                error("response failed #${response.code}")
             }
+
+            return@withContext Result.success(
+                ScrapedResult(
+                    urls = scrapeResponse.results.map {
+                        ScrapedResultUrl(
+                            url = it.url,
+                            content = it.rawContent,
+                        )
+                    }
+                )
+            )
         }
     }
 

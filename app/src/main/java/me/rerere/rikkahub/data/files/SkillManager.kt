@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
 
@@ -23,7 +24,7 @@ class SkillManager(
 
     fun listSkills(): List<SkillMetadata> {
         val skillsDir = getSkillsDir()
-        return skillsDir.listFiles()
+        val skills = skillsDir.listFiles()
             ?.filter { it.isDirectory }
             ?.mapNotNull { dir ->
                 val skillFile = dir.resolve("SKILL.md")
@@ -31,6 +32,42 @@ class SkillManager(
                 parseSkillFile(skillFile, dir)
             }
             ?: emptyList()
+        return applySkillOrder(skills)
+    }
+
+    /**
+     * 按 settings.skillOrder 中记录的技能名排序，未记录（新导入等）的技能排在最前面。
+     */
+    private fun applySkillOrder(skills: List<SkillMetadata>): List<SkillMetadata> {
+        val order = settingsStore.settingsFlow.value.skillOrder
+        if (order.isEmpty() || skills.size <= 1) return skills
+        val orderIndex = order.withIndex().associate { it.value to it.index }
+        return skills.sortedBy { orderIndex[it.name] ?: -1 }
+    }
+
+    /**
+     * 把指定技能移动到新位置并持久化到 settings.skillOrder。
+     */
+    fun reorderSkill(skillName: String, newIndex: Int): List<SkillMetadata> {
+        val current = listSkills()
+        val oldIndex = current.indexOfFirst { it.name == skillName }
+        if (oldIndex < 0) return current
+        val newList = current.toMutableList()
+        val item = newList.removeAt(oldIndex)
+        newList.add(newIndex.coerceIn(0, newList.size), item)
+        persistSkillOrder(newList.map { it.name })
+        return newList
+    }
+
+    /**
+     * 按当前展示顺序持久化技能排序。
+     */
+    fun persistSkillOrder(skillNames: List<String>) {
+        runBlocking {
+            settingsStore.update { settings ->
+                settings.copy(skillOrder = skillNames)
+            }
+        }
     }
 
     fun readSkillBody(skillName: String): String? {

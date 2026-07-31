@@ -15,6 +15,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -64,43 +66,48 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                 put("includeSummary", JsonPrimitive(false))
             }
 
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url("https://metaso.cn/api/v1/search")
+                    .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
 
-            val request = Request.Builder()
-                .url("https://metaso.cn/api/v1/search")
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body?.string() ?: error("Failed to get response body")
-                val searchResponse = runCatching {
-                    json.decodeFromString<MetasoSearchResponse>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println("Failed to decode Metaso response: $bodyRaw")
-                    error("Failed to decode response: $bodyRaw")
-                }.getOrThrow()
-
-                return@withContext Result.success(
-                    SearchResult(
-                        items = searchResponse.webpages.map { webpage ->
-                            SearchResultItem(
-                                title = webpage.title,
-                                url = webpage.link,
-                                text = webpage.snippet ?: ""
-                            )
-                        }
-                    )
-                )
-            } else {
-                val errorBody = response.body?.string()
-                println("Metaso search failed with code ${response.code}: $errorBody")
-                error("Search request failed with code ${response.code}: $errorBody")
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    val bodyRaw = response.body?.string() ?: error("Failed to get response body")
+                    runCatching {
+                        json.decodeFromString<MetasoSearchResponse>(bodyRaw)
+                    }.onFailure {
+                        it.printStackTrace()
+                        println("Failed to decode Metaso response: $bodyRaw")
+                        error("Failed to decode response: $bodyRaw")
+                    }.getOrThrow()
+                } else {
+                    val code = response.code
+                    val msg = "Search request failed with code $code: ${response.body?.string()}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
+                }
             }
+
+            return@withContext Result.success(
+                SearchResult(
+                    items = result.webpages.map { webpage ->
+                        SearchResultItem(
+                            title = webpage.title,
+                            url = webpage.link,
+                            text = webpage.snippet ?: ""
+                        )
+                    }
+                )
+            )
         }
     }
 

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -130,12 +131,7 @@ class KnowledgeBaseDetailVM(
 
             // Auto-process
             documentProcessor.processDocument(doc.id, filePath, fileType) { progress ->
-                if (progress >= 1f) {
-                    // 处理结束，清除进度条目（避免残留）
-                    _processingState.value = _processingState.value - doc.id
-                } else {
-                    _processingState.value = _processingState.value + (doc.id to progress)
-                }
+                updateProgress(doc.id, progress)
             }
         }
     }
@@ -143,12 +139,31 @@ class KnowledgeBaseDetailVM(
     fun retryDocument(id: String) {
         viewModelScope.launch {
             documentProcessor.reprocessDocument(id) { progress ->
-                if (progress >= 1f) {
-                    _processingState.value = _processingState.value - id
-                } else {
-                    _processingState.value = _processingState.value + (id to progress)
-                }
+                updateProgress(id, progress)
             }
+        }
+    }
+
+    private var reprocessAllJob: Job? = null
+
+    /**
+     * 按当前分块/模型设置重新处理全部文档（分块设置改动后手动触发）。
+     */
+    fun reprocessAll() {
+        reprocessAllJob?.cancel()
+        reprocessAllJob = viewModelScope.launch {
+            documentProcessor.reprocessAll { docId, progress ->
+                updateProgress(docId, progress)
+            }
+        }
+    }
+
+    /** 更新单文档处理进度；进度 >=1 表示处理结束，清除进度条目（避免残留）。 */
+    private fun updateProgress(id: String, progress: Float) {
+        _processingState.value = if (progress >= 1f) {
+            _processingState.value - id
+        } else {
+            _processingState.value + (id to progress)
         }
     }
 
@@ -170,7 +185,8 @@ class KnowledgeBaseDetailVM(
                 if (!searchParamsInitialized) {
                     _searchTopK.value = base.topK
                     _searchThreshold.value = base.similarityThreshold
-                    _searchRerankEnabled.value = base.rerankModelId != null
+                    // rerank 开关与实际检索的模型解析保持一致：知识库没单独配时回退全局配置
+                    _searchRerankEnabled.value = base.rerankModelId != null || settings.rerankModelId != null
                     searchParamsInitialized = true
                 }
 

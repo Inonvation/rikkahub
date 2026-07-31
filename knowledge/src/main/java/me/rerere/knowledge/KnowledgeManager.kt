@@ -49,4 +49,18 @@ class KnowledgeManager(
             keywordWeight = keywordWeight,
         )
     }
+
+    /**
+     * 清除指定知识库的向量缓存。文档导入、重处理、删除后调用。
+     */
+    fun invalidateVectorCache(knowledgeBaseId: String) {
+        vectorStore.invalidateCache(knowledgeBaseId)
+    }
+
+    /**
+     * 清除所有知识库的向量缓存。
+     */
+    fun invalidateAllVectorCache() {
+        vectorStore.invalidateAll()
+    }
 }

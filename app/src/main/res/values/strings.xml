@@ -588,6 +588,12 @@
   <string name="search_detail_username">Username</string>
   <string name="multi_key_manage_title">Manage Keys</string>
   <string name="multi_key_manage_hint">Add multiple API keys, requests will rotate between them automatically</string>
+  <string name="multi_key_manage_unsaved">Unsaved changes</string>
+  <string name="multi_key_duplicate">This key already exists</string>
+  <string name="multi_key_duplicate_hint">Duplicate keys will be merged on save</string>
+  <string name="multi_key_delete">Delete key</string>
+  <string name="multi_key_show">Show key</string>
+  <string name="multi_key_hide">Hide key</string>
   <string name="multi_key_entry_title">Multiple Keys</string>
   <string name="multi_key_entry_count">%d keys configured</string>
   <string name="multi_key_entry_empty">No keys configured yet</string>
@@ -1098,6 +1104,12 @@
   <string name="skills_page_skill_content_label">SKILL.md Content</string>
   <string name="skills_page_skill_name">Skill name: %s</string>
   <string name="skills_page_title">Agent Skills</string>
+  <string name="skills_page_batch_select">Batch select</string>
+  <string name="skills_page_batch_cancel">Cancel</string>
+  <string name="skills_page_select_all">Select all</string>
+  <string name="skills_page_deselect_all">Deselect all</string>
+  <string name="skills_page_delete">Delete</string>
+  <string name="skills_page_batch_delete_message">Delete %d skill(s)? This action cannot be undone.</string>
   <string name="speech_page_title">Speech</string>
   <string name="speech_tab_asr">Speech Recognition</string>
   <string name="speech_tab_tts">Text to Speech</string>

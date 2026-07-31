@@ -13,6 +13,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -73,36 +75,42 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             }
 
             val searchUrl = serviceOptions.searchUrl.ifBlank { DEFAULT_SEARCH_URL }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url(searchUrl)
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
 
-            val request = Request.Builder()
-                .url(searchUrl)
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseData = response.body.string().let {
-                    json.decodeFromString<JinaSearchResponse>(it)
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    response.body.string().let {
+                        json.decodeFromString<JinaSearchResponse>(it)
+                    }
+                } else {
+                    val code = response.code
+                    response.close()
+                    throw RetryableHttpException(code, "response failed #$code")
                 }
-
-                return@withContext Result.success(
-                    SearchResult(
-                        items = responseData.data.take(commonOptions.resultSize).map {
-                            SearchResultItem(
-                                title = it.title,
-                                url = it.url,
-                                text = it.description
-                            )
-                        }
-                    )
-                )
-            } else {
-                error("response failed #${response.code}")
             }
+
+            return@withContext Result.success(
+                SearchResult(
+                    items = result.data.take(commonOptions.resultSize).map {
+                        SearchResultItem(
+                            title = it.title,
+                            url = it.url,
+                            text = it.description
+                        )
+                    }
+                )
+            )
         }
     }
 
@@ -119,33 +127,39 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             }
 
             val scrapeUrl = serviceOptions.scrapeUrl.ifBlank { DEFAULT_SCRAPE_URL }
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                val request = Request.Builder()
+                    .url(scrapeUrl)
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("X-Return-Format", "markdown")
+                    .build()
 
-            val request = Request.Builder()
-                .url(scrapeUrl)
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("X-Return-Format", "markdown")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("response failed for url $url #${response.code}")
-            }
-            val responseData = response.body.string().let {
-                json.decodeFromString<JinaScrapeResponse>(it)
+                val response = httpClient.newCall(request).await()
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    response.close()
+                    throw RetryableHttpException(code, "response failed for url $url #$code")
+                }
+                response.body.string().let {
+                    json.decodeFromString<JinaScrapeResponse>(it)
+                }
             }
 
             ScrapedResult(
                 urls = listOf(
                     ScrapedResultUrl(
-                        url = responseData.data.url,
-                        content = responseData.data.content,
+                        url = result.data.url,
+                        content = result.data.content,
                         metadata = ScrapedResultMetadata(
-                            title = responseData.data.title,
-                            description = responseData.data.description
+                            title = result.data.title,
+                            description = result.data.description
                         )
                     )
                 )

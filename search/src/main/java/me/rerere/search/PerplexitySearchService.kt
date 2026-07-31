@@ -16,6 +16,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.util.RetryableHttpException
+import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -60,11 +62,6 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
         serviceOptions: SearchServiceOptions.PerplexityOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
-            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
-            if (apiKey.isBlank()) {
-                error("Perplexity API key is required")
-            }
-
             val query = params["query"]?.jsonPrimitive?.content
                 ?: error("query is required")
 
@@ -85,39 +82,52 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
 
             Log.i(TAG, "search: $body")
 
-            val request = Request.Builder()
-                .url(PERPLEXITY_ENDPOINT)
-                .post(body.toString().toRequestBody())
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .build()
-
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<PerplexityResponse>(it)
+            val result = keyRoulette.retryWithKeyFallback(
+                serviceOptions.apiKey,
+                serviceOptions.id.toString(),
+                serviceOptions.multipleKeys,
+            ) { apiKey ->
+                if (apiKey.isBlank()) {
+                    error("Perplexity API key is required")
                 }
 
-                val items = responseBody.results
-                    .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
-                    .take(commonOptions.resultSize)
-                    .map {
-                        SearchResultItem(
-                            title = it.title!!,
-                            url = it.url!!,
-                            text = it.snippet ?: it.text ?: ""
-                        )
-                    }
+                val request = Request.Builder()
+                    .url(PERPLEXITY_ENDPOINT)
+                    .post(body.toString().toRequestBody())
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
 
-                return@withContext Result.success(
-                    SearchResult(
-                        answer = responseBody.answer,
-                        items = items
-                    )
-                )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
+                val response = httpClient.newCall(request).await()
+                if (response.isSuccessful) {
+                    response.body.string().let {
+                        json.decodeFromString<PerplexityResponse>(it)
+                    }
+                } else {
+                    val code = response.code
+                    val msg = "response failed #$code: ${response.body?.string()}"
+                    response.close()
+                    throw RetryableHttpException(code, msg)
+                }
             }
+
+            val items = result.results
+                .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
+                .take(commonOptions.resultSize)
+                .map {
+                    SearchResultItem(
+                        title = it.title!!,
+                        url = it.url!!,
+                        text = it.snippet ?: it.text ?: ""
+                    )
+                }
+
+            return@withContext Result.success(
+                SearchResult(
+                    answer = result.answer,
+                    items = items
+                )
+            )
         }
     }
 

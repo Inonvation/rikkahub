@@ -18,6 +18,9 @@ interface KnowledgeDocumentDao {
     @Query("SELECT * FROM knowledge_document WHERE id = :id")
     suspend fun getById(id: String): KnowledgeDocumentEntity?
 
+    @Query("SELECT * FROM knowledge_document WHERE file_hash = :fileHash AND knowledge_base_id = :knowledgeBaseId LIMIT 1")
+    suspend fun getByFileHashAndKnowledgeBaseId(fileHash: String, knowledgeBaseId: String): KnowledgeDocumentEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: KnowledgeDocumentEntity)
 

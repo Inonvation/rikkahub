@@ -1,7 +1,11 @@
 package me.rerere.rikkahub.ui.pages.extensions.skills
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,17 +14,22 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -37,12 +46,14 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -53,6 +64,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.FileImport
@@ -63,11 +76,14 @@ import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun SkillsPage() {
@@ -81,6 +97,19 @@ fun SkillsPage() {
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
+    // 批量选择删除
+    val selectedItems = remember { mutableStateListOf<String>() }
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = selecting) {
+        selecting = false
+        selectedItems.clear()
+    }
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val fromName = skills.getOrNull(from.index)?.name ?: return@rememberReorderableLazyListState
+        vm.reorderSkill(fromName, to.index)
+    }
     val fileImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -101,11 +130,43 @@ fun SkillsPage() {
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
+                actions = {
+                    if (selecting) {
+                        IconButton(onClick = {
+                            if (selectedItems.size == skills.size) {
+                                selectedItems.clear()
+                            } else {
+                                selectedItems.clear()
+                                selectedItems.addAll(skills.map { it.name })
+                            }
+                        }) {
+                            Icon(
+                                HugeIcons.CursorPointer01,
+                                contentDescription = stringResource(
+                                    if (selectedItems.size == skills.size) {
+                                        R.string.skills_page_deselect_all
+                                    } else {
+                                        R.string.skills_page_select_all
+                                    }
+                                ),
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { selecting = true }) {
+                            Icon(
+                                HugeIcons.MoreVertical,
+                                contentDescription = stringResource(R.string.skills_page_batch_select),
+                            )
+                        }
+                    }
+                },
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showImportSheet = true }) {
-                Icon(HugeIcons.Add01, contentDescription = null)
+            if (!selecting) {
+                FloatingActionButton(onClick = { showImportSheet = true }) {
+                    Icon(HugeIcons.Add01, contentDescription = null)
+                }
             }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -120,6 +181,7 @@ fun SkillsPage() {
                 bottom = 16.dp + 72.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
+            state = lazyListState,
         ) {
             if (skills.isEmpty()) {
                 item {
@@ -151,12 +213,114 @@ fun SkillsPage() {
             }
 
             items(skills, key = { it.skillDir.absolutePath }) { skill ->
-                SkillCard(
-                    skill = skill,
-                    onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
-                    onDelete = { deleteTarget = skill },
-                )
+                if (selecting) {
+                    SkillSelectableCard(
+                        skill = skill,
+                        selected = selectedItems.contains(skill.name),
+                        onSelectChange = {
+                            if (!selectedItems.contains(skill.name)) {
+                                selectedItems.add(skill.name)
+                            } else {
+                                selectedItems.remove(skill.name)
+                            }
+                        },
+                        onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
+                    )
+                } else {
+                    ReorderableItem(
+                        state = reorderableState,
+                        key = skill.skillDir.absolutePath,
+                    ) { isDragging ->
+                        SkillCard(
+                            skill = skill,
+                            onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
+                            onDelete = { deleteTarget = skill },
+                            modifier = Modifier
+                                .longPressDraggableHandle()
+                                .graphicsLayer {
+                                    if (isDragging) {
+                                        scaleX = 1.05f
+                                        scaleY = 1.05f
+                                    }
+                                },
+                        )
+                    }
+                }
             }
+        }
+    }
+
+    // 批量删除操作条
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 24.dp),
+    ) {
+        AnimatedVisibility(
+            visible = selecting,
+            modifier = Modifier
+                .align(Alignment.BottomCenter),
+            enter = slideInVertically(initialOffsetY = { it * 2 }),
+            exit = slideOutVertically(targetOffsetY = { it * 2 }),
+        ) {
+            HorizontalFloatingToolbar(expanded = true) {
+            Tooltip(
+                tooltip = {
+                    Text(stringResource(R.string.skills_page_batch_cancel))
+                }
+            ) {
+                IconButton(
+                    onClick = {
+                        selecting = false
+                        selectedItems.clear()
+                    }
+                ) {
+                    Icon(HugeIcons.Cancel01, null)
+                }
+            }
+            Tooltip(
+                tooltip = {
+                    Text(
+                        stringResource(
+                            if (selectedItems.size == skills.size) {
+                                R.string.skills_page_deselect_all
+                            } else {
+                                R.string.skills_page_select_all
+                            }
+                        )
+                    )
+                }
+            ) {
+                IconButton(
+                    onClick = {
+                        if (selectedItems.size == skills.size) {
+                            selectedItems.clear()
+                        } else {
+                            selectedItems.clear()
+                            selectedItems.addAll(skills.map { it.name })
+                        }
+                    }
+                ) {
+                    Icon(HugeIcons.CursorPointer01, null)
+                }
+            }
+            Tooltip(
+                tooltip = {
+                    Text(stringResource(R.string.skills_page_delete))
+                }
+            ) {
+                FilledIconButton(
+                    onClick = {
+                        if (selectedItems.isNotEmpty()) {
+                            showBatchDeleteDialog = true
+                        }
+                    },
+                    enabled = selectedItems.isNotEmpty(),
+                ) {
+                    Icon(HugeIcons.Delete01, stringResource(R.string.skills_page_delete))
+                }
+            }
+        }
         }
     }
 
@@ -228,6 +392,28 @@ fun SkillsPage() {
     ) {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
     }
+
+    RikkaConfirmDialog(
+        show = showBatchDeleteDialog,
+        title = stringResource(R.string.skills_page_delete_title),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            val deletedNames = selectedItems.toList()
+            vm.deleteSkills(deletedNames)
+            selectedItems.clear()
+            selecting = false
+            showBatchDeleteDialog = false
+        },
+        onDismiss = { showBatchDeleteDialog = false },
+    ) {
+        Text(
+            stringResource(
+                R.string.skills_page_batch_delete_message,
+                selectedItems.size,
+            )
+        )
+    }
 }
 
 @Composable
@@ -235,12 +421,13 @@ private fun SkillCard(
     skill: SkillMetadata,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
@@ -305,6 +492,55 @@ private fun SkillCard(
                         },
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillSelectableCard(
+    skill: SkillMetadata,
+    selected: Boolean,
+    onSelectChange: () -> Unit,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, top = 12.dp, bottom = 12.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onSelectChange() },
+            )
+            Icon(
+                imageVector = HugeIcons.Puzzle,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = skill.name,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                )
+                Text(
+                    text = skill.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
             }
         }
     }

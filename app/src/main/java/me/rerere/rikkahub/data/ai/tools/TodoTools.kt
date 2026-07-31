@@ -159,7 +159,7 @@ fun List<UIMessage>.extractLatestTodoListFromConversation(
             .filter { it.toolName == "todo_write" }
     }
     val latestTodo = allTools.lastOrNull()
-    val result = if (latestTodo != null) {
+    val fromMessages = if (latestTodo != null) {
         val jsonStr = if (latestTodo.isExecuted) {
             latestTodo.output.filterIsInstance<UIMessagePart.Text>()
                 .joinToString("\n") { it.text }
@@ -167,9 +167,11 @@ fun List<UIMessage>.extractLatestTodoListFromConversation(
             latestTodo.input
         }
         runCatching { JsonInstant.decodeFromString<TodoList>(jsonStr) }.getOrNull()
-    } else {
-        todoStorage?.let { conversationId?.let { id -> it.load(id) } }
-    } ?: return null
+    } else null
+
+    val result = fromMessages
+        ?: todoStorage?.let { conversationId?.let { id -> it.load(id) } }
+        ?: return null
 
     if (shouldAutoCleanup(result, todoStorage, conversationId)) return null
 
