@@ -195,14 +195,14 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_haptic_effect_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_haptic_effect_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_and_finished_haptic_effect_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_and_finished_haptic_effect_desc)) },
                         trailingContent = {
                             Switch(
-                                checked = displaySetting.enableMessageGenerationStartedHapticEffect,
+                                checked = displaySetting.enableMessageGenerationStartedAndFinishedHapticEffect,
                                 enabled = displaySetting.enableHapticFeedback,
                                 onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(enableMessageGenerationStartedHapticEffect = it))
+                                    updateDisplaySetting(displaySetting.copy(enableMessageGenerationStartedAndFinishedHapticEffect = it))
                                 }
                             )
                         },

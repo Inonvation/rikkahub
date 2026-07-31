@@ -585,6 +585,9 @@ enum class ChatFontFamily {
 @Serializable
 data class DisplaySetting(
     val enableHapticFeedback: Boolean = true,
+    val enableUiHapticFeedback: Boolean = true,
+    val enableMessageGenerationHapticEffect: Boolean = false,
+    val enableMessageGenerationStartedAndFinishedHapticEffect: Boolean = false,
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
     val useAppIconStyleLoadingIndicator: Boolean = true,
@@ -600,9 +603,6 @@ data class DisplaySetting(
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,
-    val enableMessageGenerationStartedHapticEffect: Boolean = false,
-    val enableMessageGenerationHapticEffect: Boolean = false,
-    val enableUiHapticFeedback: Boolean = true,
     val skipCropImage: Boolean = true,
     val enableNotificationOnMessageGeneration: Boolean = false,
     val enableLiveUpdateNotification: Boolean = false,

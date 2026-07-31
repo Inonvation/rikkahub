@@ -509,6 +509,7 @@ class ChatService(
 
             // start generating
             val session = getOrCreateSession(conversationId)
+            var hasEmittedGenerationStarted = false
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -619,6 +620,12 @@ class ChatService(
             }.collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {
+                        if (!hasEmittedGenerationStarted) {
+                            hasEmittedGenerationStarted = true
+                            appEventBus.tryEmit(
+                                AppEvent.ChatGenerationStarted(conversationId = conversationId)
+                            )
+                        }
                         val updatedConversation = getConversationFlow(conversationId).value
                             .updateCurrentMessages(chunk.messages)
                         updateConversation(conversationId, updatedConversation)

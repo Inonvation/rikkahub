@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
@@ -90,6 +91,8 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
 import me.rerere.rikkahub.data.ai.tools.extractLatestTodoListFromConversation
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -108,8 +111,6 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
-import me.rerere.rikkahub.ui.hooks.rememberMessageGenerationHaptic
-import me.rerere.rikkahub.ui.hooks.rememberMessageGenerationStartedHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
@@ -129,6 +130,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     )
     val filesManager: FilesManager = koinInject()
+    val appEventBus: AppEventBus = koinInject()
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
 
@@ -171,24 +173,42 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
 
-    val hapticController = rememberHaptic()
-    val messageGenerationStartedHapticController = rememberMessageGenerationStartedHaptic()
-    val messageGenerationHapticController = rememberMessageGenerationHaptic()
+    val hapticFeedback = LocalHapticFeedback.current
 
     // AI 消息生成开始时触发一次触感反馈
-    var previousLoading by remember { mutableStateOf(loadingJob != null) }
-    LaunchedEffect(loadingJob) {
-        val currentLoading = loadingJob != null
-        if (currentLoading && !previousLoading) {
-            messageGenerationStartedHapticController.perform(HapticFeedbackType.Confirm)
+    LaunchedEffect(Unit) {
+        appEventBus.events.collect { event ->
+            if (event is AppEvent.ChatGenerationStarted && event.conversationId == id) {
+                if (setting.displaySetting.enableHapticFeedback &&
+                    setting.displaySetting.enableMessageGenerationStartedAndFinishedHapticEffect) {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                }
+            }
         }
-        previousLoading = currentLoading
+    }
+
+    // AI 消息生成过程中触发触感反馈
+    var lastMessageGenerationHapticTime by remember { mutableStateOf(0L) }
+    LaunchedEffect(conversation.currentMessages.size) {
+        if (loadingJob != null) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastMessageGenerationHapticTime > 150) {
+                if (setting.displaySetting.enableHapticFeedback &&
+                    setting.displaySetting.enableMessageGenerationHapticEffect) {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                }
+                lastMessageGenerationHapticTime = now
+            }
+        }
     }
 
     // AI 消息生成完成后触发一次触感反馈
     LaunchedEffect(Unit) {
         vm.generationDoneFlow.collect { _ ->
-            messageGenerationHapticController.perform(HapticFeedbackType.Confirm)
+            if (setting.displaySetting.enableHapticFeedback &&
+                setting.displaySetting.enableMessageGenerationStartedAndFinishedHapticEffect) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+            }
         }
     }
 

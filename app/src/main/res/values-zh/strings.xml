@@ -679,10 +679,10 @@
   <string name="setting_display_page_enable_latex_rendering_title">启用 LaTeX 渲染</string>
   <string name="setting_display_page_enable_haptic_feedback_title">触感反馈</string>
   <string name="setting_display_page_enable_haptic_feedback_desc">开启后，应用内的触感反馈才会生效</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">消息生成完成后触发一次触感反馈</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">消息生成完成后</string>
-  <string name="setting_display_page_enable_message_generation_started_haptic_effect_desc">消息开始生成时触发一次触感反馈</string>
-  <string name="setting_display_page_enable_message_generation_started_haptic_effect_title">消息生成开始时</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">消息生成过程中持续触发触感反馈</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">消息生成时</string>
+  <string name="setting_display_page_enable_message_generation_started_and_finished_haptic_effect_desc">消息开始生成和生成完成后各触发一次触感反馈</string>
+  <string name="setting_display_page_enable_message_generation_started_and_finished_haptic_effect_title">消息开始/结束时</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 及控件</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_desc">为按钮点击、开关切换、列表选择等 UI 交互启用触感反馈</string>
   <string name="setting_display_page_font_size_preview">凌晨四点钟，看到海棠花未眠。我常常这样，在无人的夜里独自醒着，想，若有人此刻也在想我，那就好了。</string>

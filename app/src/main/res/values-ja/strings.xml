@@ -649,10 +649,10 @@
   <string name="setting_display_page_enable_latex_rendering_title">LaTeXレンダリングを有効にする</string>
   <string name="setting_display_page_enable_haptic_feedback_title">触覚フィードバック</string>
   <string name="setting_display_page_enable_haptic_feedback_desc">アプリ全体で触覚フィードバックを有効にする</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">メッセージ生成完了時に触覚フィードバックを有効にする</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">メッセージ生成後</string>
-  <string name="setting_display_page_enable_message_generation_started_haptic_effect_desc">メッセージ生成開始時に触覚フィードバックを有効にする</string>
-  <string name="setting_display_page_enable_message_generation_started_haptic_effect_title">メッセージ生成前</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">メッセージ生成中に触覚フィードバックを続的に有効にする</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">メッセージ生成中</string>
+  <string name="setting_display_page_enable_message_generation_started_and_finished_haptic_effect_desc">メッセージ生成開始時と生成完了時に触覚フィードバックを有効にする</string>
+  <string name="setting_display_page_enable_message_generation_started_and_finished_haptic_effect_title">メッセージ生成開始/完了時</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_title">UI とコントロール</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_desc">ボタンタップ、スイッチ切り替え、リスト選択などの UI 操作に触覚フィードバックを有効にする</string>
   <string name="setting_display_page_font_size_preview">午前4時、海棠の花がまだ眠っていないのを見た。私はよくこうして、誰もいない夜にひとり目を覚まし、思う——もし今この瞬間、誰かが私のことを思っていてくれたなら、それだけでいい。</string>
