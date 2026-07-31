@@ -175,16 +175,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val hapticFeedback = LocalHapticFeedback.current
 
-    // 侧边栏展开完成后触发一次触感反馈
-    LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Open &&
-            setting.displaySetting.enableHapticFeedback &&
-            setting.displaySetting.enableUiHapticFeedback
-        ) {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-        }
-    }
-
     // AI 消息生成开始时触发一次触感反馈
     LaunchedEffect(Unit) {
         appEventBus.events.collect { event ->
@@ -359,6 +349,19 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
     var showFilesSheet by remember { mutableStateOf(false) }
+
+    // 侧边栏展开触感反馈：只在抽屉从关闭变为完全打开时触发一次。
+    // currentValue（settledValue）在动画/滑动落定后才翻转，因此反馈时机=完全展开。
+    // 首次组合直接跳过：从设置/收藏等页面返回时抽屉恢复为打开状态，不算"展开"，不触发。
+    val drawerHaptic = rememberHaptic()
+    var drawerPrevValue by remember { mutableStateOf(drawerState.currentValue) }
+    LaunchedEffect(drawerState.currentValue) {
+        val prev = drawerPrevValue
+        drawerPrevValue = drawerState.currentValue
+        if (prev == DrawerValue.Closed && drawerState.currentValue == DrawerValue.Open) {
+            drawerHaptic.perform(HapticFeedbackType.GestureEnd)
+        }
+    }
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         assistant.workspaceId?.let { workspaceId ->

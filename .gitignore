@@ -13,3 +13,4 @@ keystore.jks
 .cursor
 .history
 .kotlin
+.claude/settings.local.json
