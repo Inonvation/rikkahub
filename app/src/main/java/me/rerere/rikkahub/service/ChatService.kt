@@ -57,6 +57,7 @@ import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
+import me.rerere.rikkahub.data.ai.transformers.KnowledgeBaseReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
@@ -158,6 +159,9 @@ class ChatService(
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+
+    // 知识库系统提示注入
+    private val knowledgeBaseReminderTransformer = KnowledgeBaseReminderTransformer()
 
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -535,6 +539,7 @@ class ChatService(
                     addAll(inputTransformers)
                     add(templateTransformer)
                     add(workspaceReminderTransformer)
+                    add(knowledgeBaseReminderTransformer)
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
@@ -693,12 +698,32 @@ class ChatService(
         @Suppress("UNCHECKED_CAST")
         val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
 
+        // 解析 rerank model（首库配置 ?: 全局默认；未配置/不可解析 → null，AI 检索回退 RRF 排序）
+        val rerankModelId = assistant.knowledgeBaseIds.firstOrNull()?.let { kbId ->
+            knowledgeManager.baseRepository.getById(kbId.toString())?.rerankModelId
+        } ?: settings.rerankModelId?.toString()
+        val reranker = resolveReranker(settings, rerankModelId)
+
         return KnowledgeSearchTool(
             knowledgeManager = knowledgeManager,
             getAllowedKnowledgeBaseIds = { allowedIds },
             getEmbeddingProvider = { provider to providerSetting },
             getEmbeddingModel = { model },
+            getReranker = { reranker },
         ).create()
+    }
+
+    /** 解析 rerank 模型为 Reranker；未配置或不可用返回 null。 */
+    private fun resolveReranker(settings: Settings, rerankModelId: String?): me.rerere.knowledge.retrieval.Reranker? {
+        if (rerankModelId == null) return null
+        return runCatching {
+            val model = settings.findModelById(kotlin.uuid.Uuid.parse(rerankModelId)) ?: return null
+            val providerSetting = model.findProvider(settings.providers) ?: return null
+            if (providerSetting !is ProviderSetting.OpenAI) return null
+            @Suppress("UNCHECKED_CAST")
+            val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
+            me.rerere.knowledge.retrieval.Reranker(provider, providerSetting, model)
+        }.getOrNull()
     }
 
     // ---- 检查无效消息 ----

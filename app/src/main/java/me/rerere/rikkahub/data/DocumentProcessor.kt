@@ -116,7 +116,7 @@ class DocumentProcessor(
             val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
 
             // 5. Generate embeddings in batches
-            val batchSize = 20
+            val batchSize = 10
             val totalBatches = (chunks.size + batchSize - 1) / batchSize
             var processedCount = 0
 
@@ -133,15 +133,16 @@ class DocumentProcessor(
                     )
                 )
 
+                // 转成字节数组后立即丢弃 FloatArray（result 每批用完即弃，不累计）
                 val chunkEntities = batch.mapIndexed { i, chunk ->
-                    val embedding = result.embeddings.getOrNull(i)
+                    val embeddingBytes = result.embeddings.getOrNull(i)?.toFloatArray()?.toByteArray()
                     KnowledgeChunkEntity(
                         id = Uuid.random().toString(),
                         documentId = documentId,
                         knowledgeBaseId = baseId,
                         chunkIndex = processedCount + i,
                         content = chunk.content,
-                        embedding = embedding?.toFloatArray()?.toByteArray(),
+                        embedding = embeddingBytes,
                         tokenCount = chunk.tokenCount,
                     )
                 }
@@ -152,6 +153,10 @@ class DocumentProcessor(
             }
 
             knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
+        } catch (e: OutOfMemoryError) {
+            // OOM 是 Error 不是 Exception，需单独捕获：标记失败而非崩溃
+            Log.e(TAG, "processDocument OOM: $documentId", e)
+            knowledgeManager.documentRepository.updateStatus(documentId, "failed", "内存不足，请将文档分割后再导入")
         } catch (e: Exception) {
             Log.e(TAG, "processDocument failed: $documentId", e)
             knowledgeManager.documentRepository.updateStatus(documentId, "failed", e.message ?: "Unknown error")

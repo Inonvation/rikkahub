@@ -17,9 +17,9 @@ class KnowledgeBaseRepository(
         description: String = "",
         embeddingModelId: String? = null,
         rerankModelId: String? = null,
-        chunkSize: Int = 1024,
-        chunkOverlap: Int = 200,
-        chunkStrategy: String = "fixed_size",
+        chunkSize: Int = 512,
+        chunkOverlap: Int = 80,
+        chunkStrategy: String = "sentence",
         topK: Int = 10,
         similarityThreshold: Float = 0f,
     ): KnowledgeBaseEntity {

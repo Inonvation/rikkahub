@@ -60,6 +60,11 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
     val effectiveRerankModelId = vm.rerankModelId ?: settings.rerankModelId?.toString()
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    // 数字输入框用本地 String 状态，允许清空编辑；仅在提交时校验
+    var chunkSizeText by remember { mutableStateOf(vm.chunkSize.toString()) }
+    var chunkOverlapText by remember { mutableStateOf(vm.chunkOverlap.toString()) }
+    var topKText by remember { mutableStateOf(vm.topK.toString()) }
+
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -180,8 +185,11 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                             description = { Text("每块文本的字符数，越小检索越精准但碎片多；改动保存后会自动重新处理全部文档") },
                         ) {
                             OutlinedTextField(
-                                value = vm.chunkSize.toString(),
-                                onValueChange = { vm.updateChunkSize(it.toIntOrNull() ?: 1024) },
+                                value = chunkSizeText,
+                                onValueChange = {
+                                    chunkSizeText = it
+                                    it.toIntOrNull()?.let { v -> vm.updateChunkSize(v) }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -196,8 +204,11 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                             description = { Text("相邻块的重叠字符数，避免切断语义；改动保存后会自动重新处理全部文档") },
                         ) {
                             OutlinedTextField(
-                                value = vm.chunkOverlap.toString(),
-                                onValueChange = { vm.updateChunkOverlap(it.toIntOrNull() ?: 200) },
+                                value = chunkOverlapText,
+                                onValueChange = {
+                                    chunkOverlapText = it
+                                    it.toIntOrNull()?.let { v -> vm.updateChunkOverlap(v) }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -218,8 +229,11 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                             description = { Text("每次检索最多返回几条结果，越大越全但可能混入不相关的") },
                         ) {
                             OutlinedTextField(
-                                value = vm.topK.toString(),
-                                onValueChange = { vm.updateTopK(it.toIntOrNull() ?: 10) },
+                                value = topKText,
+                                onValueChange = {
+                                    topKText = it
+                                    it.toIntOrNull()?.let { v -> vm.updateTopK(v) }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),

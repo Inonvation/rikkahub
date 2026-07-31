@@ -62,7 +62,8 @@ class FixedSizeChunker : Chunker {
     }
 
     private fun splitLongText(text: String, chunkSize: Int, chunkOverlap: Int): List<String> {
-        val expectedCount = (text.length / (chunkSize - chunkOverlap)) + 1
+        val step = (chunkSize - chunkOverlap).coerceAtLeast(1)
+        val expectedCount = (text.length / step) + 1
         val chunks = ArrayList<String>(expectedCount)
         var start = 0
         while (start < text.length) {
@@ -71,9 +72,11 @@ class FixedSizeChunker : Chunker {
                 val breakPoint = findBreakPoint(text, end, start)
                 if (breakPoint > start) end = breakPoint
             }
+            // 防退化：end 必须 > start，否则强制前进 1 个字符
+            if (end <= start) end = start + 1
             chunks.add(text.substring(start, end))
-            start = end - chunkOverlap
-            if (start >= text.length) break
+            // 下一块起点 = end - overlap，但必须严格递增，避免死循环
+            start = maxOf(end - chunkOverlap, start + 1)
         }
         return chunks
     }

@@ -23,13 +23,13 @@ data class KnowledgeBaseEntity(
     val rerankModelId: String? = null,
 
     @ColumnInfo(name = "chunk_size")
-    val chunkSize: Int = 1024,
+    val chunkSize: Int = 512,
 
     @ColumnInfo(name = "chunk_overlap")
-    val chunkOverlap: Int = 200,
+    val chunkOverlap: Int = 80,
 
     @ColumnInfo(name = "chunk_strategy")
-    val chunkStrategy: String = "fixed_size",
+    val chunkStrategy: String = "sentence",
 
     @ColumnInfo(name = "top_k")
     val topK: Int = 10,

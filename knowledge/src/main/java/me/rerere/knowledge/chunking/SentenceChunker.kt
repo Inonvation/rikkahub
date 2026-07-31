@@ -56,9 +56,11 @@ class SentenceChunker : Chunker {
                 val spaceIdx = text.lastIndexOf(' ', end)
                 if (spaceIdx > start) end = spaceIdx
             }
+            // 防退化：end 必须 > start，否则强制前进 1 个字符
+            if (end <= start) end = start + 1
             chunks.add(text.substring(start, end).trim())
-            start = end - chunkOverlap
-            if (start >= text.length) break
+            // 下一块起点必须严格递增，避免死循环
+            start = maxOf(end - chunkOverlap, start + 1)
         }
         return chunks
     }

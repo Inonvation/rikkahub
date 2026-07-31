@@ -30,11 +30,11 @@ class KnowledgeBaseSettingsVM(
         private set
     var rerankModelId by mutableStateOf<String?>(null)
         private set
-    var chunkSize by mutableStateOf(1024)
+    var chunkSize by mutableStateOf(512)
         private set
-    var chunkOverlap by mutableStateOf(200)
+    var chunkOverlap by mutableStateOf(80)
         private set
-    var chunkStrategy by mutableStateOf("fixed_size")
+    var chunkStrategy by mutableStateOf("sentence")
         private set
     var topK by mutableStateOf(10)
         private set
