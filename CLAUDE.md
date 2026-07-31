@@ -4,8 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RikkaHub is a native Android LLM chat client that supports switching between different AI providers for conversations.
-Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
+**RikkaHub** — 这是 [rikkahub/rikkahub](https://github.com/rikkahub/rikkahub) 的定制分支，由 **Inonvation** 维护，仅限个人使用。
+
+- 移除 Firebase（Analytics / Crashlytics），不需要 `google-services.json` 即可编译
+- 自定义包名：`com.inonvation.rikkahub`
+- 自定义签名密钥：`keystore.jks`
+- 签名配置在 `local.properties`（已加入 `.gitignore`）
+
+## Git 工作流
+
+### 重要：避免误操作
+
+- **永远不要向 `upstream` 提 PR 或推送**。`upstream` 指向原项目 `rikkahub/rikkahub`。
+- 日常推送只推 `origin`（你自己 GitHub 的 `Inonvation/rikkahub`）。
+- 拉取上游更新用 `git fetch upstream && git merge upstream/main`，有冲突手动解决。
+
+### 远程地址
+
+- `origin`   → `https://github.com/Inonvation/rikkahub.git`（你的仓库）
+- `upstream` → `https://github.com/rikkahub/rikkahub.git`（原项目）
 
 ## Architecture Overview
 

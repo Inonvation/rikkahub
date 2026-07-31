@@ -3,8 +3,25 @@
     "allow": [
       "Bash(./gradlew:*)",
       "Bash(find:*)",
-      "Bash(uv run --directory locale-tui src/main.py:*)"
+      "Bash(uv run --directory locale-tui src/main.py:*)",
+      "mcp__sequentialthinking__sequentialthinking",
+      "Bash(git fetch *)",
+      "Bash(git remote *)",
+      "Bash(findstr \"HEAD branch\")",
+      "WebSearch",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "WebFetch(domain:docs.tavily.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(export ANDROID_HOME=\"C:/Users/cy/AppData/Local/Android/Sdk\")",
+      "Bash(grep -n \"}$\" \"F:\\\\git\\\\rikkahub\\\\app\\\\src\\\\main\\\\java\\\\me\\\\rerere\\\\rikkahub\\\\ui\\\\components\\\\message\\\\ChatMessage.kt\")",
+      "Bash(gh api *)",
+      "Bash(gh repo *)",
+      "Bash(gh auth *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ],
     "deny": []
-  }
+  },
+  "spinnerTipsEnabled": false
 }
