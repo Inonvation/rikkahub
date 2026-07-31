@@ -724,6 +724,8 @@
   <string name="setting_display_page_volume_key_scroll_desc">使用音量键翻页，非常适合电子墨水屏</string>
   <string name="setting_display_page_volume_key_scroll_ratio">滚动幅度</string>
   <string name="setting_display_page_volume_key_scroll_title">音量键翻页</string>
+  <string name="setting_display_page_enable_todo_list_desc">开启后，AI 会在处理复杂请求时自动创建和管理任务计划</string>
+  <string name="setting_display_page_enable_todo_list_title">启用任务计划</string>
   <string name="setting_files_page_cancel_action">取消</string>
   <string name="setting_files_page_clean_action">清理</string>
   <string name="setting_files_page_clean_confirmation">将永久删除此分类中的全部文件，此操作无法撤销。</string>
@@ -930,6 +932,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_filter_placeholder">输入模型名称筛选</string>
   <string name="setting_provider_page_image">图片</string>
   <string name="setting_provider_page_image_model">图像</string>
+  <string name="setting_provider_page_reranking_model">重排序</string>
   <string name="setting_provider_page_image_qr_decode_failed">解析图片中的二维码失败：%s</string>
   <string name="setting_provider_page_import_dialog_message">请选择导入方式：</string>
   <string name="setting_provider_page_import_dialog_title">导入供应商配置</string>
@@ -1226,6 +1229,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="common_rename">重命名</string>
   <string name="common_export">导出</string>
   <string name="common_share">分享</string>
+  <string name="common_preview">预览</string>
   <string name="tool_ui_edit_file">编辑：%s</string>
   <string name="tool_ui_edit_file_default">编辑文件</string>
   <string name="tool_ui_read_file">读取: %s</string>

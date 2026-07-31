@@ -45,6 +45,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.highlight.HighlightText
 import me.rerere.hugeicons.HugeIcons
@@ -52,6 +53,7 @@ import me.rerere.hugeicons.stroke.Clipboard
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Eraser
 import me.rerere.hugeicons.stroke.GlobalSearch
+import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Message02
 import me.rerere.hugeicons.stroke.QuillWrite01
@@ -823,5 +825,38 @@ private fun ScrapeWebPreview(content: JsonElement) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 任务计划: 渲染 todo_write 工具调用摘要
+ */
+object TodoWriteToolUI : ToolUIRenderer {
+    override val toolName: String = "todo_write"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.LeftToRightListBullet
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val message = context.arguments.getStringContent("message")
+            ?: context.content.getStringContent("message")
+        return message ?: "任务计划已更新"
+    }
+
+    override fun hasSummary(context: ToolUIContext): Boolean = true
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val items = (context.arguments.jsonObjectOrNull
+            ?.get("items") as? JsonArray) ?: return
+        val total = items.size
+        val completed = items.count { item ->
+            (item as? JsonObject)?.get("status")?.jsonPrimitive?.content in listOf("completed", "cancelled")
+        }
+        Text(
+            text = "$completed/$total 已完成",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
     }
 }

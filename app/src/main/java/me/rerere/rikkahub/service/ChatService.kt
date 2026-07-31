@@ -32,6 +32,8 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
@@ -50,6 +52,7 @@ import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
+import me.rerere.rikkahub.data.ai.tools.createTodoTool
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
@@ -64,6 +67,7 @@ import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -74,6 +78,8 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.knowledge.KnowledgeManager
+import me.rerere.knowledge.tool.KnowledgeSearchTool
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -148,6 +154,7 @@ class ChatService(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
+    private val knowledgeManager: KnowledgeManager,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -530,6 +537,9 @@ class ChatService(
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
+                    if (assistant.enableTodoList) {
+                        add(createTodoTool())
+                    }
                     if (assistant.enableWebSearch) {
                         addAll(createSearchTools(settings))
                     }
@@ -575,6 +585,16 @@ class ChatService(
                                 },
                             )
                         )
+                    }
+                    // Knowledge base search tool
+                    if (assistant.knowledgeBaseIds.isNotEmpty()) {
+                        val kbTool = createKnowledgeSearchTool(
+                            settings = settings,
+                            assistant = assistant,
+                        )
+                        if (kbTool != null) {
+                            add(kbTool)
+                        }
                     }
                 },
             ).onCompletion {
@@ -645,6 +665,33 @@ class ChatService(
             return emptyList()
         }
         return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
+    }
+
+    private suspend fun createKnowledgeSearchTool(
+        settings: Settings,
+        assistant: Assistant,
+    ): Tool? {
+        val allowedIds = assistant.knowledgeBaseIds.map { it.toString() }.toSet()
+        if (allowedIds.isEmpty()) return null
+
+        val embeddingModelId = assistant.knowledgeBaseIds.firstOrNull()?.let { kbId ->
+            // Find the first knowledge base's embedding model
+            knowledgeManager.baseRepository.getById(kbId.toString())?.embeddingModelId
+        } ?: settings.embeddingModelId?.toString() ?: return null
+
+        val model = settings.findModelById(kotlin.uuid.Uuid.parse(embeddingModelId)) ?: return null
+        val providerSetting = model.findProvider(settings.providers) ?: return null
+        if (providerSetting !is ProviderSetting.OpenAI) return null
+
+        @Suppress("UNCHECKED_CAST")
+        val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
+
+        return KnowledgeSearchTool(
+            knowledgeManager = knowledgeManager,
+            getAllowedKnowledgeBaseIds = { allowedIds },
+            getEmbeddingProvider = { provider to providerSetting },
+            getEmbeddingModel = { model },
+        ).create()
     }
 
     // ---- 检查无效消息 ----

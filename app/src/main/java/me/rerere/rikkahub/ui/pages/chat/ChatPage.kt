@@ -5,16 +5,25 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,6 +40,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,12 +50,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,11 +77,19 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
+import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.ai.tools.TodoList
+import me.rerere.rikkahub.data.ai.tools.TodoStatus
+import me.rerere.rikkahub.data.ai.tools.extractLatestTodoListFromConversation
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -325,7 +346,18 @@ private fun ChatPageContent(
                 )
             },
             bottomBar = {
-                ChatInput(
+                val todolist = conversation.currentMessages.extractLatestTodoListFromConversation()
+                Column {
+                    // TodolistBanner - 显示在聊天输入框上方
+                    if (todolist != null) {
+                        TodolistBanner(
+                            todolist = todolist,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                    ChatInput(
                     state = inputState,
                     loading = loadingJob != null,
                     settings = setting,
@@ -408,6 +440,7 @@ private fun ChatPageContent(
                         showFilesSheet = true
                     },
                 )
+                }
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
@@ -832,5 +865,131 @@ private fun TopBar(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun TodolistBanner(
+    todolist: TodoList,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val inProgressItems = todolist.items.filter { it.status == TodoStatus.in_progress }
+    val pendingCount = todolist.items.count { it.status == TodoStatus.pending }
+    val completed = todolist.items.count { it.status == TodoStatus.completed }
+    val total = todolist.items.size
+
+    Card(
+        modifier = modifier.animateContentSize(),
+        shape = RoundedCornerShape(12.dp),
+        onClick = { expanded = !expanded },
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = HugeIcons.LeftToRightListBullet,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    if (inProgressItems.isNotEmpty() && !expanded) {
+                        Text(
+                            text = inProgressItems.first().content,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (pendingCount > 0 && !expanded) {
+                        Text(
+                            text = "$pendingCount pending",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    } else {
+                        Text(
+                            text = "TodoList",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "$completed/$total",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = if (expanded) "折叠" else "展开",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    LinearProgressIndicator(
+                        progress = { if (total > 0) completed.toFloat() / total else 0f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                    )
+                    todolist.message?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    todolist.items.forEach { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = when (item.status) {
+                                    TodoStatus.completed -> HugeIcons.Tick01
+                                    TodoStatus.in_progress -> HugeIcons.Sparkles
+                                    TodoStatus.cancelled -> HugeIcons.Cancel01
+                                    TodoStatus.pending -> HugeIcons.ArrowRight01
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = when (item.status) {
+                                    TodoStatus.completed -> MaterialTheme.colorScheme.primary
+                                    TodoStatus.in_progress -> MaterialTheme.colorScheme.tertiary
+                                    TodoStatus.cancelled -> MaterialTheme.colorScheme.error
+                                    TodoStatus.pending -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = item.content,
+                                style = MaterialTheme.typography.bodySmall,
+                                textDecoration = if (item.status == TodoStatus.completed || item.status == TodoStatus.cancelled)
+                                    TextDecoration.LineThrough else TextDecoration.None,
+                                color = when (item.status) {
+                                    TodoStatus.completed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    TodoStatus.cancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }

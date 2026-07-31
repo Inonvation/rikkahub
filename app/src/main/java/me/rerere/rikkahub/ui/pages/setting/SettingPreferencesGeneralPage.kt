@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
@@ -265,6 +266,27 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                             }
                         )
                     }
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_todo_list_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_todo_list_desc)) },
+                        trailingContent = {
+                            val currentAssistant = settings.getCurrentAssistant()
+                            Switch(
+                                checked = currentAssistant.enableTodoList,
+                                onCheckedChange = { enabled ->
+                                    vm.updateSettings(
+                                        settings.copy(
+                                            assistants = settings.assistants.map { a ->
+                                                if (a.id == currentAssistant.id) {
+                                                    a.copy(enableTodoList = enabled)
+                                                } else a
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                        },
+                    )
                 }
             }
 

@@ -714,8 +714,6 @@
   <string name="setting_display_page_show_thinking_content_title">Show Thinking Content</string>
   <string name="setting_display_page_show_token_usage_desc">Display token usage and message count</string>
   <string name="setting_display_page_show_token_usage_title">Show Token &amp; Context Stats</string>
-  <string name="setting_display_page_show_updates_desc">Whether to display app update notifications</string>
-  <string name="setting_display_page_show_updates_title">Show Updates</string>
   <string name="setting_display_page_show_user_avatar_desc">Whether to display user avatar in chat messages</string>
   <string name="setting_display_page_show_user_avatar_title">Show User Avatar</string>
   <string name="setting_display_page_skip_crop_image_desc">Skip crop interface after importing images or taking photos</string>
@@ -730,6 +728,8 @@
   <string name="setting_display_page_volume_key_scroll_desc">Scroll pages with volume keys, ideal for e-ink screens</string>
   <string name="setting_display_page_volume_key_scroll_ratio">Scroll Amount</string>
   <string name="setting_display_page_volume_key_scroll_title">Volume Key Page Scroll</string>
+  <string name="setting_display_page_enable_todo_list_desc">When enabled, the AI will automatically create and manage task plans for complex requests</string>
+  <string name="setting_display_page_enable_todo_list_title">Enable Task Plan</string>
   <string name="setting_files_page_cancel_action">Cancel</string>
   <string name="setting_files_page_clean_action">Clean</string>
   <string name="setting_files_page_clean_confirmation">All files in this category will be permanently deleted. This action cannot be undone.</string>
@@ -950,6 +950,7 @@
   <string name="setting_provider_page_filter_placeholder">Enter model name to filter</string>
   <string name="setting_provider_page_image">Image</string>
   <string name="setting_provider_page_image_model">Image</string>
+  <string name="setting_provider_page_reranking_model">Reranking</string>
   <string name="setting_provider_page_image_qr_decode_failed">Failed to parse QR code from image: %s</string>
   <string name="setting_provider_page_import_dialog_message">Please select import method:</string>
   <string name="setting_provider_page_import_dialog_title">Import Provider Configuration</string>
@@ -1131,11 +1132,6 @@
   <string name="translator_page_translate">Translate</string>
   <string name="tts">TTS</string>
   <string name="unpin_chat">Unpin the Chat</string>
-  <string name="update_card_check_failed">Check update failed</string>
-  <string name="update_card_close">Close</string>
-  <string name="update_card_downloading">Downloading, please check status bar for progress</string>
-  <string name="update_card_new_version_found">New version found %s</string>
-  <string name="update_card_unknown_error">Unknown error</string>
   <string name="upload_file">Upload File</string>
   <string name="use_web_search">Web Search</string>
   <string name="user_default_name">User</string>
@@ -1231,6 +1227,7 @@
   <string name="common_rename">Rename</string>
   <string name="common_export">Export</string>
   <string name="common_share">Share</string>
+  <string name="common_preview">Preview</string>
   <string name="tool_ui_edit_file">Edit: %s</string>
   <string name="tool_ui_edit_file_default">Edit file</string>
   <string name="tool_ui_read_file">Read: %s</string>
