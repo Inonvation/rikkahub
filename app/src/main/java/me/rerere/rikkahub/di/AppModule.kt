@@ -3,8 +3,11 @@ package me.rerere.rikkahub.di
 import kotlinx.serialization.json.Json
 import me.rerere.highlight.Highlighter
 import me.rerere.knowledge.KnowledgeManager
+import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.db.fts.FtsKeywordSearcher
+import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
@@ -48,7 +51,20 @@ val appModule = module {
     }
 
     single {
-        KnowledgeManager(get(), get(), get())
+        KnowledgeChunkFtsManager(get())
+    }
+
+    single<KeywordSearcher> {
+        FtsKeywordSearcher(get(), get())
+    }
+
+    single {
+        KnowledgeManager(
+            knowledgeBaseDao = get(),
+            knowledgeDocumentDao = get(),
+            chunkDao = get(),
+            keywordSearcher = get(),
+        )
     }
 
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；

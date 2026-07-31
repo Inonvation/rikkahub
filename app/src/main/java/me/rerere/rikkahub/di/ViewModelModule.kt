@@ -23,6 +23,7 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
+import me.rerere.rikkahub.data.DocumentProcessor
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -79,17 +80,31 @@ val viewModelModule = module {
     viewModelOf(::StatsVM)
     viewModelOf(::KnowledgeBasesVM)
     viewModel<KnowledgeBaseDetailVM> { params ->
+        val baseId = params.get<String>()
         KnowledgeBaseDetailVM(
             knowledgeManager = get(),
             settingsStore = get(),
             providerManager = get(),
-            baseId = params.get(),
+            documentProcessor = DocumentProcessor(
+                knowledgeManager = get(),
+                settingsStore = get(),
+                providerManager = get(),
+                baseId = baseId,
+            ),
+            baseId = baseId,
         )
     }
     viewModel<KnowledgeBaseSettingsVM> { params ->
+        val baseId = params.get<String>()
         KnowledgeBaseSettingsVM(
             knowledgeManager = get(),
-            baseId = params.get(),
+            documentProcessor = DocumentProcessor(
+                knowledgeManager = get(),
+                settingsStore = get(),
+                providerManager = get(),
+                baseId = baseId,
+            ),
+            baseId = baseId,
         )
     }
 }

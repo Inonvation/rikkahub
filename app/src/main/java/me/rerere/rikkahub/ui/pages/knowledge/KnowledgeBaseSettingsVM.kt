@@ -12,9 +12,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
+import me.rerere.rikkahub.data.DocumentProcessor
 
 class KnowledgeBaseSettingsVM(
     private val knowledgeManager: KnowledgeManager,
+    private val documentProcessor: DocumentProcessor,
     private val baseId: String,
 ) : ViewModel() {
     val base = knowledgeManager.baseRepository.getByIdFlow(baseId)
@@ -90,6 +92,11 @@ class KnowledgeBaseSettingsVM(
     private suspend fun doSave() {
         if (!loaded) return
         val current = knowledgeManager.baseRepository.getById(baseId) ?: return
+        val chunkConfigChanged =
+            current.chunkSize != chunkSize ||
+                current.chunkOverlap != chunkOverlap ||
+                current.chunkStrategy != chunkStrategy
+
         knowledgeManager.baseRepository.update(
             current.copy(
                 name = name,
@@ -104,6 +111,13 @@ class KnowledgeBaseSettingsVM(
                 updatedAt = System.currentTimeMillis(),
             )
         )
+
+        // 分块相关设置变化 → 自动重新处理该知识库全部文档（删旧 chunk 后按新设置重建）
+        if (chunkConfigChanged) {
+            viewModelScope.launch {
+                documentProcessor.reprocessAll()
+            }
+        }
     }
 
     fun delete() {

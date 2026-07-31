@@ -116,7 +116,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Embedding 模型") },
-                            description = { Text(if (vm.embeddingModelId == null && settings.embeddingModelId != null) "使用全局默认" else "向量化模型") },
+                            description = { Text(if (vm.embeddingModelId == null && settings.embeddingModelId != null) "使用全局默认 · 把文本转成向量，语义检索用" else "向量化模型 · 把文本转成向量，语义检索用") },
                         ) {
                             ModelSelector(
                                 modelId = effectiveEmbeddingModelId?.let { kotlin.uuid.Uuid.parse(it) },
@@ -132,7 +132,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Reranking 模型") },
-                            description = { Text(if (vm.rerankModelId == null && settings.rerankModelId != null) "使用全局默认" else "重排序模型（可选）") },
+                            description = { Text(if (vm.rerankModelId == null && settings.rerankModelId != null) "使用全局默认 · 可选，精排结果但会多耗一次模型调用" else "重排序模型（可选）· 精排结果，但会多耗一次模型调用") },
                         ) {
                             ModelSelector(
                                 modelId = effectiveRerankModelId?.let { kotlin.uuid.Uuid.parse(it) },
@@ -154,6 +154,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("分块策略") },
+                            description = { Text("文档切块方式：固定大小 / 按段落 / 按句子；改动保存后会自动重新处理全部文档") },
                         ) {
                             Select(
                                 options = CHUNK_STRATEGIES,
@@ -176,6 +177,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Chunk Size") },
+                            description = { Text("每块文本的字符数，越小检索越精准但碎片多；改动保存后会自动重新处理全部文档") },
                         ) {
                             OutlinedTextField(
                                 value = vm.chunkSize.toString(),
@@ -191,6 +193,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Chunk Overlap") },
+                            description = { Text("相邻块的重叠字符数，避免切断语义；改动保存后会自动重新处理全部文档") },
                         ) {
                             OutlinedTextField(
                                 value = vm.chunkOverlap.toString(),
@@ -212,6 +215,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                     headlineContent = {
                         FormItem(
                             label = { Text("Top K") },
+                            description = { Text("每次检索最多返回几条结果，越大越全但可能混入不相关的") },
                         ) {
                             OutlinedTextField(
                                 value = vm.topK.toString(),

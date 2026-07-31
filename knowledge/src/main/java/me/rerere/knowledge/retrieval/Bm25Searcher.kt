@@ -1,5 +1,6 @@
 package me.rerere.knowledge.retrieval
 
+import me.rerere.knowledge.data.dao.KnowledgeChunkDao
 import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 
 data class Bm25SearchResult(
@@ -9,7 +10,7 @@ data class Bm25SearchResult(
 )
 
 class Bm25Searcher(
-    private val chunkDao: me.rerere.knowledge.data.dao.KnowledgeChunkDao,
+    private val chunkDao: KnowledgeChunkDao,
 ) {
     suspend fun search(
         query: String,

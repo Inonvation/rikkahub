@@ -6,6 +6,7 @@ import me.rerere.knowledge.data.dao.KnowledgeDocumentDao
 import me.rerere.knowledge.data.repository.KnowledgeBaseRepository
 import me.rerere.knowledge.data.repository.KnowledgeDocumentRepository
 import me.rerere.knowledge.retrieval.Bm25Searcher
+import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.knowledge.retrieval.Reranker
 import me.rerere.knowledge.retrieval.RetrievalPipeline
 import me.rerere.knowledge.retrieval.RetrievalResult
@@ -15,6 +16,7 @@ class KnowledgeManager(
     private val knowledgeBaseDao: KnowledgeBaseDao,
     private val knowledgeDocumentDao: KnowledgeDocumentDao,
     val chunkDao: KnowledgeChunkDao,
+    private val keywordSearcher: KeywordSearcher? = null,
 ) {
     val baseRepository = KnowledgeBaseRepository(knowledgeBaseDao)
     val documentRepository = KnowledgeDocumentRepository(knowledgeDocumentDao)
@@ -25,6 +27,7 @@ class KnowledgeManager(
         chunkDao = chunkDao,
         vectorStore = vectorStore,
         bm25Searcher = bm25Searcher,
+        keywordSearcher = keywordSearcher,
     )
 
     suspend fun search(
@@ -34,6 +37,7 @@ class KnowledgeManager(
         topK: Int = 10,
         similarityThreshold: Float = 0f,
         reranker: Reranker? = null,
+        keywordWeight: Float = 1f,
     ): List<RetrievalResult> {
         return retrievalPipeline.search(
             query = query,
@@ -42,6 +46,7 @@ class KnowledgeManager(
             topK = topK,
             similarityThreshold = similarityThreshold,
             reranker = reranker,
+            keywordWeight = keywordWeight,
         )
     }
 }

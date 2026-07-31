@@ -3,6 +3,8 @@ package me.rerere.knowledge.retrieval
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.RerankingGenerationParams
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 import me.rerere.knowledge.data.dao.KnowledgeChunkDao
 import me.rerere.knowledge.vector.VectorStore
@@ -13,6 +15,7 @@ data class RetrievalResult(
     val score: Float,
     val rank: Int,
     val scoreKind: String, // "relevance" (rerank score) or "ranking" (RRF score)
+    val snippet: String? = null, // 命中片段（带 [..] 高亮标记），用于 UI 展示
 )
 
 class Reranker(
@@ -50,11 +53,12 @@ class RetrievalPipeline(
     private val chunkDao: KnowledgeChunkDao,
     private val vectorStore: VectorStore,
     private val bm25Searcher: Bm25Searcher,
+    private val keywordSearcher: KeywordSearcher? = null,
 ) {
     /**
      * Cherry Studio 风格的检索:
      * 1. Over-fetch (topK × 3) 候选
-     * 2. Vector + BM25 → RRF fusion
+     * 2. Vector + Keyword → RRF fusion（关键词侧可按 keywordWeight 加权）
      * 3. 可选 reranking
      * 4. Threshold 过滤
      * 5. 裁剪到 topK 并排序
@@ -66,20 +70,33 @@ class RetrievalPipeline(
         topK: Int = 10,
         similarityThreshold: Float = 0f,
         reranker: Reranker? = null,
+        keywordWeight: Float = 1f,
     ): List<RetrievalResult> {
         val candidateLimit = (topK * 3).coerceAtMost(100)
 
-        // 并行执行 vector search 和 BM25 search (over-fetch)
-        val vectorResults = if (queryEmbedding != null) {
-            vectorStore.search(queryEmbedding, knowledgeBaseId, candidateLimit)
-        } else {
-            emptyList()
+        // 并行执行 vector search 和关键词 search (over-fetch)
+        val (vectorResults, keywordResults) = coroutineScope {
+            val vectorDeferred = async {
+                if (queryEmbedding != null) {
+                    vectorStore.search(queryEmbedding, knowledgeBaseId, candidateLimit)
+                } else {
+                    emptyList()
+                }
+            }
+            val keywordDeferred = async {
+                // 关键词侧优先用 FTS5+jieba（真正的 BM25 排序）；不可用时回退到内置 BM25
+                keywordSearcher
+                    ?.let { searcher ->
+                        runCatching { searcher.search(query, knowledgeBaseId, candidateLimit) }.getOrNull()
+                    }
+                    ?: bm25Searcher.search(query, knowledgeBaseId, candidateLimit)
+                        .map { KeywordSearchResult(chunk = it.chunk, rank = it.rank) }
+            }
+            vectorDeferred.await() to keywordDeferred.await()
         }
 
-        val bm25Results = bm25Searcher.search(query, knowledgeBaseId, candidateLimit)
-
         // RRF 融合
-        val fused = rrfFusion(vectorResults, bm25Results)
+        val fused = rrfFusion(vectorResults, keywordResults, keywordWeight = keywordWeight)
 
         // 可选 reranking
         val results = if (reranker != null) {
@@ -104,10 +121,12 @@ class RetrievalPipeline(
 
     private fun rrfFusion(
         vectorResults: List<VectorSearchResult>,
-        bm25Results: List<Bm25SearchResult>,
+        keywordResults: List<KeywordSearchResult>,
         k: Int = 60,
+        keywordWeight: Float = 1f,
     ): List<RetrievalResult> {
         val scores = mutableMapOf<String, Pair<KnowledgeChunkEntity, Float>>()
+        val snippets = mutableMapOf<String, String?>()
 
         vectorResults.forEachIndexed { index, result ->
             val rrfScore = 1f / (k + index + 1)
@@ -119,24 +138,29 @@ class RetrievalPipeline(
             }
         }
 
-        bm25Results.forEachIndexed { index, result ->
-            val rrfScore = 1f / (k + index + 1)
+        keywordResults.forEachIndexed { index, result ->
+            val rrfScore = 1f / (k + index + 1) * keywordWeight
             val existing = scores[result.chunk.id]
             if (existing == null) {
                 scores[result.chunk.id] = result.chunk to rrfScore
             } else {
                 scores[result.chunk.id] = existing.copy(second = existing.second + rrfScore)
             }
+            // 关键词命中的 snippet 透传给融合结果，供 UI 展示命中上下文
+            if (result.snippet != null) {
+                snippets[result.chunk.id] = result.snippet
+            }
         }
 
         return scores.entries
             .sortedByDescending { it.value.second }
-            .map { (_, pair) ->
+            .map { (id, pair) ->
                 RetrievalResult(
                     chunk = pair.first,
                     score = pair.second,
                     rank = 0,
                     scoreKind = "ranking",
+                    snippet = snippets[id],
                 )
             }
     }

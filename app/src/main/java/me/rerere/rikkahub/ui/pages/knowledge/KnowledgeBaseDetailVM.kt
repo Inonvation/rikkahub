@@ -15,20 +15,11 @@ import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.document.DocxParser
-import me.rerere.document.EpubParser
-import me.rerere.document.PdfParser
-import me.rerere.document.PptxParser
-import me.rerere.document.XlsxParser
 import me.rerere.knowledge.KnowledgeManager
-import me.rerere.knowledge.chunking.FixedSizeChunker
-import me.rerere.knowledge.chunking.ParagraphChunker
-import me.rerere.knowledge.chunking.SentenceChunker
-import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 import me.rerere.knowledge.retrieval.Reranker
 import me.rerere.knowledge.retrieval.RetrievalResult
-import me.rerere.knowledge.vector.toByteArray
 import me.rerere.knowledge.vector.toFloatArray
+import me.rerere.rikkahub.data.DocumentProcessor
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -36,10 +27,28 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import java.io.File
 
+// 知识库支持导入的扩展名白名单（与 parseDocument 各分支对应）
+private val SUPPORTED_EXTENSIONS = setOf(
+    // 文档
+    "pdf", "docx", "pptx", "epub", "xlsx",
+    // 纯文本 / 标记
+    "txt", "csv", "md", "markdown", "json", "xml", "html", "htm",
+    // 图片（走 OCR）
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif",
+)
+
+private val SUPPORTED_FORMATS_TEXT = buildString {
+    append("支持导入：")
+    append("文档(PDF/DOCX/PPTX/EPUB/XLSX)、")
+    append("文本(TXT/CSV/MD/JSON/XML/HTML)、")
+    append("图片(JPG/PNG/GIF/WEBP/BMP，走 OCR 识别)")
+}
+
 class KnowledgeBaseDetailVM(
     private val knowledgeManager: KnowledgeManager,
     private val settingsStore: SettingsStore,
     private val providerManager: ProviderManager,
+    private val documentProcessor: DocumentProcessor,
     private val baseId: String,
 ) : ViewModel() {
     val base = knowledgeManager.baseRepository.getByIdFlow(baseId)
@@ -57,10 +66,50 @@ class KnowledgeBaseDetailVM(
     private var _searchLoading = MutableStateFlow(false)
     val searchLoading = _searchLoading.asStateFlow()
 
+    // 检索测试可调参数（默认值在首次搜索时用知识库设置填充）
+    private val _searchTopK = MutableStateFlow(10)
+    val searchTopK = _searchTopK.asStateFlow()
+
+    private val _searchThreshold = MutableStateFlow(0f)
+    val searchThreshold = _searchThreshold.asStateFlow()
+
+    private val _searchRerankEnabled = MutableStateFlow(true)
+    val searchRerankEnabled = _searchRerankEnabled.asStateFlow()
+
+    // 关键词检索权重（RRF 融合时给关键词侧加权，1=等权）
+    private val _searchKeywordWeight = MutableStateFlow(1f)
+    val searchKeywordWeight = _searchKeywordWeight.asStateFlow()
+
+    private val _searchDurationMs = MutableStateFlow<Long?>(null)
+    val searchDurationMs = _searchDurationMs.asStateFlow()
+
+    // chunkId -> 文档文件名，用于结果来源展示
+    private val _documentNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val documentNames = _documentNames.asStateFlow()
+
+    // 一次性消息通知（导入被拒绝等），由 UI 层 toast 展示
+    private val _notices = MutableStateFlow<String?>(null)
+    val notices = _notices.asStateFlow()
+
+    private var searchParamsInitialized = false
+
+    fun updateSearchTopK(v: Int) { _searchTopK.value = v }
+    fun updateSearchThreshold(v: Float) { _searchThreshold.value = v }
+    fun updateSearchRerankEnabled(v: Boolean) { _searchRerankEnabled.value = v }
+    fun updateSearchKeywordWeight(v: Float) { _searchKeywordWeight.value = v }
+
+    fun consumeNotice() { _notices.value = null }
+
     fun addDocument(uri: Uri, context: Context) {
         viewModelScope.launch {
             val fileName = uri.lastPathSegment ?: "unknown"
-            val fileType = fileName.substringAfterLast('.', "txt").lowercase()
+            val fileType = fileName.substringAfterLast('.', "").lowercase()
+
+            // 白名单校验：不支持的类型直接拒绝，不拷贝、不创建记录
+            if (fileType !in SUPPORTED_EXTENSIONS) {
+                _notices.value = "不支持的文件类型 .$fileType\n$SUPPORTED_FORMATS_TEXT"
+                return@launch
+            }
             val filePath = "${context.filesDir}/knowledge/${baseId}/raw/${fileName}"
 
             withContext(Dispatchers.IO) {
@@ -80,145 +129,33 @@ class KnowledgeBaseDetailVM(
             )
 
             // Auto-process
-            processDocument(doc.id, filePath, fileType)
-        }
-    }
-
-    @OptIn(ExperimentalUuidApi::class)
-    private suspend fun processDocument(documentId: String, filePath: String, fileType: String) {
-        _processingState.value = _processingState.value + (documentId to 0f)
-        knowledgeManager.documentRepository.updateStatus(documentId, "processing")
-
-        try {
-            // Check file size (limit to 50MB)
-            val file = File(filePath)
-            val fileSizeMB = file.length() / (1024 * 1024)
-            if (fileSizeMB > 50) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "文件过大 (${fileSizeMB}MB > 50MB)")
-                return
-            }
-
-            // 1. Parse document
-            val text = withContext(Dispatchers.IO) { parseDocument(filePath, fileType) }
-            if (text.isBlank()) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "文档内容为空或解析失败")
-                return
-            }
-            // Check parsed text size to avoid OOM
-            if (text.length > 500_000) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "文档文本过长 (${text.length} 字符)，请分割后导入")
-                return
-            }
-            _processingState.value = _processingState.value + (documentId to 0.1f)
-
-            // 2. Get chunk config
-            val base = base.value ?: return
-            val chunkSize = base.chunkSize
-            val chunkOverlap = base.chunkOverlap
-            val chunkStrategy = base.chunkStrategy
-
-            // 3. Chunk
-            val chunker = when (chunkStrategy) {
-                "paragraph" -> ParagraphChunker()
-                "sentence" -> SentenceChunker()
-                else -> FixedSizeChunker()
-            }
-            val chunks = chunker.chunk(text, chunkSize, chunkOverlap)
-            if (chunks.isEmpty()) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "No chunks")
-                return
-            }
-            _processingState.value = _processingState.value + (documentId to 0.3f)
-
-            // 4. Resolve embedding model
-            val settings = settingsStore.settingsFlow.value
-            val modelId = base.embeddingModelId?.let { Uuid.parse(it) } ?: settings.embeddingModelId
-            if (modelId == null) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "No embedding model configured")
-                return
-            }
-            val model = settings.findModelById(modelId) ?: run {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "Embedding model not found")
-                return
-            }
-            val providerSetting = model.findProvider(settings.providers) ?: run {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "Provider not found")
-                return
-            }
-            if (providerSetting !is ProviderSetting.OpenAI) {
-                knowledgeManager.documentRepository.updateStatus(documentId, "failed", "Only OpenAI-compatible providers support embedding")
-                return
-            }
-
-            @Suppress("UNCHECKED_CAST")
-            val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
-
-            // 5. Generate embeddings in batches
-            val batchSize = 20
-            val totalBatches = (chunks.size + batchSize - 1) / batchSize
-            var processedCount = 0
-
-            for (batchIndex in 0 until totalBatches) {
-                val start = batchIndex * batchSize
-                val end = minOf(start + batchSize, chunks.size)
-                val batch = chunks.subList(start, end)
-
-                val result = provider.generateEmbedding(
-                    providerSetting = providerSetting,
-                    params = EmbeddingGenerationParams(
-                        model = model,
-                        input = batch.map { it.content },
-                    )
-                )
-
-                val chunkEntities = batch.mapIndexed { i, chunk ->
-                    val embedding = result.embeddings.getOrNull(i)
-                    KnowledgeChunkEntity(
-                        id = Uuid.random().toString(),
-                        documentId = documentId,
-                        knowledgeBaseId = baseId,
-                        chunkIndex = processedCount + i,
-                        content = chunk.content,
-                        embedding = embedding?.toFloatArray()?.toByteArray(),
-                        tokenCount = chunk.tokenCount,
-                    )
+            documentProcessor.processDocument(doc.id, filePath, fileType) { progress ->
+                if (progress >= 1f) {
+                    // 处理结束，清除进度条目（避免残留）
+                    _processingState.value = _processingState.value - doc.id
+                } else {
+                    _processingState.value = _processingState.value + (doc.id to progress)
                 }
-
-                knowledgeManager.chunkDao.insertAll(chunkEntities)
-                processedCount += batch.size
-                _processingState.value = _processingState.value + (documentId to 0.3f + 0.6f * (processedCount.toFloat() / chunks.size))
             }
-
-            knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
-        } catch (e: Exception) {
-            knowledgeManager.documentRepository.updateStatus(documentId, "failed", e.message ?: "Unknown error")
-        } finally {
-            _processingState.value = _processingState.value - documentId
         }
     }
 
-    private fun parseDocument(filePath: String, fileType: String): String {
-        val file = File(filePath)
-        if (!file.exists()) return ""
-        return try {
-            when (fileType) {
-                "pdf" -> PdfParser.parserPdf(file)
-                "docx" -> DocxParser.parse(file)
-                "pptx" -> PptxParser.parse(file)
-                "epub" -> EpubParser.parse(file)
-                "xlsx" -> XlsxParser.parse(file)
-                    "xls" -> "旧版 .xls 格式暂不支持，请在 Excel 中另存为 .xlsx 格式"
-                "csv", "txt", "md", "markdown", "json", "xml", "html", "htm" -> file.readText()
-                else -> file.readText()
+    fun retryDocument(id: String) {
+        viewModelScope.launch {
+            documentProcessor.reprocessDocument(id) { progress ->
+                if (progress >= 1f) {
+                    _processingState.value = _processingState.value - id
+                } else {
+                    _processingState.value = _processingState.value + (id to progress)
+                }
             }
-        } catch (e: Exception) {
-            "解析失败: ${e.message}"
         }
     }
 
     fun searchTest(query: String) {
         viewModelScope.launch {
             _searchLoading.value = true
+            _searchDurationMs.value = null
             _searchResults.value = emptyList()
             try {
                 val base = this@KnowledgeBaseDetailVM.base.value
@@ -228,6 +165,16 @@ class KnowledgeBaseDetailVM(
                 }
 
                 val settings = settingsStore.settingsFlow.value
+
+                // 首次搜索时，用知识库配置初始化可调参数
+                if (!searchParamsInitialized) {
+                    _searchTopK.value = base.topK
+                    _searchThreshold.value = base.similarityThreshold
+                    _searchRerankEnabled.value = base.rerankModelId != null
+                    searchParamsInitialized = true
+                }
+
+                val startTime = System.nanoTime()
 
                 // Resolve embedding model
                 val embModelId = base.embeddingModelId?.let { Uuid.parse(it) } ?: settings.embeddingModelId
@@ -247,15 +194,17 @@ class KnowledgeBaseDetailVM(
                     } else null
                 } else null
 
-                // Resolve reranker if configured
-                val rerankModelId = base.rerankModelId?.let { Uuid.parse(it) } ?: settings.rerankModelId
-                val reranker = if (rerankModelId != null) {
-                    val rerankModel = settings.findModelById(rerankModelId)
-                    val rerankProviderSetting = rerankModel?.findProvider(settings.providers)
-                    if (rerankModel != null && rerankProviderSetting is ProviderSetting.OpenAI) {
-                        @Suppress("UNCHECKED_CAST")
-                        val rerankProvider = providerManager.getProviderByType(rerankProviderSetting) as Provider<ProviderSetting.OpenAI>
-                        Reranker(rerankProvider, rerankProviderSetting, rerankModel)
+                // Resolve reranker（仅当开关开启）
+                val reranker = if (_searchRerankEnabled.value) {
+                    val rerankModelId = base.rerankModelId?.let { Uuid.parse(it) } ?: settings.rerankModelId
+                    if (rerankModelId != null) {
+                        val rerankModel = settings.findModelById(rerankModelId)
+                        val rerankProviderSetting = rerankModel?.findProvider(settings.providers)
+                        if (rerankModel != null && rerankProviderSetting is ProviderSetting.OpenAI) {
+                            @Suppress("UNCHECKED_CAST")
+                            val rerankProvider = providerManager.getProviderByType(rerankProviderSetting) as Provider<ProviderSetting.OpenAI>
+                            Reranker(rerankProvider, rerankProviderSetting, rerankModel)
+                        } else null
                     } else null
                 } else null
 
@@ -263,27 +212,27 @@ class KnowledgeBaseDetailVM(
                     query = query,
                     queryEmbedding = queryEmbedding,
                     knowledgeBaseId = baseId,
-                    topK = base.topK,
-                    similarityThreshold = base.similarityThreshold,
+                    topK = _searchTopK.value,
+                    similarityThreshold = _searchThreshold.value,
                     reranker = reranker,
+                    keywordWeight = _searchKeywordWeight.value,
                 )
                 _searchResults.value = results
+
+                // 构建 chunkId -> 文档文件名 映射（用于结果来源展示）
+                val chunkIds = results.map { it.chunk.id }.toSet()
+                if (chunkIds.isNotEmpty()) {
+                    _documentNames.value = knowledgeManager.chunkDao
+                        .getDocumentNamesByChunkIds(chunkIds.toList())
+                        .associate { it.chunkId to it.fileName }
+                }
+
+                _searchDurationMs.value = (System.nanoTime() - startTime) / 1_000_000
             } catch (e: Exception) {
                 _searchResults.value = emptyList()
             } finally {
                 _searchLoading.value = false
             }
-        }
-    }
-
-    fun retryDocument(id: String) {
-        viewModelScope.launch {
-            val doc = knowledgeManager.documentRepository.getById(id) ?: return@launch
-            // Delete old chunks
-            knowledgeManager.chunkDao.deleteByDocumentId(id)
-            knowledgeManager.documentRepository.updateChunkCount(id, 0, "pending")
-            // Re-process
-            processDocument(doc.id, doc.filePath, doc.fileType)
         }
     }
 

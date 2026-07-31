@@ -25,4 +25,15 @@ interface KnowledgeChunkDao {
 
     @Query("SELECT COUNT(*) FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId")
     suspend fun countByKnowledgeBaseId(knowledgeBaseId: String): Int
+
+    /**
+     * 根据 chunk 列表查询所属文档文件名，返回 chunkId -> fileName 映射。
+     */
+    @Query(
+        "SELECT kc.id AS chunkId, kd.file_name AS fileName " +
+            "FROM knowledge_chunk kc " +
+            "JOIN knowledge_document kd ON kc.document_id = kd.id " +
+            "WHERE kc.id IN (:chunkIds)"
+    )
+    suspend fun getDocumentNamesByChunkIds(chunkIds: List<String>): List<ChunkDocumentName>
 }
