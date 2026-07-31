@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -90,6 +93,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
+import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.extractLatestTodoListFromConversation
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -345,6 +349,7 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
+    val todoStorage: TodoStorage = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
@@ -402,7 +407,10 @@ private fun ChatPageContent(
                 )
             },
             bottomBar = {
-                val todolist = conversation.currentMessages.extractLatestTodoListFromConversation()
+                val todolist = conversation.currentMessages.extractLatestTodoListFromConversation(
+                    todoStorage = todoStorage,
+                    conversationId = conversation.id.toString(),
+                )
                 Column {
                     // TodolistBanner - 显示在聊天输入框上方
                     if (todolist != null) {
@@ -932,119 +940,162 @@ private fun TodolistBanner(
     todolist: TodoList,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
     val inProgressItems = todolist.items.filter { it.status == TodoStatus.in_progress }
     val pendingCount = todolist.items.count { it.status == TodoStatus.pending }
     val completed = todolist.items.count { it.status == TodoStatus.completed }
     val total = todolist.items.size
+    val allDone = completed + todolist.items.count { it.status == TodoStatus.cancelled } == total
+    val hasActive = inProgressItems.isNotEmpty() || pendingCount > 0
 
-    Card(
-        modifier = modifier.animateContentSize(),
-        shape = RoundedCornerShape(12.dp),
-        onClick = { expanded = !expanded },
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = HugeIcons.LeftToRightListBullet,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    if (inProgressItems.isNotEmpty() && !expanded) {
-                        Text(
-                            text = inProgressItems.first().content,
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    } else if (pendingCount > 0 && !expanded) {
-                        Text(
-                            text = "$pendingCount pending",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                    } else {
-                        Text(
-                            text = "TodoList",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "$completed/$total",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                        contentDescription = if (expanded) "折叠" else "展开",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+    // 有活跃任务时默认展开，全部完成时默认折叠
+    var expanded by remember(hasActive) { mutableStateOf(hasActive) }
 
-            AnimatedVisibility(visible = expanded) {
-                Column {
-                    LinearProgressIndicator(
-                        progress = { if (total > 0) completed.toFloat() / total else 0f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                    )
-                    todolist.message?.let { msg ->
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 6.dp),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+    // todo 列表内容变化时自动重新显示
+    val itemsFingerprint = todolist.items.hashCode()
+    var dismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(itemsFingerprint) {
+        dismissed = false
+    }
+
+    val progress = if (total > 0) completed.toFloat() / total else 0f
+
+    AnimatedVisibility(visible = !dismissed) {
+        Card(
+            modifier = modifier.animateContentSize(),
+            shape = RoundedCornerShape(12.dp),
+            onClick = { expanded = !expanded },
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                // 标题行
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(
+                            imageVector = if (allDone) HugeIcons.Tick01 else HugeIcons.LeftToRightListBullet,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (allDone) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.primary,
                         )
-                    }
-                    todolist.items.forEach { item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = when (item.status) {
-                                    TodoStatus.completed -> HugeIcons.Tick01
-                                    TodoStatus.in_progress -> HugeIcons.Sparkles
-                                    TodoStatus.cancelled -> HugeIcons.Cancel01
-                                    TodoStatus.pending -> HugeIcons.ArrowRight01
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = when (item.status) {
-                                    TodoStatus.completed -> MaterialTheme.colorScheme.primary
-                                    TodoStatus.in_progress -> MaterialTheme.colorScheme.tertiary
-                                    TodoStatus.cancelled -> MaterialTheme.colorScheme.error
-                                    TodoStatus.pending -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                            Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(6.dp))
+                        if (!expanded) {
+                            val collapsedText = when {
+                                allDone -> "全部完成"
+                                inProgressItems.isNotEmpty() -> inProgressItems.first().content
+                                todolist.message != null -> todolist.message
+                                pendingCount > 0 -> "$pendingCount 项待处理"
+                                else -> "TodoList"
+                            }
                             Text(
-                                text = item.content,
-                                style = MaterialTheme.typography.bodySmall,
-                                textDecoration = if (item.status == TodoStatus.completed || item.status == TodoStatus.cancelled)
-                                    TextDecoration.LineThrough else TextDecoration.None,
-                                color = when (item.status) {
-                                    TodoStatus.completed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                    TodoStatus.cancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                },
+                                text = collapsedText,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = if (allDone) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface,
                             )
+                        } else {
+                            Text(
+                                text = "TodoList",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (allDone) "完成" else "$completed/$total",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (allDone) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                            contentDescription = if (expanded) "折叠" else "展开",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = "关闭",
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                ) { dismissed = true },
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // 折叠态也显示细进度条，展开态显示完整进度条
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (expanded) 4.dp else 6.dp),
+                    strokeCap = StrokeCap.Round,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+
+                // 展开态：显示更新说明和任务列表
+                AnimatedVisibility(visible = expanded) {
+                    Column {
+                        Spacer(Modifier.size(4.dp))
+                        todolist.message?.let { msg ->
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        todolist.items.forEach { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = when (item.status) {
+                                        TodoStatus.completed -> HugeIcons.Tick01
+                                        TodoStatus.in_progress -> HugeIcons.Sparkles
+                                        TodoStatus.cancelled -> HugeIcons.Cancel01
+                                        TodoStatus.pending -> HugeIcons.ArrowRight01
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = when (item.status) {
+                                        TodoStatus.completed -> MaterialTheme.colorScheme.primary
+                                        TodoStatus.in_progress -> MaterialTheme.colorScheme.tertiary
+                                        TodoStatus.cancelled -> MaterialTheme.colorScheme.error
+                                        TodoStatus.pending -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = item.content,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    textDecoration = if (item.status == TodoStatus.completed || item.status == TodoStatus.cancelled)
+                                        TextDecoration.LineThrough else TextDecoration.None,
+                                    color = when (item.status) {
+                                        TodoStatus.completed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        TodoStatus.cancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
                         }
                     }
                 }

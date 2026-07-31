@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import kotlin.uuid.Uuid
@@ -17,6 +18,7 @@ class TransformerContext(
     val conversationLorebookIds: Set<Uuid> = emptySet(),
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     val workspaceCwd: String? = null,
+    val conversationId: String? = null,
 )
 
 interface MessageTransformer {
@@ -71,6 +73,7 @@ suspend fun List<UIMessage>.transforms(
     conversationLorebookIds: Set<Uuid> = emptySet(),
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     workspaceCwd: String? = null,
+    conversationId: String? = null,
 ): List<UIMessage> {
     val ctx = TransformerContext(
         context = context,
@@ -81,6 +84,7 @@ suspend fun List<UIMessage>.transforms(
         conversationLorebookIds = conversationLorebookIds,
         processingStatus = processingStatus,
         workspaceCwd = workspaceCwd,
+        conversationId = conversationId,
     )
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)
@@ -119,4 +123,16 @@ suspend fun List<UIMessage>.onGenerationFinish(
             acc
         }
     }
+}
+
+internal fun UIMessage.appendText(extra: String): UIMessage {
+    val updatedParts = parts.toMutableList()
+    val firstTextIndex = updatedParts.indexOfFirst { it is UIMessagePart.Text }
+    if (firstTextIndex >= 0) {
+        val text = updatedParts[firstTextIndex] as UIMessagePart.Text
+        updatedParts[firstTextIndex] = text.copy(text = text.text + extra)
+    } else {
+        updatedParts.add(UIMessagePart.Text(extra))
+    }
+    return copy(parts = updatedParts)
 }

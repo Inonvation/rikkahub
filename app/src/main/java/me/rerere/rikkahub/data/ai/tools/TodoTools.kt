@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -38,7 +39,10 @@ data class TodoList(
     val message: String? = null,
 )
 
-fun createTodoTool(): Tool = Tool(
+fun createTodoTool(
+    conversationId: String,
+    todoStorage: TodoStorage,
+): Tool = Tool(
     name = "todo_write",
     description = """
         Create and manage a structured task list for planning and tracking complex multi-step work.
@@ -131,27 +135,67 @@ fun createTodoTool(): Tool = Tool(
             put("items", items)
             message?.let { put("message", JsonPrimitive(it)) }
         }
-        listOf(UIMessagePart.Text(output.toString()))
+        val outputStr = output.toString()
+        // 持久化到文件，防止对话截断/压缩导致数据丢失
+        runCatching {
+            val todoList = JsonInstant.decodeFromString<TodoList>(outputStr)
+            todoStorage.save(conversationId, todoList)
+        }
+        listOf(UIMessagePart.Text(outputStr))
     }
 )
 
 /**
- * 从对话中所有消息中提取最新的 todolist
- * 扫描所有消息的 parts，找到最新的 todo_write 工具调用
+ * 从对话中提取最新的 todolist。
+ * 优先从消息中的 todo_write 工具调用读取，找不到时从文件存储 fallback。
+ * 如果所有任务已完成且用户已发下一条消息，自动清理文件并返回 null。
  */
-fun List<UIMessage>.extractLatestTodoListFromConversation(): TodoList? {
+fun List<UIMessage>.extractLatestTodoListFromConversation(
+    todoStorage: TodoStorage? = null,
+    conversationId: String? = null,
+): TodoList? {
     val allTools = this.flatMap { msg ->
         msg.parts.filterIsInstance<UIMessagePart.Tool>()
             .filter { it.toolName == "todo_write" }
     }
-    val latestTodo = allTools.lastOrNull() ?: return null
-    val jsonStr = if (latestTodo.isExecuted) {
-        latestTodo.output.filterIsInstance<UIMessagePart.Text>()
-            .joinToString("\n") { it.text }
+    val latestTodo = allTools.lastOrNull()
+    val result = if (latestTodo != null) {
+        val jsonStr = if (latestTodo.isExecuted) {
+            latestTodo.output.filterIsInstance<UIMessagePart.Text>()
+                .joinToString("\n") { it.text }
+        } else {
+            latestTodo.input
+        }
+        runCatching { JsonInstant.decodeFromString<TodoList>(jsonStr) }.getOrNull()
     } else {
-        latestTodo.input
-    }
-    return runCatching {
-        JsonInstant.decodeFromString<TodoList>(jsonStr)
-    }.getOrNull()
+        todoStorage?.let { conversationId?.let { id -> it.load(id) } }
+    } ?: return null
+
+    if (shouldAutoCleanup(result, todoStorage, conversationId)) return null
+
+    return result
 }
+
+private fun List<UIMessage>.shouldAutoCleanup(
+    todoList: TodoList,
+    todoStorage: TodoStorage?,
+    conversationId: String?,
+): Boolean {
+    if (todoStorage == null || conversationId == null) return false
+    if (!todoList.isAllDone()) return false
+
+    val lastTodoMsgIndex = indexOfLast { msg ->
+        msg.parts.any { part ->
+            part is UIMessagePart.Tool && part.toolName == "todo_write" && part.isExecuted
+        }
+    }
+    if (lastTodoMsgIndex < 0) return false
+    val hasUserMessageAfter = drop(lastTodoMsgIndex + 1).any { it.role == MessageRole.USER }
+    if (!hasUserMessageAfter) return false
+
+    todoStorage.delete(conversationId)
+    return true
+}
+
+private fun TodoList.isAllDone(): Boolean =
+    items.all { it.status == TodoStatus.completed || it.status == TodoStatus.cancelled }

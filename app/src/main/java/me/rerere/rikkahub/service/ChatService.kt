@@ -38,6 +38,8 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_QUERY_REWRITE_PROMPT
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
@@ -53,6 +55,8 @@ import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createTodoTool
+import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
+import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
@@ -80,6 +84,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.knowledge.KnowledgeManager
+import me.rerere.knowledge.tool.EmbeddingConfig
 import me.rerere.knowledge.tool.KnowledgeSearchTool
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
@@ -121,16 +126,6 @@ enum class ChatErrorSolution {
     CheckTitleModelSettings,
 }
 
-private val inputTransformers by lazy {
-    listOf(
-        TimeReminderTransformer,
-        PromptInjectionTransformer,
-        PlaceholderTransformer,
-        DocumentAsPromptTransformer,
-        OcrTransformer,
-    )
-}
-
 private val outputTransformers by lazy {
     listOf(
         ThinkTagTransformer,
@@ -156,6 +151,7 @@ class ChatService(
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
     private val knowledgeManager: KnowledgeManager,
+    private val todoStorage: TodoStorage,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -163,7 +159,19 @@ class ChatService(
     // 知识库系统提示注入
     private val knowledgeBaseReminderTransformer = KnowledgeBaseReminderTransformer()
 
-    // 统一会话管理
+    // Todo 被动提醒注入
+    private val todoReminderTransformer = TodoReminderTransformer(todoStorage)
+
+    private val inputTransformers by lazy {
+        listOf(
+            TimeReminderTransformer,
+            PromptInjectionTransformer,
+            PlaceholderTransformer,
+            DocumentAsPromptTransformer,
+            OcrTransformer,
+            todoReminderTransformer,
+        )
+    }
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
 
@@ -530,6 +538,7 @@ class ChatService(
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
+                conversationId = conversation.id.toString(),
                 memories = if (assistant.useGlobalMemory) {
                     memoryRepository.getGlobalMemories()
                 } else {
@@ -544,7 +553,7 @@ class ChatService(
                 outputTransformers = outputTransformers,
                 tools = buildList {
                     if (assistant.enableTodoList) {
-                        add(createTodoTool())
+                        add(createTodoTool(conversation.id.toString(), todoStorage))
                     }
                     if (assistant.enableWebSearch) {
                         addAll(createSearchTools(settings))
@@ -592,14 +601,15 @@ class ChatService(
                             )
                         )
                     }
-                    // Knowledge base search tool
+                    // Knowledge base tools
                     if (assistant.knowledgeBaseIds.isNotEmpty()) {
-                        val kbTool = createKnowledgeSearchTool(
+                        val kbTools = createKnowledgeBaseTools(
                             settings = settings,
                             assistant = assistant,
+                            conversation = conversation,
                         )
-                        if (kbTool != null) {
-                            add(kbTool)
+                        if (kbTools.isNotEmpty()) {
+                            addAll(kbTools)
                         }
                     }
                 },
@@ -679,24 +689,13 @@ class ChatService(
         return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
     }
 
-    private suspend fun createKnowledgeSearchTool(
+    private suspend fun createKnowledgeBaseTools(
         settings: Settings,
         assistant: Assistant,
-    ): Tool? {
+        conversation: Conversation,
+    ): List<Tool> {
         val allowedIds = assistant.knowledgeBaseIds.map { it.toString() }.toSet()
-        if (allowedIds.isEmpty()) return null
-
-        val embeddingModelId = assistant.knowledgeBaseIds.firstOrNull()?.let { kbId ->
-            // Find the first knowledge base's embedding model
-            knowledgeManager.baseRepository.getById(kbId.toString())?.embeddingModelId
-        } ?: settings.embeddingModelId?.toString() ?: return null
-
-        val model = settings.findModelById(kotlin.uuid.Uuid.parse(embeddingModelId)) ?: return null
-        val providerSetting = model.findProvider(settings.providers) ?: return null
-        if (providerSetting !is ProviderSetting.OpenAI) return null
-
-        @Suppress("UNCHECKED_CAST")
-        val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
+        if (allowedIds.isEmpty()) return emptyList()
 
         // 解析 rerank model（首库配置 ?: 全局默认；未配置/不可解析 → null，AI 检索回退 RRF 排序）
         val rerankModelId = assistant.knowledgeBaseIds.firstOrNull()?.let { kbId ->
@@ -704,13 +703,135 @@ class ChatService(
         } ?: settings.rerankModelId?.toString()
         val reranker = resolveReranker(settings, rerankModelId)
 
-        return KnowledgeSearchTool(
+        // 按库解析 embedding 模型：每库用该库入库时的模型（无则回退全局），
+        // 保证检索 query 向量维度与该库 chunk 一致
+        val embeddingForBase: suspend (String) -> EmbeddingConfig? = { baseId ->
+            resolveEmbeddingConfig(baseId, settings)
+        }
+
+        // 工具创建时一次性计算最近对话摘要（排除当前用户问题，由 kb_search 的 query 承载）
+        val historyText = conversation.currentMessages
+            .dropLast(1)
+            .takeLast(6)
+            .filter { it.toText().isNotBlank() }
+            .joinToString("\n\n") { it.summaryAsText(maxLength = 500) }
+
+        val rewrite: suspend (String) -> String =
+            if (assistant.enableKnowledgeQueryRewrite) {
+                { query -> rewriteQueryForSearch(query, historyText, settings, assistant) }
+            } else {
+                { it }
+            }
+
+        val hyde: suspend (String) -> String? = { query ->
+            generateHydeText(query, settings, assistant)
+        }
+
+        val tool = KnowledgeSearchTool(
             knowledgeManager = knowledgeManager,
             getAllowedKnowledgeBaseIds = { allowedIds },
-            getEmbeddingProvider = { provider to providerSetting },
-            getEmbeddingModel = { model },
+            getEmbeddingForBase = embeddingForBase,
             getReranker = { reranker },
-        ).create()
+            rewriteQuery = rewrite,
+            generateHydeText = hyde,
+        )
+        return listOf(tool.create(), tool.createListTool())
+    }
+
+    /**
+     * 解析单个知识库的 embedding 配置（provider + model 来自同一次解析，原子获取）。
+     * 解析失败返回 null（调用方降级纯关键词检索）。runCatching 只包住唯一会抛的 Uuid.parse，
+     * 避免把协程取消也吞掉。
+     */
+    private suspend fun resolveEmbeddingConfig(baseId: String, settings: Settings): EmbeddingConfig? {
+        val base = knowledgeManager.baseRepository.getById(baseId) ?: return null
+        val modelId = base.embeddingModelId?.let { id ->
+            runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return null
+        } ?: settings.embeddingModelId ?: return null
+        val model = settings.findModelById(modelId) ?: return null
+        val providerSetting = model.findProvider(settings.providers) ?: return null
+        if (providerSetting !is ProviderSetting.OpenAI) return null
+        @Suppress("UNCHECKED_CAST")
+        val provider = providerManager.getProviderByType(providerSetting) as Provider<ProviderSetting.OpenAI>
+        return EmbeddingConfig(provider = provider, providerSetting = providerSetting, model = model)
+    }
+
+    /**
+     * 检索前查询改写：结合最近对话历史，把依赖上下文的 query 改写为自包含检索 query。
+     * 无历史 / 改写失败时原样返回。
+     */
+    private suspend fun rewriteQueryForSearch(
+        query: String,
+        history: String,
+        settings: Settings,
+        assistant: Assistant,
+    ): String {
+        if (query.isBlank()) return query
+        if (history.isBlank()) return query  // 首轮无历史，改写=原样，省一次 LLM 调用
+        return try {
+            val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+                ?: return query
+            val provider = model.findProvider(settings.providers) ?: return query
+            val providerHandler = providerManager.getProviderByType(provider)
+            val result = providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(
+                    UIMessage.user(
+                        DEFAULT_QUERY_REWRITE_PROMPT.applyPlaceholders(
+                            "query" to query,
+                            "history" to history,
+                        )
+                    )
+                ),
+                params = backgroundTextGenerationParams(
+                    model = model,
+                    reasoningLevel = ReasoningLevel.OFF,  // 改写不需要推理，省 token/延迟
+                ),
+            )
+            result.choices[0].message?.toText()?.trim()?.takeIf { it.isNotBlank() } ?: query
+        } catch (e: CancellationException) {
+            throw e  // 不吞取消，让生成链正常中止
+        } catch (e: Exception) {
+            query  // 改写失败回退原 query
+        }
+    }
+
+    /**
+     * HyDE（Hypothetical Document Embeddings）：让 LLM 根据 query 生成一段假设答案，
+     * 用假设答案的向量做检索，改善口语化/模糊 query 的召回。
+     * 失败时返回 null，调用方将回退到原 query。
+     */
+    private suspend fun generateHydeText(
+        query: String,
+        settings: Settings,
+        assistant: Assistant,
+    ): String? {
+        if (query.isBlank()) return null
+        return try {
+            val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+                ?: return null
+            val provider = model.findProvider(settings.providers) ?: return null
+            val providerHandler = providerManager.getProviderByType(provider)
+            val result = providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(
+                    UIMessage.user(
+                        DEFAULT_HYDE_PROMPT.applyPlaceholders(
+                            "query" to query,
+                        )
+                    )
+                ),
+                params = backgroundTextGenerationParams(
+                    model = model,
+                    reasoningLevel = ReasoningLevel.OFF,
+                ),
+            )
+            result.choices[0].message?.toText()?.trim()?.takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /** 解析 rerank 模型为 Reranker；未配置或不可用返回 null。 */

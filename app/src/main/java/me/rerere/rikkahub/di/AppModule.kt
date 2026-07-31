@@ -5,6 +5,7 @@ import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.db.fts.FtsKeywordSearcher
 import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -43,6 +44,10 @@ val appModule = module {
 
     single {
         SoundEffectPlayer(get())
+    }
+
+    single {
+        TodoStorage(get())
     }
 
     single {
@@ -91,6 +96,7 @@ val appModule = module {
             workspaceRepository = get(),
             folderRepository = get(),
             knowledgeManager = get(),
+            todoStorage = get(),
         )
     }
 

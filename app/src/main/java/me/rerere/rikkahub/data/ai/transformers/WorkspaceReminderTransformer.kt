@@ -56,15 +56,3 @@ private fun buildWorkspacePrompt(workspace: WorkspaceEntity, cwd: String? = null
     }
     append("</workspace>")
 }
-
-private fun UIMessage.appendText(extra: String): UIMessage {
-    val updatedParts = parts.toMutableList()
-    val firstTextIndex = updatedParts.indexOfFirst { it is UIMessagePart.Text }
-    if (firstTextIndex >= 0) {
-        val text = updatedParts[firstTextIndex] as UIMessagePart.Text
-        updatedParts[firstTextIndex] = text.copy(text = text.text + extra)
-    } else {
-        updatedParts.add(UIMessagePart.Text(extra))
-    }
-    return copy(parts = updatedParts)
-}
