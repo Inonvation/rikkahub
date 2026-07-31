@@ -685,8 +685,10 @@
   <string name="setting_display_page_enable_latex_rendering_title">Enable LaTeX Rendering</string>
   <string name="setting_display_page_enable_haptic_feedback_title">Haptic Feedback</string>
   <string name="setting_display_page_enable_haptic_feedback_desc">Enable haptic feedback throughout the app</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Enable haptic feedback when message generation starts and completes</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">During Message Generation</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Enable haptic feedback when message generation completes</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">After Message Generation</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_desc">Enable haptic feedback when message generation starts</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_title">Before Message Generation</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_title">UI and Controls</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_desc">Enable haptic feedback for UI interactions such as button clicks, toggle switches, and list selections</string>
   <string name="setting_display_page_font_size_preview">At four in the morning, I saw the begonia flowers still awake. I am often like this — lying awake alone in the quiet night, thinking: if someone is thinking of me at this moment, that would be wonderful.</string>

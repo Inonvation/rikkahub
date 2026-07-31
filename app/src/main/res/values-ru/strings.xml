@@ -649,8 +649,10 @@
   <string name="setting_display_page_enable_latex_rendering_title">Включить рендеринг LaTeX</string>
   <string name="setting_display_page_enable_haptic_feedback_title">Тактильная обратная связь</string>
   <string name="setting_display_page_enable_haptic_feedback_desc">Включить тактильную обратную связь в приложении</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Включить тактильную обратную связь при начале и завершении генерации сообщения</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">Во время генерации</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">Включить тактильную обратную связь при завершении генерации сообщения</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">После генерации</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_desc">Включить тактильную обратную связь при начале генерации сообщения</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_title">Перед генерацией</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_title">UI и элементы управления</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_desc">Включить тактильную обратную связь для нажатий кнопок, переключателей, выбора в списках</string>
   <string name="setting_display_page_font_size_preview">Это **пример** текста чата</string>

@@ -649,8 +649,10 @@
   <string name="setting_display_page_enable_latex_rendering_title">啟用 LaTeX 渲染</string>
   <string name="setting_display_page_enable_haptic_feedback_title">觸感回饋</string>
   <string name="setting_display_page_enable_haptic_feedback_desc">開啟後，應用程式內的觸感回饋才會生效</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">訊息開始生成和生成完成後各發一次觸感回饋</string>
-  <string name="setting_display_page_enable_message_generation_haptic_effect_title">訊息生成時</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_desc">訊息生成完成後發一次觸感回饋</string>
+  <string name="setting_display_page_enable_message_generation_haptic_effect_title">訊息生成完成後</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_desc">訊息開始生成時發一次觸感回饋</string>
+  <string name="setting_display_page_enable_message_generation_started_haptic_effect_title">訊息生成開始時</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_title">UI 及控制項</string>
   <string name="setting_display_page_enable_ui_haptic_feedback_desc">為按鈕點擊、開切換、列表選擇等 UI 操作啟用觸感回饋</string>
   <string name="setting_display_page_font_size_preview">凌晨四點鐘，看到海棠花未眠。我常常這樣，在無人的夜裡獨自醒著，想，若有人此刻也在想我，那就好了。</string>
