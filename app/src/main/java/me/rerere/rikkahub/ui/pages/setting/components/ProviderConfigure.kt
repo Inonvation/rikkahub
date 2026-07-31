@@ -39,7 +39,6 @@ import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.ui.pages.setting.MultiKeyEntryCard
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.json.Json
@@ -52,7 +51,6 @@ import kotlin.reflect.KClass
 fun ProviderConfigure(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
-    onOpenMultiKeyManager: (() -> Unit)? = null,
     onEdit: (provider: ProviderSetting) -> Unit,
 ) {
     Column(
@@ -76,9 +74,9 @@ fun ProviderConfigure(
         }
 
         when (provider) {
-            is ProviderSetting.OpenAI -> ProviderConfigureOpenAI(provider, onEdit, onOpenMultiKeyManager)
-            is ProviderSetting.Google -> ProviderConfigureGoogle(provider, onEdit, onOpenMultiKeyManager)
-            is ProviderSetting.Claude -> ProviderConfigureClaude(provider, onEdit, onOpenMultiKeyManager)
+            is ProviderSetting.OpenAI -> ProviderConfigureOpenAI(provider, onEdit)
+            is ProviderSetting.Google -> ProviderConfigureGoogle(provider, onEdit)
+            is ProviderSetting.Claude -> ProviderConfigureClaude(provider, onEdit)
         }
     }
 }
@@ -109,31 +107,23 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl, multipleKeys = this.multipleKeysOf,
+            apiKey = apiKey, baseUrl = convertedBaseUrl,
         )
         ProviderSetting.Google::class -> ProviderSetting.Google(
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl, multipleKeys = this.multipleKeysOf,
+            apiKey = apiKey, baseUrl = convertedBaseUrl,
         )
         ProviderSetting.Claude::class -> ProviderSetting.Claude(
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl, multipleKeys = this.multipleKeysOf,
+            apiKey = apiKey, baseUrl = convertedBaseUrl,
         )
         else -> error("Unsupported provider type: $type")
     }
 }
-
-/** 提取多个 ProviderSetting 子类共有的多 key 开关，供 convertTo 迁移复用 */
-private val ProviderSetting.multipleKeysOf: Boolean
-    get() = when (this) {
-        is ProviderSetting.OpenAI -> this.multipleKeys
-        is ProviderSetting.Google -> this.multipleKeys
-        is ProviderSetting.Claude -> this.multipleKeys
-    }
 
 internal fun ProviderSetting.defaultBaseUrlForReset(): String {
     val defaultProvider = DEFAULT_PROVIDERS.find { it.id == id }
@@ -214,10 +204,8 @@ private val OFFICIAL_PROVIDER_HOSTS = setOf(
 private fun ProviderConfigureOpenAI(
     provider: ProviderSetting.OpenAI,
     onEdit: (provider: ProviderSetting.OpenAI) -> Unit,
-    onOpenMultiKeyManager: (() -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
-    val navController = LocalNavController.current
 
     provider.description()
 
@@ -229,46 +217,19 @@ private fun ProviderConfigureOpenAI(
     )
 
     var keyVisible by remember { mutableStateOf(false) }
-    if (provider.multipleKeys) {
-        MultiKeyEntryCard(
-            apiKey = provider.apiKey,
-            onClick = {
-                if (onOpenMultiKeyManager != null) {
-                    onOpenMultiKeyManager()
-                } else {
-                    navController.navigate(
-                        Screen.SettingMultiKeyManage("provider", provider.id.toString())
-                    )
-                }
-            }
-        )
-    } else {
-        OutlinedTextField(
-            value = provider.apiKey,
-            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-            label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { keyVisible = !keyVisible }) {
-                    Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
-                }
-            },
-        )
-    }
-
-    Row(
+    OutlinedTextField(
+        value = provider.apiKey,
+        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(stringResource(R.string.setting_provider_page_multiple_keys))
-        Switch(
-            checked = provider.multipleKeys,
-            onCheckedChange = { onEdit(provider.copy(multipleKeys = it)) }
-        )
-    }
+        maxLines = 3,
+        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { keyVisible = !keyVisible }) {
+                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+            }
+        },
+    )
 
     OutlinedTextField(
         value = provider.baseUrl,
@@ -346,9 +307,7 @@ private fun ProviderConfigureOpenAI(
 private fun ProviderConfigureClaude(
     provider: ProviderSetting.Claude,
     onEdit: (provider: ProviderSetting.Claude) -> Unit,
-    onOpenMultiKeyManager: (() -> Unit)? = null,
 ) {
-    val navController = LocalNavController.current
 
     provider.description()
 
@@ -361,46 +320,19 @@ private fun ProviderConfigureClaude(
     )
 
     var keyVisible by remember { mutableStateOf(false) }
-    if (provider.multipleKeys) {
-        MultiKeyEntryCard(
-            apiKey = provider.apiKey,
-            onClick = {
-                if (onOpenMultiKeyManager != null) {
-                    onOpenMultiKeyManager()
-                } else {
-                    navController.navigate(
-                        Screen.SettingMultiKeyManage("provider", provider.id.toString())
-                    )
-                }
-            }
-        )
-    } else {
-        OutlinedTextField(
-            value = provider.apiKey,
-            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-            label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { keyVisible = !keyVisible }) {
-                    Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
-                }
-            },
-        )
-    }
-
-    Row(
+    OutlinedTextField(
+        value = provider.apiKey,
+        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(stringResource(R.string.setting_provider_page_multiple_keys))
-        Switch(
-            checked = provider.multipleKeys,
-            onCheckedChange = { onEdit(provider.copy(multipleKeys = it)) }
-        )
-    }
+        maxLines = 3,
+        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { keyVisible = !keyVisible }) {
+                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+            }
+        },
+    )
 
     OutlinedTextField(
         value = provider.baseUrl,
@@ -463,11 +395,9 @@ private fun ProviderConfigureClaude(
 private fun ProviderConfigureGoogle(
     provider: ProviderSetting.Google,
     onEdit: (provider: ProviderSetting.Google) -> Unit,
-    onOpenMultiKeyManager: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
-    val navController = LocalNavController.current
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -502,46 +432,19 @@ private fun ProviderConfigureGoogle(
 
     if (!(provider.vertexAI && provider.useServiceAccount)) {
         var keyVisible by remember { mutableStateOf(false) }
-        if (provider.multipleKeys) {
-            MultiKeyEntryCard(
-                apiKey = provider.apiKey,
-                onClick = {
-                    if (onOpenMultiKeyManager != null) {
-                        onOpenMultiKeyManager()
-                    } else {
-                        navController.navigate(
-                            Screen.SettingMultiKeyManage("provider", provider.id.toString())
-                        )
-                    }
-                }
-            )
-        } else {
-            OutlinedTextField(
-                value = provider.apiKey,
-                onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-                label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-                modifier = Modifier.fillMaxWidth(),
-                maxLines = 3,
-                visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { keyVisible = !keyVisible }) {
-                        Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
-                    }
-                },
-            )
-        }
-
-        Row(
+        OutlinedTextField(
+            value = provider.apiKey,
+            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+            label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(R.string.setting_provider_page_multiple_keys))
-            Switch(
-                checked = provider.multipleKeys,
-                onCheckedChange = { onEdit(provider.copy(multipleKeys = it)) }
-            )
-        }
+            maxLines = 3,
+            visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { keyVisible = !keyVisible }) {
+                    Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+                }
+            },
+        )
     }
 
     if (!provider.vertexAI) {

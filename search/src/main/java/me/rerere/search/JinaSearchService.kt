@@ -13,12 +13,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -75,42 +72,35 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             }
 
             val searchUrl = serviceOptions.searchUrl.ifBlank { DEFAULT_SEARCH_URL }
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url(searchUrl)
-                    .post(body.toString().toRequestBody())
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .addHeader("Accept", "application/json")
-                    .addHeader("Content-Type", "application/json")
-                    .build()
 
-                val response = httpClient.newCall(request).await()
-                if (response.isSuccessful) {
-                    response.body.string().let {
-                        json.decodeFromString<JinaSearchResponse>(it)
-                    }
-                } else {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
+            val request = Request.Builder()
+                .url(searchUrl)
+                .post(body.toString().toRequestBody())
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Accept", "application/json")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            val response = httpClient.newCall(request).await()
+            if (response.isSuccessful) {
+                val responseData = response.body.string().let {
+                    json.decodeFromString<JinaSearchResponse>(it)
                 }
-            }
 
-            return@withContext Result.success(
-                SearchResult(
-                    items = result.data.take(commonOptions.resultSize).map {
-                        SearchResultItem(
-                            title = it.title,
-                            url = it.url,
-                            text = it.description
-                        )
-                    }
+                return@withContext Result.success(
+                    SearchResult(
+                        items = responseData.data.take(commonOptions.resultSize).map {
+                            SearchResultItem(
+                                title = it.title,
+                                url = it.url,
+                                text = it.description
+                            )
+                        }
+                    )
                 )
-            )
+            } else {
+                error("response failed #${response.code}")
+            }
         }
     }
 
@@ -127,39 +117,32 @@ object JinaSearchService : SearchService<SearchServiceOptions.JinaOptions> {
             }
 
             val scrapeUrl = serviceOptions.scrapeUrl.ifBlank { DEFAULT_SCRAPE_URL }
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url(scrapeUrl)
-                    .post(body.toString().toRequestBody())
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .addHeader("Accept", "application/json")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("X-Return-Format", "markdown")
-                    .build()
 
-                val response = httpClient.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed for url $url #$code")
-                }
-                response.body.string().let {
-                    json.decodeFromString<JinaScrapeResponse>(it)
-                }
+            val request = Request.Builder()
+                .url(scrapeUrl)
+                .post(body.toString().toRequestBody())
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Accept", "application/json")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("X-Return-Format", "markdown")
+                .build()
+
+            val response = httpClient.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("response failed for url $url #${response.code}")
+            }
+            val responseData = response.body.string().let {
+                json.decodeFromString<JinaScrapeResponse>(it)
             }
 
             ScrapedResult(
                 urls = listOf(
                     ScrapedResultUrl(
-                        url = result.data.url,
-                        content = result.data.content,
+                        url = responseData.data.url,
+                        content = responseData.data.content,
                         metadata = ScrapedResultMetadata(
-                            title = result.data.title,
-                            description = result.data.description
+                            title = responseData.data.title,
+                            description = responseData.data.description
                         )
                     )
                 )

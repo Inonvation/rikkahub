@@ -14,6 +14,9 @@ interface KnowledgeChunkDao {
     @Query("SELECT * FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId ORDER BY document_id, chunk_index")
     suspend fun getByKnowledgeBaseId(knowledgeBaseId: String): List<KnowledgeChunkEntity>
 
+    @Query("SELECT * FROM knowledge_chunk WHERE id IN (:chunkIds)")
+    suspend fun getByChunkIds(chunkIds: List<String>): List<KnowledgeChunkEntity>
+
     @Query("SELECT * FROM knowledge_chunk WHERE document_id = :documentId ORDER BY chunk_index")
     suspend fun getByDocumentId(documentId: String): List<KnowledgeChunkEntity>
 

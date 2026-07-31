@@ -580,17 +580,6 @@
   <string name="search_detail_system_prompt">系统提示</string>
   <string name="search_detail_unknown_error">未知错误</string>
   <string name="search_detail_username">用户名</string>
-  <string name="multi_key_manage_title">管理 Keys</string>
-  <string name="multi_key_manage_hint">添加多个 API key，请求时自动轮换使用</string>
-  <string name="multi_key_manage_unsaved">有未保存的更改</string>
-  <string name="multi_key_duplicate">该 key 已存在</string>
-  <string name="multi_key_duplicate_hint">存在重复的 key，保存时会自动合并</string>
-  <string name="multi_key_delete">删除 key</string>
-  <string name="multi_key_show">显示 key</string>
-  <string name="multi_key_hide">隐藏 key</string>
-  <string name="multi_key_entry_title">多 Key</string>
-  <string name="multi_key_entry_count">已配置 %d 个 key</string>
-  <string name="multi_key_entry_empty">尚未配置 key</string>
   <string name="search_page_hint">输入关键词并点击搜索以查找消息</string>
   <string name="search_page_no_results">无结果</string>
   <string name="search_page_placeholder">搜索消息内容…</string>

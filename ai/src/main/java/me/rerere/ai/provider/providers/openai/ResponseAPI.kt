@@ -7,7 +7,6 @@ import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
@@ -42,14 +41,11 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.ai.util.RetryableHttpException
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
-import me.rerere.ai.util.retryWithKeyFallback
-import me.rerere.ai.util.splitApiKeys
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
@@ -83,149 +79,116 @@ class ResponseAPI(
             params = params,
             stream = false,
         )
-        return keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/responses")
-                .headers(params.customHeaders.toHeaders())
-                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Content-Type", "application/json")
-                .configureReferHeaders(providerSetting.baseUrl)
-                .build()
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/responses")
+            .headers(params.customHeaders.toHeaders())
+            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .addHeader(
+                "Authorization",
+                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+            )
+            .addHeader("Content-Type", "application/json")
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
 
-            Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                val msg = "Failed to get response: ${response.code} ${response.body.string()}"
-                response.close()
-                throw RetryableHttpException(response.code, msg)
-            }
-
-            val bodyStr = response.body?.string() ?: ""
-            Log.i(TAG, "generateText: $bodyStr")
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            parseResponseOutput(bodyJson)
+        val response = client.newCall(request).await()
+        if (!response.isSuccessful) {
+            throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
         }
+
+        val bodyStr = response.body?.string() ?: ""
+        Log.i(TAG, "generateText: $bodyStr")
+        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val output = parseResponseOutput(bodyJson)
+
+        return output
     }
 
     override suspend fun streamText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = flow {
-        val keys = providerSetting.apiKey
-        val providerId = providerSetting.id.toString()
+    ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
             params = params,
             stream = true,
         )
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/responses")
+            .headers(params.customHeaders.toHeaders())
+            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .addHeader(
+                "Authorization",
+                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+            )
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
-        val multipleKeys = providerSetting.multipleKeys
-        val keyList = splitApiKeys(keys)
-        val shouldRotate = multipleKeys && keyList.size >= 2
-
-        val startKey = keyRoulette.next(keys, providerId, multipleKeys)
-        val startIndex = keyList.indexOf(startKey).takeIf { it >= 0 } ?: 0
-        val maxAttempts = if (shouldRotate) keyList.size else 1
-
-        for (offset in 0 until maxAttempts) {
-            val key = if (shouldRotate) keyList[(startIndex + offset) % keyList.size] else startKey
-            var emittedAny = false
-            try {
-                callbackFlow {
-                    val request = Request.Builder()
-                        .url("${providerSetting.baseUrl}/responses")
-                        .headers(params.customHeaders.toHeaders())
-                        .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-                        .addHeader("Authorization", "Bearer $key")
-                        .configureReferHeaders(providerSetting.baseUrl)
-                        .build()
-
-                    val listener = object : EventSourceListener() {
-                        override fun onEvent(
-                            eventSource: EventSource,
-                            id: String?,
-                            type: String?,
-                            data: String
-                        ) {
-                            if (data == "[DONE]") {
-                                close()
-                                return
-                            }
-                            Log.d(TAG, "onEvent: $id/$type $data")
-                            val eventJson = json.parseToJsonElement(data).jsonObject
-                            val chunk = parseResponseDelta(eventJson)
-                            if (chunk != null) {
-                                trySend(chunk).onFailure { e ->
-                                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
-                                }
-                            }
-                            if (type == "response.completed") {
-                                close()
-                            }
-                        }
-
-                        override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                            // 未吐任何内容时的 401/429 才能换 key 重试，交给外层判断
-                            val code = response?.code
-                            if (code == 401 || code == 429) {
-                                close(RetryableHttpException(code, "stream failed #$code"))
-                                return
-                            }
-                            var exception = t
-
-                            t?.printStackTrace()
-                            println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                            val bodyRaw = response?.body?.stringSafe()
-                            try {
-                                if (!bodyRaw.isNullOrBlank()) {
-                                    val bodyElement = Json.parseToJsonElement(bodyRaw)
-                                    println(bodyElement)
-                                    exception = bodyElement.parseErrorDetail()
-                                    Log.i(TAG, "onFailure: $exception")
-                                }
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                                e.printStackTrace()
-                            } finally {
-                                close(exception)
-                            }
-                        }
-
-                        override fun onClosed(eventSource: EventSource) {
-                            close()
-                        }
-                    }
-
-                    val eventSource = EventSources.createFactory(client)
-                        .newEventSource(request, listener)
-
-                    awaitClose {
-                        println("[awaitClose] 关闭eventSource ")
-                        eventSource.cancel()
-                    }
-                    // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
-                }.buffer(Channel.UNLIMITED).collect { chunk ->
-                    emittedAny = true
-                    emit(chunk)
+        val listener = object : EventSourceListener() {
+            override fun onEvent(
+                eventSource: EventSource,
+                id: String?,
+                type: String?,
+                data: String
+            ) {
+                if (data == "[DONE]") {
+                    close()
+                    return
                 }
-                return@flow
-            } catch (e: RetryableHttpException) {
-                if (emittedAny || !e.retryable) throw e
-                keyRoulette.markFailed(keys, providerId, key)
+                Log.d(TAG, "onEvent: $id/$type $data")
+                val json = json.parseToJsonElement(data).jsonObject
+                val chunk = parseResponseDelta(json)
+                if (chunk != null) {
+                    trySend(chunk).onFailure { e ->
+                        Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    }
+                }
+                if (type == "response.completed") {
+                    close()
+                }
+            }
+
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                var exception = t
+
+                t?.printStackTrace()
+                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+
+                val bodyRaw = response?.body?.stringSafe()
+                try {
+                    if (!bodyRaw.isNullOrBlank()) {
+                        val bodyElement = Json.parseToJsonElement(bodyRaw)
+                        println(bodyElement)
+                        exception = bodyElement.parseErrorDetail()
+                        Log.i(TAG, "onFailure: $exception")
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                    e.printStackTrace()
+                } finally {
+                    close(exception)
+                }
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                close()
             }
         }
-        throw RetryableHttpException(-1, "All keys failed for ResponseAPI stream")
+
+        val eventSource = EventSources.createFactory(client)
+            .newEventSource(request, listener)
+
+        awaitClose {
+            println("[awaitClose] 关闭eventSource ")
+            eventSource.cancel()
+        }
+        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED)
 
     internal fun buildRequestBody(

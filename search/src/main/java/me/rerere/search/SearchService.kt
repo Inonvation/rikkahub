@@ -172,15 +172,13 @@ sealed class SearchServiceOptions {
     data class ZhipuOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("tavily")
     data class TavilyOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val depth: String = "advanced",
     ) : SearchServiceOptions()
 
@@ -189,8 +187,7 @@ sealed class SearchServiceOptions {
     data class ExaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("searxng")
@@ -208,7 +205,6 @@ sealed class SearchServiceOptions {
     data class LinkUpOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val depth: String = "standard",
     ) : SearchServiceOptions()
 
@@ -217,31 +213,27 @@ sealed class SearchServiceOptions {
     data class BraveOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("metaso")
     data class MetasoOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("ollama")
     data class OllamaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("perplexity")
     data class PerplexityOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val maxTokens: Int? = null,
         val maxTokensPerPage: Int? = null,
     ) : SearchServiceOptions()
@@ -251,15 +243,13 @@ sealed class SearchServiceOptions {
     data class FirecrawlOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("jina")
     data class JinaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val searchUrl: String = "https://s.jina.ai/",
         val scrapeUrl: String = "https://r.jina.ai/",
     ) : SearchServiceOptions()
@@ -269,7 +259,6 @@ sealed class SearchServiceOptions {
     data class BochaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val summary: Boolean = true,
     ) : SearchServiceOptions()
 
@@ -278,7 +267,6 @@ sealed class SearchServiceOptions {
     data class RikkaHubOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val depth: String = "standard",
     ) : SearchServiceOptions()
 
@@ -287,7 +275,6 @@ sealed class SearchServiceOptions {
     data class GrokOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
         val model: String = "grok-4-1-fast-non-reasoning",
         val customUrl: String = "https://api.x.ai/v1/responses",
         val systemPrompt: String = "You are a helpful search assistant. Search the web to find accurate and up-to-date information for the user's query. Provide a comprehensive answer with citations.",
@@ -298,16 +285,14 @@ sealed class SearchServiceOptions {
     data class TinyfishOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("serper")
     data class SerperOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        val multipleKeys: Boolean = false,
-    ) : SearchServiceOptions()
+        ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("custom_js")

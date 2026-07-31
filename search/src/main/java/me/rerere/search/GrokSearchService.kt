@@ -18,12 +18,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -63,6 +60,10 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
         serviceOptions: SearchServiceOptions.GrokOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
+            if (serviceOptions.apiKey.isBlank()) {
+                error("Grok API key is required")
+            }
+
             val query = params["query"]?.jsonPrimitive?.content
                 ?: error("query is required")
 
@@ -91,62 +92,49 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
 
             Log.i(TAG, "search: $query")
 
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                if (apiKey.isBlank()) {
-                    error("Grok API key is required")
+            val request = Request.Builder()
+                .url(serviceOptions.customUrl)
+                .post(body.toString().toRequestBody())
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            val response = httpClient.newCall(request).await()
+            if (response.isSuccessful) {
+                val responseBody = response.body.string().let {
+                    json.decodeFromString<GrokResponse>(it)
                 }
 
-                val request = Request.Builder()
-                    .url(serviceOptions.customUrl)
-                    .post(body.toString().toRequestBody())
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .addHeader("Content-Type", "application/json")
-                    .build()
-
-                val response = httpClient.newCall(request).await()
-                if (response.isSuccessful) {
-                    response.body.string().let {
-                        json.decodeFromString<GrokResponse>(it)
-                    }
-                } else {
-                    val code = response.code
-                    val msg = "response failed #$code: ${response.body?.string()}"
-                    response.close()
-                    throw RetryableHttpException(code, msg)
+                val messageOutput = responseBody.output.firstOrNull {
+                    it.type == "message" && it.role == "assistant"
                 }
-            }
+                val textContent = messageOutput?.content?.firstOrNull {
+                    it.type == "output_text"
+                }
 
-            val messageOutput = result.output.firstOrNull {
-                it.type == "message" && it.role == "assistant"
-            }
-            val textContent = messageOutput?.content?.firstOrNull {
-                it.type == "output_text"
-            }
+                val answer = textContent?.text
 
-            val answer = textContent?.text
+                val items = textContent?.annotations
+                    ?.filter { it.type == "url_citation" && !it.url.isNullOrBlank() }
+                    ?.distinctBy { it.url }
+                    ?.take(commonOptions.resultSize)
+                    ?.map { annotation ->
+                        SearchResultItem(
+                            title = annotation.url!!,
+                            url = annotation.url,
+                            text = ""
+                        )
+                    } ?: emptyList()
 
-            val items = textContent?.annotations
-                ?.filter { it.type == "url_citation" && !it.url.isNullOrBlank() }
-                ?.distinctBy { it.url }
-                ?.take(commonOptions.resultSize)
-                ?.map { annotation ->
-                    SearchResultItem(
-                        title = annotation.url!!,
-                        url = annotation.url,
-                        text = ""
+                return@withContext Result.success(
+                    SearchResult(
+                        answer = answer,
+                        items = items
                     )
-                } ?: emptyList()
-
-            return@withContext Result.success(
-                SearchResult(
-                    answer = answer,
-                    items = items
                 )
-            )
+            } else {
+                error("response failed #${response.code}: ${response.body?.string()}")
+            }
         }
     }
 

@@ -30,7 +30,8 @@ class FtsKeywordSearcher(
         val hits = ftsManager.search(query, knowledgeBaseId, topK)
         if (hits.isEmpty()) return@withContext emptyList()
 
-        val byId = chunkDao.getByKnowledgeBaseId(knowledgeBaseId).associateBy { it.id }
+        val hitIds = hits.map { it.chunkId }
+        val byId = chunkDao.getByChunkIds(hitIds).associateBy { it.id }
         hits.mapNotNull { hit ->
             byId[hit.chunkId]?.let { chunk ->
                 KeywordSearchResult(

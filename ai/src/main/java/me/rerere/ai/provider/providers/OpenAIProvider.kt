@@ -19,12 +19,8 @@ import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.RerankResult
-import me.rerere.ai.provider.RerankingGenerationParams
-import me.rerere.ai.provider.RerankingGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.openai.ChatCompletionsAPI
 import me.rerere.ai.provider.providers.openai.ResponseAPI
@@ -32,11 +28,9 @@ import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.ai.util.RetryableHttpException
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.getByKey
@@ -64,79 +58,58 @@ class OpenAIProvider(
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
-            keyRoulette.retryWithKeyFallback(
-                keys = providerSetting.apiKey,
-                providerId = providerSetting.id.toString(),
-                multipleKeys = providerSetting.multipleKeys,
-            ) { key ->
-                val request = Request.Builder()
-                    .url("${providerSetting.baseUrl}/models")
-                    .addHeader("Authorization", "Bearer $key")
-                    .get()
-                    .build()
+            val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            val request = Request.Builder()
+                .url("${providerSetting.baseUrl}/models")
+                .addHeader("Authorization", "Bearer $key")
+                .get()
+                .build()
 
-                val response = client.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val msg = "Failed to get models: ${response.code} ${response.body?.string()}"
-                    response.close()
-                    throw RetryableHttpException(response.code, msg)
-                }
+            val response = client.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("Failed to get models: ${response.code} ${response.body?.string()}")
+            }
 
-                val bodyStr = response.body?.string() ?: ""
-                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-                val data = bodyJson["data"]?.jsonArray ?: emptyList()
+            val bodyStr = response.body?.string() ?: ""
+            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+            val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
 
-                data.mapNotNull { modelJson ->
-                    val modelObj = modelJson.jsonObject
-                    val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            data.mapNotNull { modelJson ->
+                val modelObj = modelJson.jsonObject
+                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
-                    // Auto-detect embedding models by ID pattern
-                    val isEmbedding = id.contains("embedding", ignoreCase = true) ||
-                            id.contains("bge", ignoreCase = true) ||
-                            id.contains("e5", ignoreCase = true) ||
-                            id.contains("gte", ignoreCase = true)
-
-                    Model(
-                        modelId = id,
-                        displayName = id,
-                        type = if (isEmbedding) ModelType.EMBEDDING else ModelType.CHAT,
-                    )
-                }
+                Model(
+                    modelId = id,
+                    displayName = id,
+                )
             }
         }
 
     override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
-                providerSetting.balanceOption.apiPath
-            } else {
-                "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
-            }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $key")
-                .get()
-                .build()
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                val msg = "Failed to get balance: ${response.code} ${response.body?.string()}"
-                response.close()
-                throw RetryableHttpException(response.code, msg)
-            }
+        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
+            providerSetting.balanceOption.apiPath
+        } else {
+            "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
+        }
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $key")
+            .get()
+            .build()
+        val response = client.newCall(request).await()
+        if (!response.isSuccessful) {
+            error("Failed to get balance: ${response.code} ${response.body?.string()}")
+        }
 
-            val bodyStr = response.body.string()
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
-            val digitalValue = value.toFloatOrNull()
-            if(digitalValue != null) {
-                "%.2f".format(digitalValue)
-            } else {
-                value
-            }
+        val bodyStr = response.body.string()
+        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
+        val digitalValue = value.toFloatOrNull()
+        if(digitalValue != null) {
+            "%.2f".format(digitalValue)
+        } else {
+            value
         }
     }
 
@@ -182,114 +155,49 @@ class OpenAIProvider(
     ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
         require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
 
-        keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val requestBody = json.encodeToString(
-                buildJsonObject {
-                    put("model", params.model.modelId)
-                    if (params.input.size == 1) {
-                        put("input", params.input.first())
-                    } else {
-                        putJsonArray("input") {
-                            params.input.forEach { add(JsonPrimitive(it)) }
-                        }
+        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        val requestBody = json.encodeToString(
+            buildJsonObject {
+                put("model", params.model.modelId)
+                if (params.input.size == 1) {
+                    put("input", params.input.first())
+                } else {
+                    putJsonArray("input") {
+                        params.input.forEach { add(JsonPrimitive(it)) }
                     }
-                    params.dimensions?.let { put("dimensions", it) }
-                }.mergeCustomBody(params.customBody)
-            )
+                }
+                params.dimensions?.let { put("dimensions", it) }
+            }.mergeCustomBody(params.customBody)
+        )
 
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}${providerSetting.embeddingsPath}")
-                .headers(params.customHeaders.toHeaders())
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
-                .build()
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/embeddings")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .build()
 
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                val msg = "Failed to generate embedding: ${response.code} ${response.body?.string()} (${request.url})"
-                response.close()
-                throw RetryableHttpException(response.code, msg)
-            }
-
-            val bodyStr = response.body?.string() ?: ""
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
-            val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
-
-            val embeddings = data.map { embeddingJson ->
-                val embeddingArray = embeddingJson.jsonObject["embedding"]?.jsonArray
-                    ?: error("No embedding in response")
-                embeddingArray.map { it.jsonPrimitive.content.toFloat() }
-            }
-
-            EmbeddingGenerationResult(
-                model = model,
-                embeddings = embeddings
-            )
+        val response = client.newCall(request).await()
+        if (!response.isSuccessful) {
+            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
         }
-    }
 
-    override suspend fun rerank(
-        providerSetting: ProviderSetting.OpenAI,
-        params: RerankingGenerationParams
-    ): RerankingGenerationResult = withContext(Dispatchers.IO) {
-        require(params.query.isNotBlank()) { "Reranking query cannot be empty" }
-        require(params.documents.isNotEmpty()) { "Reranking documents cannot be empty" }
+        val bodyStr = response.body?.string() ?: ""
+        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+        val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
+        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
 
-        keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val requestBody = json.encodeToString(
-                buildJsonObject {
-                    put("model", params.model.modelId)
-                    put("query", params.query)
-                    putJsonArray("documents") {
-                        params.documents.forEach { add(JsonPrimitive(it)) }
-                    }
-                    params.topN?.let { put("top_n", it) }
-                }.mergeCustomBody(params.customBody)
-            )
-
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}${providerSetting.rerankPath}")
-                .headers(params.customHeaders.toHeaders())
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                val msg = "Failed to rerank: ${response.code} ${response.body?.string()}"
-                response.close()
-                throw RetryableHttpException(response.code, msg)
-            }
-
-            val bodyStr = response.body?.string() ?: ""
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
-            val results = bodyJson["results"]?.jsonArray?.map { resultJson ->
-                val obj = resultJson.jsonObject
-                RerankResult(
-                    index = obj["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                        ?: error("Missing index in rerank result"),
-                    relevanceScore = obj["relevance_score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
-                        ?: error("Missing relevance_score in rerank result")
-                )
-            } ?: emptyList()
-
-            RerankingGenerationResult(
-                model = model,
-                results = results
-            )
+        val embeddings = data.map { embeddingJson ->
+            val embeddingArray = embeddingJson.jsonObject["embedding"]?.jsonArray
+                ?: error("No embedding in response")
+            embeddingArray.map { it.jsonPrimitive.content.toFloat() }
         }
+
+        EmbeddingGenerationResult(
+            model = model,
+            embeddings = embeddings
+        )
     }
 
     override suspend fun generateImage(
@@ -300,47 +208,41 @@ class OpenAIProvider(
             "Expected OpenAI provider setting"
         }
 
-        val items = keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val requestBody = json.encodeToString(
-                buildJsonObject {
-                    put("model", params.model.modelId)
-                    put("prompt", params.prompt)
-                    put("n", params.numOfImages)
+        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
 
-                    val isGrok = providerSetting.baseUrl.contains("x.ai", ignoreCase = true) ||
-                        params.model.modelId.contains("grok", ignoreCase = true)
-
-                    if (params.size.isNotBlank() && !isGrok) {
-                        put("size", params.size)
-                    }
+        val requestBody = json.encodeToString(
+            buildJsonObject {
+                put("model", params.model.modelId)
+                put("prompt", params.prompt)
+                put("n", params.numOfImages)
+                
+                val isGrok = providerSetting.baseUrl.contains("x.ai", ignoreCase = true) || 
+                    params.model.modelId.contains("grok", ignoreCase = true)
+                
+                if (params.size.isNotBlank() && !isGrok) {
+                    put("size", params.size)
                 }
-                    .mergeCustomBody(params.customBody)
-            )
-
-            Log.i(TAG, "generateImage: $requestBody")
-
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/images/generations")
-                .headers(params.customHeaders.toHeaders())
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
-                .configureReferHeaders(providerSetting.baseUrl)
-                .build()
-
-            withContext(Dispatchers.IO) {
-                val response = client.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val msg = "Failed to generate image: ${response.code} ${response.body?.string()}"
-                    response.close()
-                    throw RetryableHttpException(response.code, msg)
-                }
-                parseImageResponse(response.body.string())
             }
+                .mergeCustomBody(params.customBody)
+        )
+
+        Log.i(TAG, "generateImage: $requestBody")
+
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/images/generations")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
+
+        val items = withContext(Dispatchers.IO) {
+            val response = client.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("Failed to generate image: ${response.code} ${response.body?.string()}")
+            }
+            parseImageResponse(response.body.string())
         }
 
         items.forEach { emit(it) }
@@ -357,61 +259,54 @@ class OpenAIProvider(
             "At least one image is required"
         }
 
-        val items = keyRoulette.retryWithKeyFallback(
-            keys = providerSetting.apiKey,
-            providerId = providerSetting.id.toString(),
-            multipleKeys = providerSetting.multipleKeys,
-        ) { key ->
-            val bodyBuilder = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("model", params.model.modelId)
-                .addFormDataPart("prompt", params.prompt)
-                .addFormDataPart("n", params.numOfImages.toString())
-            if (params.size.isNotBlank()) {
-                bodyBuilder.addFormDataPart("size", params.size)
-            }
+        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        val bodyBuilder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("model", params.model.modelId)
+            .addFormDataPart("prompt", params.prompt)
+            .addFormDataPart("n", params.numOfImages.toString())
+        if (params.size.isNotBlank()) {
+            bodyBuilder.addFormDataPart("size", params.size)
+        }
 
-            val imageFieldName = if (params.images.size == 1) "image" else "image[]"
-            params.images.forEach { path ->
-                val imageFile = File(path)
-                require(imageFile.exists()) {
-                    "Image file does not exist: $path"
-                }
-                require(imageFile.extension.lowercase() in SUPPORTED_EDIT_IMAGE_EXTENSIONS) {
-                    "Unsupported image file type for OpenAI edit: ${imageFile.extension}"
-                }
-                bodyBuilder.addFormDataPart(
-                    imageFieldName,
-                    imageFile.name,
-                    imageFile.asRequestBody(imageFile.imageMediaType().toMediaType())
-                )
+        val imageFieldName = if (params.images.size == 1) "image" else "image[]"
+        params.images.forEach { path ->
+            val imageFile = File(path)
+            require(imageFile.exists()) {
+                "Image file does not exist: $path"
             }
-
-            params.customBody.forEach { customBody ->
-                val value = when (val element = customBody.value) {
-                    is JsonPrimitive -> element.contentOrNull ?: element.toString()
-                    else -> element.toString()
-                }
-                bodyBuilder.addFormDataPart(customBody.key, value)
+            require(imageFile.extension.lowercase() in SUPPORTED_EDIT_IMAGE_EXTENSIONS) {
+                "Unsupported image file type for OpenAI edit: ${imageFile.extension}"
             }
+            bodyBuilder.addFormDataPart(
+                imageFieldName,
+                imageFile.name,
+                imageFile.asRequestBody(imageFile.imageMediaType().toMediaType())
+            )
+        }
 
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/images/edits")
-                .headers(params.customHeaders.toHeaders())
-                .addHeader("Authorization", "Bearer $key")
-                .post(bodyBuilder.build())
-                .configureReferHeaders(providerSetting.baseUrl)
-                .build()
-
-            withContext(Dispatchers.IO) {
-                val response = client.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val msg = "Failed to edit image: ${response.code} ${response.body?.string()}"
-                    response.close()
-                    throw RetryableHttpException(response.code, msg)
-                }
-                parseImageResponse(response.body.string())
+        params.customBody.forEach { customBody ->
+            val value = when (val element = customBody.value) {
+                is JsonPrimitive -> element.contentOrNull ?: element.toString()
+                else -> element.toString()
             }
+            bodyBuilder.addFormDataPart(customBody.key, value)
+        }
+
+        val request = Request.Builder()
+            .url("${providerSetting.baseUrl}/images/edits")
+            .headers(params.customHeaders.toHeaders())
+            .addHeader("Authorization", "Bearer $key")
+            .post(bodyBuilder.build())
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
+
+        val items = withContext(Dispatchers.IO) {
+            val response = client.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("Failed to edit image: ${response.code} ${response.body?.string()}")
+            }
+            parseImageResponse(response.body.string())
         }
 
         items.forEach { emit(it) }

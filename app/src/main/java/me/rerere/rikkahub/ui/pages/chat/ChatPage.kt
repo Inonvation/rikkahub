@@ -259,6 +259,13 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
+    // 切回正在生成中的对话时，滚动到底部以显示最新消息
+    LaunchedEffect(Unit) {
+        if (vm.chatListInitialized && loadingJob != null) {
+            chatListState.scrollToItem(conversation.currentMessages.size + 5)
+        }
+    }
+
     when {
         isBigScreen -> {
             PermanentNavigationDrawer(

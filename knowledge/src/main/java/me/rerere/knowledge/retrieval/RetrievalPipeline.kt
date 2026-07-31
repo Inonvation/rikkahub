@@ -109,13 +109,20 @@ class RetrievalPipeline(
         }
 
         // Threshold 过滤 + 裁剪
-        return results
-            .filter { result ->
-                // ranking 分数不过滤(来自 RRF), relevance 分数按阈值过滤
-                if (result.scoreKind == "relevance") {
-                    result.score >= similarityThreshold
-                } else true
+        val afterThreshold = if (similarityThreshold > 0f) {
+            results.filter { result ->
+                when (result.scoreKind) {
+                    "relevance" -> result.score >= similarityThreshold
+                    else -> {
+                        val maxScore = results.maxOf { it.score }
+                        if (maxScore > 0f) result.score >= similarityThreshold * maxScore
+                        else true
+                    }
+                }
             }
+        } else results
+
+        return afterThreshold
             .take(topK)
             .mapIndexed { index, it ->
                 it.copy(rank = index + 1)

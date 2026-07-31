@@ -175,7 +175,10 @@ class KnowledgeSearchTool(
                 }
 
                 allResults.sortByDescending { it.score }
-                val topResults = allResults.take(10)
+                val maxTopK = targetIds.maxOf { id ->
+                    knowledgeManager.baseRepository.getById(id)?.topK ?: 10
+                }
+                val topResults = allResults.take(maxTopK)
 
                 if (topResults.isEmpty()) {
                     return@Tool listOf(
@@ -197,10 +200,7 @@ class KnowledgeSearchTool(
                             "relevance" -> "相关度 ${"%.0f".format(result.score * 100)}%"
                             else -> "RRF ${"%.3f".format(result.score)}"
                         }
-                        val content = result.snippet
-                            // 去除 simple_snippet 的 [..] 高亮标记，给 LLM 干净文本
-                            ?.replace("[", "")?.replace("]", "")
-                            ?: result.chunk.content
+                        val content = result.chunk.content
                         appendLine("---")
                         appendLine("[${index + 1}] 来源: ${source ?: "未知文档"} (${scoreText})")
                         appendLine(content)

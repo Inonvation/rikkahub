@@ -262,8 +262,7 @@ private fun SettingProviderConfigPage(
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit,
 ) {
-    val navController = LocalNavController.current
-    var internalProvider by remember(provider.id) { mutableStateOf(provider) }
+    var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -279,13 +278,6 @@ private fun SettingProviderConfigPage(
             onEdit = {
                 internalProvider = it
             },
-            onOpenMultiKeyManager = {
-                // 进入多 key 子编辑器前先提交当前快照，避免子页面读到旧值
-                onEdit(internalProvider)
-                navController.navigate(
-                    Screen.SettingMultiKeyManage("provider", internalProvider.id.toString())
-                )
-            }
         )
 
         if (internalProvider is ProviderSetting.OpenAI) {

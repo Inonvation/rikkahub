@@ -578,11 +578,6 @@
   <string name="search_detail_system_prompt">系統提示</string>
   <string name="search_detail_unknown_error">未知錯誤</string>
   <string name="search_detail_username">使用者名稱</string>
-  <string name="multi_key_manage_title">管理 Keys</string>
-  <string name="multi_key_manage_hint">添加多個 API key，請求時自動輪換使用</string>
-  <string name="multi_key_entry_title">多 Key</string>
-  <string name="multi_key_entry_count">已配置 %d 個 key</string>
-  <string name="multi_key_entry_empty">尚未配置 key</string>
   <string name="search_page_hint">輸入關鍵字並按下搜尋以尋找訊息</string>
   <string name="search_page_no_results">沒有結果</string>
   <string name="search_page_placeholder">搜尋訊息內容…</string>

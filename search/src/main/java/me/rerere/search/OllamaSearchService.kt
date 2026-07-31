@@ -13,12 +13,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -71,40 +68,31 @@ object OllamaSearchService : SearchService<SearchServiceOptions.OllamaOptions> {
                 put("max_results", commonOptions.resultSize.coerceIn(5..10))
             }
 
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://ollama.com/api/web_search")
-                    .post(body.toString().toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
+            val request = Request.Builder()
+                .url("https://ollama.com/api/web_search")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .build()
 
-                val response = httpClient.newCall(request).await()
-                if (response.isSuccessful) {
-                    val responseBody = response.body.string()
-                    json.decodeFromString<OllamaSearchResponse>(responseBody)
-                } else {
-                    val code = response.code
-                    val msg = "Ollama search failed with code $code: ${response.message}"
-                    response.close()
-                    throw RetryableHttpException(code, msg)
-                }
-            }
+            val response = httpClient.newCall(request).await()
+            if (response.isSuccessful) {
+                val responseBody = response.body.string()
+                val searchResponse = json.decodeFromString<OllamaSearchResponse>(responseBody)
 
-            return@withContext Result.success(
-                SearchResult(
-                    items = result.results.map {
-                        SearchResultItem(
-                            title = it.title,
-                            url = it.url,
-                            text = it.content
-                        )
-                    }
+                return@withContext Result.success(
+                    SearchResult(
+                        items = searchResponse.results.map {
+                            SearchResultItem(
+                                title = it.title,
+                                url = it.url,
+                                text = it.content
+                            )
+                        }
+                    )
                 )
-            )
+            } else {
+                error("Ollama search failed with code ${response.code}: ${response.message}")
+            }
         }
     }
 
@@ -120,35 +108,27 @@ object OllamaSearchService : SearchService<SearchServiceOptions.OllamaOptions> {
                 put("url", url)
             }
 
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://ollama.com/api/web_fetch")
-                    .post(body.toString().toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
+            val request = Request.Builder()
+                .url("https://ollama.com/api/web_fetch")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .build()
 
-                val response = httpClient.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed for url $url #$code")
-                }
-                response.body.string().let {
-                    json.decodeFromString<OllamaScrapeResponse>(it)
-                }
+            val response = httpClient.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("response failed for url $url #${response.code}")
+            }
+            val responseData = response.body.string().let {
+                json.decodeFromString<OllamaScrapeResponse>(it)
             }
 
             ScrapedResult(
                 urls = listOf(
                     ScrapedResultUrl(
                         url = url,
-                        content = result.content,
+                        content = responseData.content,
                         metadata = ScrapedResultMetadata(
-                            title = result.title
+                            title = responseData.title
                         )
                     )
                 )

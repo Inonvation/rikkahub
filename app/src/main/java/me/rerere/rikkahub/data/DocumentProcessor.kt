@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -38,6 +39,7 @@ class DocumentProcessor(
     private val knowledgeManager: KnowledgeManager,
     private val settingsStore: SettingsStore,
     private val providerManager: ProviderManager,
+    private val ftsManager: KnowledgeChunkFtsManager,
     private val baseId: String,
 ) {
     /**
@@ -173,6 +175,8 @@ class DocumentProcessor(
             knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
             // 文档索引变更后，清除该知识库的向量缓存，避免检索命中旧数据
             knowledgeManager.invalidateVectorCache(baseId)
+            // 强制重建 FTS 索引，确保新增/更新内容立即可检索
+            rebuildFtsIndex()
         } catch (e: OutOfMemoryError) {
             // OOM 是 Error 不是 Exception，需单独捕获：标记失败而非崩溃
             Log.e(TAG, "processDocument OOM: $documentId", e)
@@ -309,6 +313,13 @@ class DocumentProcessor(
 
     private companion object {
         const val TAG = "DocumentProcessor"
+    }
+
+    private suspend fun rebuildFtsIndex() {
+        if (ftsManager.ensureIndex()) {
+            val chunks = knowledgeManager.chunkDao.getByKnowledgeBaseId(baseId)
+            ftsManager.rebuildBase(baseId, chunks)
+        }
     }
 }
 

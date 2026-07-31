@@ -21,12 +21,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -114,35 +111,26 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 }
             }
 
-            val resultData = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://api.firecrawl.dev/v2/search")
-                    .post(body.toString().toRequestBody())
-                    .addHeader("Content-Type", "application/json")
-                    .apply {
-                        if (apiKey.isNotBlank()) {
-                            addHeader("Authorization", "Bearer $apiKey")
-                        }
+            val request = Request.Builder()
+                .url("https://api.firecrawl.dev/v2/search")
+                .post(body.toString().toRequestBody())
+                .addHeader("Content-Type", "application/json")
+                .apply {
+                    if (serviceOptions.apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
                     }
-                    .build()
-
-                val response = httpClient.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
                 }
+                .build()
 
-                val bodyString = response.body.string()
-                val payload = json.parseToJsonElement(bodyString).jsonObject
-                val data = payload["data"]?.jsonObject ?: error("empty response data")
-                json.decodeFromJsonElement<FirecrawlSearchResultData>(data)
+            val response = httpClient.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("response failed #${response.code}")
             }
 
+            val bodyString = response.body.string()
+            val payload = json.parseToJsonElement(bodyString).jsonObject
+            val data = payload["data"]?.jsonObject ?: error("empty response data")
+            val resultData = json.decodeFromJsonElement<FirecrawlSearchResultData>(data)
             val result = buildList {
                 resultData.web?.forEach { item ->
                     add(SearchResultItem(title = item.title, url = item.url, text = item.description))
@@ -186,40 +174,32 @@ object FirecrawlSearchService : SearchService<SearchServiceOptions.FirecrawlOpti
                 })
             }
 
-            val markdown = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://api.firecrawl.dev/v2/scrape")
-                    .post(body.toString().toRequestBody())
-                    .addHeader("Content-Type", "application/json")
-                    .apply {
-                        if (apiKey.isNotBlank()) {
-                            addHeader("Authorization", "Bearer $apiKey")
-                        }
+            val request = Request.Builder()
+                .url("https://api.firecrawl.dev/v2/scrape")
+                .post(body.toString().toRequestBody())
+                .addHeader("Content-Type", "application/json")
+                .apply {
+                    if (serviceOptions.apiKey.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
                     }
-                    .build()
-
-                val response = httpClient.newCall(request).await()
-                if (!response.isSuccessful) {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
                 }
+                .build()
 
-                val bodyString = response.body.string()
-                val payload = json.parseToJsonElement(bodyString).jsonObject
-
-                val success = payload["success"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
-                if (!success) {
-                    error("scrape request failed")
-                }
-
-                val data = payload["data"]?.jsonObject ?: error("empty response data")
-                data["markdown"]?.jsonPrimitive?.content ?: ""
+            val response = httpClient.newCall(request).await()
+            if (!response.isSuccessful) {
+                error("response failed #${response.code}")
             }
+
+            val bodyString = response.body.string()
+            val payload = json.parseToJsonElement(bodyString).jsonObject
+
+            val success = payload["success"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false
+            if (!success) {
+                error("scrape request failed")
+            }
+
+            val data = payload["data"]?.jsonObject ?: error("empty response data")
+            val markdown = data["markdown"]?.jsonPrimitive?.content ?: ""
 
             ScrapedResult(
                 urls = listOf(

@@ -578,11 +578,6 @@
   <string name="search_detail_system_prompt">システムプロンプト</string>
   <string name="search_detail_unknown_error">不明なエラー</string>
   <string name="search_detail_username">ユーザー名</string>
-  <string name="multi_key_manage_title">Key を管理</string>
-  <string name="multi_key_manage_hint">複数の API key を追加すると、リクエスト時に自動的にローテーションされます</string>
-  <string name="multi_key_entry_title">複数 Key</string>
-  <string name="multi_key_entry_count">%d 個の key を設定済み</string>
-  <string name="multi_key_entry_empty">key がまだ設定されていません</string>
   <string name="search_page_hint">キーワードを入力して検索ボタンを押すとメッセージを検索できます</string>
   <string name="search_page_no_results">検索結果なし</string>
   <string name="search_page_placeholder">メッセージ内容を検索…</string>

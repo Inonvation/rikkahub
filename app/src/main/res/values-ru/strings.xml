@@ -578,11 +578,6 @@
   <string name="search_detail_system_prompt">Системный запрос</string>
   <string name="search_detail_unknown_error">Неизвестная ошибка</string>
   <string name="search_detail_username">Имя пользователя</string>
-  <string name="multi_key_manage_title">Управление ключами</string>
-  <string name="multi_key_manage_hint">Добавьте несколько API-ключей, запросы будут автоматически ротироваться</string>
-  <string name="multi_key_entry_title">Несколько ключей</string>
-  <string name="multi_key_entry_count">Настроено ключей: %d</string>
-  <string name="multi_key_entry_empty">Ключи ещё не настроены</string>
   <string name="search_page_hint">Введите ключевые слова и нажмите «Поиск», чтобы найти сообщения</string>
   <string name="search_page_no_results">Нет результатов</string>
   <string name="search_page_placeholder">Искать в содержимом сообщений…</string>

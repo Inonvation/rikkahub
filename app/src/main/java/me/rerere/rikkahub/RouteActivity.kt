@@ -103,8 +103,6 @@ import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
-import me.rerere.rikkahub.ui.pages.setting.MultiKeyManagePage
-import me.rerere.rikkahub.ui.pages.setting.MultiKeyManagePage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
@@ -456,10 +454,6 @@ class RouteActivity : ComponentActivity() {
                                 SettingSearchDetailPage(id)
                             }
 
-                            entry<Screen.SettingMultiKeyManage> { key ->
-                                MultiKeyManagePage(source = key.source, id = Uuid.parse(key.id))
-                            }
-
                             entry<Screen.SettingSpeech> {
                                 SettingSpeechPage()
                             }
@@ -692,9 +686,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class SettingSearchDetail(val serviceId: String) : Screen
-
-    @Serializable
-    data class SettingMultiKeyManage(val source: String, val id: String) : Screen
 
     @Serializable
     data object SettingSpeech : Screen

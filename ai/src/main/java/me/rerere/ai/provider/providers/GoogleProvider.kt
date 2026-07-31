@@ -48,14 +48,11 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
-import me.rerere.ai.util.RetryableHttpException
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.removeElements
-import me.rerere.ai.util.retryWithKeyFallback
-import me.rerere.ai.util.splitApiKeys
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
@@ -94,8 +91,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private suspend fun transformRequest(
         providerSetting: ProviderSetting.Google,
-        request: Request,
-        apiKey: String,
+        request: Request
     ): Request {
         return if (providerSetting.vertexAI && providerSetting.useServiceAccount) {
             val accessToken = serviceAccountTokenProvider.fetchAccessToken(
@@ -105,32 +101,29 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             request.newBuilder()
                 .addHeader("Authorization", "Bearer $accessToken")
                 .build()
-        } else if (providerSetting.vertexAI) {
-            request.newBuilder()
-                .url(request.url.newBuilder().addQueryParameter("key", apiKey).build())
-                .build()
         } else {
-            request.newBuilder()
-                .addHeader("x-goog-api-key", apiKey)
-                .build()
+            val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            if (providerSetting.vertexAI) {
+                request.newBuilder()
+                    .url(request.url.newBuilder().addQueryParameter("key", key).build())
+                    .build()
+            } else {
+                request.newBuilder()
+                    .addHeader("x-goog-api-key", key)
+                    .build()
+            }
         }
     }
 
     override suspend fun listModels(providerSetting: ProviderSetting.Google): List<Model> =
         withContext(Dispatchers.IO) {
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
-            val key = keyRoulette.next(
-                providerSetting.apiKey,
-                providerSetting.id.toString(),
-                providerSetting.multipleKeys,
-            )
             val request = transformRequest(
                 providerSetting = providerSetting,
                 request = Request.Builder()
                     .url(url)
                     .get()
-                    .build(),
-                apiKey = key,
+                    .build()
             )
             val response = client.newCall(request).await()
             if (response.isSuccessful) {
@@ -177,39 +170,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         )
 
-        if (providerSetting.vertexAI && providerSetting.useServiceAccount) {
-            // OAuth 分支不依赖 apiKey，不参与换 key 重试
-            executeGenerateText(
-                providerSetting = providerSetting,
-                params = params,
-                url = url,
-                requestBody = requestBody,
-                apiKey = "",
-            )
-        } else {
-            keyRoulette.retryWithKeyFallback(
-                keys = providerSetting.apiKey,
-                providerId = providerSetting.id.toString(),
-                multipleKeys = providerSetting.multipleKeys,
-            ) { key ->
-                executeGenerateText(
-                    providerSetting = providerSetting,
-                    params = params,
-                    url = url,
-                    requestBody = requestBody,
-                    apiKey = key,
-                )
-            }
-        }
-    }
-
-    private suspend fun executeGenerateText(
-        providerSetting: ProviderSetting.Google,
-        params: TextGenerationParams,
-        url: okhttp3.HttpUrl,
-        requestBody: JsonObject,
-        apiKey: String,
-    ): MessageChunk {
         val request = transformRequest(
             providerSetting = providerSetting,
             request = Request.Builder()
@@ -219,15 +179,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
                 )
                 .configureReferHeaders(providerSetting.baseUrl)
-                .build(),
-            apiKey = apiKey,
+                .build()
         )
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            val msg = "Failed to get response: ${response.code} ${response.body?.string()}"
-            response.close()
-            throw RetryableHttpException(response.code, msg)
+            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -236,7 +193,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val candidates = bodyJson["candidates"]!!.jsonArray
         val usage = bodyJson["usageMetadata"]!!.jsonObject
 
-        return MessageChunk(
+        val messageChunk = MessageChunk(
             id = Uuid.random().toString(),
             model = params.model.modelId,
             choices = candidates.map { candidate ->
@@ -249,15 +206,15 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             },
             usage = parseUsageMeta(usage)
         )
+
+        messageChunk
     }
 
     override suspend fun streamText(
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): Flow<MessageChunk> = flow {
-        val keys = providerSetting.apiKey
-        val providerId = providerSetting.id.toString()
+    ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildCompletionRequestBody(messages, params)
 
         val url = buildUrl(
@@ -269,163 +226,126 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         ).newBuilder().addQueryParameter("alt", "sse").build()
 
+        val request = transformRequest(
+            providerSetting = providerSetting,
+            request = Request.Builder()
+                .url(url)
+                .headers(params.customHeaders.toHeaders())
+                .post(
+                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                )
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build()
+        )
+
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
-        // OAuth 分支不依赖 apiKey，不参与换 key 重试
-        val retryable = !(providerSetting.vertexAI && providerSetting.useServiceAccount)
-        val multipleKeys = providerSetting.multipleKeys
-        val keyList = splitApiKeys(keys)
-        val shouldRotate = retryable && multipleKeys && keyList.size >= 2
+        val listener = object : EventSourceListener() {
+            override fun onEvent(
+                eventSource: EventSource,
+                id: String?,
+                type: String?,
+                data: String
+            ) {
+                Log.i(TAG, "onEvent: $data")
 
-        val startKey = if (retryable) keyRoulette.next(keys, providerId, multipleKeys) else ""
-        val startIndex = if (retryable) keyList.indexOf(startKey).takeIf { it >= 0 } ?: 0 else 0
-        val maxAttempts = if (shouldRotate) keyList.size else 1
+                try {
+                    val jsonData = json.parseToJsonElement(data).jsonObject
+                    val reason =
+                        jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
+                    if (reason != null) {
+                        close(RuntimeException("Prompt feedback: $reason"))
+                    }
+                    val candidates = jsonData["candidates"]?.jsonArray ?: return
+                    if (candidates.isEmpty()) return
+                    val usage = parseUsageMeta(jsonData["usageMetadata"] as? JsonObject)
+                    val messageChunk = MessageChunk(
+                        id = Uuid.random().toString(),
+                        model = params.model.modelId,
+                        choices = candidates.mapIndexed { index, candidate ->
+                            val candidateObj = candidate.jsonObject
+                            val content = candidateObj["content"]?.jsonObject
+                            val groundingMetadata = candidateObj["groundingMetadata"]?.jsonObject
+                            val finishReason =
+                                candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
 
-        for (offset in 0 until maxAttempts) {
-            val key = if (retryable) {
-                if (shouldRotate) keyList[(startIndex + offset) % keyList.size] else startKey
-            } else {
-                ""
-            }
-            var emittedAny = false
-            try {
-                callbackFlow {
-                    val request = transformRequest(
-                        providerSetting = providerSetting,
-                        request = Request.Builder()
-                            .url(url)
-                            .headers(params.customHeaders.toHeaders())
-                            .post(
-                                json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                            val message = content?.let {
+                                parseMessage(buildJsonObject {
+                                    put("role", JsonPrimitive("model"))
+                                    put("content", it)
+                                    groundingMetadata?.let { groundingMetadata ->
+                                        put("groundingMetadata", groundingMetadata)
+                                    }
+                                })
+                            }
+
+                            UIMessageChoice(
+                                index = index,
+                                delta = message,
+                                message = null,
+                                finishReason = finishReason
                             )
-                            .configureReferHeaders(providerSetting.baseUrl)
-                            .build(),
-                        apiKey = key,
+                        },
+                        usage = usage
                     )
 
-                    val listener = object : EventSourceListener() {
-                        override fun onEvent(
-                            eventSource: EventSource,
-                            id: String?,
-                            type: String?,
-                            data: String
-                        ) {
-                            Log.i(TAG, "onEvent: $data")
-
-                            try {
-                                val jsonData = json.parseToJsonElement(data).jsonObject
-                                val reason =
-                                    jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
-                                if (reason != null) {
-                                    close(RuntimeException("Prompt feedback: $reason"))
-                                }
-                                val candidates = jsonData["candidates"]?.jsonArray ?: return
-                                if (candidates.isEmpty()) return
-                                val usage = parseUsageMeta(jsonData["usageMetadata"] as? JsonObject)
-                                val messageChunk = MessageChunk(
-                                    id = Uuid.random().toString(),
-                                    model = params.model.modelId,
-                                    choices = candidates.mapIndexed { index, candidate ->
-                                        val candidateObj = candidate.jsonObject
-                                        val content = candidateObj["content"]?.jsonObject
-                                        val groundingMetadata = candidateObj["groundingMetadata"]?.jsonObject
-                                        val finishReason =
-                                            candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
-
-                                        val message = content?.let {
-                                            parseMessage(buildJsonObject {
-                                                put("role", JsonPrimitive("model"))
-                                                put("content", it)
-                                                groundingMetadata?.let { groundingMetadata ->
-                                                    put("groundingMetadata", groundingMetadata)
-                                                }
-                                            })
-                                        }
-
-                                        UIMessageChoice(
-                                            index = index,
-                                            delta = message,
-                                            message = null,
-                                            finishReason = finishReason
-                                        )
-                                    },
-                                    usage = usage
-                                )
-
-                                trySend(messageChunk).onFailure { e ->
-                                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                println("[onEvent] 解析错误: $data")
-                            }
-                        }
-
-                        override fun onFailure(
-                            eventSource: EventSource,
-                            t: Throwable?,
-                            response: Response?
-                        ) {
-                            // 未吐任何内容时的 401/429 才能换 key 重试，交给外层判断
-                            val code = response?.code
-                            if (code == 401 || code == 429) {
-                                close(RetryableHttpException(code, "stream failed #$code"))
-                                return
-                            }
-                            var exception = t
-
-                            t?.printStackTrace()
-                            println("[onFailure] 发生错误: ${t?.message}")
-
-                            try {
-                                if (t == null && response != null) {
-                                    val bodyStr = response.body.stringSafe()
-                                    if (!bodyStr.isNullOrEmpty()) {
-                                        val bodyElement = json.parseToJsonElement(bodyStr)
-                                        println(bodyElement)
-                                        if (bodyElement is JsonObject) {
-                                            exception = Exception(
-                                                bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                                    ?: "unknown"
-                                            )
-                                        }
-                                    } else {
-                                        exception = Exception("Unknown error: ${response.code}")
-                                    }
-                                }
-                            } catch (e: Throwable) {
-                                e.printStackTrace()
-                                exception = e
-                            } finally {
-                                close(exception ?: Exception("Stream failed"))
-                            }
-                        }
-
-                        override fun onClosed(eventSource: EventSource) {
-                            println("[onClosed] 连接已关闭")
-                            close()
-                        }
+                    trySend(messageChunk).onFailure { e ->
+                        Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
                     }
-
-                    val eventSource = EventSources.createFactory(client)
-                        .newEventSource(request, listener)
-
-                    awaitClose {
-                        println("[awaitClose] 关闭eventSource")
-                        eventSource.cancel()
-                    }
-                    // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
-                }.buffer(Channel.UNLIMITED).collect { chunk ->
-                    emittedAny = true
-                    emit(chunk)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    println("[onEvent] 解析错误: $data")
                 }
-                return@flow
-            } catch (e: RetryableHttpException) {
-                if (!retryable || emittedAny || !e.retryable) throw e
-                keyRoulette.markFailed(keys, providerId, key)
+            }
+
+            override fun onFailure(
+                eventSource: EventSource,
+                t: Throwable?,
+                response: Response?
+            ) {
+                var exception = t
+
+                t?.printStackTrace()
+                println("[onFailure] 发生错误: ${t?.message}")
+
+                try {
+                    if (t == null && response != null) {
+                        val bodyStr = response.body.stringSafe()
+                        if (!bodyStr.isNullOrEmpty()) {
+                            val bodyElement = json.parseToJsonElement(bodyStr)
+                            println(bodyElement)
+                            if (bodyElement is JsonObject) {
+                                exception = Exception(
+                                    bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
+                                        ?: "unknown"
+                                )
+                            }
+                        } else {
+                            exception = Exception("Unknown error: ${response.code}")
+                        }
+                    }
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    exception = e
+                } finally {
+                    close(exception ?: Exception("Stream failed"))
+                }
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                println("[onClosed] 连接已关闭")
+                close()
             }
         }
-        throw RetryableHttpException(-1, "All keys failed for Google stream")
+
+        val eventSource = EventSources.createFactory(client)
+                .newEventSource(request, listener)
+
+        awaitClose {
+            println("[awaitClose] 关闭eventSource")
+            eventSource.cancel()
+        }
+        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED)
 
     private fun buildCompletionRequestBody(

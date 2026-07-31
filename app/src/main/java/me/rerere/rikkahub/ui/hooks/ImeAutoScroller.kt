@@ -25,12 +25,10 @@ fun ImeLazyListAutoScroller(
             ime.getBottom(localDensity)
         }.collect { keyboardHeight ->
             if (keyboardHeight > 0) {
-                if (imeHeigh < keyboardHeight) {
-                    lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
-                } else {
-                    lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
-                }
+                lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
                 imeHeigh = keyboardHeight
+            } else {
+                imeHeigh = 0
             }
         }
     }

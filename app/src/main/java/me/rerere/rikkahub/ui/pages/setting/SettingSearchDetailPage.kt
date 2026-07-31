@@ -352,11 +352,8 @@ internal fun TavilyOptions(
     onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -389,11 +386,8 @@ internal fun ExaOptions(
     onUpdateOptions: (SearchServiceOptions.ExaOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -403,11 +397,8 @@ internal fun ZhipuOptions(
     onUpdateOptions: (SearchServiceOptions.ZhipuOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -493,11 +484,8 @@ internal fun SearchLinkUpOptions(
     onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -530,11 +518,8 @@ internal fun BraveOptions(
     onUpdateOptions: (SearchServiceOptions.BraveOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -544,11 +529,8 @@ internal fun SerperOptions(
     onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -558,11 +540,8 @@ internal fun MetasoOptions(
     onUpdateOptions: (SearchServiceOptions.MetasoOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -572,11 +551,8 @@ internal fun OllamaOptions(
     onUpdateOptions: (SearchServiceOptions.OllamaOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -586,11 +562,8 @@ internal fun PerplexityOptions(
     onUpdateOptions: (SearchServiceOptions.PerplexityOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -630,11 +603,8 @@ internal fun FirecrawlOptions(
     onUpdateOptions: (SearchServiceOptions.FirecrawlOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -644,11 +614,8 @@ internal fun JinaOptions(
     onUpdateOptions: (SearchServiceOptions.JinaOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -692,11 +659,8 @@ internal fun BochaOptions(
     onUpdateOptions: (SearchServiceOptions.BochaOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -723,11 +687,8 @@ internal fun RikkaHubOptions(
     onUpdateOptions: (SearchServiceOptions.RikkaHubOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(
@@ -760,11 +721,8 @@ internal fun TinyfishOptions(
     onUpdateOptions: (SearchServiceOptions.TinyfishOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 }
 
@@ -774,11 +732,8 @@ internal fun GrokOptions(
     onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
 ) {
     SearchApiKeyField(
-        serviceId = options.id.toString(),
         apiKey = options.apiKey,
-        multipleKeys = options.multipleKeys,
-        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) },
-        onMultipleKeysChange = { onUpdateOptions(options.copy(multipleKeys = it)) }
+        onApiKeyChange = { onUpdateOptions(options.copy(apiKey = it)) }
     )
 
     FormItem(

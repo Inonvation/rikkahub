@@ -15,12 +15,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
-import me.rerere.search.SearchService.Companion.keyRoulette
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -67,44 +64,37 @@ object ZhipuSearchService : SearchService<SearchServiceOptions.ZhipuOptions> {
                 put("count", JsonPrimitive(commonOptions.resultSize))
             }
 
-            val result = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://open.bigmodel.cn/api/paas/v4/web_search")
-                    .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
+            val request = Request.Builder()
+                .url("https://open.bigmodel.cn/api/paas/v4/web_search")
+                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
+                .build()
 
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val bodyRaw = response.body?.string() ?: error("Failed to get response body")
-                    runCatching {
-                        json.decodeFromString<ZhipuDto>(bodyRaw)
-                    }.onFailure {
-                        it.printStackTrace()
-                        println(bodyRaw)
-                        error("Failed to decode response: $bodyRaw")
-                    }.getOrThrow()
-                } else {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
-                }
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyRaw = response.body?.string() ?: error("Failed to get response body")
+                val response = runCatching {
+                    json.decodeFromString<ZhipuDto>(bodyRaw)
+                }.onFailure {
+                    it.printStackTrace()
+                    println(bodyRaw)
+                    error("Failed to decode response: $bodyRaw")
+                }.getOrThrow()
+
+                return@withContext Result.success(
+                    SearchResult(
+                        items = response.searchResult.map {
+                            SearchResultItem(
+                                title = it.title,
+                                url = it.link,
+                                text = it.content,
+                            )
+                        }
+                    ))
+            } else {
+                println(response.body?.string())
+                error("response failed #${response.code}")
             }
-
-            return@withContext Result.success(
-                SearchResult(
-                    items = result.searchResult.map {
-                        SearchResultItem(
-                            title = it.title,
-                            url = it.link,
-                            text = it.content,
-                        )
-                    }
-                ))
         }
     }
 

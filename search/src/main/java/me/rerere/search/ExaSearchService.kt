@@ -17,8 +17,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.util.RetryableHttpException
-import me.rerere.ai.util.retryWithKeyFallback
 import me.rerere.search.SearchResult.SearchResultItem
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -88,47 +86,41 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                     put("text", JsonPrimitive(true))
                 })
             }
-            val exaData = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://api.exa.ai/search")
-                    .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val bodyRaw = response.body.string()
-                    val searchResponse = runCatching {
-                        json.decodeFromString<ExaData>(bodyRaw)
-                    }.onFailure {
-                        it.printStackTrace()
-                        println(bodyRaw)
-                        error("Failed to decode response: $bodyRaw")
-                    }.getOrThrow()
-                    searchResponse
-                } else {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
-                }
+            val request = Request.Builder()
+                .url("https://api.exa.ai/search")
+                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyRaw = response.body.string()
+                val response = runCatching {
+                    json.decodeFromString<ExaData>(bodyRaw)
+                }.onFailure {
+                    it.printStackTrace()
+                    println(bodyRaw)
+                    error("Failed to decode response: $bodyRaw")
+                }.getOrThrow()
+
+                return@withContext Result.success(
+                    SearchResult(
+                        answer = response.output?.content,
+                        items = response.results.map {
+                            SearchResultItem(
+                                title = it.title,
+                                url = it.url,
+                                text = it.text ?: ""
+                            )
+                        },
+                        images = response.results.mapNotNull { it.image?.takeIf { url -> url.isNotBlank() } },
+                    ))
+            } else {
+                println(response.body.string())
+                error("response failed #${response.code}")
             }
-
-            return@withContext Result.success(
-                SearchResult(
-                    answer = exaData.output?.content,
-                    items = exaData.results.map {
-                        SearchResultItem(
-                            title = it.title,
-                            url = it.url,
-                            text = it.text ?: ""
-                        )
-                    },
-                    images = exaData.results.mapNotNull { it.image?.takeIf { url -> url.isNotBlank() } },
-                ))
         }
     }
 
@@ -145,48 +137,42 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                 })
                 put("text", JsonPrimitive(true))
             }
-            val exaData = keyRoulette.retryWithKeyFallback(
-                serviceOptions.apiKey,
-                serviceOptions.id.toString(),
-                serviceOptions.multipleKeys,
-            ) { apiKey ->
-                val request = Request.Builder()
-                    .url("https://api.exa.ai/contents")
-                    .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
+            val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val bodyRaw = response.body.string()
-                    val data = runCatching {
-                        json.decodeFromString<ExaData>(bodyRaw)
-                    }.onFailure {
-                        it.printStackTrace()
-                        println(bodyRaw)
-                        error("Failed to decode response: $bodyRaw")
-                    }.getOrThrow()
-                    data
-                } else {
-                    val code = response.code
-                    response.close()
-                    throw RetryableHttpException(code, "response failed #$code")
-                }
-            }
+            val request = Request.Builder()
+                .url("https://api.exa.ai/contents")
+                .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
 
-            return@withContext Result.success(
-                ScrapedResult(
-                    urls = exaData.results.map {
-                        ScrapedResultUrl(
-                            url = it.url,
-                            content = it.text ?: "",
-                            metadata = ScrapedResultMetadata(
-                                title = it.title,
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyRaw = response.body.string()
+                val data = runCatching {
+                    json.decodeFromString<ExaData>(bodyRaw)
+                }.onFailure {
+                    it.printStackTrace()
+                    println(bodyRaw)
+                    error("Failed to decode response: $bodyRaw")
+                }.getOrThrow()
+
+                return@withContext Result.success(
+                    ScrapedResult(
+                        urls = data.results.map {
+                            ScrapedResultUrl(
+                                url = it.url,
+                                content = it.text ?: "",
+                                metadata = ScrapedResultMetadata(
+                                    title = it.title,
+                                )
                             )
-                        )
-                    }
+                        }
+                    )
                 )
-            )
+            } else {
+                println(response.body.string())
+                error("response failed #${response.code}")
+            }
         }
     }
 
