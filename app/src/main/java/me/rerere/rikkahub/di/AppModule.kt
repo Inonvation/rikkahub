@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.di
 
 import kotlinx.serialization.json.Json
-import me.rerere.highlight.Highlighter
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.rikkahub.AppScope
@@ -21,10 +20,6 @@ import org.koin.dsl.module
 
 val appModule = module {
     single<Json> { JsonInstant }
-
-    single {
-        Highlighter(get())
-    }
 
     single {
         AppEventBus()
