@@ -175,6 +175,16 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val hapticFeedback = LocalHapticFeedback.current
 
+    // 侧边栏展开完成后触发一次触感反馈
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Open &&
+            setting.displaySetting.enableHapticFeedback &&
+            setting.displaySetting.enableUiHapticFeedback
+        ) {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+        }
+    }
+
     // AI 消息生成开始时触发一次触感反馈
     LaunchedEffect(Unit) {
         appEventBus.events.collect { event ->
@@ -405,6 +415,7 @@ private fun ChatPageContent(
                     loading = loadingJob != null,
                     settings = setting,
                     hazeState = hazeState,
+                    conversation = conversation,
                     completionProviders = completionProviders,
                     onCancelClick = {
                         vm.stopGeneration()
@@ -478,6 +489,10 @@ private fun ChatPageContent(
                                 searchServiceSelected = index
                             )
                         )
+                    },
+                    onUpdateConversation = { newConversation ->
+                        vm.updateConversation(newConversation)
+                        vm.saveConversationAsync()
                     },
                     onMoreClick = {
                         showFilesSheet = true
@@ -747,7 +762,6 @@ private fun ChatFilesPickerSheet(
             conversation = conversation,
             state = inputState,
             assistant = assistant,
-            mcpManager = vm.mcpManager,
             onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
                 vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
             },
@@ -806,7 +820,6 @@ private fun TopBar(
             if (!bigScreen) {
                 IconButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
                         scope.launch { drawerState.open() }
                     }
                 ) {

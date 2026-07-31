@@ -1,10 +1,12 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -14,11 +16,13 @@ import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +47,7 @@ import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,6 +76,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
@@ -85,6 +92,8 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.FullScreen
@@ -94,8 +103,10 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
+import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
@@ -123,10 +134,12 @@ fun ChatInput(
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    conversation: Conversation,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
     onUpdateChatModel: (Model) -> Unit,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
+    onUpdateConversation: (Conversation) -> Unit,
     onMoreClick: () -> Unit,
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
@@ -166,6 +179,7 @@ fun ChatInput(
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
     val hapticController = rememberHaptic()
+    val mcpManager: McpManager = koinInject()
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
         soundEffectPlayer.preload(R.raw.asr_start, R.raw.asr_stop)
@@ -173,6 +187,7 @@ fun ChatInput(
     val asrPermission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(permissionState = asrPermission)
     var asrBaseText by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(asrState.status) {
         when (asrState.status) {
             ASRStatus.Listening -> {
@@ -245,12 +260,14 @@ fun ChatInput(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
+                        // 禁用 Material3 默认 48dp 最小触摸尺寸，让按钮高度由内容决定，垂直对齐
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
                             // Model Picker
                             ModelSelector(
                                 modelId = assistant.chatModelId ?: settings.chatModelId,
@@ -284,14 +301,7 @@ fun ChatInput(
                                 },
                                 onUpdateSearchService = onUpdateSearchService,
                                 model = chatModel,
-                            )
-
-                            // Knowledge Base
-                            KnowledgeBasePickerButton(
-                                selectedIds = assistant.knowledgeBaseIds,
-                                onSelectionChange = { newIds ->
-                                    onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
-                                },
+                                compact = true,
                             )
 
                             // Reasoning
@@ -303,8 +313,65 @@ fun ChatInput(
                                         onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                     },
                                     onlyIcon = true,
+                                    compact = true,
                                 )
                             }
+
+                            // Expand / Collapse
+                            IconButton(
+                                onClick = {
+                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                    expanded = !expanded
+                                },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (expanded) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+                                    contentDescription = stringResource(R.string.more_options),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+
+                            // Collapsible section: MCP, Knowledge Base, Workspace
+                            AnimatedVisibility(
+                                visible = expanded,
+                                enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
+                                exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    // MCP
+                                    if (settings.mcpServers.isNotEmpty()) {
+                                        McpPickerButton(
+                                            assistant = assistant,
+                                            servers = settings.mcpServers,
+                                            mcpManager = mcpManager,
+                                            onUpdateAssistant = onUpdateAssistant,
+                                            compact = true,
+                                        )
+                                    }
+
+                                    // Knowledge Base
+                                    KnowledgeBasePickerButton(
+                                        selectedIds = assistant.knowledgeBaseIds,
+                                        onSelectionChange = { newIds ->
+                                            onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
+                                        },
+                                    )
+
+                                    // Workspace
+                                    WorkspacePickerButton(
+                                        assistant = assistant,
+                                        conversation = conversation,
+                                        onUpdateAssistant = onUpdateAssistant,
+                                        onUpdateConversation = onUpdateConversation,
+                                        compact = true,
+                                    )
+                                }
+                            }
+
+                        }
 
                         }
 
@@ -572,6 +639,7 @@ private fun TextInputRow(
                 Text(stringResource(R.string.chat_input_placeholder))
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 17.dp),
             keyboardOptions = KeyboardOptions(
                 imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
             ),
@@ -700,12 +768,19 @@ private fun QuickMessageButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val hapticController = rememberHaptic()
-    IconButton(
-        onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
-            expanded = !expanded
-        }) {
-        Icon(HugeIcons.Zap, null)
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                expanded = !expanded
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(HugeIcons.Zap, null, modifier = Modifier.size(20.dp))
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },

@@ -221,10 +221,11 @@ fun ModelSelector(
                 hapticController.perform(HapticFeedbackType.KeyboardTap)
                 state.open()
             },
+            modifier = Modifier.size(40.dp),
         ) {
             if (model != null) {
                 AutoAIIcon(
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(32.dp),
                     name = model.modelId,
                     color = Color.Transparent
                 )
@@ -232,7 +233,7 @@ fun ModelSelector(
                 Icon(
                     imageVector = HugeIcons.Brain02,
                     contentDescription = stringResource(R.string.setting_model_page_chat_model),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }

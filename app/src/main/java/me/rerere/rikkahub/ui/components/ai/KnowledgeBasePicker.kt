@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.uuid.ExperimentalUuidApi
@@ -36,6 +37,7 @@ import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalUuidApi::class)
@@ -47,6 +49,7 @@ fun KnowledgeBasePickerButton(
 ) {
     var showPicker by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
+    val hapticController = rememberHaptic()
     val knowledgeManager = koinInject<KnowledgeManager>()
     val bases by knowledgeManager.baseRepository.getAllWithDocumentCount()
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -54,8 +57,11 @@ fun KnowledgeBasePickerButton(
     val hasSelection = selectedIds.isNotEmpty()
 
     IconButton(
-        onClick = { showPicker = true },
-        modifier = modifier,
+        onClick = {
+            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            showPicker = true
+        },
+        modifier = modifier.size(40.dp),
     ) {
         Icon(
             HugeIcons.Bookshelf01,
@@ -69,7 +75,7 @@ fun KnowledgeBasePickerButton(
     if (showPicker) {
         ModalBottomSheet(
             onDismissRequest = { showPicker = false },
-            sheetState = rememberBottomSheetState(initialValue = SheetValue.Expanded, enabledValues = setOf(SheetValue.Expanded, SheetValue.Hidden)),
+            sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),

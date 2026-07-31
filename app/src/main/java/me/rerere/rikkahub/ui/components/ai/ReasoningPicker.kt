@@ -53,6 +53,7 @@ private val levelCount = levels.size
 fun ReasoningButton(
     modifier: Modifier = Modifier,
     onlyIcon: Boolean = false,
+    compact: Boolean = false,
     reasoningLevel: ReasoningLevel,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
 ) {
@@ -72,12 +73,14 @@ fun ReasoningButton(
         modifier = modifier,
     ) {
         Row(
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+            modifier = Modifier
+                .height(if (compact) 40.dp else 44.dp)
+                .padding(horizontal = if (compact) 10.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Box(
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(if (compact) 22.dp else 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 ReasoningIcon(reasoningLevel)

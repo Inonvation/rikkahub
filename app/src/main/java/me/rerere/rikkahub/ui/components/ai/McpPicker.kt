@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,19 +9,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -64,7 +61,8 @@ fun McpPickerButton(
     servers: List<McpServerConfig>,
     mcpManager: McpManager,
     modifier: Modifier = Modifier,
-    onUpdateAssistant: (Assistant) -> Unit
+    onUpdateAssistant: (Assistant) -> Unit,
+    compact: Boolean = false,
 ) {
     var showMcpPicker by remember { mutableStateOf(false) }
     val hapticController = rememberHaptic()
@@ -82,12 +80,13 @@ fun McpPickerButton(
     ) {
         Row(
             modifier = Modifier
-                .padding(vertical = 8.dp, horizontal = 8.dp),
+                .height(if (compact) 40.dp else 44.dp)
+                .padding(horizontal = if (compact) 10.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Box(
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(if (compact) 22.dp else 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (loading) {
@@ -160,67 +159,6 @@ fun McpPickerButton(
                 )
             }
         }
-    }
-}
-
-@Composable
-fun McpPickerListItem(
-    assistant: Assistant,
-    servers: List<McpServerConfig>,
-    mcpManager: McpManager,
-    modifier: Modifier = Modifier,
-    onUpdateAssistant: (Assistant) -> Unit
-) {
-    var showMcpPicker by remember { mutableStateOf(false) }
-    val hapticController = rememberHaptic()
-    val status by mcpManager.syncingStatus.collectAsStateWithLifecycle()
-    val loading = status.values.any { it == McpStatus.Connecting }
-    val enabledServers = servers.fastFilter {
-        it.commonOptions.enable && assistant.mcpServers.contains(it.id)
-    }
-
-    ListItem(
-        leadingContent = {
-            if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else {
-                Icon(
-                    imageVector = HugeIcons.McpServer,
-                    contentDescription = stringResource(R.string.mcp_picker_title),
-                )
-            }
-        },
-        headlineContent = {
-            Text(stringResource(R.string.mcp_picker_title))
-        },
-        trailingContent = {
-            if (enabledServers.isNotEmpty()) {
-                Text(
-                    text = enabledServers.size.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        },
-        colors = ListItemDefaults.colors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        modifier = modifier
-            .clip(MaterialTheme.shapes.large)
-            .clickable {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                showMcpPicker = true
-            },
-    )
-
-    if (showMcpPicker) {
-        McpPickerSheet(
-            assistant = assistant,
-            servers = servers,
-            loading = loading,
-            onUpdateAssistant = onUpdateAssistant,
-            onDismiss = { showMcpPicker = false },
-        )
     }
 }
 
