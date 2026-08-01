@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,29 +38,37 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Archive02
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FileView
 import me.rerere.hugeicons.stroke.Share08
+import me.rerere.knowledge.KnowledgeManager
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 import java.io.File
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 private const val DEFAULT_VISIBLE_COUNT = 3
 private val WORKSPACE_FILE_TOOL_NAMES = setOf("workspace_write_file", "workspace_edit_file")
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalUuidApi::class)
 @Composable
 internal fun EditedFilesList(
     parts: List<UIMessagePart>,
@@ -77,9 +89,13 @@ internal fun EditedFilesList(
     val scope = rememberCoroutineScope()
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
+    val knowledgeManager: KnowledgeManager = koinInject()
+    val toaster = LocalToaster.current
 
     var selectedPath by remember { mutableStateOf<String?>(null) }
     var expanded by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var importPath by remember { mutableStateOf<String?>(null) }
     val visibleFiles = if (expanded) editedFiles else editedFiles.take(DEFAULT_VISIBLE_COUNT)
     val hasMore = editedFiles.size > DEFAULT_VISIBLE_COUNT
 
@@ -190,10 +206,7 @@ internal fun EditedFilesList(
                             contentDescription = null,
                             modifier = Modifier.padding(4.dp),
                         )
-                        Text(
-                            text = stringResource(R.string.common_preview),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                        Text(stringResource(R.string.common_preview), style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Card(
@@ -215,10 +228,7 @@ internal fun EditedFilesList(
                             contentDescription = null,
                             modifier = Modifier.padding(4.dp),
                         )
-                        Text(
-                            text = stringResource(R.string.common_export),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                        Text(stringResource(R.string.common_export), style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Card(
@@ -261,14 +271,147 @@ internal fun EditedFilesList(
                             contentDescription = null,
                             modifier = Modifier.padding(4.dp),
                         )
-                        Text(
-                            text = stringResource(R.string.common_share),
-                            style = MaterialTheme.typography.titleMedium,
+                        Text(stringResource(R.string.common_share), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Card(
+                    onClick = {
+                        val p = selectedPath ?: return@Card
+                        importPath = p
+                        selectedPath = null
+                        showImportDialog = true
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Archive02,
+                            contentDescription = null,
+                            modifier = Modifier.padding(4.dp),
                         )
+                        Text("导入到知识库", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
         }
+    }
+
+    // 知识库选择对话框
+    if (showImportDialog && importPath != null) {
+        val path = importPath!!
+        var kbList by remember { mutableStateOf<List<me.rerere.knowledge.data.entity.KnowledgeBaseEntity>>(emptyList()) }
+        var loadingKbs by remember { mutableStateOf(true) }
+
+        // 加载知识库列表
+        remember(path) {
+            scope.launch {
+                try {
+                    kbList = knowledgeManager.baseRepository.getAll().first()
+                } catch (_: Exception) { }
+                loadingKbs = false
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = {
+                showImportDialog = false
+                importPath = null
+            },
+            title = { Text("选择知识库") },
+            text = {
+                if (loadingKbs) {
+                    Text("加载中...")
+                } else if (kbList.isEmpty()) {
+                    Text("暂无知识库，请先创建知识库")
+                } else {
+                    LazyColumn {
+                        items(kbList) { base ->
+                            Card(
+                                onClick = {
+                                    showImportDialog = false
+                                    importPath = null
+                                    scope.launch {
+                                        importFileToKnowledgeBase(
+                                            context = context,
+                                            workspaceRepository = workspaceRepository,
+                                            workspaceId = workspaceId,
+                                            filePath = path,
+                                            knowledgeManager = knowledgeManager,
+                                            kbId = base.id,
+                                            toaster = toaster,
+                                        )
+                                    }
+                                },
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(base.name, style = MaterialTheme.typography.titleSmall)
+                                    if (base.description.isNotBlank()) {
+                                        Text(
+                                            base.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImportDialog = false
+                    importPath = null
+                }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalUuidApi::class)
+private suspend fun importFileToKnowledgeBase(
+    context: android.content.Context,
+    workspaceRepository: WorkspaceRepository,
+    workspaceId: String,
+    filePath: String,
+    knowledgeManager: KnowledgeManager,
+    kbId: String,
+    toaster: com.dokar.sonner.ToasterState,
+) {
+    try {
+        val fileName = filePath.substringAfterLast('/')
+        val (area, relativePath) = resolveWorkspacePath(filePath)
+        val destDir = File("${context.filesDir}/knowledge/${kbId}/raw").apply { mkdirs() }
+        val destFile = File(destDir, fileName)
+
+        withContext(Dispatchers.IO) {
+            destFile.outputStream().use { output ->
+                workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+            }
+        }
+
+        val fileType = fileName.substringAfterLast('.', "").lowercase()
+        knowledgeManager.documentRepository.create(
+            knowledgeBaseId = kbId,
+            fileName = fileName,
+            fileType = fileType,
+            filePath = destFile.absolutePath,
+            fileSize = destFile.length(),
+        )
+
+        toaster.show("已导入「${fileName}」到知识库，请在知识库中处理该文档")
+    } catch (e: Exception) {
+        toaster.show("导入失败: ${e.message}")
     }
 }
 

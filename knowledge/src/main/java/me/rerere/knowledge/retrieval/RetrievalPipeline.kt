@@ -9,6 +9,7 @@ import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 import me.rerere.knowledge.data.dao.KnowledgeChunkDao
 import me.rerere.knowledge.vector.VectorStore
 import me.rerere.knowledge.vector.SearchResult as VectorSearchResult
+import me.rerere.knowledge.vector.Similarity
 
 data class RetrievalResult(
     val chunk: KnowledgeChunkEntity,
@@ -43,7 +44,6 @@ class Reranker(
                 } else r
             }.sortedByDescending { it.score }
         } catch (e: Exception) {
-            // Rerank failed, fall back to original order
             return candidates
         }
     }
@@ -56,12 +56,7 @@ class RetrievalPipeline(
     private val keywordSearcher: KeywordSearcher? = null,
 ) {
     /**
-     * Cherry Studio 风格的检索:
-     * 1. Over-fetch (topK × 3) 候选
-     * 2. Vector + Keyword → RRF fusion（关键词侧可按 keywordWeight 加权）
-     * 3. 可选 reranking
-     * 4. Threshold 过滤
-     * 5. 裁剪到 topK 并排序
+     * Hybrid 检索：Vector + Keyword → RRF 融合 → MMR → 可选 reranking → threshold → topK
      */
     suspend fun search(
         query: String,
@@ -71,10 +66,10 @@ class RetrievalPipeline(
         similarityThreshold: Float = 0f,
         reranker: Reranker? = null,
         keywordWeight: Float = 1f,
+        mmrLambda: Float = 0.7f,
     ): List<RetrievalResult> {
         val candidateLimit = (topK * 3).coerceAtMost(100)
 
-        // 并行执行 vector search 和关键词 search (over-fetch)
         val (vectorResults, keywordResults) = coroutineScope {
             val vectorDeferred = async {
                 if (queryEmbedding != null) {
@@ -84,7 +79,6 @@ class RetrievalPipeline(
                 }
             }
             val keywordDeferred = async {
-                // 关键词侧优先用 FTS5+jieba（真正的 BM25 排序）；不可用时回退到内置 BM25
                 keywordSearcher
                     ?.let { searcher ->
                         runCatching { searcher.search(query, knowledgeBaseId, candidateLimit) }.getOrNull()
@@ -95,38 +89,99 @@ class RetrievalPipeline(
             vectorDeferred.await() to keywordDeferred.await()
         }
 
-        // RRF 融合
         val fused = rrfFusion(vectorResults, keywordResults, keywordWeight = keywordWeight)
 
-        // 文档级多样性：避免 top 结果全部来自同一份文档的连续 chunk
-        val diversified = diversifyByDocument(fused, candidateLimit)
+        val diversified = mmrDiversify(fused, knowledgeBaseId, queryEmbedding, candidateLimit, mmrLambda)
 
-        // 可选 reranking
         val results = if (reranker != null) {
             reranker.rerank(query, diversified, topK)
         } else {
             diversified
         }
 
-        // Threshold 过滤 + 裁剪
-        val afterThreshold = if (similarityThreshold > 0f) {
-            results.filter { result ->
-                when (result.scoreKind) {
-                    "relevance" -> result.score >= similarityThreshold
-                    else -> {
-                        val maxScore = results.maxOf { it.score }
-                        if (maxScore > 0f) result.score >= similarityThreshold * maxScore
-                        else true
-                    }
+        return applyThreshold(results, similarityThreshold).take(topK)
+            .mapIndexed { index, it -> it.copy(rank = index + 1) }
+    }
+
+    /**
+     * 纯语义检索：仅用向量余弦相似度，不做关键词融合。
+     */
+    suspend fun semanticSearch(
+        queryEmbedding: FloatArray,
+        knowledgeBaseId: String,
+        topK: Int = 10,
+        similarityThreshold: Float = 0f,
+        reranker: Reranker? = null,
+        mmrLambda: Float = 0.7f,
+    ): List<RetrievalResult> {
+        val candidateLimit = (topK * 3).coerceAtMost(100)
+        val vectorResults = vectorStore.search(queryEmbedding, knowledgeBaseId, candidateLimit)
+
+        val results = vectorResults.map {
+            RetrievalResult(
+                chunk = it.chunk,
+                score = it.score,
+                rank = 0,
+                scoreKind = "ranking",
+            )
+        }
+
+        val diversified = mmrDiversify(results, knowledgeBaseId, queryEmbedding, candidateLimit, mmrLambda)
+
+        val reranked = if (reranker != null) {
+            reranker.rerank("", diversified, topK)
+        } else {
+            diversified
+        }
+
+        return applyThreshold(reranked, similarityThreshold).take(topK)
+            .mapIndexed { index, it -> it.copy(rank = index + 1) }
+    }
+
+    /**
+     * 纯关键词检索：仅用 FTS5/BM25，不做向量融合。
+     */
+    suspend fun keywordSearch(
+        query: String,
+        knowledgeBaseId: String,
+        topK: Int = 10,
+    ): List<RetrievalResult> {
+        val candidateLimit = (topK * 3).coerceAtMost(100)
+        val keywordResults = keywordSearcher
+            ?.let { searcher ->
+                runCatching { searcher.search(query, knowledgeBaseId, candidateLimit) }.getOrNull()
+            }
+            ?: bm25Searcher.search(query, knowledgeBaseId, candidateLimit)
+                .map { KeywordSearchResult(chunk = it.chunk, rank = it.rank) }
+
+        return keywordResults
+            .take(topK)
+            .mapIndexed { index, result ->
+                RetrievalResult(
+                    chunk = result.chunk,
+                    score = 1f / (1 + index),
+                    rank = index + 1,
+                    scoreKind = "ranking",
+                    snippet = result.snippet,
+                )
+            }
+    }
+
+    private fun applyThreshold(
+        results: List<RetrievalResult>,
+        similarityThreshold: Float,
+    ): List<RetrievalResult> {
+        if (similarityThreshold <= 0f) return results
+        return results.filter { result ->
+            when (result.scoreKind) {
+                "relevance" -> result.score >= similarityThreshold
+                else -> {
+                    val maxScore = results.maxOf { it.score }
+                    if (maxScore > 0f) result.score >= similarityThreshold * maxScore
+                    else true
                 }
             }
-        } else results
-
-        return afterThreshold
-            .take(topK)
-            .mapIndexed { index, it ->
-                it.copy(rank = index + 1)
-            }
+        }
     }
 
     private fun rrfFusion(
@@ -156,7 +211,6 @@ class RetrievalPipeline(
             } else {
                 scores[result.chunk.id] = existing.copy(second = existing.second + rrfScore)
             }
-            // 关键词命中的 snippet 透传给融合结果，供 UI 展示命中上下文
             if (result.snippet != null) {
                 snippets[result.chunk.id] = result.snippet
             }
@@ -176,29 +230,62 @@ class RetrievalPipeline(
     }
 
     /**
-     * 文档级多样性控制：优先让 top 结果来自不同文档，避免同一份文档的连续 chunk 占据全部结果。
-     * 每个文档只取第一条，剩余结果按原顺序补位。
+     * MMR（Maximal Marginal Relevance）多样性控制。
+     * λ=1 纯相关性排序，λ=0 纯多样性（最小化与已选结果的相似度）。
+     * 需要 chunk embedding 来计算 pairwise 相似度。
      */
-    private fun diversifyByDocument(
+    private fun mmrDiversify(
         results: List<RetrievalResult>,
+        knowledgeBaseId: String,
+        queryEmbedding: FloatArray?,
         maxResults: Int,
+        lambda: Float,
     ): List<RetrievalResult> {
         if (results.size <= 1) return results
 
-        val seenDocs = mutableSetOf<String>()
-        val diverse = mutableListOf<RetrievalResult>()
-        val extras = mutableListOf<RetrievalResult>()
+        val selected = mutableListOf<RetrievalResult>()
+        val candidates = results.toMutableList()
 
-        for (result in results) {
-            val docId = result.chunk.documentId
-            if (docId !in seenDocs) {
-                diverse.add(result)
-                seenDocs.add(docId)
-            } else {
-                extras.add(result)
+        // 取第一个（最高分）作为种子
+        selected.add(candidates.removeAt(0))
+
+        while (candidates.isNotEmpty() && selected.size < maxResults) {
+            var bestIdx = 0
+            var bestScore = Float.NEGATIVE_INFINITY
+
+            for (i in candidates.indices) {
+                val candidate = candidates[i]
+                val relevance = candidate.score
+
+                // 计算与已选结果的最大相似度
+                var maxSimilarity = 0f
+                if (queryEmbedding != null) {
+                    val candEmb = vectorStore.getEmbedding(knowledgeBaseId, candidate.chunk.id)
+                    if (candEmb != null) {
+                        for (s in selected) {
+                            val selEmb = vectorStore.getEmbedding(knowledgeBaseId, s.chunk.id)
+                            if (selEmb != null) {
+                                val sim = Similarity.cosineSimilarity(candEmb, selEmb)
+                                if (!sim.isNaN() && sim > maxSimilarity) {
+                                    maxSimilarity = sim
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val mmr = lambda * relevance - (1f - lambda) * maxSimilarity
+                if (mmr > bestScore) {
+                    bestScore = mmr
+                    bestIdx = i
+                }
             }
+
+            selected.add(candidates.removeAt(bestIdx))
         }
 
-        return (diverse + extras).take(maxResults)
+        // 追加剩余候选
+        selected.addAll(candidates)
+        return selected.take(maxResults)
     }
 }

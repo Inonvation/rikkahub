@@ -21,6 +21,7 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,7 +53,7 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
-private val CHUNK_STRATEGIES = listOf("fixed_size", "paragraph", "sentence")
+private val CHUNK_STRATEGIES = listOf("fixed_size", "paragraph", "sentence", "semantic")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -190,6 +191,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                                         "fixed_size" -> "固定大小"
                                         "paragraph" -> "段落"
                                         "sentence" -> "句子"
+                                        "semantic" -> "语义"
                                         else -> it
                                     }
                                 },
@@ -234,6 +236,22 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                                 placeholder = { Text("默认 ${KnowledgeBaseEntity.DEFAULT_CHUNK_OVERLAP}，不建议修改") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("父块大小 (Small-to-Big)") },
+                            description = { Text("0=禁用。启用时用小粒度做精确匹配，返回大粒度上下文。设 1024 表示每个父块 1024 字符。当前 ${vm.parentChunkSize}") },
+                        ) {
+                            Slider(
+                                value = vm.parentChunkSize.toFloat(),
+                                onValueChange = { vm.updateParentChunkSize(it.toInt()) },
+                                valueRange = 0f..2048f,
+                                steps = 15,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -290,12 +308,73 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 item(
                     headlineContent = {
                         FormItem(
+                            label = { Text("关键词权重") },
+                            description = { Text("混合检索时关键词匹配的比重：0=纯语义，1=均衡，2=双倍关键词。当前 ${"%.1f".format(vm.keywordWeight)}") },
+                        ) {
+                            Slider(
+                                value = vm.keywordWeight,
+                                onValueChange = { vm.updateKeywordWeight(it) },
+                                valueRange = 0f..2f,
+                                steps = 19,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
                             label = { Text("HyDE 查询改写") },
                             description = { Text("用 LLM 先生成一段假设答案，再用假设答案的向量做检索。对口吻化问题召回更准，但会多耗一次模型调用") },
                         ) {
                             Switch(
                                 checked = vm.useHyde,
                                 onCheckedChange = { vm.updateUseHyde(it) },
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("多查询扩展") },
+                            description = { Text("检索时自动生成 2-3 个不同措辞的查询，合并结果。提升复杂问题的召回率，但会多耗 1 次模型调用") },
+                        ) {
+                            Switch(
+                                checked = vm.useMultiquery,
+                                onCheckedChange = { vm.updateUseMultiquery(it) },
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("上下文窗口") },
+                            description = { Text("检索结果附带前后各 N 个 chunk，补充上下文。当前 ${vm.contextWindow}（0=关闭）") },
+                        ) {
+                            Slider(
+                                value = vm.contextWindow.toFloat(),
+                                onValueChange = { vm.updateContextWindow(it.toInt()) },
+                                valueRange = 0f..3f,
+                                steps = 2,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("MMR 多样性") },
+                            description = { Text("检索结果的多样性控制：1=纯相关性，0=最大多样性。当前 ${"%.1f".format(vm.mmrLambda)}") },
+                        ) {
+                            Slider(
+                                value = vm.mmrLambda,
+                                onValueChange = { vm.updateMmrLambda(it) },
+                                valueRange = 0f..1f,
+                                steps = 9,
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }

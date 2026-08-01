@@ -45,6 +45,15 @@ class VectorStore(
             )
     }
 
+    /**
+     * 获取指定 chunk 的 embedding 向量，用于 MMR 多样性计算。
+     */
+    fun getEmbedding(knowledgeBaseId: String, chunkId: String): FloatArray? {
+        synchronized(cacheLock) {
+            return cache[knowledgeBaseId]?.find { it.chunkId == chunkId }?.embedding
+        }
+    }
+
     private val cache = object : LinkedHashMap<String, List<CachedVector>>(
         /* initialCapacity */ 16,
         /* loadFactor */ 0.75f,

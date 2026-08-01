@@ -52,4 +52,10 @@ data class KnowledgeChunkEntity(
 
     @ColumnInfo(name = "metadata")
     val metadata: String = "{}",
+
+    @ColumnInfo(name = "context_prefix", defaultValue = "")
+    val contextPrefix: String = "",
+
+    @ColumnInfo(name = "parent_chunk_id")
+    val parentChunkId: String? = null,
 )

@@ -17,9 +17,11 @@ import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
 import me.rerere.document.XlsxParser
 import me.rerere.knowledge.KnowledgeManager
+import me.rerere.knowledge.chunking.Chunk
 import me.rerere.knowledge.chunking.FixedSizeChunker
 import me.rerere.knowledge.chunking.ParagraphChunker
 import me.rerere.knowledge.chunking.SentenceChunker
+import me.rerere.knowledge.chunking.SemanticChunker
 import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 import me.rerere.knowledge.vector.toByteArray
 import me.rerere.knowledge.vector.toFloatArray
@@ -103,6 +105,7 @@ class DocumentProcessor(
             val chunker = when (chunkStrategy) {
                 "paragraph" -> ParagraphChunker()
                 "sentence" -> SentenceChunker()
+                "semantic" -> SemanticChunker()
                 else -> FixedSizeChunker()
             }
             val chunks = chunker.chunk(text, chunkSize, chunkOverlap)
@@ -110,6 +113,20 @@ class DocumentProcessor(
                 knowledgeManager.documentRepository.updateStatus(documentId, "failed", "No chunks")
                 return
             }
+
+            // Small-to-Big：如果配置了 parent_chunk_size，先创建父块再在各父块内创建子块
+            val parentChunkSize = base.parentChunkSize
+            val useSmallToBig = parentChunkSize > 0 && parentChunkSize > chunkSize
+            val parentChunks: List<Chunk> = if (useSmallToBig) {
+                chunker.chunk(text, parentChunkSize, chunkOverlap.coerceAtMost(parentChunkSize / 10))
+            } else {
+                emptyList()
+            }
+
+            // 3.5 提取文档标题和章节结构，生成上下文前缀（Contextual Chunking）
+            val docTitle = knowledgeManager.documentRepository.getById(documentId)?.fileName
+                ?.substringBeforeLast(".") ?: ""
+            val sectionHeaders = extractSectionHeaders(text)
             onProgress(0.3f)
 
             // 4. Resolve embedding model
@@ -137,39 +154,119 @@ class DocumentProcessor(
 
             // 5. Generate embeddings in batches
             val batchSize = 10
-            val totalBatches = (chunks.size + batchSize - 1) / batchSize
             var processedCount = 0
 
-            for (batchIndex in 0 until totalBatches) {
-                val start = batchIndex * batchSize
-                val end = minOf(start + batchSize, chunks.size)
-                val batch = chunks.subList(start, end)
+            // 为每个 chunk 生成上下文前缀（Contextual Chunking）
+            val chunkContexts = chunks.map { chunk ->
+                val section = findSectionForChunk(chunk.content, text, sectionHeaders)
+                buildContextPrefix(docTitle, section)
+            }
 
-                val result = provider.generateEmbedding(
-                    providerSetting = providerSetting,
-                    params = EmbeddingGenerationParams(
-                        model = model,
-                        input = batch.map { it.content },
-                    )
-                )
+            // Small-to-Big：先存父块（无 embedding），再存子块（有 embedding，关联父块）
+            if (useSmallToBig) {
+                // 构建父块 id 映射：子块 → 父块
+                val childToParentMap = buildChildToParentMap(chunks, parentChunks)
+                val parentEntities = mutableMapOf<String, String>() // content hash → entity id
 
-                // 转成字节数组后立即丢弃 FloatArray（result 每批用完即弃，不累计）
-                val chunkEntities = batch.mapIndexed { i, chunk ->
-                    val embeddingBytes = result.embeddings.getOrNull(i)?.toFloatArray()?.toByteArray()
-                    KnowledgeChunkEntity(
-                        id = Uuid.random().toString(),
-                        documentId = documentId,
-                        knowledgeBaseId = baseId,
-                        chunkIndex = processedCount + i,
-                        content = chunk.content,
-                        embedding = embeddingBytes,
-                        tokenCount = chunk.tokenCount,
-                    )
+                // 先插入父块
+                parentChunks.forEachIndexed { index, parent ->
+                    val parentId = Uuid.random().toString()
+                    parentEntities[parent.content] = parentId
+                    knowledgeManager.chunkDao.insertAll(listOf(
+                        KnowledgeChunkEntity(
+                            id = parentId,
+                            documentId = documentId,
+                            knowledgeBaseId = baseId,
+                            chunkIndex = index,
+                            content = parent.content,
+                            embedding = null,
+                            tokenCount = parent.tokenCount,
+                            contextPrefix = "",
+                        )
+                    ))
                 }
 
-                knowledgeManager.chunkDao.insertAll(chunkEntities)
-                processedCount += batch.size
-                onProgress(0.3f + 0.6f * (processedCount.toFloat() / chunks.size))
+                // 再插入子块（带 embedding）
+                val totalBatches = (chunks.size + batchSize - 1) / batchSize
+                for (batchIndex in 0 until totalBatches) {
+                    val start = batchIndex * batchSize
+                    val end = minOf(start + batchSize, chunks.size)
+                    val batch = chunks.subList(start, end)
+                    val contextBatch = chunkContexts.subList(start, end)
+
+                    val embeddingInputs = batch.mapIndexed { i, chunk ->
+                        val prefix = contextBatch[i]
+                        if (prefix.isNotEmpty()) "$prefix\n\n${chunk.content}" else chunk.content
+                    }
+
+                    val result = provider.generateEmbedding(
+                        providerSetting = providerSetting,
+                        params = EmbeddingGenerationParams(
+                            model = model,
+                            input = embeddingInputs,
+                        )
+                    )
+
+                    val chunkEntities = batch.mapIndexed { i, chunk ->
+                        val embeddingBytes = result.embeddings.getOrNull(i)?.toFloatArray()?.toByteArray()
+                        val parentId = childToParentMap[chunk.content]
+                        KnowledgeChunkEntity(
+                            id = Uuid.random().toString(),
+                            documentId = documentId,
+                            knowledgeBaseId = baseId,
+                            chunkIndex = processedCount + i,
+                            content = chunk.content,
+                            embedding = embeddingBytes,
+                            tokenCount = chunk.tokenCount,
+                            contextPrefix = contextBatch[i],
+                            parentChunkId = parentId,
+                        )
+                    }
+
+                    knowledgeManager.chunkDao.insertAll(chunkEntities)
+                    processedCount += batch.size
+                    onProgress(0.3f + 0.6f * (processedCount.toFloat() / chunks.size))
+                }
+            } else {
+                // 普通模式：直接嵌入子块
+                val totalBatches = (chunks.size + batchSize - 1) / batchSize
+                for (batchIndex in 0 until totalBatches) {
+                    val start = batchIndex * batchSize
+                    val end = minOf(start + batchSize, chunks.size)
+                    val batch = chunks.subList(start, end)
+                    val contextBatch = chunkContexts.subList(start, end)
+
+                    val embeddingInputs = batch.mapIndexed { i, chunk ->
+                        val prefix = contextBatch[i]
+                        if (prefix.isNotEmpty()) "$prefix\n\n${chunk.content}" else chunk.content
+                    }
+
+                    val result = provider.generateEmbedding(
+                        providerSetting = providerSetting,
+                        params = EmbeddingGenerationParams(
+                            model = model,
+                            input = embeddingInputs,
+                        )
+                    )
+
+                    val chunkEntities = batch.mapIndexed { i, chunk ->
+                        val embeddingBytes = result.embeddings.getOrNull(i)?.toFloatArray()?.toByteArray()
+                        KnowledgeChunkEntity(
+                            id = Uuid.random().toString(),
+                            documentId = documentId,
+                            knowledgeBaseId = baseId,
+                            chunkIndex = processedCount + i,
+                            content = chunk.content,
+                            embedding = embeddingBytes,
+                            tokenCount = chunk.tokenCount,
+                            contextPrefix = contextBatch[i],
+                        )
+                    }
+
+                    knowledgeManager.chunkDao.insertAll(chunkEntities)
+                    processedCount += batch.size
+                    onProgress(0.3f + 0.6f * (processedCount.toFloat() / chunks.size))
+                }
             }
 
             knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
@@ -313,6 +410,75 @@ class DocumentProcessor(
 
     private companion object {
         const val TAG = "DocumentProcessor"
+
+        /**
+         * 从文档文本中提取章节标题，用于 Contextual Chunking。
+         * 识别 Markdown 标题 (#)、中文章节标记（第X章/节）、以及编号标题（一、1.）。
+         */
+        private fun extractSectionHeaders(text: String): List<Pair<Int, String>> {
+            val headers = mutableListOf<Pair<Int, String>>()
+            val pattern = Regex(
+                """(?:^|\n)\s*((?:#{1,3}\s+.+)|(?:第[一二三四五六七八九十百千\d]+[章节部篇]\s*.*)|(?:[一二三四五六七八九十]+[、，]\s*.+)|(?:\d+[\.\、]\s+.+))""",
+                RegexOption.MULTILINE
+            )
+            pattern.findAll(text).forEach { match ->
+                val header = match.groupValues[1].trim()
+                if (header.length in 2..80) {
+                    headers.add(match.range.first to header)
+                }
+            }
+            return headers
+        }
+
+        /**
+         * 为 chunk 找到所属的章节标题。
+         */
+        private fun findSectionForChunk(
+            chunkContent: String,
+            fullText: String,
+            sectionHeaders: List<Pair<Int, String>>,
+        ): String {
+            if (sectionHeaders.isEmpty()) return ""
+            // 在全文文本中查找 chunk 内容的位置
+            val chunkPos = fullText.indexOf(chunkContent)
+            if (chunkPos < 0) return ""
+            // 找到 chunk 之前最近的章节标题
+            val section = sectionHeaders.lastOrNull { it.first < chunkPos }
+            return section?.second ?: ""
+        }
+
+        /**
+         * 构建上下文前缀，格式：[文档: 《xxx》] [章节: xxx]
+         */
+        private fun buildContextPrefix(docTitle: String, section: String): String {
+            if (docTitle.isBlank() && section.isBlank()) return ""
+            val parts = mutableListOf<String>()
+            if (docTitle.isNotBlank()) {
+                parts.add("文档: 《$docTitle》")
+            }
+            if (section.isNotBlank()) {
+                parts.add("章节: $section")
+            }
+            return parts.joinToString(" ")
+        }
+
+        /**
+         * Small-to-Big：为每个子块找到包含它的父块。
+         */
+        private fun buildChildToParentMap(
+            childChunks: List<Chunk>,
+            parentChunks: List<Chunk>,
+        ): Map<String, String> {
+            val map = mutableMapOf<String, String>()
+            for (child in childChunks) {
+                // 在父块中查找包含该子块的父块
+                val parent = parentChunks.find { it.content.contains(child.content) }
+                if (parent != null) {
+                    map[child.content] = parent.content
+                }
+            }
+            return map
+        }
     }
 
     private suspend fun rebuildFtsIndex() {

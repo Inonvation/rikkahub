@@ -38,6 +38,7 @@ class KnowledgeManager(
         similarityThreshold: Float = 0f,
         reranker: Reranker? = null,
         keywordWeight: Float = 1f,
+        mmrLambda: Float = 0.7f,
     ): List<RetrievalResult> {
         return retrievalPipeline.search(
             query = query,
@@ -47,6 +48,37 @@ class KnowledgeManager(
             similarityThreshold = similarityThreshold,
             reranker = reranker,
             keywordWeight = keywordWeight,
+            mmrLambda = mmrLambda,
+        )
+    }
+
+    suspend fun semanticSearch(
+        queryEmbedding: FloatArray,
+        knowledgeBaseId: String,
+        topK: Int = 10,
+        similarityThreshold: Float = 0f,
+        reranker: Reranker? = null,
+        mmrLambda: Float = 0.7f,
+    ): List<RetrievalResult> {
+        return retrievalPipeline.semanticSearch(
+            queryEmbedding = queryEmbedding,
+            knowledgeBaseId = knowledgeBaseId,
+            topK = topK,
+            similarityThreshold = similarityThreshold,
+            reranker = reranker,
+            mmrLambda = mmrLambda,
+        )
+    }
+
+    suspend fun keywordSearch(
+        query: String,
+        knowledgeBaseId: String,
+        topK: Int = 10,
+    ): List<RetrievalResult> {
+        return retrievalPipeline.keywordSearch(
+            query = query,
+            knowledgeBaseId = knowledgeBaseId,
+            topK = topK,
         )
     }
 

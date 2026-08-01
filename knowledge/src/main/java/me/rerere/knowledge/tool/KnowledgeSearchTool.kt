@@ -39,13 +39,18 @@ class KnowledgeSearchTool(
     private val getReranker: suspend () -> Reranker?,
     private val rewriteQuery: suspend (query: String) -> String = { it },
     private val generateHydeText: suspend (query: String) -> String? = { null },
+    private val generateMultiQueries: suspend (query: String) -> List<String> = { emptyList() },
 ) {
     fun create(): Tool {
         return Tool(
             name = "kb_search",
-            description = "Search the user's knowledge base for relevant text chunks from uploaded documents. " +
-                    "Use this first for questions about the user's documents, notes, or files. " +
-                    "Set scan=true for counting or exhaustive listing queries.",
+            description = "Search the user's knowledge base for relevant text chunks from uploaded documents.\n\n" +
+                    "Choose the retrieval mode based on the query type:\n" +
+                    "- \"hybrid\" (default): Combined semantic + keyword search, best for general questions and understanding content.\n" +
+                    "- \"semantic\": Pure vector similarity search, best for conceptual queries, paraphrasing, or when exact keywords may differ.\n" +
+                    "- \"keyword\": Pure keyword/term search, best for finding specific names, codes, IDs, or exact terminology.\n" +
+                    "- \"scan\": Line-by-line exact/partial match, best for counting, listing, structured data lookups, or finding ALL occurrences of a term.\n\n" +
+                    "You can call this tool multiple times with different modes and combine the results for complex queries.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -62,10 +67,28 @@ class KnowledgeSearchTool(
                                 put("type", "string")
                             })
                         })
+                        put("mode", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Retrieval mode: \"hybrid\" (semantic+keyword, default), " +
+                                    "\"semantic\" (concept/meaning search), " +
+                                    "\"keyword\" (exact term search), " +
+                                    "\"scan\" (line-by-line match for counting/listing).")
+                        })
+                        put("topK", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Max results to return, overrides the knowledge base default. Only for hybrid/semantic/keyword modes.")
+                        })
+                        put("keywordWeight", buildJsonObject {
+                            put("type", "number")
+                            put("description", "Keyword bias in hybrid mode: 0=pure semantic, 2=double keyword weight. Default: knowledge base setting.")
+                        })
                         put("scan", buildJsonObject {
                             put("type", "boolean")
-                            put("description", "Set true to scan all chunks for exact matches and return an exhaustive, deduplicated count/list. " +
-                                    "Use for counting/statistics/exhaustive-listing queries. Default false.")
+                            put("description", "Deprecated: use mode=\"scan\" instead. Set true for exhaustive line-by-line matching.")
+                        })
+                        put("scanLimit", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Max results for scan mode. Default 100.")
                         })
                     },
                     required = listOf("query")
@@ -78,7 +101,10 @@ class KnowledgeSearchTool(
                     UIMessagePart.Text("Error: query is required")
                 )
 
-                val scan = obj["scan"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                // 向后兼容：scan=true → mode="scan"
+                val scanLegacy = obj["scan"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                val mode = obj["mode"]?.jsonPrimitive?.content ?: if (scanLegacy) "scan" else "hybrid"
+                val scanLimit = obj["scanLimit"]?.jsonPrimitive?.content?.toIntOrNull() ?: 100
 
                 val requestedIds = obj["knowledgeBaseIds"]?.jsonArray?.mapNotNull {
                     it.jsonPrimitive?.content
@@ -97,136 +123,272 @@ class KnowledgeSearchTool(
                     )
                 }
 
-                // 查询改写：把"最近对话 + 当前问题"改写为自包含 query（未配置时原样返回）
                 val searchQuery = rewriteQuery(query)
 
-                // 全量扫描模式：精确匹配全部 chunk，返回穷尽计数/列表（用于统计类查询）
-                if (scan) {
-                    return@Tool listOf(UIMessagePart.Text(scanAll(searchQuery, targetIds)))
-                }
-
-                // 解析 reranker（循环外用同一实例；未配置/失败时返回 null 回退 RRF 排序）
-                val reranker = getReranker()
-
-                // 每库解析 embedding 配置（维度须与该库 chunk 一致；未配置/失败 → null，该库走纯关键词检索）。
-                // 多个库共用同一 embedding 模型时，同一 query 向量只生成一次（按 model.id 去重复用）。
-                // 开启 HyDE 的知识库使用假设答案文本生成 embedding。
-                val configByBase = targetIds.associateWith { getEmbeddingForBase(it) }
-                val useHydeByBase = targetIds.associateWith { baseId ->
-                    knowledgeManager.baseRepository.getById(baseId)?.useHyde ?: false
-                }
-                val hydeText = if (useHydeByBase.any { it.value }) {
-                    try {
-                        generateHydeText(searchQuery)
-                    } catch (_: Exception) {
-                        null
-                    }
-                } else {
-                    null
-                }
-
-                // key: "modelId:queryText"
-                val embeddingByKey = mutableMapOf<String, FloatArray?>()
-                for ((baseId, config) in configByBase) {
-                    if (config == null) continue
-                    val effectiveQuery = if (useHydeByBase[baseId] == true && !hydeText.isNullOrBlank()) {
-                        hydeText
-                    } else {
-                        searchQuery
-                    }
-                    val key = "${config.model.id}:$effectiveQuery"
-                    if (embeddingByKey.containsKey(key)) continue
-                    embeddingByKey[key] = try {
-                        val result = config.provider.generateEmbedding(
-                            providerSetting = config.providerSetting,
-                            params = EmbeddingGenerationParams(
-                                model = config.model,
-                                input = listOf(effectiveQuery),
-                            )
-                        )
-                        result.embeddings.firstOrNull()?.toFloatArray()
-                    } catch (e: Exception) {
-                        null
+                when (mode) {
+                    "scan" -> return@Tool listOf(UIMessagePart.Text(scanAll(searchQuery, targetIds, scanLimit)))
+                    "keyword" -> return@Tool listOf(UIMessagePart.Text(keywordSearchAll(searchQuery, targetIds)))
+                    else -> {
+                        // hybrid 或 semantic 需要 embedding
+                        return@Tool listOf(UIMessagePart.Text(
+                            semanticOrHybridSearch(searchQuery, targetIds, mode)
+                        ))
                     }
                 }
-
-                // Search all target knowledge bases
-                val allResults = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
-                for (baseId in targetIds) {
-                    val base = knowledgeManager.baseRepository.getById(baseId) ?: continue
-                    val config = configByBase[baseId]
-                    val effectiveQuery = if (base.useHyde && !hydeText.isNullOrBlank()) {
-                        hydeText
-                    } else {
-                        searchQuery
-                    }
-                    val key = config?.let { "${it.model.id}:$effectiveQuery" }
-                    val queryEmbedding = key?.let { embeddingByKey[it] }
-                    val results = knowledgeManager.search(
-                        query = searchQuery,
-                        queryEmbedding = queryEmbedding,
-                        knowledgeBaseId = baseId,
-                        topK = base.topK,
-                        similarityThreshold = base.similarityThreshold,
-                        reranker = reranker,
-                        keywordWeight = 1f,
-                    )
-                    allResults.addAll(results)
-                }
-
-                allResults.sortByDescending { it.score }
-                val maxTopK = targetIds.maxOf { id ->
-                    knowledgeManager.baseRepository.getById(id)?.topK ?: 10
-                }
-                val topResults = allResults.take(maxTopK)
-
-                if (topResults.isEmpty()) {
-                    return@Tool listOf(
-                        UIMessagePart.Text("No relevant information found in the knowledge base for query: \"$searchQuery\"")
-                    )
-                }
-
-                // 一次性查询所有命中 chunk 的文档名，用于来源标注
-                val chunkIds = topResults.map { it.chunk.id }
-                val docNames = knowledgeManager.chunkDao
-                    .getDocumentNamesByChunkIds(chunkIds)
-                    .associate { it.chunkId to it.fileName }
-
-                val resultText = buildString {
-                    appendLine("Found ${topResults.size} relevant chunks from the knowledge base:\n")
-                    topResults.forEachIndexed { index, result ->
-                        val source = docNames[result.chunk.id]
-                        val scoreText = when (result.scoreKind) {
-                            "relevance" -> "相关度 ${"%.0f".format(result.score * 100)}%"
-                            else -> "RRF ${"%.3f".format(result.score)}"
-                        }
-                        val content = result.chunk.content
-                        appendLine("---")
-                        appendLine("[${index + 1}] 来源: ${source ?: "未知文档"} (${scoreText})")
-                        appendLine(content)
-                        appendLine()
-                    }
-                }
-
-                listOf(UIMessagePart.Text(resultText))
             }
         )
     }
 
     /**
+     * Hybrid 或 Semantic 检索：生成 embedding → 多查询扩展（可选）→ 检索 → 合并
+     */
+    private suspend fun semanticOrHybridSearch(query: String, targetIds: List<String>, mode: String): String {
+        val reranker = getReranker()
+
+        val configByBase = targetIds.associateWith { getEmbeddingForBase(it) }
+        val useHydeByBase = targetIds.associateWith { baseId ->
+            knowledgeManager.baseRepository.getById(baseId)?.useHyde ?: false
+        }
+        val hydeText = if (useHydeByBase.any { it.value }) {
+            try { generateHydeText(query) } catch (_: Exception) { null }
+        } else null
+
+        // 多查询扩展：在 hybrid/semantic 模式下生效
+        val queries = mutableListOf<String>()
+        val baseQuery = if (hydeText != null && useHydeByBase.any { it.value }) hydeText else query
+        queries.add(baseQuery)
+        for (baseId in targetIds) {
+            val base = knowledgeManager.baseRepository.getById(baseId) ?: continue
+            if (base.useMultiquery) {
+                try {
+                    queries.addAll(generateMultiQueries(query))
+                } catch (_: Exception) { /* fallback to single query */ }
+                break // 只生成一次 multi-query
+            }
+        }
+
+        // 生成所有 query 的 embedding（按 model+query 去重）
+        val embeddingByKey = mutableMapOf<String, FloatArray?>()
+        for (q in queries) {
+            for ((baseId, config) in configByBase) {
+                if (config == null) continue
+                val key = "${config.model.id}:$q"
+                if (embeddingByKey.containsKey(key)) continue
+                embeddingByKey[key] = try {
+                    val result = config.provider.generateEmbedding(
+                        providerSetting = config.providerSetting,
+                        params = EmbeddingGenerationParams(
+                            model = config.model,
+                            input = listOf(q),
+                        )
+                    )
+                    result.embeddings.firstOrNull()?.toFloatArray()
+                } catch (e: Exception) { null }
+            }
+        }
+
+        // 每个知识库 × 每个 query 检索
+        val allResults = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
+        for (baseId in targetIds) {
+            val base = knowledgeManager.baseRepository.getById(baseId) ?: continue
+            val config = configByBase[baseId]
+
+            val overrideTopK = if (base.topK > 0) base.topK else 10
+            val overrideKeywordWeight = base.keywordWeight
+            val overrideMmrLambda = base.mmrLambda
+
+            for (q in queries) {
+                val effectiveQuery = q
+                val key = config?.let { "${it.model.id}:$effectiveQuery" }
+                val queryEmbedding = key?.let { embeddingByKey[it] }
+
+                if (mode == "semantic" && queryEmbedding != null) {
+                    val results = knowledgeManager.semanticSearch(
+                        queryEmbedding = queryEmbedding,
+                        knowledgeBaseId = baseId,
+                        topK = overrideTopK,
+                        similarityThreshold = base.similarityThreshold,
+                        reranker = reranker,
+                        mmrLambda = overrideMmrLambda,
+                    )
+                    allResults.addAll(results)
+                } else {
+                    val results = knowledgeManager.search(
+                        query = effectiveQuery,
+                        queryEmbedding = queryEmbedding,
+                        knowledgeBaseId = baseId,
+                        topK = overrideTopK,
+                        similarityThreshold = base.similarityThreshold,
+                        reranker = reranker,
+                        keywordWeight = overrideKeywordWeight,
+                        mmrLambda = overrideMmrLambda,
+                    )
+                    allResults.addAll(results)
+                }
+            }
+        }
+
+        // 多查询结果合并：按 score 降序，去重
+        allResults.sortByDescending { it.score }
+        val seenIds = mutableSetOf<String>()
+        val deduped = allResults.filter { seenIds.add(it.chunk.id) }
+
+        val maxTopK = targetIds.maxOf { id ->
+            knowledgeManager.baseRepository.getById(id)?.topK ?: 10
+        }
+        val topResults = deduped.take((maxTopK * queries.size).coerceAtMost(50))
+
+        if (topResults.isEmpty()) {
+            return "No relevant information found in the knowledge base for query: \"$query\""
+        }
+
+        return formatResults(topResults, targetIds)
+    }
+
+    /**
+     * 纯关键词检索（FTS5/BM25），不生成 embedding。
+     */
+    private suspend fun keywordSearchAll(query: String, targetIds: List<String>): String {
+        val allResults = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
+        for (baseId in targetIds) {
+            val base = knowledgeManager.baseRepository.getById(baseId) ?: continue
+            val results = knowledgeManager.keywordSearch(
+                query = query,
+                knowledgeBaseId = baseId,
+                topK = base.topK,
+            )
+            allResults.addAll(results)
+        }
+        allResults.sortByDescending { it.score }
+
+        if (allResults.isEmpty()) {
+            return "No keyword matches found in the knowledge base for query: \"$query\""
+        }
+
+        return formatResults(allResults, targetIds)
+    }
+
+    /**
+     * 格式化检索结果，包含上下文窗口扩展。
+     */
+    private suspend fun formatResults(
+        results: List<me.rerere.knowledge.retrieval.RetrievalResult>,
+        targetIds: List<String>,
+    ): String {
+        // Small-to-Big：解析父块，用大粒度内容替换子块内容
+        val resolvedResults = resolveParentChunks(results)
+
+        // 上下文窗口扩展
+        val expandedResults = expandContextWindow(resolvedResults, targetIds)
+
+        val chunkIds = expandedResults.map { it.chunk.id }
+        val docNames = knowledgeManager.chunkDao
+            .getDocumentNamesByChunkIds(chunkIds)
+            .associate { it.chunkId to it.fileName }
+
+        return buildString {
+            appendLine("Found ${results.size} relevant chunks from the knowledge base:\n")
+            expandedResults.forEachIndexed { index, result ->
+                val source = docNames[result.chunk.id]
+                val scoreText = when (result.scoreKind) {
+                    "relevance" -> "相关度 ${"%.0f".format(result.score * 100)}%"
+                    else -> "RRF ${"%.3f".format(result.score)}"
+                }
+                appendLine("---")
+                appendLine("[${index + 1}] 来源: ${source ?: "未知文档"} (${scoreText})")
+                appendLine(result.chunk.content)
+                appendLine()
+            }
+        }
+    }
+
+    /**
+     * Small-to-Big：将命中子块替换为父块内容，返回大粒度上下文。
+     * 多个子块指向同一父块时去重。
+     */
+    private suspend fun resolveParentChunks(
+        results: List<me.rerere.knowledge.retrieval.RetrievalResult>,
+    ): List<me.rerere.knowledge.retrieval.RetrievalResult> {
+        val parentIds = results.mapNotNull { it.chunk.parentChunkId }.toSet()
+        if (parentIds.isEmpty()) return results
+
+        val parentChunks = knowledgeManager.chunkDao.getByIds(parentIds.toList())
+            .associateBy { it.id }
+
+        val seenParentIds = mutableSetOf<String>()
+        val resolved = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
+
+        for (result in results) {
+            val parentId = result.chunk.parentChunkId
+            if (parentId != null) {
+                val parent = parentChunks[parentId]
+                if (parent != null && seenParentIds.add(parentId)) {
+                    resolved.add(result.copy(chunk = parent))
+                }
+            } else {
+                resolved.add(result)
+            }
+        }
+
+        return resolved
+    }
+
+    /**
+     * 上下文窗口扩展：对每个命中 chunk，拉取同一文档的前后 N 个 chunk。
+     * 去重，保持原始排序。
+     */
+    private suspend fun expandContextWindow(
+        results: List<me.rerere.knowledge.retrieval.RetrievalResult>,
+        targetIds: List<String>,
+    ): List<me.rerere.knowledge.retrieval.RetrievalResult> {
+        // 从第一个知识库读取 context_window 配置（所有知识库共享同一配置）
+        val contextWindow = targetIds.firstNotNullOfOrNull { id ->
+            knowledgeManager.baseRepository.getById(id)
+        }?.contextWindow ?: 0
+        if (contextWindow <= 0) return results
+
+        val expanded = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
+        val seenIds = mutableSetOf<String>()
+
+        for (result in results) {
+            // 添加相邻 chunk
+            val adjacentChunks = knowledgeManager.chunkDao.getAdjacentChunks(
+                documentId = result.chunk.documentId,
+                minIndex = result.chunk.chunkIndex - contextWindow,
+                maxIndex = result.chunk.chunkIndex + contextWindow,
+            )
+            for (chunk in adjacentChunks) {
+                if (seenIds.add(chunk.id)) {
+                    expanded.add(
+                        me.rerere.knowledge.retrieval.RetrievalResult(
+                            chunk = chunk,
+                            score = result.score,
+                            rank = 0,
+                            scoreKind = "context",
+                            snippet = null,
+                        )
+                    )
+                }
+            }
+
+            // 添加原始命中 chunk
+            if (seenIds.add(result.chunk.id)) {
+                expanded.add(result)
+            }
+        }
+
+        return expanded
+    }
+
+    /**
      * 全量扫描模式：对目标知识库所有 chunk 按行做大小写不敏感匹配，
      * 返回去重后的命中行（含计数），用于统计/计数/穷尽列举类查询。
-     * 按行匹配保证"一行一条记录"的名单类文档计数准确；
-     * 去重消除 chunk overlap 造成的同一行重复计数。
-     * 先按"所有词都命中"精确匹配；无结果时回退到"任一词命中"，避免 query 含泛词时漏召回。
      */
-    private suspend fun scanAll(query: String, targetIds: List<String>): String {
-        // 清洗引号，避免 "xxx" 匹配不到 xxx
+    private suspend fun scanAll(query: String, targetIds: List<String>, limit: Int = 100): String {
         val cleanedQuery = query.replace(Regex("[\"']"), "").trim()
         val terms = cleanedQuery.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return "No matches for empty query."
 
-        val MAX_HITS = 100
         val hits = LinkedHashSet<String>()
         val perBase = mutableMapOf<String, Int>()
 
@@ -248,7 +410,6 @@ class KnowledgeSearchTool(
             }
         }
 
-        // 全词匹配无结果 → 回退到任一词命中
         if (hits.isEmpty()) {
             for (baseId in targetIds) {
                 val chunks = knowledgeManager.chunkDao.getByKnowledgeBaseId(baseId)
@@ -282,12 +443,12 @@ class KnowledgeSearchTool(
                 }
             }
             appendLine()
-            hits.take(MAX_HITS).forEachIndexed { index, hit ->
+            hits.take(limit).forEachIndexed { index, hit ->
                 appendLine("${index + 1}. $hit")
             }
-            if (total > MAX_HITS) {
+            if (total > limit) {
                 appendLine()
-                appendLine("... and ${total - MAX_HITS} more. Total: $total")
+                appendLine("... and ${total - limit} more. Total: $total")
             }
         }
     }
@@ -317,7 +478,6 @@ class KnowledgeSearchTool(
                         if (base != null) {
                             add(base)
                         } else {
-                            // 即使查询失败也保留 ID，让模型知道它存在但信息不可用
                             add(
                                 KnowledgeBaseEntity(
                                     id = baseId,
@@ -341,20 +501,5 @@ class KnowledgeSearchTool(
                 listOf(UIMessagePart.Text("Available knowledge bases: $json"))
             }
         )
-    }
-
-    private fun buildKnowledgeBaseList(): String {
-        val bases = runBlocking {
-            try {
-                knowledgeManager.baseRepository.getAll().first()
-            } catch (_: Exception) {
-                return@runBlocking emptyList()
-            }
-        }
-        if (bases.isEmpty()) return "None"
-        return bases.joinToString("; ") { base ->
-            val desc = if (base.description.isNotBlank()) " - ${base.description}" else ""
-            "${base.name}$desc (id: ${base.id})"
-        }
     }
 }

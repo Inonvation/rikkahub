@@ -30,3 +30,20 @@ internal val DEFAULT_HYDE_PROMPT = """
     {query}
     </query>
 """.trimIndent()
+
+internal val DEFAULT_MULTIQUERY_PROMPT = """
+    You are a query expander for a knowledge-base search engine.
+    Given a user's query, generate 2-3 alternative search queries that capture the same intent from different angles or with different wording.
+    This helps improve retrieval when the original phrasing doesn't match the documents.
+
+    Requirements:
+    1. Each query should be a standalone, self-contained search query.
+    2. Vary the wording, perspective, or terminology while keeping the same core intent.
+    3. Keep each query in the same language as the original query.
+    4. Output one query per line, no numbering, no prefixes, no explanations.
+    5. Do NOT repeat the original query — only output the alternatives.
+
+    <query>
+    {query}
+    </query>
+""".trimIndent()

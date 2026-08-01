@@ -40,6 +40,21 @@ data class KnowledgeBaseEntity(
     @ColumnInfo(name = "use_hyde", defaultValue = "0")
     val useHyde: Boolean = false,
 
+    @ColumnInfo(name = "keyword_weight", defaultValue = "1.0")
+    val keywordWeight: Float = 1f,
+
+    @ColumnInfo(name = "use_multiquery", defaultValue = "0")
+    val useMultiquery: Boolean = false,
+
+    @ColumnInfo(name = "context_window", defaultValue = "0")
+    val contextWindow: Int = 0,
+
+    @ColumnInfo(name = "mmr_lambda", defaultValue = "0.7")
+    val mmrLambda: Float = 0.7f,
+
+    @ColumnInfo(name = "parent_chunk_size", defaultValue = "0")
+    val parentChunkSize: Int = 0,
+
     @ColumnInfo(name = "status")
     val status: String = "completed",
 

@@ -42,6 +42,16 @@ class KnowledgeBaseSettingsVM(
         private set
     var useHyde by mutableStateOf(false)
         private set
+    var keywordWeight by mutableStateOf(1f)
+        private set
+    var useMultiquery by mutableStateOf(false)
+        private set
+    var contextWindow by mutableStateOf(0)
+        private set
+    var mmrLambda by mutableStateOf(0.7f)
+        private set
+    var parentChunkSize by mutableStateOf(0)
+        private set
 
     // 手动重处理全部文档的任务状态
     var reprocessing by mutableStateOf(false)
@@ -73,6 +83,11 @@ class KnowledgeBaseSettingsVM(
         topK = entity.topK
         similarityThreshold = entity.similarityThreshold
         useHyde = entity.useHyde
+        keywordWeight = entity.keywordWeight
+        useMultiquery = entity.useMultiquery
+        contextWindow = entity.contextWindow
+        mmrLambda = entity.mmrLambda
+        parentChunkSize = entity.parentChunkSize
         loaded = true
     }
 
@@ -89,6 +104,11 @@ class KnowledgeBaseSettingsVM(
     fun updateTopK(value: Int) { topK = value; scheduleSave() }
     fun updateSimilarityThreshold(value: Float) { similarityThreshold = value.coerceIn(0f, 1f); scheduleSave() }
     fun updateUseHyde(value: Boolean) { useHyde = value; scheduleSave() }
+    fun updateKeywordWeight(value: Float) { keywordWeight = value.coerceIn(0f, 2f); scheduleSave() }
+    fun updateUseMultiquery(value: Boolean) { useMultiquery = value; scheduleSave() }
+    fun updateContextWindow(value: Int) { contextWindow = value.coerceIn(0, 3); scheduleSave() }
+    fun updateMmrLambda(value: Float) { mmrLambda = value.coerceIn(0f, 1f); scheduleSave() }
+    fun updateParentChunkSize(value: Int) { parentChunkSize = value.coerceIn(0, 4096); scheduleSave() }
 
     /** 防抖保存；delayMs=0 时立即保存。 */
     private fun scheduleSave(delayMs: Long = 500) {
@@ -114,7 +134,8 @@ class KnowledgeBaseSettingsVM(
         val chunkConfigChanged =
             current.chunkSize != safeChunkSize ||
                 current.chunkOverlap != safeChunkOverlap ||
-                current.chunkStrategy != chunkStrategy
+                current.chunkStrategy != chunkStrategy ||
+                current.parentChunkSize != parentChunkSize
 
         knowledgeManager.baseRepository.update(
             current.copy(
@@ -128,6 +149,11 @@ class KnowledgeBaseSettingsVM(
                 topK = safeTopK,
                 similarityThreshold = similarityThreshold,
                 useHyde = useHyde,
+                keywordWeight = keywordWeight,
+                useMultiquery = useMultiquery,
+                contextWindow = contextWindow,
+                mmrLambda = mmrLambda,
+                parentChunkSize = parentChunkSize,
                 updatedAt = System.currentTimeMillis(),
             )
         )

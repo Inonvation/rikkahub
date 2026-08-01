@@ -39,4 +39,20 @@ interface KnowledgeChunkDao {
             "WHERE kc.id IN (:chunkIds)"
     )
     suspend fun getDocumentNamesByChunkIds(chunkIds: List<String>): List<ChunkDocumentName>
+
+    /**
+     * 获取同一文档中指定 chunk 前后的相邻 chunk，用于上下文窗口扩展。
+     */
+    @Query(
+        "SELECT * FROM knowledge_chunk WHERE document_id = :documentId " +
+            "AND chunk_index >= :minIndex AND chunk_index <= :maxIndex " +
+            "ORDER BY chunk_index"
+    )
+    suspend fun getAdjacentChunks(documentId: String, minIndex: Int, maxIndex: Int): List<KnowledgeChunkEntity>
+
+    /**
+     * 根据 ID 批量查询 chunk，用于 Small-to-Big 父块解析。
+     */
+    @Query("SELECT * FROM knowledge_chunk WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<KnowledgeChunkEntity>
 }

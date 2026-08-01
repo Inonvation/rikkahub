@@ -39,6 +39,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MULTIQUERY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_QUERY_REWRITE_PROMPT
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
@@ -157,7 +158,7 @@ class ChatService(
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
 
     // 知识库系统提示注入
-    private val knowledgeBaseReminderTransformer = KnowledgeBaseReminderTransformer()
+    private val knowledgeBaseReminderTransformer = KnowledgeBaseReminderTransformer(knowledgeManager)
 
     // Todo 被动提醒注入
     private val todoReminderTransformer = TodoReminderTransformer(todoStorage)
@@ -727,6 +728,10 @@ class ChatService(
             generateHydeText(query, settings, assistant)
         }
 
+        val multiQuery: suspend (String) -> List<String> = { query ->
+            generateMultiQueries(query, settings, assistant)
+        }
+
         val tool = KnowledgeSearchTool(
             knowledgeManager = knowledgeManager,
             getAllowedKnowledgeBaseIds = { allowedIds },
@@ -734,6 +739,7 @@ class ChatService(
             getReranker = { reranker },
             rewriteQuery = rewrite,
             generateHydeText = hyde,
+            generateMultiQueries = multiQuery,
         )
         return listOf(tool.create(), tool.createListTool())
     }
@@ -831,6 +837,46 @@ class ChatService(
             throw e
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * Multi-Query 查询扩展：生成 2-3 个不同措辞的检索查询。
+     * 失败时返回空列表，调用方回退到单查询检索。
+     */
+    private suspend fun generateMultiQueries(
+        query: String,
+        settings: Settings,
+        assistant: Assistant,
+    ): List<String> {
+        if (query.isBlank()) return emptyList()
+        return try {
+            val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+                ?: return emptyList()
+            val provider = model.findProvider(settings.providers) ?: return emptyList()
+            val providerHandler = providerManager.getProviderByType(provider)
+            val result = providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(
+                    UIMessage.user(
+                        DEFAULT_MULTIQUERY_PROMPT.applyPlaceholders("query" to query)
+                    )
+                ),
+                params = backgroundTextGenerationParams(
+                    model = model,
+                    reasoningLevel = ReasoningLevel.OFF,
+                ),
+            )
+            result.choices[0].message?.toText()?.trim()
+                ?.lines()
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() && it != query }
+                ?.take(3)
+                ?: emptyList()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 
