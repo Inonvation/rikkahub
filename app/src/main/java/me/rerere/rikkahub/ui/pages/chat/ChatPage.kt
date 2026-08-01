@@ -42,15 +42,18 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,7 +84,6 @@ import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -148,6 +150,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val appEventBus: AppEventBus = koinInject()
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
+
+    // 清理导航栈中旧的 Chat 页面，避免无限堆积
+    LaunchedEffect(id) {
+        navController.cleanupChatPages()
+    }
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
@@ -531,9 +538,16 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
-            ChatList(
-                innerPadding = innerPadding,
-                conversation = conversation,
+            AnimatedContent(
+                targetState = conversation.id,
+                transitionSpec = {
+                    fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                },
+                label = "ChatContent",
+            ) {
+                ChatList(
+                    innerPadding = innerPadding,
+                    conversation = conversation,
                 state = chatListState,
                 loading = loadingJob != null,
                 processingStatus = processingStatus,
@@ -606,6 +620,7 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
             )
+            }
         }
 
         if (showFilesSheet) {
@@ -960,9 +975,9 @@ private fun TodolistBanner(
 ) {
     val inProgressItems = todolist.items.filter { it.status == TodoStatus.in_progress }
     val pendingCount = todolist.items.count { it.status == TodoStatus.pending }
-    val completed = todolist.items.count { it.status == TodoStatus.completed }
+    val completed = todolist.items.count { it.status == TodoStatus.completed || it.status == TodoStatus.cancelled }
     val total = todolist.items.size
-    val allDone = completed + todolist.items.count { it.status == TodoStatus.cancelled } == total
+    val allDone = completed == total
     val hasActive = inProgressItems.isNotEmpty() || pendingCount > 0
 
     // 有活跃任务时默认展开，全部完成时默认折叠
@@ -986,7 +1001,10 @@ private fun TodolistBanner(
         val removedIds = oldIds - newIds
         val addedIds = newIds - oldIds
 
-        // 标记已移除条目，触发出场动画
+        // 清理不再需要移除的条目（被重新加入的），只保留当前仍在移除列表中的
+        removingIds.value = removingIds.value.intersect(removedIds)
+
+        // 标记已移除条目，触发出场动画（清理由各条目在动画完成后自行处理）
         if (removedIds.isNotEmpty()) {
             removingIds.value = removingIds.value + removedIds
         }
@@ -999,16 +1017,14 @@ private fun TodolistBanner(
             val index = displayItems.indexOfFirst { it.id == updated.id }
             if (index >= 0) displayItems[index] = updated
         }
-
-        // 出场动画完成后清理
-        if (removedIds.isNotEmpty()) {
-            delay(350)
-            displayItems.removeAll { it.id in removedIds }
-            removingIds.value = removingIds.value - removedIds
-        }
     }
 
     val progress = if (total > 0) completed.toFloat() / total else 0f
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(500),
+        label = "progress",
+    )
 
     AnimatedVisibility(visible = !dismissed) {
         Card(
@@ -1031,8 +1047,7 @@ private fun TodolistBanner(
                             imageVector = if (allDone) HugeIcons.Tick01 else HugeIcons.LeftToRightListBullet,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = if (allDone) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                         Spacer(Modifier.width(6.dp))
                         if (!expanded) {
@@ -1089,7 +1104,7 @@ private fun TodolistBanner(
 
                 // 折叠态也显示细进度条，展开态显示完整进度条
                 LinearProgressIndicator(
-                    progress = { progress },
+                    progress = { animatedProgress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = if (expanded) 4.dp else 6.dp),
@@ -1116,15 +1131,16 @@ private fun TodolistBanner(
                                 val isRemoving = item.id in removingIds.value
                                 val visibleState = remember { MutableTransitionState(false) }
 
-                                LaunchedEffect(Unit) {
-                                    if (!isRemoving) {
-                                        visibleState.targetState = true
-                                    }
+                                LaunchedEffect(isRemoving) {
+                                    visibleState.targetState = !isRemoving
                                 }
 
-                                LaunchedEffect(isRemoving) {
-                                    if (isRemoving) {
-                                        visibleState.targetState = false
+                                // 出场动画完成后从 displayItems 中移除
+                                LaunchedEffect(isRemoving, visibleState.isIdle) {
+                                    if (isRemoving && visibleState.isIdle &&
+                                        !visibleState.currentState && !visibleState.targetState
+                                    ) {
+                                        displayItems.removeAll { it.id == item.id }
                                     }
                                 }
 
