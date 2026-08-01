@@ -31,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -184,9 +183,6 @@ internal fun AssistantBasicContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_workspace))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_workspace_desc))
-                },
                 modifier = Modifier.padding(8.dp),
             ) {
                 val selectedWorkspace = workspaces.find { it.id == assistant.workspaceId?.toString() }
@@ -214,9 +210,6 @@ internal fun AssistantBasicContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_use_assistant_avatar))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_use_assistant_avatar_desc))
-                },
                 tail = {
                     Switch(
                         checked = assistant.useAssistantAvatar,
@@ -240,9 +233,6 @@ internal fun AssistantBasicContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_chat_model))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_chat_model_desc))
-                },
                 content = {
                     ModelSelector(
                         modelId = assistant.chatModelId,
@@ -263,13 +253,6 @@ internal fun AssistantBasicContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_temperature))
-                },
-                description = {
-                    Text(
-                        text = buildAnnotatedString {
-                            append(stringResource(R.string.assistant_page_temperature_warning))
-                        }
-                    )
                 },
                 tail = {
                     Switch(
@@ -305,9 +288,6 @@ internal fun AssistantBasicContent(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         isError = temperatureValue == null || temperatureValue !in 0f..2f,
-                        supportingText = {
-                            Text("0 - 2")
-                        }
                     )
                 }
             }
@@ -316,13 +296,6 @@ internal fun AssistantBasicContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_top_p))
-                },
-                description = {
-                    Text(
-                        text = buildAnnotatedString {
-                            append(stringResource(R.string.assistant_page_top_p_warning))
-                        }
-                    )
                 },
                 tail = {
                     Switch(
@@ -358,9 +331,6 @@ internal fun AssistantBasicContent(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         isError = topPValue == null || topPValue !in 0f..1f,
-                        supportingText = {
-                            Text("0 - 1")
-                        }
                     )
                 }
             }
@@ -370,11 +340,6 @@ internal fun AssistantBasicContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_context_message_limit))
                 },
-                description = {
-                    Text(
-                        text = stringResource(R.string.assistant_page_context_message_limit_desc),
-                    )
-                }
             ) {
                 Slider(
                     value = assistant.contextMessageLimit.toFloat(),
@@ -399,22 +364,12 @@ internal fun AssistantBasicContent(
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
                 )
 
-                if (assistant.contextMessageLimit > 0) {
-                    Text(
-                        text = stringResource(R.string.assistant_page_context_message_limit_warning),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
             }
             HorizontalDivider()
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_stream_output))
-                },
-                description = {
-                    Text(stringResource(R.string.assistant_page_stream_output_desc))
                 },
                 tail = {
                     Switch(
@@ -449,9 +404,6 @@ internal fun AssistantBasicContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_max_tokens))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_max_tokens_desc))
-                }
             ) {
                 OutlinedTextField(
                     value = assistant.maxTokens?.toString() ?: "",
@@ -471,13 +423,6 @@ internal fun AssistantBasicContent(
                     placeholder = {
                         Text(stringResource(R.string.assistant_page_max_tokens_no_limit))
                     },
-                    supportingText = {
-                        if (assistant.maxTokens != null) {
-                            Text(stringResource(R.string.assistant_page_max_tokens_limit, assistant.maxTokens))
-                        } else {
-                            Text(stringResource(R.string.assistant_page_max_tokens_no_token_limit))
-                        }
-                    }
                 )
             }
         }
@@ -489,9 +434,6 @@ internal fun AssistantBasicContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_gradient_background))
-                },
-                description = {
-                    Text(stringResource(R.string.assistant_page_gradient_background_desc))
                 },
                 tail = {
                     Switch(
@@ -532,9 +474,6 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_background_opacity))
                     },
-                    description = {
-                        Text(stringResource(R.string.assistant_page_background_opacity_desc))
-                    }
                 ) {
                     Slider(
                         value = backgroundOpacity,

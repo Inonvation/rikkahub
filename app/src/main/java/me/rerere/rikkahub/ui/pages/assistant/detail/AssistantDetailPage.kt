@@ -96,49 +96,42 @@ fun AssistantDetailPage(id: String) {
                     item(
                         onClick = { navController.navigate(Screen.AssistantBasic(id)) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_basic_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_basic)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantPrompt(id)) },
                         leadingContent = { Icon(HugeIcons.Message02, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_prompt_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_prompt)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantInjections(id)) },
                         leadingContent = { Icon(HugeIcons.Puzzle, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_extensions)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantMemory(id)) },
                         leadingContent = { Icon(HugeIcons.Brain02, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_memory_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_memory)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantRequest(id)) },
                         leadingContent = { Icon(HugeIcons.Code, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_request_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_request)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantMcp(id)) },
                         leadingContent = { Icon(HugeIcons.Wrench01, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_mcp_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_mcp)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.AssistantLocalTool(id)) },
                         leadingContent = { Icon(HugeIcons.BookOpen01, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_local_tools_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_local_tools)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )

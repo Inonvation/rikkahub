@@ -56,10 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
@@ -281,9 +278,6 @@ private fun AssistantPromptContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_allow_conversation_system_prompt))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_allow_conversation_system_prompt_desc))
-                },
                 tail = {
                     Switch(
                         checked = assistant.allowConversationSystemPrompt,
@@ -306,9 +300,6 @@ private fun AssistantPromptContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_allow_conversation_prompt_injection))
-                },
-                description = {
-                    Text(stringResource(R.string.assistant_page_allow_conversation_prompt_injection_desc))
                 },
                 tail = {
                     Switch(
@@ -374,36 +365,6 @@ private fun AssistantPromptContent(
                         )
                     )
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_message_template_desc))
-                    Text(buildAnnotatedString {
-                        append(stringResource(R.string.assistant_page_template_variables_label))
-                        append(" ")
-                        append(stringResource(R.string.assistant_page_template_variable_role))
-                        append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                            append("{{ role }}")
-                        }
-                        append(", ")
-                        append(stringResource(R.string.assistant_page_template_variable_message))
-                        append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                            append("{{ message }}")
-                        }
-                        append(", ")
-                        append(stringResource(R.string.assistant_page_template_variable_time))
-                        append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                            append("{{ time }}")
-                        }
-                        append(", ")
-                        append(stringResource(R.string.assistant_page_template_variable_date))
-                        append(": ")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                            append("{{ date }}")
-                        }
-                    })
-                }
             )
             Column(
                 modifier = Modifier
@@ -474,9 +435,6 @@ private fun AssistantPromptContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_preset_messages))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_preset_messages_desc))
-                }
             )
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -576,9 +534,6 @@ private fun AssistantPromptContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_regex_title))
                 },
-                description = {
-                    Text(stringResource(R.string.assistant_page_regex_desc))
-                }
             )
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),

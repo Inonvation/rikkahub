@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -82,13 +83,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -445,17 +449,7 @@ private fun ChatPageContent(
             lastVisible != null && lastVisible.index >= chatListState.layoutInfo.totalItemsCount - 2
         }
     }
-    var userScrolledUp by remember { mutableStateOf(false) }
-    LaunchedEffect(chatListState.isScrollInProgress) {
-        if (!chatListState.isScrollInProgress) {
-            userScrolledUp = !isAtBottom
-        }
-    }
-    LaunchedEffect(isAtBottom) {
-        if (isAtBottom && userScrolledUp) {
-            userScrolledUp = false
-        }
-    }
+    val userScrolledUp by remember { derivedStateOf { !isAtBottom } }
 
     // AI 生成时自动滚动（仅在用户未手动滚离时）
     LaunchedEffect(conversation.currentMessages.size, loadingJob) {
@@ -505,7 +499,7 @@ private fun ChatPageContent(
                         onRightDrawerOpenChange(true)
                     },
                     onCompressClick = {
-                        showFilesSheet = true
+                        showCompressDialog = true
                     },
                 )
             },
@@ -541,6 +535,7 @@ private fun ChatPageContent(
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
+
                     ChatInput(
                     state = inputState,
                     loading = loadingJob != null,
@@ -718,31 +713,60 @@ private fun ChatPageContent(
             )
             }
 
-            // 回到底部浮动按钮
-            AnimatedVisibility(
-                visible = userScrolledUp,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 16.dp),
-            ) {
-                FloatingActionButton(
-                    onClick = {
-                        userScrolledUp = false
-                        scope.launch {
-                            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            // 回到底部按钮（置顶浮层，避免与输入框/知识库气泡互相推挤）
+            if (userScrolledUp) {
+                Popup(
+                    alignment = Alignment.BottomCenter,
+                    offset = IntOffset(
+                        x = 0,
+                        y = -with(LocalDensity.current) { 144.dp.toPx() }.toInt()
+                    ),
+                    onDismissRequest = null,
                 ) {
-                    Icon(
-                        imageVector = HugeIcons.ArrowDown01,
-                        contentDescription = "回到底部",
-                    )
+                    Surface(
+                        onClick = {
+                            scope.launch {
+                                chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
+                            }
+                        },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = HugeIcons.ArrowDown01,
+                                contentDescription = "回到底部",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
                 }
             }
+
             }
+        }
+
+        if (showCompressDialog) {
+            val assistant = setting.getCurrentAssistant()
+            CompressContextDialog(
+                contextTokenLimit = assistant.contextTokenLimit,
+                onSaveContextTokenLimit = { newLimit ->
+                    val effectiveLimit = newLimit.takeIf { it > 0 } ?: 128_000
+                    vm.updateSettings(
+                        setting.copy(
+                            assistants = setting.assistants.map { a ->
+                                if (a.id == assistant.id) a.copy(contextTokenLimit = effectiveLimit) else a
+                            }
+                        )
+                    )
+                },
+                onDismiss = { showCompressDialog = false },
+                onCompress = { additionalPrompt, targetTokens, keepRecentMessages ->
+                    vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
+                }
+            )
         }
 
         if (showFilesSheet) {
@@ -1038,35 +1062,37 @@ private fun TopBar(
         actions = {
             // 上下文用量圆圈
             val assistant = settings.getCurrentAssistant()
-            val sizeInfo = rememberConversationSizeInfo(conversation)
-            val contextLimit = assistant.contextMessageLimit.takeIf { it > 0 } ?: MESSAGE_NODE_WARNING_THRESHOLD
-            val usagePercent = (sizeInfo.nodeCount.toFloat() / contextLimit).coerceIn(0f, 1f)
-            if (usagePercent > 0.5f) {
-                IconButton(
-                    onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
-                        onCompressClick()
-                    },
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
-                        CircularProgressIndicator(
-                            progress = { usagePercent },
-                            modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 2.5.dp,
-                            color = when {
-                                usagePercent > 0.9f -> MaterialTheme.colorScheme.error
-                                usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
-                                else -> MaterialTheme.colorScheme.primary
-                            },
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                        )
-                        Text(
-                            text = "${(usagePercent * 100).toInt()}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+            val totalTokens = conversation.currentMessages.sumOf { it.usage?.totalTokens ?: 0 }
+            val contextTokenLimit = assistant.contextTokenLimit.takeIf { it > 0 } ?: 128_000
+            val tokenText = when {
+                totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
+                else -> totalTokens.toString()
+            }
+            val usagePercent = (totalTokens / contextTokenLimit.toFloat()).coerceIn(0f, 1f)
+            IconButton(
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onCompressClick()
+                },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
+                    CircularProgressIndicator(
+                        progress = { usagePercent },
+                        modifier = Modifier.fillMaxSize(),
+                        strokeWidth = 2.5.dp,
+                        color = when {
+                            usagePercent > 0.9f -> MaterialTheme.colorScheme.error
+                            usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.primary
+                        },
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Text(
+                        text = tokenText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 

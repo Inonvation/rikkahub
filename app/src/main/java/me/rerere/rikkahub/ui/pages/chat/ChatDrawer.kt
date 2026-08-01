@@ -159,32 +159,7 @@ fun ChatDrawerContent(
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
 
     DrawerPanel {
-        // 助手选择器（顶部）
-        AssistantPicker(
-            settings = settings,
-            onUpdateSettings = {
-                val updateJob = vm.updateSettings(it)
-                scope.launch {
-                    updateJob.join()
-                    val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
-                        Uuid.random()
-                    } else {
-                        repo.getConversationsOfAssistant(it.assistantId)
-                            .first()
-                            .firstOrNull()
-                            ?.id ?: Uuid.random()
-                    }
-                    navigateToChatPage(navigator = navController, chatId = id)
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            onClickSetting = {
-                val currentAssistantId = settings.assistantId
-                navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
-            }
-        )
-
-        // 搜索（占 3/4）+ 历史记录（行尾图标）
+        // 搜索（占 3/4）+ 历史记录（行尾图标）— 置顶
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -243,6 +218,37 @@ fun ChatDrawerContent(
                     )
                 }
             }
+        }
+
+        // 当前助手设置卡片（搜索下方，大圆角包裹成独立卡片）
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            AssistantPicker(
+                settings = settings,
+                onUpdateSettings = {
+                    val updateJob = vm.updateSettings(it)
+                    scope.launch {
+                        updateJob.join()
+                        val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                            Uuid.random()
+                        } else {
+                            repo.getConversationsOfAssistant(it.assistantId)
+                                .first()
+                                .firstOrNull()
+                                ?.id ?: Uuid.random()
+                        }
+                        navigateToChatPage(navigator = navController, chatId = id)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                onClickSetting = {
+                    val currentAssistantId = settings.assistantId
+                    navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
+                }
+            )
         }
 
         BackupReminderCard(

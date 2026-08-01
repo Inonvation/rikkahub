@@ -10,9 +10,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,16 +30,20 @@ import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
+private const val DEFAULT_CONTEXT_TOKEN_LIMIT = 128_000
+
 @Composable
 fun CompressContextDialog(
+    contextTokenLimit: Int,
+    onSaveContextTokenLimit: (Int) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job
+    onCompress: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job
 ) {
+    var contextLimit by remember { mutableIntStateOf(contextTokenLimit) }
     var additionalPrompt by remember { mutableStateOf("") }
-    var selectedTokens by remember { mutableIntStateOf(2000) }
-    var keepRecentMessages by remember { mutableIntStateOf(32) }
+    var selectedTokens by remember { mutableIntStateOf(0) }
+    var keepRecentMessages by remember { mutableIntStateOf(0) }
     val hapticController = rememberHaptic()
-    val tokenOptions = listOf(500, 1000, 2000, 4000)
     var currentJob by remember { mutableStateOf<Job?>(null) }
     val isLoading = currentJob?.isActive == true
 
@@ -84,33 +85,27 @@ fun CompressContextDialog(
                 } else {
                     Text(stringResource(R.string.chat_page_compress_context_desc))
 
-                    // Token size selector
-                    Text(
-                        text = stringResource(R.string.chat_page_compress_target_tokens),
-                        style = MaterialTheme.typography.labelMedium
+                    // Context token limit input (for top bar indicator)
+                    OutlinedNumberInput(
+                        value = contextLimit,
+                        onValueChange = { contextLimit = it },
+                        label = stringResource(R.string.chat_page_compress_context_token_limit),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        tokenOptions.forEachIndexed { index, tokens ->
-                            SegmentedButton(
-                                selected = selectedTokens == tokens,
-                                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); selectedTokens = tokens },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = tokenOptions.size
-                                )
-                            ) {
-                                Text("$tokens")
-                            }
-                        }
-                    }
 
                     // Keep recent messages input
                     OutlinedNumberInput(
                         value = keepRecentMessages,
                         onValueChange = { keepRecentMessages = it },
                         label = stringResource(R.string.chat_page_compress_keep_recent),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    // Target token size input
+                    OutlinedNumberInput(
+                        value = selectedTokens,
+                        onValueChange = { selectedTokens = it },
+                        label = stringResource(R.string.chat_page_compress_target_tokens),
                         modifier = Modifier.fillMaxWidth(),
                     )
 
@@ -149,9 +144,17 @@ fun CompressContextDialog(
             } else {
                 TextButton(onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    currentJob = onConfirm(additionalPrompt, selectedTokens, keepRecentMessages)
+                    // 兜底：删除或非法时恢复默认 128k
+                    val effectiveLimit = contextLimit.takeIf { it > 0 } ?: DEFAULT_CONTEXT_TOKEN_LIMIT
+                    onSaveContextTokenLimit(effectiveLimit)
+                    // 只有目标 Token 和保留消息数都大于 0 时才执行压缩
+                    if (selectedTokens > 0 && keepRecentMessages > 0) {
+                        currentJob = onCompress(additionalPrompt, selectedTokens, keepRecentMessages)
+                    } else {
+                        onDismiss()
+                    }
                 }) {
-                    Text(stringResource(R.string.confirm))
+                    Text(stringResource(R.string.chat_page_compress_save))
                 }
             }
         },

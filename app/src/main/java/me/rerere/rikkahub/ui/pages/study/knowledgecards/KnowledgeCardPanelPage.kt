@@ -87,7 +87,17 @@ fun KnowledgeCardPanelPage() {
     val tabs = listOf("政治", "机械原理")
 
     Scaffold(
-        topBar = { LargeTopAppBar(title = { Text("知识点卡片") }, navigationIcon = { BackButton() }, scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors, actions = { IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") } }) },
+        topBar = {
+            LargeTopAppBar(
+                title = {
+                    Column {
+                        Text("知识点卡片")
+                        Text("${currentCards.size} 张卡片", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
+                actions = { IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") } }) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { padding ->

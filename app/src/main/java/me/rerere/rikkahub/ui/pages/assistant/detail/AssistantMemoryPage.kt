@@ -167,11 +167,6 @@ private fun AssistantMemoryContent(
         CardGroup {
             item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_memory)) },
-                supportingContent = {
-                    Text(
-                        text = stringResource(R.string.assistant_page_memory_desc),
-                    )
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.enableMemory,
@@ -187,11 +182,6 @@ private fun AssistantMemoryContent(
             )
             item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_global_memory)) },
-                supportingContent = {
-                    Text(
-                        text = stringResource(R.string.assistant_page_global_memory_desc),
-                    )
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.useGlobalMemory,
@@ -208,11 +198,6 @@ private fun AssistantMemoryContent(
             )
             item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_recent_chats)) },
-                supportingContent = {
-                    Text(
-                        text = stringResource(R.string.assistant_page_recent_chats_desc),
-                    )
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.enableRecentChatsReference,
@@ -228,11 +213,6 @@ private fun AssistantMemoryContent(
             )
             item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_time_reminder)) },
-                supportingContent = {
-                    Text(
-                        text = stringResource(R.string.assistant_page_time_reminder_desc),
-                    )
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.enableTimeReminder,

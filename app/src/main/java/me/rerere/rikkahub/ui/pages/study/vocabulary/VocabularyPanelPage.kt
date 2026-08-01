@@ -90,11 +90,15 @@ fun VocabularyPanelPage() {
     Scaffold(
         topBar = {
             LargeTopAppBar(
-                title = { Text("生词面板") },
+                title = {
+                    Column {
+                        Text("生词面板")
+                        Text("${totalWords} 个单词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                 actions = {
-                    Text("${totalWords}词", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                 }
             )

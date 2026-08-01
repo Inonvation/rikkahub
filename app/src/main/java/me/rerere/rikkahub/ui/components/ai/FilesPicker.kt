@@ -254,16 +254,6 @@ internal fun FilesPicker(
             onDismissAll = onDismiss,
         )
     }
-
-    // Compress Context Dialog
-    if (showCompressDialog) {
-        CompressContextDialog(onDismiss = {
-            onShowCompressDialogChange(false)
-            onDismiss()
-        }, onConfirm = { additionalPrompt, targetTokens, keepRecentMessages ->
-            onCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
-        })
-    }
 }
 
 @Composable

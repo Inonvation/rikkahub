@@ -59,6 +59,7 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.db.entity.NoteEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.study.parseTags
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -89,7 +90,15 @@ fun NotesPanelPage() {
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(title = { Text("笔记") }, navigationIcon = { BackButton() }, scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
+            LargeTopAppBar(
+                title = {
+                    Column {
+                        Text("笔记")
+                        Text("${notes.size} 条笔记", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                 actions = { IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") } })
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -155,7 +164,7 @@ private fun NoteDetailDialog(note: NoteEntity, tags: List<String>, cooldown: Int
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(note.category, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text(note.content, style = MaterialTheme.typography.bodyMedium)
+                MarkdownBlock(note.content)
                 if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
             }
         },

@@ -25,6 +25,8 @@ data class Assistant(
     val topP: Float? = null,
     // 上下文消息条数上限, 超出后阶梯式截断; 0 表示不限制
     val contextMessageLimit: Int = 0,
+    // 上下文窗口 token 上限（用于顶栏圆环显示），默认 128k
+    val contextTokenLimit: Int = 128_000,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆

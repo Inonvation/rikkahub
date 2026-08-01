@@ -71,7 +71,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private fun cleanLatex(s: String) = s.replace(Regex("\\$\\$.*?\\$\\$"), "[公式]").replace(Regex("\\$.*?\\$"), "[公式]").replace(Regex("\\\\[a-zA-Z]+"), " ").take(80)
+private fun cleanLatex(s: String) = s
+    .replace(Regex("\\$\\$([\\s\\S]*?)\\$\\$")) { it.groupValues[1].trim() }
+    .replace(Regex("\\$([^$]*?)\\$")) { it.groupValues[1].trim() }
+    .replace(Regex("\\\\[a-zA-Z]+"), "")
+    .replace("{", "").replace("}", "")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .take(80)
 
 data class QuestionSettings(val cooldownSeconds: Int = 3)
 
@@ -92,7 +99,15 @@ fun WrongQuestionPanelPage() {
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(title = { Text("错题本") }, navigationIcon = { BackButton() }, scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
+            LargeTopAppBar(
+                title = {
+                    Column {
+                        Text("错题本")
+                        Text("${currentQuestions.size} 道错题", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                 actions = { IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") } })
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -155,13 +170,13 @@ private fun QuestionDetailDialog(q: WrongQuestionEntity, knowledgePoints: List<S
         onDismissRequest = { if (canDismiss) onDismiss() },
         title = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(q.question.take(40), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(cleanLatex(q.question).take(40), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 if (q.sourceConversationId.isNotBlank()) IconButton(onClick = { runCatching { navigateToChatPage(navController, Uuid.parse(q.sourceConversationId)) } }) { Icon(HugeIcons.ArrowUpRight01, "跳转对话", tint = MaterialTheme.colorScheme.primary) }
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (q.question.length > 40) MarkdownBlock(q.question)
+                MarkdownBlock(q.question)
                 if (q.answer.isNotBlank()) { Text("答案", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); MarkdownBlock(q.answer) }
                 if (q.solution.isNotBlank()) { Text("解析", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); MarkdownBlock(q.solution) }
                 if (knowledgePoints.isNotEmpty()) { Text("知识点", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { knowledgePoints.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } } }

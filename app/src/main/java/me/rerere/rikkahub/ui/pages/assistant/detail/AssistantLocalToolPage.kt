@@ -132,9 +132,6 @@ private fun AssistantLocalToolContent(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_javascript_engine_title))
                 },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_javascript_engine_desc))
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.JavascriptEngine),
@@ -145,9 +142,6 @@ private fun AssistantLocalToolContent(
             item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_time_info_title))
-                },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_time_info_desc))
                 },
                 trailingContent = {
                     Switch(
@@ -160,9 +154,6 @@ private fun AssistantLocalToolContent(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_clipboard_title))
                 },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_clipboard_desc))
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.Clipboard),
@@ -173,9 +164,6 @@ private fun AssistantLocalToolContent(
             item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_tts_title))
-                },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_tts_desc))
                 },
                 trailingContent = {
                     Switch(
@@ -188,9 +176,6 @@ private fun AssistantLocalToolContent(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_ask_user_title))
                 },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_ask_user_desc))
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.AskUser),
@@ -202,9 +187,6 @@ private fun AssistantLocalToolContent(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_screen_time_title))
                 },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_screen_time_desc))
-                },
                 trailingContent = {
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.ScreenTime),
@@ -215,9 +197,6 @@ private fun AssistantLocalToolContent(
             item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_calendar_title))
-                },
-                supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_calendar_desc))
                 },
                 trailingContent = {
                     Switch(
