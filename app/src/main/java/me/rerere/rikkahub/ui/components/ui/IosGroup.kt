@@ -98,7 +98,7 @@ fun IosGroup(
             ProvideTextStyle(MaterialTheme.typography.labelMedium) {
                 Text(
                     text = title,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(start = 16.dp, bottom = 6.dp),
                 )
             }
         }
@@ -117,7 +117,7 @@ fun IosGroup(
                         headlineContent = item.headlineContent,
                         modifier = item.modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp)
+                            .heightIn(min = 44.dp)
                             .then(
                                 if (item.onClick != null) {
                                     Modifier.clickable(

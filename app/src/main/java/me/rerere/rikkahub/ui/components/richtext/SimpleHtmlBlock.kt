@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -268,7 +272,11 @@ private fun RenderDetails(
         }
 
         // Details content (animated visibility)
-        AnimatedVisibility(visible = isExpanded) {
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

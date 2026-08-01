@@ -5,14 +5,18 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,15 +49,21 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,6 +80,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -77,6 +89,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -94,6 +108,7 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Sparkles
@@ -278,7 +293,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     // 切回正在生成中的对话时，滚动到底部以显示最新消息
-    LaunchedEffect(Unit) {
+    LaunchedEffect(loadingJob) {
         if (vm.chatListInitialized && loadingJob != null) {
             chatListState.scrollToItem(conversation.currentMessages.size + 5)
         }
@@ -346,9 +361,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     onClearAllErrors = { vm.clearAllErrors() },
                 )
             }
-            BackHandler(drawerState.isOpen) {
-                scope.launch { drawerState.close() }
-            }
         }
     }
 }
@@ -407,10 +419,45 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxSize()
-    ) {
+    var rightDrawerOpen by remember { mutableStateOf(false) }
+
+    // Handle back press when right study drawer is open
+    BackHandler(enabled = rightDrawerOpen) {
+        rightDrawerOpen = false
+    }
+
+    // 右侧学习面板抽屉
+    val rightDrawerWidth = 280.dp
+    val rightDrawerWidthPx = with(LocalDensity.current) { rightDrawerWidth.toPx() }
+    val rightDrawerOffsetX = remember { Animatable(rightDrawerWidthPx) }
+
+    // 互斥：右侧抽屉打开时关闭左侧抽屉
+    LaunchedEffect(rightDrawerOpen) {
+        if (rightDrawerOpen && drawerState.isOpen) {
+            drawerState.close()
+        }
+    }
+    // 互斥：左侧抽屉打开时关闭右侧抽屉
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen && rightDrawerOpen) {
+            rightDrawerOpen = false
+        }
+    }
+
+    // 动画同步
+    LaunchedEffect(rightDrawerOpen) {
+        if (rightDrawerOpen) {
+            rightDrawerOffsetX.animateTo(0f, tween(300))
+        } else {
+            rightDrawerOffsetX.snapTo(rightDrawerWidthPx)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize()
+        ) {
         AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState))
         Scaffold(
             topBar = {
@@ -428,7 +475,10 @@ private fun ChatPageContent(
                     },
                     onUpdateTitle = {
                         vm.updateTitle(it)
-                    }
+                    },
+                    onOpenRightDrawer = {
+                        rightDrawerOpen = true
+                    },
                 )
             },
             bottomBar = {
@@ -633,6 +683,80 @@ private fun ChatPageContent(
                 onDismiss = { showFilesSheet = false },
             )
         }
+    }
+
+    // 右侧学习面板抽屉覆盖层
+    val fraction = 1f - (rightDrawerOffsetX.value / rightDrawerWidthPx)
+    if (fraction > 0.01f) {
+        // 半透明遮罩
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f * fraction))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { rightDrawerOpen = false }
+        )
+        // 抽屉面板
+        Surface(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(rightDrawerWidth)
+                .offset { IntOffset(rightDrawerOffsetX.value.roundToInt(), 0) }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (rightDrawerOffsetX.value > rightDrawerWidthPx * 0.3f) {
+                                rightDrawerOpen = false
+                            } else {
+                                scope.launch { rightDrawerOffsetX.animateTo(0f, tween(200)) }
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            if (dragAmount > 0) { // 右滑关闭
+                                val newOffset = (rightDrawerOffsetX.value + dragAmount)
+                                    .coerceIn(0f, rightDrawerWidthPx)
+                                scope.launch { rightDrawerOffsetX.snapTo(newOffset) }
+                            }
+                        }
+                    )
+                },
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+        ) {
+            StudyDrawerContent(navController = navController)
+        }
+    }
+
+    // 右边缘滑动手势检测（抽屉关闭时，在右边缘 24dp 范围内左滑触发打开）
+    if (!rightDrawerOpen) {
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(24.dp)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (rightDrawerOffsetX.value < rightDrawerWidthPx * 0.6f) {
+                                rightDrawerOpen = true
+                            } else {
+                                scope.launch { rightDrawerOffsetX.animateTo(rightDrawerWidthPx, tween(200)) }
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            if (dragAmount < 0) { // 左滑展开
+                                val newOffset = (rightDrawerOffsetX.value + dragAmount)
+                                    .coerceIn(0f, rightDrawerWidthPx)
+                                scope.launch { rightDrawerOffsetX.snapTo(newOffset) }
+                            }
+                        }
+                    )
+                }
+        )
+    }
     }
 }
 
@@ -849,7 +973,8 @@ private fun TopBar(
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
-    onUpdateTitle: (String) -> Unit
+    onUpdateTitle: (String) -> Unit,
+    onOpenRightDrawer: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -909,6 +1034,15 @@ private fun TopBar(
             }
         },
         actions = {
+            IconButton(
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onOpenRightDrawer()
+                }
+            ) {
+                Icon(HugeIcons.BookOpen01, "Study Panel")
+            }
+
             IconButton(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
@@ -983,15 +1117,15 @@ private fun TodolistBanner(
     // 有活跃任务时默认展开，全部完成时默认折叠
     var expanded by remember(hasActive) { mutableStateOf(hasActive) }
 
-    // todo 列表内容变化时自动重新显示
-    val itemsFingerprint = todolist.items.hashCode()
+    // todo 列表条目增删时自动重新显示（仅 ID 集合变化，内容变更不触发）
+    val itemsFingerprint = todolist.items.map { it.id }.toSet().hashCode()
     var dismissed by remember { mutableStateOf(false) }
     LaunchedEffect(itemsFingerprint) {
         dismissed = false
     }
 
-    // 本地状态层：用于支持条目的出场动画
-    val displayItems = remember { mutableStateListOf<TodoItem>().apply { addAll(todolist.items) } }
+    // 本地状态层：用于支持条目的出场动画，key 为 todolist 确保切换会话时重新初始化
+    val displayItems = remember(todolist) { mutableStateListOf<TodoItem>().apply { addAll(todolist.items) } }
     val removingIds = remember { mutableStateOf<Set<String>>(emptySet()) }
 
     LaunchedEffect(todolist.items) {
@@ -1113,7 +1247,11 @@ private fun TodolistBanner(
                 )
 
                 // 展开态：显示更新说明和任务列表
-                AnimatedVisibility(visible = expanded) {
+                AnimatedVisibility(
+                    visible = expanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
                     Column {
                         Spacer(Modifier.size(4.dp))
                         todolist.message?.let { msg ->

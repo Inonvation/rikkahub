@@ -130,7 +130,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {

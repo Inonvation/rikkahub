@@ -5,6 +5,10 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Refresh03
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,7 +83,11 @@ fun SettingProviderBalanceOption(
                 onCheckedChange = { onEdit(balanceOption.copy(enabled = it)) }
             )
         }
-        AnimatedVisibility(visible = expand) {
+        AnimatedVisibility(
+            visible = expand,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

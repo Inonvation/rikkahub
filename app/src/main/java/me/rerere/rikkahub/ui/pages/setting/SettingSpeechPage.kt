@@ -318,7 +318,7 @@ private fun TTSProviderList(
             .fillMaxSize()
             .imePadding(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
         items(settings.ttsProviders, key = { it.id }) { provider ->
@@ -442,7 +442,7 @@ private fun ASRProviderList(
             .fillMaxSize()
             .imePadding(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
         items(settings.asrProviders, key = { it.id }) { provider ->
@@ -720,8 +720,8 @@ private fun TTSProviderItem(
         )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -867,8 +867,8 @@ private fun ASRProviderItem(
         )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

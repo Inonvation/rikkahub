@@ -180,7 +180,7 @@ fun SkillsPage() {
                 top = 16.dp,
                 bottom = 16.dp + 72.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState,
         ) {
             if (skills.isEmpty()) {
@@ -190,7 +190,7 @@ fun SkillsPage() {
                             .fillMaxWidth()
                             .padding(vertical = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(
                             imageVector = HugeIcons.Puzzle,
@@ -433,7 +433,7 @@ private fun SkillCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(

@@ -226,7 +226,7 @@ private fun SortMenuButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(onClick = { expanded = !expanded }) {
             Icon(
                 HugeIcons.Sorting01,
                 contentDescription = stringResource(R.string.search_page_sort)

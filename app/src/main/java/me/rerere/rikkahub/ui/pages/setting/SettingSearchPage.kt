@@ -122,7 +122,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .imePadding(),
             contentPadding = it + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
             items(settings.searchServices, key = { it.id }) { service ->
@@ -226,7 +226,7 @@ private fun AddProviderDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -285,7 +285,7 @@ private fun SearchProviderCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {

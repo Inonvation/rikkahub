@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -83,11 +82,10 @@ private class ReasoningState(
 private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
     val loading = reasoning.finishedAt == null
-    val scrollState = rememberScrollState()
 
     val state = remember(reasoning.createdAt) {
         ReasoningState(
-            scrollState = scrollState,
+            scrollState = ScrollState(0),
             initialDuration = reasoning.finishedAt?.let { it - reasoning.createdAt }
                 ?: (Clock.System.now() - reasoning.createdAt)
         )
@@ -97,7 +95,7 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         if (loading) {
             if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
                 state.expandState = ReasoningCardState.Preview
-            scrollState.animateScrollTo(scrollState.maxValue)
+            state.scrollState.animateScrollTo(state.scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
                 state.expandState = if (settings.displaySetting.autoCloseThinking)

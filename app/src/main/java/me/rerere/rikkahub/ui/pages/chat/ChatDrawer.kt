@@ -761,11 +761,18 @@ fun StudyDrawerContent(
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "生词面板",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "生词面板",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "英语",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -792,11 +799,18 @@ fun StudyDrawerContent(
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "笔记",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "笔记",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "多科目",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -823,11 +837,18 @@ fun StudyDrawerContent(
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "错题本",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "错题本",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "数学 · 机械原理",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -854,11 +875,18 @@ fun StudyDrawerContent(
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "知识点卡片",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "知识点卡片",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "政治 · 机械原理",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

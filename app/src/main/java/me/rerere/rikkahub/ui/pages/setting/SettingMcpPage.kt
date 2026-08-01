@@ -325,8 +325,8 @@ private fun McpServerItem(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 when (status) {
@@ -350,7 +350,7 @@ private fun McpServerItem(
 
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -358,7 +358,7 @@ private fun McpServerItem(
                     ) {
                         Text(
                             text = item.commonOptions.name,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                         )
                         val dotColor =
                             if (item.commonOptions.enable) MaterialTheme.extendColors.green6 else MaterialTheme.extendColors.red6
@@ -381,6 +381,10 @@ private fun McpServerItem(
                                 is McpServerConfig.SseTransportServer -> Text("SSE")
                                 is McpServerConfig.StreamableHTTPServer -> Text("Streamable HTTP")
                             }
+                        }
+                        Tag(type = TagType.INFO) {
+                            val enabledCount = item.commonOptions.tools.count { it.enable }
+                            Text("${enabledCount}/${item.commonOptions.tools.size}")
                         }
                     }
                     if (status is McpStatus.Error) {

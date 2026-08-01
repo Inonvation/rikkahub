@@ -295,13 +295,13 @@ private fun RecommendProviderItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AutoAIIcon(
                 name = provider.name,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(36.dp)
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -603,13 +603,13 @@ private fun ProviderItem(
         }
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AutoAIIcon(
                 name = provider.name,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(36.dp)
             )
             Column(
                 modifier = Modifier.weight(1f),
