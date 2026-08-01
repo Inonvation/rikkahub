@@ -23,6 +23,10 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
+import me.rerere.rikkahub.ui.pages.study.vocabulary.VocabularyPanelVM
+import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelVM
+import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelVM
+import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelVM
 import me.rerere.rikkahub.data.DocumentProcessor
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -109,4 +113,8 @@ val viewModelModule = module {
             baseId = baseId,
         )
     }
+    viewModelOf(::VocabularyPanelVM)
+    viewModelOf(::NotesPanelVM)
+    viewModelOf(::WrongQuestionPanelVM)
+    viewModelOf(::KnowledgeCardPanelVM)
 }

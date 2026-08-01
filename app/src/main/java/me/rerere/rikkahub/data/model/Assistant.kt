@@ -53,6 +53,8 @@ data class Assistant(
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
     val knowledgeBaseIds: Set<Uuid> = emptySet(), // 绑定的知识库 ID 列表
     val enableKnowledgeQueryRewrite: Boolean = true, // 检索前用 LLM 改写查询（默认开，追问/指代检索更准）
+    val enabledStudyTools: List<String> = emptyList(), // 启用的学习工具名称列表（save_vocabulary, save_note, save_wrong_question, save_knowledge_card, quiz_user）
+    val studySubject: String = "", // 学科标识（english, math, politics, mechanics），用于错题本和知识点卡片的科目分类
 )
 
 @Serializable

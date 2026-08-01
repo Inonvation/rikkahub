@@ -60,6 +60,10 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS_IDS
+import me.rerere.rikkahub.data.ai.prompts.ENGLISH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MATH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.POLITICS_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MECHANICS_TUTOR_PROMPT
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
@@ -98,6 +102,8 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
     var selectedTagIds by remember { mutableStateOf(emptySet<Uuid>()) }
     // 操作菜单状态
     var actionSheetAssistant by remember { mutableStateOf<Assistant?>(null) }
+    // 模板选择对话框
+    var showTemplateDialog by remember { mutableStateOf(false) }
 
     // 根据搜索关键词和选中的标签过滤助手
     val filteredAssistants = remember(settings.assistants, selectedTagIds, searchQuery) {
@@ -122,7 +128,7 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                 actions = {
                     IconButton(
                         onClick = {
-                            createState.open(Assistant())
+                            showTemplateDialog = true
                         }) {
                         Icon(HugeIcons.Add01, stringResource(R.string.assistant_page_add))
                     }
@@ -237,6 +243,19 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
         }
     }
 
+    // 模板选择对话框
+    if (showTemplateDialog) {
+        TemplateSelectionDialog(
+            onSelect = { templateAssistant ->
+                showTemplateDialog = false
+                createState.open(templateAssistant)
+            },
+            onDismiss = {
+                showTemplateDialog = false
+            }
+        )
+    }
+
     AssistantCreationSheet(createState)
 
     // 操作菜单 Bottom Sheet
@@ -317,6 +336,140 @@ private fun AssistantTagsFilterRow(
             }
         }
     }
+}
+
+private data class AssistantTemplate(
+    val name: String,
+    val description: String,
+    val create: () -> Assistant,
+)
+
+private val ASSISTANT_TEMPLATES = listOf(
+    AssistantTemplate(
+        name = "空白助手",
+        description = "完全自定义配置",
+        create = { Assistant() }
+    ),
+    AssistantTemplate(
+        name = "英语导师",
+        description = "单词查询、翻译、作文模板、题目指导",
+        create = {
+            Assistant(
+                systemPrompt = ENGLISH_TUTOR_PROMPT,
+                temperature = 0.3f,
+                contextMessageLimit = 20,
+                enableTodoList = false,
+                enableTimeReminder = false,
+                localTools = emptyList(),
+                enabledStudyTools = listOf("save_vocabulary", "save_note"),
+                studySubject = "english",
+            )
+        }
+    ),
+    AssistantTemplate(
+        name = "数学导师",
+        description = "考点定位、分步推导、定理引用",
+        create = {
+            Assistant(
+                systemPrompt = MATH_TUTOR_PROMPT,
+                temperature = 0.3f,
+                reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
+                contextMessageLimit = 20,
+                enableTodoList = false,
+                enableTimeReminder = false,
+                localTools = emptyList(),
+                enabledStudyTools = listOf("save_wrong_question", "save_note"),
+                studySubject = "math",
+            )
+        }
+    ),
+    AssistantTemplate(
+        name = "政治导师",
+        description = "知识点精讲、论述框架、助记口诀、抽背提问",
+        create = {
+            Assistant(
+                systemPrompt = POLITICS_TUTOR_PROMPT,
+                temperature = 0.3f,
+                contextMessageLimit = 20,
+                enableTodoList = false,
+                enableTimeReminder = false,
+                localTools = emptyList(),
+                enabledStudyTools = listOf("save_note", "save_knowledge_card", "quiz_user"),
+                studySubject = "politics",
+            )
+        }
+    ),
+    AssistantTemplate(
+        name = "机械原理导师",
+        description = "概念解析、机构分析、公式推导、真题演练",
+        create = {
+            Assistant(
+                systemPrompt = MECHANICS_TUTOR_PROMPT,
+                temperature = 0.3f,
+                reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
+                contextMessageLimit = 20,
+                enableTodoList = false,
+                enableTimeReminder = false,
+                localTools = emptyList(),
+                enabledStudyTools = listOf("save_wrong_question", "save_note", "save_knowledge_card", "quiz_user"),
+                studySubject = "mechanics",
+            )
+        }
+    ),
+    AssistantTemplate(
+        name = "日常聊天",
+        description = "轻松闲聊，温暖陪伴",
+        create = {
+            Assistant(
+                systemPrompt = "You are a friendly and supportive companion. Chat naturally with the user in Chinese. Be encouraging, warm, and understanding. Keep responses concise (2-4 sentences).",
+                temperature = 0.8f,
+                enableMemory = true,
+                enableTodoList = false,
+                enableTimeReminder = false,
+                localTools = emptyList(),
+            )
+        }
+    ),
+)
+
+@Composable
+private fun TemplateSelectionDialog(
+    onSelect: (Assistant) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择助手模板") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ASSISTANT_TEMPLATES.forEach { template ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onClick { onSelect(template.create()) }
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = template.name,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = template.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
@@ -463,6 +616,37 @@ private fun AssistantItem(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                }
+
+                // 学习面板标签
+                if (assistant.enabledStudyTools.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        assistant.enabledStudyTools.mapNotNull { toolName ->
+                            when (toolName) {
+                                "save_vocabulary" -> "生词本"
+                                "save_note" -> "笔记"
+                                "save_wrong_question" -> "错题本"
+                                "save_knowledge_card" -> "知识点"
+                                "quiz_user" -> "抽背"
+                                else -> null
+                            }
+                        }.forEach { label ->
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = label,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                     }
                 }

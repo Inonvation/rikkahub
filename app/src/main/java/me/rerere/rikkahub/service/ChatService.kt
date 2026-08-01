@@ -58,6 +58,7 @@ import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createTodoTool
 import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
+import me.rerere.rikkahub.data.ai.tools.StudyTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
@@ -153,6 +154,7 @@ class ChatService(
     private val folderRepository: FolderRepository,
     private val knowledgeManager: KnowledgeManager,
     private val todoStorage: TodoStorage,
+    private val studyTools: StudyTools,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -555,6 +557,14 @@ class ChatService(
                 tools = buildList {
                     if (assistant.enableTodoList) {
                         add(createTodoTool(conversation.id.toString(), todoStorage))
+                    }
+                    if (assistant.enabledStudyTools.isNotEmpty()) {
+                        addAll(studyTools.getTools(
+                            enabledTools = assistant.enabledStudyTools,
+                            conversationId = conversation.id.toString(),
+                            assistantId = assistant.id.toString(),
+                            studySubject = assistant.studySubject,
+                        ))
                     }
                     if (assistant.enableWebSearch) {
                         addAll(createSearchTools(settings))

@@ -97,6 +97,7 @@ val appModule = module {
             folderRepository = get(),
             knowledgeManager = get(),
             todoStorage = get(),
+            studyTools = get(),
         )
     }
 

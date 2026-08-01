@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -73,6 +74,10 @@ import me.rerere.rikkahub.data.ai.transformers.DefaultPlaceholderProvider
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.TransformerContext
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.ai.prompts.ENGLISH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MATH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.POLITICS_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MECHANICS_TUTOR_PROMPT
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.AssistantRegex
@@ -177,6 +182,72 @@ private fun AssistantPromptContent(
                     minLines = 5,
                     maxLines = 10
                 )
+
+                // 重置为模板
+                var showResetDialog by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = { showResetDialog = true }) {
+                        Icon(
+                            HugeIcons.Refresh03,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        Text("重置为模板")
+                    }
+                }
+
+                if (showResetDialog) {
+                    val templates = listOf(
+                        "英语导师" to ENGLISH_TUTOR_PROMPT,
+                        "数学导师" to MATH_TUTOR_PROMPT,
+                        "政治导师" to POLITICS_TUTOR_PROMPT,
+                        "机械原理导师" to MECHANICS_TUTOR_PROMPT,
+                        "通用助手" to """
+                            You are a helpful assistant, called {{char}}, based on model {{model_name}}.
+
+                            ## Info
+                            - Date: {{cur_date}}
+                            - Locale: {{locale}}
+                            - Timezone: {{timezone}}
+                            - Device Info: {{device_info}}
+                            - System Version: {{system_version}}
+                            - User Nickname: {{user}}
+
+                            ## Hint
+                            - If the user does not specify a language, reply in the user's primary language.
+                            - Remember to use Markdown syntax for formatting, and use latex for mathematical expressions.
+                        """.trimIndent(),
+                    )
+                    AlertDialog(
+                        onDismissRequest = { showResetDialog = false },
+                        title = { Text("选择模板") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("将系统提示词重置为所选模板的默认值：")
+                                templates.forEach { (name, prompt) ->
+                                    TextButton(
+                                        onClick = {
+                                            onUpdate(assistant.copy(systemPrompt = prompt))
+                                            showResetDialog = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(name, modifier = Modifier.fillMaxWidth())
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            TextButton(onClick = { showResetDialog = false }) {
+                                Text("取消")
+                            }
+                        },
+                    )
+                }
 
                 Column {
                     Text(

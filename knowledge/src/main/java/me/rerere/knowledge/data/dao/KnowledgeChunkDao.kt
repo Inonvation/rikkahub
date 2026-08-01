@@ -55,4 +55,17 @@ interface KnowledgeChunkDao {
      */
     @Query("SELECT * FROM knowledge_chunk WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<KnowledgeChunkEntity>
+
+    /**
+     * 获取随机 chunk，用于抽背提问。如果指定 topic 则按内容模糊匹配。
+     */
+    @Query(
+        "SELECT * FROM knowledge_chunk " +
+            "WHERE (:topic IS NULL OR content LIKE '%' || :topic || '%') " +
+            "ORDER BY RANDOM() LIMIT :limit"
+    )
+    suspend fun getRandomChunks(topic: String?, limit: Int): List<KnowledgeChunkEntity>
+
+    @Query("SELECT * FROM knowledge_chunk ORDER BY RANDOM() LIMIT 5")
+    suspend fun getRandomChunksFallback(): List<KnowledgeChunkEntity>
 }
