@@ -142,8 +142,8 @@ class ResponseAPI(
                     return
                 }
                 Log.d(TAG, "onEvent: $id/$type $data")
-                val json = json.parseToJsonElement(data).jsonObject
-                val chunk = parseResponseDelta(json)
+                val eventJson = json.parseToJsonElement(data).jsonObject
+                val chunk = parseResponseDelta(eventJson)
                 if (chunk != null) {
                     trySend(chunk).onFailure { e ->
                         Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
