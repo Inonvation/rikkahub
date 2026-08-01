@@ -212,6 +212,8 @@ fun ChatMessage(
             assistant = assistant,
         )
 
+        StudyItemsList(parts = message.parts)
+
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
         }

@@ -26,4 +26,7 @@ interface WorkspaceDAO {
 
     @Query("DELETE FROM workspaces WHERE id = :id")
     suspend fun deleteById(id: String): Int
+
+    @Query("UPDATE workspaces SET updated_at = :timestamp WHERE id = :id")
+    suspend fun updateTimestamp(id: String, timestamp: Long)
 }

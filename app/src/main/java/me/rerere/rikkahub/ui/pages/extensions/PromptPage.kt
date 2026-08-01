@@ -12,6 +12,9 @@ import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CursorPointer01
+import me.rerere.hugeicons.stroke.MoreVertical
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +44,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
@@ -55,17 +59,16 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -93,9 +96,11 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ExportDialog
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -111,6 +116,10 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
+    // 批量选择状态（每个 tab 独立）
+    var modeSelecting by rememberSaveable { mutableStateOf(false) }
+    var lorebookSelecting by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
@@ -118,6 +127,58 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 title = { Text(stringResource(R.string.prompt_page_title)) },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
+                actions = {
+                    val isSelecting = when (pagerState.currentPage) {
+                        0 -> modeSelecting
+                        else -> lorebookSelecting
+                    }
+                    if (isSelecting) {
+                        val selectedCount = when (pagerState.currentPage) {
+                            0 -> selectedModeInjections.size
+                            else -> selectedLorebooks.size
+                        }
+                        IconButton(onClick = {
+                            when (pagerState.currentPage) {
+                                0 -> {
+                                    if (selectedCount == settings.modeInjections.size) {
+                                        selectedModeInjections.clear()
+                                    } else {
+                                        selectedModeInjections.clear()
+                                        selectedModeInjections.addAll(settings.modeInjections.map { it.id })
+                                    }
+                                }
+                                else -> {
+                                    if (selectedCount == settings.lorebooks.size) {
+                                        selectedLorebooks.clear()
+                                    } else {
+                                        selectedLorebooks.clear()
+                                        selectedLorebooks.addAll(settings.lorebooks.map { it.id })
+                                    }
+                                }
+                            }
+                        }) {
+                            Icon(
+                                HugeIcons.CursorPointer01,
+                                contentDescription = stringResource(
+                                    if (selectedCount == (when (pagerState.currentPage) { 0 -> settings.modeInjections.size; else -> settings.lorebooks.size })) R.string.skills_page_deselect_all
+                                    else R.string.skills_page_select_all
+                                ),
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            when (pagerState.currentPage) {
+                                0 -> modeSelecting = true
+                                else -> lorebookSelecting = true
+                            }
+                        }) {
+                            Icon(
+                                HugeIcons.MoreVertical,
+                                contentDescription = stringResource(R.string.skills_page_batch_select),
+                            )
+                        }
+                    }
+                },
             )
         },
         bottomBar = {
@@ -127,6 +188,10 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                     label = { Text(stringResource(R.string.prompt_page_mode_injection_tab)) },
                     icon = { Icon(HugeIcons.MagicWand01, null) },
                     onClick = {
+                        modeSelecting = false
+                        selectedModeInjections.clear()
+                        lorebookSelecting = false
+                        selectedLorebooks.clear()
                         scope.launch { pagerState.animateScrollToPage(0) }
                     }
                 )
@@ -135,6 +200,10 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                     label = { Text(stringResource(R.string.prompt_page_lorebook_tab)) },
                     icon = { Icon(HugeIcons.Book01, null) },
                     onClick = {
+                        modeSelecting = false
+                        selectedModeInjections.clear()
+                        lorebookSelecting = false
+                        selectedLorebooks.clear()
                         scope.launch { pagerState.animateScrollToPage(1) }
                     }
                 )
@@ -152,22 +221,35 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
             when (page) {
                 0 -> ModeInjectionTab(
                     modeInjections = settings.modeInjections,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) },
+                    selecting = modeSelecting,
+                    onSelectingChange = { modeSelecting = it },
+                    selectedItems = selectedModeInjections,
                 )
 
                 1 -> LorebookTab(
                     lorebooks = settings.lorebooks,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) },
+                    selecting = lorebookSelecting,
+                    onSelectingChange = { lorebookSelecting = it },
+                    selectedItems = selectedLorebooks,
                 )
             }
         }
     }
 }
 
+// 批量选择状态（放在顶层以跨 recomposition 保持）
+private val selectedModeInjections = mutableStateListOf<kotlin.uuid.Uuid>()
+private val selectedLorebooks = mutableStateListOf<kotlin.uuid.Uuid>()
+
 @Composable
 private fun ModeInjectionTab(
     modeInjections: List<PromptInjection.ModeInjection>,
-    onUpdate: (List<PromptInjection.ModeInjection>) -> Unit
+    onUpdate: (List<PromptInjection.ModeInjection>) -> Unit,
+    selecting: Boolean,
+    onSelectingChange: (Boolean) -> Unit,
+    selectedItems: MutableList<kotlin.uuid.Uuid>,
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
@@ -198,6 +280,12 @@ private fun ModeInjectionTab(
         }
     }
 
+    var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = selecting) {
+        onSelectingChange(false)
+        selectedItems.clear()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
@@ -207,8 +295,8 @@ private fun ModeInjectionTab(
                     onExpand = { expanded = true },
                     onCollapse = { expanded = false }
                 ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(12.dp) + PaddingValues(bottom = 128.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             state = lazyListState
         ) {
             if (modeInjections.isEmpty()) {
@@ -234,49 +322,122 @@ private fun ModeInjectionTab(
                 }
             } else {
                 items(modeInjections, key = { it.id }) { injection ->
-                    ReorderableItem(
-                        state = reorderableState,
-                        key = injection.id
-                    ) { isDragging ->
-                        ModeInjectionCard(
+                    if (selecting) {
+                        ModeInjectionSelectableCard(
                             injection = injection,
-                            modifier = Modifier
-                                .longPressDraggableHandle()
-                                .graphicsLayer {
-                                    if (isDragging) {
-                                        scaleX = 1.05f
-                                        scaleY = 1.05f
-                                    }
-                                },
+                            selected = selectedItems.contains(injection.id),
+                            onSelectChange = {
+                                if (!selectedItems.contains(injection.id)) {
+                                    selectedItems.add(injection.id)
+                                } else {
+                                    selectedItems.remove(injection.id)
+                                }
+                            },
                             onEdit = { editState.open(injection) },
-                            onDelete = { onUpdate(modeInjections - injection) }
                         )
+                    } else {
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = injection.id
+                        ) { isDragging ->
+                            ModeInjectionCard(
+                                injection = injection,
+                                modifier = Modifier
+                                    .longPressDraggableHandle()
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                        }
+                                    },
+                                onEdit = { editState.open(injection) },
+                                onDelete = { onUpdate(modeInjections - injection) }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        // 批量删除操作条
+        AnimatedVisibility(
+            visible = selecting,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(HugeIcons.FileImport, null)
-                }
-            },
+                .padding(bottom = 24.dp),
         ) {
-            Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+            HorizontalFloatingToolbar(expanded = true) {
+                Tooltip(tooltip = { Text(stringResource(R.string.skills_page_batch_cancel)) }) {
+                    IconButton(
+                        onClick = {
+                            onSelectingChange(false)
+                            selectedItems.clear()
+                        }
+                    ) {
+                        Icon(HugeIcons.Cancel01, null)
+                    }
+                }
+                Tooltip(
+                    tooltip = {
+                        Text(
+                            stringResource(
+                                if (selectedItems.size == modeInjections.size) R.string.skills_page_deselect_all
+                                else R.string.skills_page_select_all
+                            )
+                        )
+                    }
                 ) {
-                    Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_mode_injection))
+                    IconButton(
+                        onClick = {
+                            if (selectedItems.size == modeInjections.size) {
+                                selectedItems.clear()
+                            } else {
+                                selectedItems.clear()
+                                selectedItems.addAll(modeInjections.map { it.id })
+                            }
+                        }
+                    ) {
+                        Icon(HugeIcons.CursorPointer01, null)
+                    }
+                }
+                Tooltip(tooltip = { Text(stringResource(R.string.skills_page_delete)) }) {
+                    FilledIconButton(
+                        onClick = {
+                            if (selectedItems.isNotEmpty()) {
+                                showBatchDeleteDialog = true
+                            }
+                        },
+                        enabled = selectedItems.isNotEmpty(),
+                    ) {
+                        Icon(HugeIcons.Delete01, stringResource(R.string.skills_page_delete))
+                    }
+                }
+            }
+        }
+
+        if (!selecting) {
+            HorizontalFloatingToolbar(
+                expanded = expanded,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -ScreenOffset),
+                leadingContent = {
+                    IconButton(onClick = { importer.importFromFile() }) {
+                        Icon(HugeIcons.FileImport, null)
+                    }
+                },
+            ) {
+                Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(HugeIcons.Add01, null)
+                        AnimatedVisibility(expanded) {
+                            Row {
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(stringResource(R.string.prompt_page_add_mode_injection))
+                            }
                         }
                     }
                 }
@@ -294,6 +455,22 @@ private fun ModeInjectionTab(
             )
         }
     }
+
+    RikkaConfirmDialog(
+        show = showBatchDeleteDialog,
+        title = stringResource(R.string.skills_page_delete_title),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            onUpdate(modeInjections.filter { it.id !in selectedItems })
+            selectedItems.clear()
+            onSelectingChange(false)
+            showBatchDeleteDialog = false
+        },
+        onDismiss = { showBatchDeleteDialog = false },
+    ) {
+        Text(stringResource(R.string.skills_page_batch_delete_message, selectedItems.size))
+    }
 }
 
 @Composable
@@ -303,81 +480,53 @@ private fun ModeInjectionCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val swipeState = rememberSwipeToDismissBoxState()
-    val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(injection, ModeInjectionSerializer)
 
-    SwipeToDismissBox(
-        state = swipeState,
-        backgroundContent = {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                IconButton(onClick = { scope.launch { swipeState.reset() } }) {
-                    Icon(HugeIcons.Cancel01, null)
-                }
-                FilledIconButton(onClick = {
-                    scope.launch {
-                        onDelete()
-                        swipeState.reset()
+                Text(
+                    text = injection.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Tag(type = TagType.INFO) {
+                        Text(getPositionLabel(injection.position))
                     }
-                }) {
-                    Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
+                    Tag(type = TagType.DEFAULT) {
+                        Text(stringResource(R.string.prompt_page_priority_format, injection.priority))
+                    }
+                    if (!injection.enabled) {
+                        Tag(type = TagType.WARNING) {
+                            Text(stringResource(R.string.prompt_page_disabled))
+                        }
+                    }
                 }
             }
-        },
-        enableDismissFromStartToEnd = false,
-        modifier = modifier
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = injection.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Tag(type = TagType.INFO) {
-                            Text(getPositionLabel(injection.position))
-                        }
-                        Tag(type = TagType.DEFAULT) {
-                            Text(stringResource(R.string.prompt_page_priority_format, injection.priority))
-                        }
-                        if (!injection.enabled) {
-                            Tag(type = TagType.WARNING) {
-                                Text(stringResource(R.string.prompt_page_disabled))
-                            }
-                        }
-                    }
-                }
-                IconButton(onClick = { showExportDialog = true }) {
-                    Icon(HugeIcons.Share03, stringResource(R.string.export_title))
-                }
-                IconButton(onClick = onEdit) {
-                    Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
-                }
+            IconButton(onClick = { showExportDialog = true }) {
+                Icon(HugeIcons.Share03, stringResource(R.string.export_title), modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onEdit) {
+                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit), modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -387,6 +536,62 @@ private fun ModeInjectionCard(
             exporter = exporter,
             onDismiss = { showExportDialog = false }
         )
+    }
+}
+
+@Composable
+private fun ModeInjectionSelectableCard(
+    injection: PromptInjection.ModeInjection,
+    selected: Boolean,
+    onSelectChange: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onSelectChange() },
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = injection.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Tag(type = TagType.INFO) {
+                        Text(getPositionLabel(injection.position))
+                    }
+                    Tag(type = TagType.DEFAULT) {
+                        Text(stringResource(R.string.prompt_page_priority_format, injection.priority))
+                    }
+                    if (!injection.enabled) {
+                        Tag(type = TagType.WARNING) {
+                            Text(stringResource(R.string.prompt_page_disabled))
+                        }
+                    }
+                }
+            }
+            IconButton(onClick = onEdit) {
+                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit), modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -579,7 +784,10 @@ private fun getRoleLabel(role: MessageRole): String = when (role) {
 @Composable
 private fun LorebookTab(
     lorebooks: List<Lorebook>,
-    onUpdate: (List<Lorebook>) -> Unit
+    onUpdate: (List<Lorebook>) -> Unit,
+    selecting: Boolean,
+    onSelectingChange: (Boolean) -> Unit,
+    selectedItems: MutableList<kotlin.uuid.Uuid>,
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
@@ -610,6 +818,12 @@ private fun LorebookTab(
         }
     }
 
+    var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = selecting) {
+        onSelectingChange(false)
+        selectedItems.clear()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
@@ -619,8 +833,8 @@ private fun LorebookTab(
                     onExpand = { expanded = true },
                     onCollapse = { expanded = false }
                 ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(12.dp) + PaddingValues(bottom = 128.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             state = lazyListState
         ) {
             if (lorebooks.isEmpty()) {
@@ -646,49 +860,122 @@ private fun LorebookTab(
                 }
             } else {
                 items(lorebooks, key = { it.id }) { book ->
-                    ReorderableItem(
-                        state = reorderableState,
-                        key = book.id
-                    ) { isDragging ->
-                        LorebookCard(
+                    if (selecting) {
+                        LorebookSelectableCard(
                             book = book,
-                            modifier = Modifier
-                                .longPressDraggableHandle()
-                                .graphicsLayer {
-                                    if (isDragging) {
-                                        scaleX = 1.05f
-                                        scaleY = 1.05f
-                                    }
-                                },
+                            selected = selectedItems.contains(book.id),
+                            onSelectChange = {
+                                if (!selectedItems.contains(book.id)) {
+                                    selectedItems.add(book.id)
+                                } else {
+                                    selectedItems.remove(book.id)
+                                }
+                            },
                             onEdit = { editState.open(book) },
-                            onDelete = { onUpdate(lorebooks - book) }
                         )
+                    } else {
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = book.id
+                        ) { isDragging ->
+                            LorebookCard(
+                                book = book,
+                                modifier = Modifier
+                                    .longPressDraggableHandle()
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                        }
+                                    },
+                                onEdit = { editState.open(book) },
+                                onDelete = { onUpdate(lorebooks - book) }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        // 批量删除操作条
+        AnimatedVisibility(
+            visible = selecting,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(HugeIcons.FileImport, null)
-                }
-            },
+                .padding(bottom = 24.dp),
         ) {
-            Button(onClick = { editState.open(Lorebook()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+            HorizontalFloatingToolbar(expanded = true) {
+                Tooltip(tooltip = { Text(stringResource(R.string.skills_page_batch_cancel)) }) {
+                    IconButton(
+                        onClick = {
+                            onSelectingChange(false)
+                            selectedItems.clear()
+                        }
+                    ) {
+                        Icon(HugeIcons.Cancel01, null)
+                    }
+                }
+                Tooltip(
+                    tooltip = {
+                        Text(
+                            stringResource(
+                                if (selectedItems.size == lorebooks.size) R.string.skills_page_deselect_all
+                                else R.string.skills_page_select_all
+                            )
+                        )
+                    }
                 ) {
-                    Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_lorebook))
+                    IconButton(
+                        onClick = {
+                            if (selectedItems.size == lorebooks.size) {
+                                selectedItems.clear()
+                            } else {
+                                selectedItems.clear()
+                                selectedItems.addAll(lorebooks.map { it.id })
+                            }
+                        }
+                    ) {
+                        Icon(HugeIcons.CursorPointer01, null)
+                    }
+                }
+                Tooltip(tooltip = { Text(stringResource(R.string.skills_page_delete)) }) {
+                    FilledIconButton(
+                        onClick = {
+                            if (selectedItems.isNotEmpty()) {
+                                showBatchDeleteDialog = true
+                            }
+                        },
+                        enabled = selectedItems.isNotEmpty(),
+                    ) {
+                        Icon(HugeIcons.Delete01, stringResource(R.string.skills_page_delete))
+                    }
+                }
+            }
+        }
+
+        if (!selecting) {
+            HorizontalFloatingToolbar(
+                expanded = expanded,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -ScreenOffset),
+                leadingContent = {
+                    IconButton(onClick = { importer.importFromFile() }) {
+                        Icon(HugeIcons.FileImport, null)
+                    }
+                },
+            ) {
+                Button(onClick = { editState.open(Lorebook()) }) {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(HugeIcons.Add01, null)
+                        AnimatedVisibility(expanded) {
+                            Row {
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(stringResource(R.string.prompt_page_add_lorebook))
+                            }
                         }
                     }
                 }
@@ -706,6 +993,22 @@ private fun LorebookTab(
             )
         }
     }
+
+    RikkaConfirmDialog(
+        show = showBatchDeleteDialog,
+        title = stringResource(R.string.skills_page_delete_title),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            onUpdate(lorebooks.filter { it.id !in selectedItems })
+            selectedItems.clear()
+            onSelectingChange(false)
+            showBatchDeleteDialog = false
+        },
+        onDismiss = { showBatchDeleteDialog = false },
+    ) {
+        Text(stringResource(R.string.skills_page_batch_delete_message, selectedItems.size))
+    }
 }
 
 @Composable
@@ -715,92 +1018,64 @@ private fun LorebookCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val swipeState = rememberSwipeToDismissBoxState()
-    val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(book, LorebookSerializer)
 
-    SwipeToDismissBox(
-        state = swipeState,
-        backgroundContent = {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { scope.launch { swipeState.reset() } }) {
-                    Icon(HugeIcons.Cancel01, null)
-                }
-                FilledIconButton(onClick = {
-                    scope.launch {
-                        onDelete()
-                        swipeState.reset()
-                    }
-                }) {
-                    Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
-                }
-            }
-        },
-        enableDismissFromStartToEnd = false,
-        modifier = modifier
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+        modifier = modifier,
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Text(
+                    text = book.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_lorebook) },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (book.description.isNotEmpty()) {
                     Text(
-                        text = book.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_lorebook) },
-                        style = MaterialTheme.typography.titleSmall,
+                        text = book.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (book.description.isNotEmpty()) {
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Tag(type = TagType.INFO) {
                         Text(
-                            text = book.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            stringResource(
+                                R.string.prompt_page_entries_count_format,
+                                book.entries.size
+                            )
                         )
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Tag(type = TagType.INFO) {
-                            Text(
-                                stringResource(
-                                    R.string.prompt_page_entries_count_format,
-                                    book.entries.size
-                                )
-                            )
-                        }
-                        if (!book.enabled) {
-                            Tag(type = TagType.WARNING) {
-                                Text(stringResource(R.string.prompt_page_disabled))
-                            }
+                    if (!book.enabled) {
+                        Tag(type = TagType.WARNING) {
+                            Text(stringResource(R.string.prompt_page_disabled))
                         }
                     }
                 }
-                IconButton(onClick = { showExportDialog = true }) {
-                    Icon(HugeIcons.Share03, stringResource(R.string.export_title))
-                }
-                IconButton(onClick = onEdit) {
-                    Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
-                }
+            }
+            IconButton(onClick = { showExportDialog = true }) {
+                Icon(HugeIcons.Share03, stringResource(R.string.export_title), modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onEdit) {
+                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit), modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -810,6 +1085,73 @@ private fun LorebookCard(
             exporter = exporter,
             onDismiss = { showExportDialog = false }
         )
+    }
+}
+
+@Composable
+private fun LorebookSelectableCard(
+    book: Lorebook,
+    selected: Boolean,
+    onSelectChange: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onSelectChange() },
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = book.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_lorebook) },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (book.description.isNotEmpty()) {
+                    Text(
+                        text = book.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Tag(type = TagType.INFO) {
+                        Text(
+                            stringResource(
+                                R.string.prompt_page_entries_count_format,
+                                book.entries.size
+                            )
+                        )
+                    }
+                    if (!book.enabled) {
+                        Tag(type = TagType.WARNING) {
+                            Text(stringResource(R.string.prompt_page_disabled))
+                        }
+                    }
+                }
+            }
+            IconButton(onClick = onEdit) {
+                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit), modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 

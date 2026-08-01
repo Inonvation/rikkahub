@@ -33,6 +33,22 @@ class Navigator(private val backStack: MutableList<NavKey>) {
     fun popBackStack() {
         if (backStack.size > 1) backStack.removeLastOrNull()
     }
+
+    /**
+     * 移除导航栈中旧的 Chat 页面，仅保留最后一个。
+     */
+    fun cleanupChatPages() {
+        val lastChatIndex = backStack.indexOfLast { it is Screen.Chat }
+        if (lastChatIndex <= 0) return
+        // 移除所有非最后一个的 Chat 页面
+        var i = lastChatIndex - 1
+        while (i >= 0) {
+            if (backStack[i] is Screen.Chat) {
+                backStack.removeAt(i)
+            }
+            i--
+        }
+    }
 }
 
 class NavigateOptionsBuilder {

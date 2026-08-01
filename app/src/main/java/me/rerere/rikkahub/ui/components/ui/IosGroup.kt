@@ -86,7 +86,7 @@ private class IosGroupScopeImpl : IosGroupScope {
 
 @Composable
 fun IosGroup(
-    title: String,
+    title: String? = null,
     modifier: Modifier = Modifier,
     content: IosGroupScope.() -> Unit,
 ) {
@@ -94,12 +94,14 @@ fun IosGroup(
     scope.content()
 
     Column(modifier = modifier) {
-        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-            ProvideTextStyle(MaterialTheme.typography.labelMedium) {
-                Text(
-                    text = title,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 6.dp),
-                )
+        if (title != null) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                    Text(
+                        text = title,
+                        modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
+                    )
+                }
             }
         }
         Surface(

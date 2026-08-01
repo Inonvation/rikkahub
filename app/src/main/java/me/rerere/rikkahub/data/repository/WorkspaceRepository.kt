@@ -298,6 +298,10 @@ class WorkspaceRepository(
         return true
     }
 
+    suspend fun updateTimestamp(id: String, timestamp: Long) {
+        dao.updateTimestamp(id, timestamp)
+    }
+
     private suspend fun cleanupAssistantReferences(workspaceId: String) {
         settingsStore.update { settings ->
             settings.copy(

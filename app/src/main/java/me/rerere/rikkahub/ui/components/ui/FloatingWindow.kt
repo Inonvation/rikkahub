@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -12,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.petterp.floatingx.FloatingX
 import com.petterp.floatingx.assist.FxGravity
 import com.petterp.floatingx.listener.control.IFxAppControl
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 
 @Composable
@@ -21,6 +23,7 @@ fun FloatingWindow(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val settings = LocalSettings.current
     var window: IFxAppControl? by remember { mutableStateOf(null) }
 
     LaunchedEffect(visibility) {
@@ -41,7 +44,9 @@ fun FloatingWindow(
             setLayoutView(ComposeView(context).apply {
                 setContent {
                     RikkahubTheme {
-                        content()
+                        CompositionLocalProvider(LocalSettings provides settings) {
+                            content()
+                        }
                     }
                 }
             })

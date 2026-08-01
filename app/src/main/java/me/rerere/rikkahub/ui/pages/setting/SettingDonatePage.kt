@@ -13,19 +13,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -34,9 +29,8 @@ import coil3.compose.AsyncImage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.model.Sponsor
-import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
-import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.components.ui.IosGroup
+import me.rerere.rikkahub.ui.components.ui.SettingScaffold
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.onError
 import me.rerere.rikkahub.utils.onLoading
@@ -46,23 +40,8 @@ import org.koin.compose.koinInject
 
 @Composable
 fun SettingDonatePage() {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
-    Scaffold(
-        topBar = {
-            LargeFlexibleTopAppBar(
-                title = {
-                    Text(text = stringResource(R.string.donate_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
-                scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
-            )
-        },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+    SettingScaffold(
+        title = stringResource(R.string.donate_page_title),
     ) { paddings ->
         Column(
             modifier = Modifier
@@ -71,7 +50,7 @@ fun SettingDonatePage() {
                 .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            DonateMethodsCardGroup()
+            DonateMethodsGroup()
 
             Text(
                 text = stringResource(R.string.donate_page_sponsor_list),
@@ -89,11 +68,11 @@ fun SettingDonatePage() {
 }
 
 @Composable
-private fun DonateMethodsCardGroup() {
+private fun DonateMethodsGroup() {
     val context = LocalContext.current
-    CardGroup(
+    IosGroup(
         modifier = Modifier.fillMaxWidth(),
-        title = { Text(stringResource(R.string.donate_page_donation_methods)) },
+        title = stringResource(R.string.donate_page_donation_methods),
     ) {
         item(
             onClick = { context.openUrl("https://ko-fi.com/reovodev") },
@@ -127,9 +106,7 @@ private fun Sponsors(modifier: Modifier = Modifier) {
     val sponsors by produceState<UiState<List<Sponsor>>>(UiState.Idle) {
         value = UiState.Loading
         runCatching {
-            val sponsors = sponsorAPI.getSponsors()
-            println(sponsors)
-            value = UiState.Success(sponsors)
+            value = UiState.Success(sponsorAPI.getSponsors())
         }.onFailure {
             value = UiState.Error(it)
         }

@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,11 +15,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -28,11 +36,14 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,7 +51,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Zap
@@ -48,9 +62,13 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
@@ -60,63 +78,223 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
     var editTarget by remember { mutableStateOf<QuickMessage?>(null) }
     var deleteTarget by remember { mutableStateOf<QuickMessage?>(null) }
 
+    // 批量选择
+    val selectedItems = remember { mutableStateListOf<String>() }
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = selecting) {
+        selecting = false
+        selectedItems.clear()
+    }
+
+    // 拖拽排序
+    val lazyListState = rememberLazyListState()
+    val hapticController = rememberHaptic()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        vm.reorderQuickMessages(from.index, to.index)
+    }
+
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.assistant_page_quick_messages)) },
                 navigationIcon = { BackButton() },
+                actions = {
+                    if (selecting) {
+                        IconButton(onClick = {
+                            if (selectedItems.size == settings.quickMessages.size) {
+                                selectedItems.clear()
+                            } else {
+                                selectedItems.clear()
+                                selectedItems.addAll(settings.quickMessages.map { it.id.toString() })
+                            }
+                        }) {
+                            Icon(
+                                HugeIcons.CursorPointer01,
+                                contentDescription = stringResource(
+                                    if (selectedItems.size == settings.quickMessages.size) {
+                                        R.string.skills_page_deselect_all
+                                    } else {
+                                        R.string.skills_page_select_all
+                                    }
+                                ),
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { selecting = true }) {
+                            Icon(
+                                HugeIcons.MoreVertical,
+                                contentDescription = stringResource(R.string.skills_page_batch_select),
+                            )
+                        }
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(HugeIcons.Add01, contentDescription = null)
+            if (!selecting) {
+                FloatingActionButton(onClick = { showAddDialog = true }) {
+                    Icon(HugeIcons.Add01, contentDescription = null)
+                }
             }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (settings.quickMessages.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Zap,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = innerPadding + PaddingValues(12.dp) + PaddingValues(bottom = 72.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                state = lazyListState,
+            ) {
+                if (settings.quickMessages.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Zap,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = stringResource(R.string.quick_messages_page_empty_title),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = stringResource(R.string.quick_messages_page_empty_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                items(settings.quickMessages, key = { it.id.toString() }) { quickMessage ->
+                    if (selecting) {
+                        QuickMessageSelectableCard(
+                            quickMessage = quickMessage,
+                            selected = selectedItems.contains(quickMessage.id.toString()),
+                            onSelectChange = {
+                                if (!selectedItems.contains(quickMessage.id.toString())) {
+                                    selectedItems.add(quickMessage.id.toString())
+                                } else {
+                                    selectedItems.remove(quickMessage.id.toString())
+                                }
+                            },
+                            onEdit = { editTarget = quickMessage },
                         )
-                        Text(
-                            text = stringResource(R.string.quick_messages_page_empty_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            text = stringResource(R.string.quick_messages_page_empty_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    } else {
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = quickMessage.id.toString(),
+                        ) { isDragging ->
+                            QuickMessageCard(
+                                quickMessage = quickMessage,
+                                onEdit = { editTarget = quickMessage },
+                                onDelete = { deleteTarget = quickMessage },
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                        }
+                                    },
+                                dragHandle = {
+                                    IconButton(
+                                        onClick = {},
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                                },
+                                                onDragStopped = {
+                                                    hapticController.perform(HapticFeedbackType.GestureEnd)
+                                                }
+                                            )
+                                    ) {
+                                        Icon(
+                                            imageVector = HugeIcons.DragDropHorizontal,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
 
-            items(settings.quickMessages, key = { it.id }) { quickMessage ->
-                QuickMessageCard(
-                    quickMessage = quickMessage,
-                    onEdit = { editTarget = quickMessage },
-                    onDelete = { deleteTarget = quickMessage },
-                )
+            // 批量删除操作条
+            AnimatedVisibility(
+                visible = selecting,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp),
+                enter = slideInVertically(initialOffsetY = { it * 2 }),
+                exit = slideOutVertically(targetOffsetY = { it * 2 }),
+            ) {
+                HorizontalFloatingToolbar(expanded = true) {
+                    Tooltip(tooltip = { Text(stringResource(R.string.skills_page_batch_cancel)) }) {
+                        IconButton(
+                            onClick = {
+                                selecting = false
+                                selectedItems.clear()
+                            }
+                        ) {
+                            Icon(HugeIcons.Cancel01, null)
+                        }
+                    }
+                    Tooltip(
+                        tooltip = {
+                            Text(
+                                stringResource(
+                                    if (selectedItems.size == settings.quickMessages.size) {
+                                        R.string.skills_page_deselect_all
+                                    } else {
+                                        R.string.skills_page_select_all
+                                    }
+                                )
+                            )
+                        }
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (selectedItems.size == settings.quickMessages.size) {
+                                    selectedItems.clear()
+                                } else {
+                                    selectedItems.clear()
+                                    selectedItems.addAll(settings.quickMessages.map { it.id.toString() })
+                                }
+                            }
+                        ) {
+                            Icon(HugeIcons.CursorPointer01, null)
+                        }
+                    }
+                    Tooltip(tooltip = { Text(stringResource(R.string.skills_page_delete)) }) {
+                        FilledIconButton(
+                            onClick = {
+                                if (selectedItems.isNotEmpty()) {
+                                    showBatchDeleteDialog = true
+                                }
+                            },
+                            enabled = selectedItems.isNotEmpty(),
+                        ) {
+                            Icon(HugeIcons.Delete01, stringResource(R.string.skills_page_delete))
+                        }
+                    }
+                }
             }
         }
     }
@@ -163,6 +341,22 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
     ) {
         Text(stringResource(R.string.quick_messages_page_delete_message, deleteTarget?.title ?: ""))
     }
+
+    RikkaConfirmDialog(
+        show = showBatchDeleteDialog,
+        title = stringResource(R.string.skills_page_delete_title),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            vm.deleteQuickMessages(selectedItems.map { kotlin.uuid.Uuid.parse(it) })
+            selectedItems.clear()
+            selecting = false
+            showBatchDeleteDialog = false
+        },
+        onDismiss = { showBatchDeleteDialog = false },
+    ) {
+        Text(stringResource(R.string.skills_page_batch_delete_message, selectedItems.size))
+    }
 }
 
 @Composable
@@ -170,19 +364,23 @@ private fun QuickMessageCard(
     quickMessage: QuickMessage,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    dragHandle: @Composable (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            dragHandle?.invoke()
+
             Icon(
                 imageVector = HugeIcons.Zap,
                 contentDescription = null,
@@ -248,6 +446,60 @@ private fun QuickMessageCard(
                         },
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickMessageSelectableCard(
+    quickMessage: QuickMessage,
+    selected: Boolean,
+    onSelectChange: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onSelectChange() },
+            )
+            Icon(
+                imageVector = HugeIcons.Zap,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = quickMessage.title.ifBlank { stringResource(R.string.quick_messages_page_untitled) },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = quickMessage.content.ifBlank { stringResource(R.string.quick_messages_page_empty_content) },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(HugeIcons.Edit01, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(20.dp))
             }
         }
     }

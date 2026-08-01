@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,9 +49,13 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Archive02
+import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.BookOpen01
+import me.rerere.hugeicons.stroke.Bulb
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FileView
+import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.Share08
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.rikkahub.R
@@ -421,5 +426,98 @@ private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, Strin
         WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
     } else {
         WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
+    }
+}
+
+private data class StudyToolConfig(
+    val toolName: String,
+    val inputField: String,
+    val labelPrefix: String,
+    val icon: ImageVector,
+    val screen: Screen,
+)
+
+private val STUDY_TOOL_CONFIGS = listOf(
+    StudyToolConfig("save_vocabulary", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
+    StudyToolConfig("save_note", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
+    StudyToolConfig("save_wrong_question", "question", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
+    StudyToolConfig("save_knowledge_card", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
+)
+
+private data class StudyItem(
+    val key: String,
+    val label: String,
+    val icon: ImageVector,
+    val screen: Screen,
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun StudyItemsList(parts: List<UIMessagePart>) {
+    val navController = LocalNavController.current
+    val studyItems = remember(parts) {
+        parts.filterIsInstance<UIMessagePart.Tool>()
+            .filter { it.isExecuted }
+            .mapNotNull { tool ->
+                val config = STUDY_TOOL_CONFIGS.find { it.toolName == tool.toolName } ?: return@mapNotNull null
+                val value = tool.inputAsJson().jsonObject[config.inputField]
+                    ?.jsonPrimitive?.contentOrNull
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return@mapNotNull null
+                val label = if (config.toolName == "save_wrong_question") {
+                    "${config.labelPrefix}: ${value.take(20)}"
+                } else {
+                    "${config.labelPrefix}: $value"
+                }
+                StudyItem(key = "${config.toolName}:$value", label = label, icon = config.icon, screen = config.screen)
+            }
+            .distinctBy { it.key }
+    }
+    if (studyItems.isEmpty()) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val visibleItems = if (expanded) studyItems else studyItems.take(DEFAULT_VISIBLE_COUNT)
+    val hasMore = studyItems.size > DEFAULT_VISIBLE_COUNT
+
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        visibleItems.forEach { item ->
+            Surface(
+                onClick = { navController.navigate(item.screen) },
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(item.icon, null, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 200.dp),
+                    )
+                }
+            }
+        }
+        if (hasMore && !expanded) {
+            Surface(
+                onClick = { expanded = true },
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Text(
+                    text = "+${studyItems.size - DEFAULT_VISIBLE_COUNT}",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
     }
 }

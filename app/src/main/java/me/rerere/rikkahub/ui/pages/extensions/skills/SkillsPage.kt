@@ -175,12 +175,12 @@ fun SkillsPage() {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 16.dp,
-                bottom = 16.dp + 72.dp,
+                start = 12.dp,
+                end = 12.dp,
+                top = 12.dp,
+                bottom = 12.dp + 72.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             state = lazyListState,
         ) {
             if (skills.isEmpty()) {
@@ -433,7 +433,7 @@ private fun SkillCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -512,7 +512,7 @@ private fun SkillSelectableCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 8.dp, top = 12.dp, bottom = 12.dp, end = 16.dp),
+                .padding(start = 4.dp, top = 6.dp, bottom = 6.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(

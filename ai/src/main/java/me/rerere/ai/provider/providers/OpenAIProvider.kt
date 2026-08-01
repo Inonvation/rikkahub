@@ -18,6 +18,7 @@ import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
@@ -78,9 +79,16 @@ class OpenAIProvider(
                 val modelObj = modelJson.jsonObject
                 val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
+                // Auto-detect embedding models by ID pattern
+                val isEmbedding = id.contains("embedding", ignoreCase = true) ||
+                        id.contains("bge", ignoreCase = true) ||
+                        id.contains("e5", ignoreCase = true) ||
+                        id.contains("gte", ignoreCase = true)
+
                 Model(
                     modelId = id,
                     displayName = id,
+                    type = if (isEmbedding) ModelType.EMBEDDING else ModelType.CHAT,
                 )
             }
         }

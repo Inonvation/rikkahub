@@ -43,6 +43,8 @@ class KnowledgeBaseRepository(
 
     suspend fun delete(id: String) = dao.deleteById(id)
 
+    suspend fun updateTimestamp(id: String, timestamp: Long) = dao.updateTimestamp(id, timestamp)
+
     suspend fun getById(id: String) = dao.getById(id)
 
     fun getAll() = dao.getAll()

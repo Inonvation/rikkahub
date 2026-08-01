@@ -34,7 +34,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.utils.plus
 
 @Composable
@@ -106,7 +106,7 @@ private fun PromptSettingItem(
 ) {
     var showEditor by remember { mutableStateOf(false) }
 
-    CardGroup(title = { Text(title) }) {
+    IosGroup(title = title) {
         item(
             onClick = { showEditor = true },
             headlineContent = { Text(stringResource(R.string.setting_model_page_prompt)) },

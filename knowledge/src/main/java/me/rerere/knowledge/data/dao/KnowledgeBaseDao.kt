@@ -37,6 +37,9 @@ interface KnowledgeBaseDao {
     @Query("DELETE FROM knowledge_base WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    @Query("UPDATE knowledge_base SET updated_at = :timestamp WHERE id = :id")
+    suspend fun updateTimestamp(id: String, timestamp: Long)
+
     @Query("SELECT COUNT(*) FROM knowledge_base")
     suspend fun count(): Int
 }

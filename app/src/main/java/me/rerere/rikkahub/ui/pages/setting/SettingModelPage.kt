@@ -13,19 +13,15 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
 import me.rerere.rikkahub.ui.components.ui.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,8 +39,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.ModelListSheet
 import me.rerere.rikkahub.ui.components.ai.rememberModelListState
-import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.IosGroup
+import me.rerere.rikkahub.ui.components.ui.SettingScaffold
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -53,20 +49,11 @@ import kotlin.uuid.Uuid
 @Composable
 fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
 
-    Scaffold(
-        containerColor = CustomColors.topBarColors.containerColor,
-        topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.setting_model_page_title)) },
-                navigationIcon = { BackButton() },
-                scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
-            )
-        },
+    SettingScaffold(
+        title = stringResource(R.string.setting_model_page_title),
         bottomBar = {
             BottomAppBar(
                 containerColor = CustomColors.cardColorsOnSurfaceContainer.containerColor
@@ -85,7 +72,6 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                 )
             }
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { contentPadding ->
         HorizontalPager(
             state = pagerState,
@@ -104,7 +90,7 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             ModelSettingItem(
@@ -205,7 +191,7 @@ private fun SuggestionModelSettingItem(
     )
 
     Column {
-        CardGroup(title = { Text(title) }) {
+        IosGroup(title = title) {
             item(
                 headlineContent = { Text(stringResource(R.string.setting_model_page_enable_suggestion)) },
                 trailingContent = {
@@ -281,7 +267,7 @@ private fun ModelSettingItem(
     )
 
     Column {
-        CardGroup(title = { Text(title) }) {
+        IosGroup(title = title) {
             item(
                 onClick = { state.open() },
                 headlineContent = { Text(title) },
