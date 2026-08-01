@@ -31,6 +31,10 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.ENGLISH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MATH_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.POLITICS_TUTOR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.MECHANICS_TUTOR_PROMPT
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
@@ -744,6 +748,14 @@ private fun Model.findModelProviderFromList(providers: List<ProviderSetting>): P
 }
 
 internal val DEFAULT_ASSISTANT_ID = Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")
+
+// 学科助手固定 UUID
+internal val ENGLISH_TUTOR_ID = Uuid.parse("e1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6")
+internal val MATH_TUTOR_ID = Uuid.parse("f1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c7")
+internal val POLITICS_TUTOR_ID = Uuid.parse("a1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c8")
+internal val MECHANICS_TUTOR_ID = Uuid.parse("b1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c9")
+internal val DAILY_CHAT_ID = Uuid.parse("c1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c0")
+
 internal val DEFAULT_ASSISTANTS = listOf(
     Assistant(
         id = DEFAULT_ASSISTANT_ID,
@@ -754,20 +766,89 @@ internal val DEFAULT_ASSISTANTS = listOf(
         id = Uuid.parse("3d47790c-c415-4b90-9388-751128adb0a0"),
         name = "",
         systemPrompt = """
-            You are a helpful assistant, called {{char}}, based on model {{model_name}}.
+            You are {{char}}, based on {{model_name}}. Current date: {{cur_date}}. User: {{user}}.
 
-            ## Info
-            - Date: {{cur_date}}
-            - Locale: {{locale}}
-            - Timezone: {{timezone}}
-            - Device Info: {{device_info}}
-            - System Version: {{system_version}}
-            - User Nickname: {{user}}
-
-            ## Hint
-            - If the user does not specify a language, reply in the user's primary language.
-            - Remember to use Markdown syntax for formatting, and use latex for mathematical expressions.
+            Reply in the user's language. Use Markdown for formatting, LaTeX for math.
         """.trimIndent()
+    ),
+    // 英语导师
+    Assistant(
+        id = ENGLISH_TUTOR_ID,
+        name = "英语导师",
+        systemPrompt = ENGLISH_TUTOR_PROMPT,
+        temperature = 0.3f,
+        contextMessageLimit = 20,
+        enableTodoList = false,
+        enableTimeReminder = false,
+        localTools = listOf(),
+        enabledStudyTools = listOf("save_vocabulary", "save_note"),
+        studySubject = "english",
+    ),
+    // 数学导师
+    Assistant(
+        id = MATH_TUTOR_ID,
+        name = "数学导师",
+        systemPrompt = MATH_TUTOR_PROMPT,
+        temperature = 0.3f,
+        reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
+        contextMessageLimit = 20,
+        enableTodoList = false,
+        enableTimeReminder = false,
+        localTools = listOf(),
+        enabledStudyTools = listOf("save_wrong_question", "save_note"),
+        studySubject = "math",
+    ),
+    // 政治导师
+    Assistant(
+        id = POLITICS_TUTOR_ID,
+        name = "政治导师",
+        systemPrompt = POLITICS_TUTOR_PROMPT,
+        temperature = 0.3f,
+        contextMessageLimit = 20,
+        enableTodoList = false,
+        enableTimeReminder = false,
+        localTools = listOf(),
+        enabledStudyTools = listOf("save_note", "save_knowledge_card", "quiz_user"),
+        studySubject = "politics",
+    ),
+    // 机械原理导师
+    Assistant(
+        id = MECHANICS_TUTOR_ID,
+        name = "机械原理导师",
+        systemPrompt = MECHANICS_TUTOR_PROMPT,
+        temperature = 0.3f,
+        reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
+        contextMessageLimit = 20,
+        enableTodoList = false,
+        enableTimeReminder = false,
+        localTools = listOf(),
+        enabledStudyTools = listOf("save_wrong_question", "save_note", "save_knowledge_card", "quiz_user"),
+        studySubject = "mechanics",
+    ),
+    // 日常聊天
+    Assistant(
+        id = DAILY_CHAT_ID,
+        name = "日常聊天",
+        systemPrompt = """
+            You are a friendly and supportive companion. Chat naturally with the user in Chinese.
+
+            ## About the User
+            The user is a graduate entrance exam (考研) student. They may be stressed or tired from studying.
+            Be encouraging, warm, and understanding. Occasionally check in on how they're feeling.
+
+            ## Style
+            - Natural, conversational Chinese
+            - Warm but not overly enthusiastic
+            - Use occasional emoji, but don't overdo it
+            - Keep responses concise (2-4 sentences usually)
+            - Feel free to use humor when appropriate
+            - Remember details about the user (via memory) to build rapport
+        """.trimIndent(),
+        temperature = 0.8f,
+        enableMemory = true,
+        enableTodoList = false,
+        enableTimeReminder = false,
+        localTools = listOf(),
     ),
 )
 
@@ -794,5 +875,53 @@ val DEFAULT_MODE_INJECTIONS = listOf(
         content = LEARNING_MODE_PROMPT,
         position = InjectionPosition.AFTER_SYSTEM_PROMPT,
         name = "Learning Mode"
-    )
+    ),
+    PromptInjection.ModeInjection(
+        id = Uuid.parse("e1e2e3e4-d5e6-f7a8-b9c0-d1e2f3a4b5c6"),
+        content = """
+            English study mode active. Be concise and direct — no filler words.
+            - Word lookup: **{word}** /{pronunciation}/, definitions with Chinese, examples, memory aid, collocations, 考研提示. Call `save_vocabulary` after.
+            - Translation: direct + 2-3 alternatives + key vocabulary. No preamble.
+            - Exam questions: identify type → guide step-by-step → explain reasoning → summarize.
+            - Grammar in Chinese, rest in English. Use Markdown.
+        """.trimIndent(),
+        position = InjectionPosition.AFTER_SYSTEM_PROMPT,
+        name = "英语学习模式"
+    ),
+    PromptInjection.ModeInjection(
+        id = Uuid.parse("f1e2e3e4-d5e6-f7a8-b9c0-d1e2f3a4b5c7"),
+        content = """
+            Math problem-solving mode active. Reply in Chinese, use LaTeX for all formulas.
+            - 考点定位: knowledge point / importance(★) / common question type
+            - 分步推导: step-by-step with theorem citations (e.g. "根据拉格朗日中值定理")
+            - 最终答案: $$\boxed{answer}$$, then 易错点提示
+            - Call `save_wrong_question` for representative problems, `save_note` for techniques.
+        """.trimIndent(),
+        position = InjectionPosition.AFTER_SYSTEM_PROMPT,
+        name = "数学解题模式"
+    ),
+    PromptInjection.ModeInjection(
+        id = Uuid.parse("a1e2e3e4-d5e6-f7a8-b9c0-d1e2f3a4b5c8"),
+        content = """
+            Politics study mode active. Reply in Chinese, use Markdown.
+            - Knowledge points: 核心概念 → 详细解析 → 记忆口诀 → 易混辨析 → 真题链接. Call `save_knowledge_card`.
+            - Essay frameworks: 题目类型 → 答题框架 → 关键词汇 → 范例. Call `save_note` with category "论述框架".
+            - 抽背: call `quiz_user`, one question at a time, give feedback.
+            - Link current events to exam points.
+        """.trimIndent(),
+        position = InjectionPosition.AFTER_SYSTEM_PROMPT,
+        name = "政治学习模式"
+    ),
+    PromptInjection.ModeInjection(
+        id = Uuid.parse("b1e2e3e4-d5e6-f7a8-b9c0-d1e2f3a4b5c9"),
+        content = """
+            Mechanics study mode active. Reply in Chinese, use LaTeX for all formulas.
+            - Problem solving: 考点定位 → 分步推导(with theorem citations) → $$\boxed{answer}$$ → 易错点. Call `save_wrong_question`.
+            - Concepts: 定义 → 工作原理 → 关键公式 → 应用场景 → 考试重点. Call `save_knowledge_card`.
+            - 抽背: call `quiz_user`, one question at a time, give feedback.
+            - Save techniques via `save_note` with category "解题思路", formulas via "公式推导".
+        """.trimIndent(),
+        position = InjectionPosition.AFTER_SYSTEM_PROMPT,
+        name = "机械原理学习模式"
+    ),
 )

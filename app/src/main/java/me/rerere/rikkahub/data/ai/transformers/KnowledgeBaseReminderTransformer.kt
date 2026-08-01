@@ -55,12 +55,12 @@ class KnowledgeBaseReminderTransformer(
             $kbList
 
             Rules:
-            - For ANY question that might be related to the content of these knowledge bases, call `kb_search` FIRST before answering.
-            - Read the descriptions above — if a question's topic matches a knowledge base's description, you MUST search it.
-            - Choose the right search mode: "scan" for counting/listing, "keyword" for exact terms/names, "semantic" for conceptual questions, "hybrid" for general questions.
-            - Answer from the retrieved chunks. Do NOT call `kb_search` more than once for the same question.
+            - For questions related to these knowledge bases, call `kb_search` first before answering.
+            - If a question's topic matches a knowledge base's description, search it.
+            - Search modes: "scan" for counting/listing, "keyword" for exact terms, "semantic" for concepts, "hybrid" for general questions.
+            - Answer from the retrieved chunks. Call `kb_search` once per question.
             - If no relevant information is found, say "I couldn't find this in your knowledge base" and stop.
-            - Do NOT search the workspace or filesystem for documents that are in the knowledge base.
+            - Search the knowledge base, not the workspace or filesystem, for these documents.
             </knowledge_base>
         """.trimIndent()
     }

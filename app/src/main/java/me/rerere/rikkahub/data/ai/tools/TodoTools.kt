@@ -103,29 +103,7 @@ fun createTodoTool(
         )
     },
     systemPrompt = { _, _ ->
-        """
-        ## Task Management
-
-        You have access to a `todo_write` tool for managing structured task lists.
-
-        ### When to use:
-        - The user's request involves 3+ distinct steps or sub-tasks
-        - The task is complex and requires planning
-        - You need to track progress across multiple tool calls
-
-        ### Workflow:
-        1. Before starting work, call `todo_write` to create the initial plan with all items as "pending"
-        2. Before starting a task, update its status to "in_progress"
-        3. Immediately after completing a task, update its status to "completed"
-        4. If a task becomes irrelevant, mark it as "cancelled"
-        5. Always pass the FULL todolist (all items), not just the ones that changed
-
-        ### Guidelines:
-        - Keep items granular and actionable
-        - Use clear, descriptive names
-        - Order items logically (consider dependencies)
-        - Update the todolist after EACH significant step, not just at the end
-        """.trimIndent()
+        "Use `todo_write` to track complex tasks (3+ steps). Create a plan before starting, update item status (pending→in_progress→completed/cancelled) as you work. Always pass the full list, not just changes. Update after each significant step."
     },
     execute = { args ->
         val items = args.jsonObject["items"]?.jsonArray

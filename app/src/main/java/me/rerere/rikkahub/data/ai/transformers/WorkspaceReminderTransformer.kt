@@ -41,18 +41,15 @@ class WorkspaceReminderTransformer(
 
 private fun buildWorkspacePrompt(workspace: WorkspaceEntity, cwd: String? = null): String = buildString {
     appendLine("<workspace>")
-    appendLine("You have access to a persistent Linux workspace named \"${workspace.name}\", running in a sandboxed proot rootfs environment.")
-    appendLine("- The workspace files area is mounted at `/workspace`. Use it as your working directory; files written there persist across turns of this conversation.")
-    appendLine("- All paths passed to workspace tools must be absolute and inside the Rootfs (for example `/workspace/notes.md`).")
-    appendLine("- Available tools:")
-    appendLine("  - `workspace_read_file`: read file contents.")
-    appendLine("  - `workspace_write_file` / `workspace_edit_file`: create files, or make precise edits to existing files.")
-    appendLine("  - `workspace_shell`: run shell commands (the files area is mounted at /workspace).")
-    appendLine("- Prefer `workspace_shell` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file` for targeted edits over rewriting whole files.")
-    appendLine("- The skills directory is mounted at `/skills`. Each skill is a subdirectory `/skills/<skill-name>/` containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Read a skill's `SKILL.md` before using it, and follow its instructions.")
-    appendLine("- Files the user uploaded are mounted at `/upload`. Treat `/upload` as READ-ONLY: read uploaded files from `/upload/<file-name>`, but never modify, overwrite, or delete anything there. If you need to change an uploaded file, copy it into `/workspace` first and edit the copy.")
+    appendLine("You have a Linux workspace \"${workspace.name}\" (sandboxed proot rootfs).")
+    appendLine("- Working directory: `/workspace`. Files there persist across turns.")
+    appendLine("- All paths must be absolute and inside the rootfs (e.g. `/workspace/notes.md`).")
+    appendLine("- Tools: `workspace_read_file`, `workspace_write_file`, `workspace_edit_file`, `workspace_shell`.")
+    appendLine("- Prefer `workspace_shell` for Unix tasks, `workspace_edit_file` for targeted edits.")
+    appendLine("- Skills are at `/skills/<skill-name>/SKILL.md`. Read before using.")
+    appendLine("- Uploaded files at `/upload` are READ-ONLY. Copy to `/workspace` to modify.")
     if (!cwd.isNullOrBlank()) {
-        appendLine("- Current working directory: `$cwd`. Use this as the default context for file operations and shell commands.")
+        appendLine("- Current working directory: `$cwd`.")
     }
     append("</workspace>")
 }
