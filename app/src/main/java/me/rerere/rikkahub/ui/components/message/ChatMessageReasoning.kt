@@ -130,6 +130,7 @@ private fun ReasoningContent(
     loading: Boolean,
 ) {
     val isPreview = expandState == ReasoningCardState.Preview
+    val surfaceColor = MaterialTheme.colorScheme.surface
     val reasoningTextStyle = MaterialTheme.typography.bodySmall.copy(
         fontFamily = LocalTextStyle.current.fontFamily,
     )
@@ -146,8 +147,8 @@ private fun ReasoningContent(
                                 endY = size.height,
                                 colorStops = arrayOf(
                                     0.0f to Color.Transparent,
-                                    (fadeHeight / size.height) to Color.Black,
-                                    (1 - fadeHeight / size.height) to Color.Black,
+                                    (fadeHeight / size.height) to surfaceColor,
+                                    (1 - fadeHeight / size.height) to surfaceColor,
                                     1.0f to Color.Transparent
                                 )
                             )

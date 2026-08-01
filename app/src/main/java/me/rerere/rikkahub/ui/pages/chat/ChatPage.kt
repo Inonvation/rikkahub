@@ -43,11 +43,20 @@ import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -72,6 +81,7 @@ import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -91,6 +101,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.ai.tools.TodoItem
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
@@ -964,6 +975,39 @@ private fun TodolistBanner(
         dismissed = false
     }
 
+    // 本地状态层：用于支持条目的出场动画
+    val displayItems = remember { mutableStateListOf<TodoItem>().apply { addAll(todolist.items) } }
+    val removingIds = remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(todolist.items) {
+        val oldIds = displayItems.map { it.id }.toSet()
+        val newIds = todolist.items.map { it.id }.toSet()
+
+        val removedIds = oldIds - newIds
+        val addedIds = newIds - oldIds
+
+        // 标记已移除条目，触发出场动画
+        if (removedIds.isNotEmpty()) {
+            removingIds.value = removingIds.value + removedIds
+        }
+
+        // 添加新条目，触发入场动画
+        displayItems.addAll(todolist.items.filter { it.id in addedIds })
+
+        // 更新已存在的条目，触发颜色过渡
+        todolist.items.filter { it.id in oldIds.intersect(newIds) }.forEach { updated ->
+            val index = displayItems.indexOfFirst { it.id == updated.id }
+            if (index >= 0) displayItems[index] = updated
+        }
+
+        // 出场动画完成后清理
+        if (removedIds.isNotEmpty()) {
+            delay(350)
+            displayItems.removeAll { it.id in removedIds }
+            removingIds.value = removingIds.value - removedIds
+        }
+    }
+
     val progress = if (total > 0) completed.toFloat() / total else 0f
 
     AnimatedVisibility(visible = !dismissed) {
@@ -1067,46 +1111,87 @@ private fun TodolistBanner(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        todolist.items.forEach { item ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    imageVector = when (item.status) {
-                                        TodoStatus.completed -> HugeIcons.Tick01
-                                        TodoStatus.in_progress -> HugeIcons.Sparkles
-                                        TodoStatus.cancelled -> HugeIcons.Cancel01
-                                        TodoStatus.pending -> HugeIcons.ArrowRight01
-                                    },
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = when (item.status) {
-                                        TodoStatus.completed -> MaterialTheme.colorScheme.primary
-                                        TodoStatus.in_progress -> MaterialTheme.colorScheme.tertiary
-                                        TodoStatus.cancelled -> MaterialTheme.colorScheme.error
-                                        TodoStatus.pending -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = item.content,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    textDecoration = if (item.status == TodoStatus.completed || item.status == TodoStatus.cancelled)
-                                        TextDecoration.LineThrough else TextDecoration.None,
-                                    color = when (item.status) {
-                                        TodoStatus.completed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        TodoStatus.cancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
-                                )
+                        displayItems.forEach { item ->
+                            key(item.id) {
+                                val isRemoving = item.id in removingIds.value
+                                val visibleState = remember { MutableTransitionState(false) }
+
+                                LaunchedEffect(Unit) {
+                                    if (!isRemoving) {
+                                        visibleState.targetState = true
+                                    }
+                                }
+
+                                LaunchedEffect(isRemoving) {
+                                    if (isRemoving) {
+                                        visibleState.targetState = false
+                                    }
+                                }
+
+                                AnimatedVisibility(
+                                    visibleState = visibleState,
+                                    enter = fadeIn(animationSpec = tween(300)) +
+                                        slideInVertically(animationSpec = tween(300)) { it },
+                                    exit = fadeOut(animationSpec = tween(300)) +
+                                        slideOutVertically(animationSpec = tween(300)) { -it },
+                                ) {
+                                    TodoItemRow(item)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TodoItemRow(item: TodoItem) {
+    val iconTint by animateColorAsState(
+        targetValue = when (item.status) {
+            TodoStatus.completed -> MaterialTheme.colorScheme.primary
+            TodoStatus.in_progress -> MaterialTheme.colorScheme.tertiary
+            TodoStatus.cancelled -> MaterialTheme.colorScheme.error
+            TodoStatus.pending -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(400),
+        label = "iconTint",
+    )
+    val textColor by animateColorAsState(
+        targetValue = when (item.status) {
+            TodoStatus.completed, TodoStatus.cancelled ->
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            else -> MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(400),
+        label = "textColor",
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = when (item.status) {
+                TodoStatus.completed -> HugeIcons.Tick01
+                TodoStatus.in_progress -> HugeIcons.Sparkles
+                TodoStatus.cancelled -> HugeIcons.Cancel01
+                TodoStatus.pending -> HugeIcons.ArrowRight01
+            },
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = iconTint,
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = item.content,
+            style = MaterialTheme.typography.bodySmall,
+            textDecoration = if (item.status == TodoStatus.completed || item.status == TodoStatus.cancelled)
+                TextDecoration.LineThrough else TextDecoration.None,
+            color = textColor,
+        )
     }
 }

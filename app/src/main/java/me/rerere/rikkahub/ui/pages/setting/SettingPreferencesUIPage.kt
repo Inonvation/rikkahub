@@ -122,10 +122,11 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Message Bubbles
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_message_display_settings)) },
+                    title = { Text(stringResource(R.string.setting_page_message_bubbles)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_title)) },
@@ -172,6 +173,15 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                             }
                         }
                     )
+                }
+            }
+
+            // Message Info
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_message_info)) },
+                ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_desc)) },
@@ -220,6 +230,15 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                }
+            }
+
+            // Thinking
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_thinking)) },
+                ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_desc)) },
@@ -244,18 +263,15 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.enableLatexRendering,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(enableLatexRendering = it))
-                                }
-                            )
-                        },
-                    )
+                }
+            }
+
+            // Font
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_font)) },
+                ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_chat_font_family_title)) },
                         supportingContent = {
@@ -363,6 +379,28 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
+            // Rendering
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_rendering)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.enableLatexRendering,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(enableLatexRendering = it))
+                                }
+                            )
+                        },
+                    )
+                }
+            }
+
+            // Code Display
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
@@ -400,6 +438,51 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                                 checked = displaySetting.showLineNumbers,
                                 onCheckedChange = {
                                     updateDisplaySetting(displaySetting.copy(showLineNumbers = it))
+                                }
+                            )
+                        },
+                    )
+                }
+            }
+
+            // TTS Playback
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_tts_playback)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.ttsOnlyReadQuoted,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(ttsOnlyReadQuoted = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_tts_read_outside_brackets_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_tts_read_outside_brackets_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.ttsOnlyReadOutsideBrackets,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(ttsOnlyReadOutsideBrackets = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_auto_play_tts_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_auto_play_tts_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.autoPlayTTSAfterGeneration,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(autoPlayTTSAfterGeneration = it))
                                 }
                             )
                         },

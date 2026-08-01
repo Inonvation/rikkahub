@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -62,11 +63,11 @@ import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
-import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.BookOpen01
+import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -156,9 +157,6 @@ fun ChatDrawerContent(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var folderToRename by remember { mutableStateOf<Folder?>(null) }
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
-
-    // Menu popup 状态
-    var showMenuPopup by remember { mutableStateOf(false) }
 
     ModalDrawerSheet(
         modifier = Modifier.width(300.dp)
@@ -310,53 +308,27 @@ fun ChatDrawerContent(
             ) {
                 DrawerAction(
                     icon = {
-                        Icon(
-                            imageVector = HugeIcons.LookTop,
-                            contentDescription = stringResource(R.string.assistant_page_title)
-                        )
+                        Icon(HugeIcons.LanguageCircle, null)
                     },
                     label = {
-                        Text(stringResource(R.string.assistant_page_title))
+                        Text(stringResource(R.string.chat_page_menu_ai_translator))
                     },
                     onClick = {
-                        navController.navigate(Screen.Assistant)
+                        navController.navigate(Screen.Translator)
                     },
                 )
 
-                Box {
-                    DrawerAction(
-                        icon = {
-                            Icon(HugeIcons.Sparkles, "Menu")
-                        },
-                        label = {
-                            Text(stringResource(R.string.menu))
-                        },
-                        onClick = {
-                            showMenuPopup = true
-                        },
-                    )
-                    DropdownMenu(
-                        expanded = showMenuPopup,
-                        onDismissRequest = { showMenuPopup = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
-                            leadingIcon = { Icon(HugeIcons.LanguageCircle, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.Translator)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
-                            leadingIcon = { Icon(HugeIcons.Image02, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.ImageGen)
-                            }
-                        )
-                    }
-                }
+                DrawerAction(
+                    icon = {
+                        Icon(HugeIcons.Image02, null)
+                    },
+                    label = {
+                        Text(stringResource(R.string.chat_page_menu_image_generation))
+                    },
+                    onClick = {
+                        navController.navigate(Screen.ImageGen)
+                    },
+                )
 
                 DrawerAction(
                     icon = {
@@ -733,6 +705,81 @@ private fun DrawerActions(navController: Navigator) {
                 )
                 Text(
                     text = stringResource(R.string.chat_page_history),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+
+        // 学习面板分隔
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "学习面板",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+
+        // 生词面板入口
+        Surface(
+            onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                navController.navigate(Screen.VocabularyPanel)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.BookOpen01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "生词面板",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+
+        // 笔记入口
+        Surface(
+            onClick = {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                navController.navigate(Screen.NotesPanel)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Note01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "笔记",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

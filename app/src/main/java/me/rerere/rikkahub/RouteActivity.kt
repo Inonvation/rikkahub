@@ -88,7 +88,6 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
-import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesPage
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailPage
@@ -104,8 +103,7 @@ import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
-import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
-import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
+import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
@@ -126,6 +124,10 @@ import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBasesPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseDetailPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseSettingsPage
+import me.rerere.rikkahub.ui.pages.study.vocabulary.VocabularyPanelPage
+import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelPage
+import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelPage
+import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -408,12 +410,8 @@ class RouteActivity : ComponentActivity() {
                                 SettingThemePage()
                             }
 
-                            entry<Screen.SettingPreferences> {
-                                SettingPreferencesPage()
-                            }
-
-                            entry<Screen.SettingPreferencesTheme> {
-                                SettingPreferencesThemePage()
+                            entry<Screen.SettingAppearance> {
+                                SettingAppearancePage()
                             }
 
                             entry<Screen.SettingPreferencesNotification> {
@@ -482,9 +480,6 @@ class RouteActivity : ComponentActivity() {
                                 LogPage()
                             }
 
-                            entry<Screen.Extensions> {
-                                ExtensionsPage()
-                            }
 
                             entry<Screen.QuickMessages> {
                                 QuickMessagesPage()
@@ -540,6 +535,22 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.KnowledgeBaseSettings> { key ->
                                 KnowledgeBaseSettingsPage(key.id)
+                            }
+
+                            entry<Screen.VocabularyPanel> {
+                                VocabularyPanelPage()
+                            }
+
+                            entry<Screen.NotesPanel> {
+                                NotesPanelPage()
+                            }
+
+                            entry<Screen.WrongQuestionPanel> {
+                                WrongQuestionPanelPage()
+                            }
+
+                            entry<Screen.KnowledgeCardPanel> {
+                                KnowledgeCardPanelPage()
                             }
                         }
                     )
@@ -655,10 +666,7 @@ sealed interface Screen : NavKey {
     data object SettingTheme : Screen
 
     @Serializable
-    data object SettingPreferences : Screen
-
-    @Serializable
-    data object SettingPreferencesTheme : Screen
+    data object SettingAppearance : Screen
 
     @Serializable
     data object SettingPreferencesNotification : Screen
@@ -709,9 +717,6 @@ sealed interface Screen : NavKey {
     data object Log : Screen
 
     @Serializable
-    data object Extensions : Screen
-
-    @Serializable
     data object QuickMessages : Screen
 
     @Serializable
@@ -749,4 +754,16 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class KnowledgeBaseSettings(val id: String) : Screen
+
+    @Serializable
+    data object VocabularyPanel : Screen
+
+    @Serializable
+    data object NotesPanel : Screen
+
+    @Serializable
+    data object WrongQuestionPanel : Screen
+
+    @Serializable
+    data object KnowledgeCardPanel : Screen
 }

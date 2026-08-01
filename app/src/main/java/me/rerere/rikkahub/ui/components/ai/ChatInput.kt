@@ -317,21 +317,6 @@ fun ChatInput(
                                 )
                             }
 
-                            // Expand / Collapse
-                            IconButton(
-                                onClick = {
-                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
-                                    expanded = !expanded
-                                },
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Icon(
-                                    imageVector = if (expanded) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
-                                    contentDescription = stringResource(R.string.more_options),
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-
                             // Collapsible section: MCP, Knowledge Base, Workspace
                             AnimatedVisibility(
                                 visible = expanded,
@@ -369,6 +354,21 @@ fun ChatInput(
                                         compact = true,
                                     )
                                 }
+                            }
+
+                            // Expand / Collapse
+                            IconButton(
+                                onClick = {
+                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                    expanded = !expanded
+                                },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (expanded) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+                                    contentDescription = stringResource(R.string.more_options),
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
 
                         }

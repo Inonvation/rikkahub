@@ -50,7 +50,7 @@ import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
-private val LocalCardColor = staticCompositionLocalOf { Color.White }
+private val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。

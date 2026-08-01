@@ -1,8 +1,5 @@
 package me.rerere.rikkahub.ui.pages.setting
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,37 +41,36 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.Book01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Clapping01
 import me.rerere.hugeicons.stroke.Database02
+import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.ImageUpload
-import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
-import me.rerere.hugeicons.stroke.Package
+import me.rerere.hugeicons.stroke.Notification01
+import me.rerere.hugeicons.stroke.PaintBoard
+import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.WavingHand01
+import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.isNotConfigured
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
-import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.icons.DiscordIcon
 import me.rerere.rikkahub.ui.components.ui.icons.TencentQQIcon
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.Navigator
-import me.rerere.rikkahub.ui.hooks.rememberColorMode
-import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.joinQQGroup
 import me.rerere.rikkahub.utils.openUrl
@@ -135,7 +130,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {
@@ -143,129 +138,141 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            item("generalSettings") {
-                var colorMode by rememberColorMode()
-                val selectedColorModeText = when (colorMode) {
-                    ColorMode.SYSTEM -> stringResource(R.string.setting_page_color_mode_system)
-                    ColorMode.LIGHT -> stringResource(R.string.setting_page_color_mode_light)
-                    ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
-                }
-                CardGroup(
+            // 外观
+            item("appearance") {
+                IosGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_general_settings)) },
+                    title = stringResource(R.string.setting_page_appearance),
                 ) {
                     item(
+                        onClick = { navController.navigate(Screen.SettingAppearance) },
                         leadingContent = { Icon(HugeIcons.Sun01, null) },
-                        trailingContent = {
-                            Select(
-                                options = ColorMode.entries,
-                                selectedOption = colorMode,
-                                onOptionSelected = {
-                                    colorMode = it
-                                    navController.navigate(Screen.Setting) {
-                                        popUpTo(Screen.Setting) {
-                                            inclusive = true
-                                        }
-                                    }
-                                },
-                                optionToString = {
-                                    when (it) {
-                                        ColorMode.SYSTEM -> stringResource(R.string.setting_page_color_mode_system)
-                                        ColorMode.LIGHT -> stringResource(R.string.setting_page_color_mode_light)
-                                        ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
-                                    }
-                                },
-                                modifier = Modifier.width(150.dp)
-                            )
-                        },
-                        headlineContent = { Text(stringResource(R.string.setting_page_color_mode)) },
-                        supportingContent = { Text(selectedColorModeText) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_color_and_theme)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
-                        onClick = { navController.navigate(Screen.SettingPreferences) },
+                        onClick = { navController.navigate(Screen.SettingPreferencesUI) },
+                        leadingContent = { Icon(HugeIcons.PaintBoard, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_preferences_ui)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingPreferencesGeneral) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_preferences_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_preferences)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_behavior)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
-                        onClick = { navController.navigate(Screen.Assistant) },
-                        leadingContent = { Icon(HugeIcons.LookTop, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_assistant_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_assistant)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
+                        onClick = { navController.navigate(Screen.SettingPreferencesNotification) },
+                        leadingContent = { Icon(HugeIcons.Notification01, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_notifications)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                 }
             }
 
-            item("modelServices") {
-                CardGroup(
+            // AI 服务
+            item("aiServices") {
+                IosGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_model_and_services)) },
+                    title = stringResource(R.string.setting_page_ai_services),
                 ) {
+                    item(
+                        onClick = { navController.navigate(Screen.Assistant) },
+                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_assistant)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { Icon(HugeIcons.AiMagic, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
                         leadingContent = { Icon(HugeIcons.Brain02, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_providers_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { Icon(HugeIcons.GlobalSearch, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_search_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingSpeech) },
-                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_tts_service_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingMcp) },
                         leadingContent = { Icon(HugeIcons.McpServer, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_mcp_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_mcp)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.QuickMessages) },
+                        leadingContent = { Icon(HugeIcons.Zap, null) },
+                        headlineContent = { Text(stringResource(R.string.assistant_page_quick_messages)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Prompts) },
+                        leadingContent = { Icon(HugeIcons.Book03, null) },
+                        headlineContent = { Text(stringResource(R.string.extensions_page_prompts)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Skills) },
+                        leadingContent = { Icon(HugeIcons.Puzzle, null) },
+                        headlineContent = { Text(stringResource(R.string.extensions_page_agent_skills)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Workspaces) },
+                        leadingContent = { Icon(HugeIcons.Folder01, null) },
+                        headlineContent = { Text(stringResource(R.string.extensions_page_workspace)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.KnowledgeBases) },
+                        leadingContent = { Icon(HugeIcons.Bookshelf01, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_knowledge_bases)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingSpeech) },
+                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingWeb) },
                         leadingContent = { Icon(HugeIcons.ServerStack01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                 }
             }
 
+            // 数据
             item("dataSettings") {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()
                 }
-                CardGroup(
+                IosGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_data_settings)) },
+                    title = stringResource(R.string.setting_page_data_settings),
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { Icon(HugeIcons.Database02, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_data_backup_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_data_backup)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
                         leadingContent = { Icon(HugeIcons.ImageUpload, null) },
-                        supportingContent = {
+                        headlineContent = {
                             if (storageState.first == -1) {
-                                Text(stringResource(R.string.calculating))
+                                Text(stringResource(R.string.setting_page_chat_storage))
                             } else {
                                 Text(
                                     stringResource(
@@ -276,24 +283,21 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                 )
                             }
                         },
-                        headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                 }
             }
 
+            // 关于
             item("aboutSettings") {
                 val context = LocalContext.current
-                val shareText = stringResource(R.string.setting_page_share_text)
-                val share = stringResource(R.string.setting_page_share)
-                val noShareApp = stringResource(R.string.setting_page_no_share_app)
-                CardGroup(
+                IosGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_page_about)) },
+                    title = stringResource(R.string.setting_page_about_community),
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAbout) },
                         leadingContent = { Icon(HugeIcons.Clapping01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_about_desc)) },
                         trailingContent = {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -325,49 +329,16 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                         tint = MaterialTheme.colorScheme.secondary
                                     )
                                 }
+                                Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_about)) },
                     )
                     item(
-                        onClick = {
-                            val docUrl = if (java.util.Locale.getDefault().language == "zh") {
-                                "https://docs.rikka-ai.com/zh/introduction"
-                            } else {
-                                "https://docs.rikka-ai.com/introduction"
-                            }
-                            context.openUrl(docUrl)
-                        },
-                        leadingContent = { Icon(HugeIcons.Book01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_documentation_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_documentation)) },
-                    )
-                    item(
                         onClick = { navController.navigate(Screen.Log) },
                         leadingContent = { Icon(HugeIcons.Bookshelf01, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_request_logs_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_request_logs)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingDonate) },
-                        leadingContent = { Icon(HugeIcons.InLove, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_donate_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_donate)) },
-                    )
-                    item(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_SEND)
-                            intent.type = "text/plain"
-                            intent.putExtra(Intent.EXTRA_TEXT, shareText)
-                            try {
-                                context.startActivity(Intent.createChooser(intent, share))
-                            } catch (e: ActivityNotFoundException) {
-                                Toast.makeText(context, noShareApp, Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        leadingContent = { Icon(HugeIcons.Share04, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_share_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_share)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                 }
             }
