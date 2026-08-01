@@ -23,9 +23,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit03
-import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
@@ -52,6 +51,7 @@ import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAssistantState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.modifier.onClick
 import kotlin.uuid.Uuid
 
 @Composable
@@ -66,35 +66,70 @@ fun AssistantPicker(
     var showPicker by remember { mutableStateOf(false) }
     val hapticController = rememberHaptic()
 
-    NavigationDrawerItem(
-        icon = {
-            Icon(HugeIcons.LookTop, contentDescription = null)
+    ListItem(
+        headlineContent = {
+            Text(
+                text = state.currentAssistant.name.ifEmpty { defaultAssistantName },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
-        label = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+        supportingContent = {
+            if (state.currentAssistant.enabledStudyTools.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    state.currentAssistant.enabledStudyTools.mapNotNull { toolName ->
+                        when (toolName) {
+                            "save_vocabulary" -> "生词本"
+                            "save_note" -> "笔记"
+                            "save_wrong_question" -> "错题本"
+                            "save_knowledge_card" -> "知识点"
+                            "quiz_user" -> "抽背"
+                            else -> null
+                        }
+                    }.forEach { label ->
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = label,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        leadingContent = {
+            UIAvatar(
+                name = state.currentAssistant.name.ifEmpty { defaultAssistantName },
+                value = state.currentAssistant.avatar,
+                onClick = onClickSetting,
+                modifier = Modifier.size(32.dp),
+            )
+        },
+        trailingContent = {
+            IconButton(
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onClickSetting()
+                }
             ) {
-                Text(
-                    text = state.currentAssistant.name.ifEmpty { defaultAssistantName },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                UIAvatar(
-                    name = state.currentAssistant.name.ifEmpty { defaultAssistantName },
-                    value = state.currentAssistant.avatar,
-                    onClick = onClickSetting
+                Icon(
+                    imageVector = HugeIcons.Edit03,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = modifier.onClick {
             showPicker = true
         },
-        modifier = modifier,
-        selected = false,
     )
 
     if (showPicker) {
@@ -229,6 +264,36 @@ private fun AssistantItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        },
+        supportingContent = {
+            if (assistant.enabledStudyTools.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    assistant.enabledStudyTools.mapNotNull { toolName ->
+                        when (toolName) {
+                            "save_vocabulary" -> "生词本"
+                            "save_note" -> "笔记"
+                            "save_wrong_question" -> "错题本"
+                            "save_knowledge_card" -> "知识点"
+                            "quiz_user" -> "抽背"
+                            else -> null
+                        }
+                    }.forEach { label ->
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = label,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
         },
         leadingContent = {
             UIAvatar(

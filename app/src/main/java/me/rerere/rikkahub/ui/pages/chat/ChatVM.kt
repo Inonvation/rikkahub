@@ -57,6 +57,10 @@ class ChatVM(
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
+    // 侧边栏展开状态 - 保存在 ViewModel 中，导航到子页面返回后仍保持
+    var leftDrawerOpen by mutableStateOf(false)
+    var rightDrawerOpen by mutableStateOf(false)
+
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 

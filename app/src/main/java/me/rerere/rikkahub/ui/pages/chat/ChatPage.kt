@@ -25,15 +25,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.DrawerState
-import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -45,17 +45,19 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberBottomSheetState
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,11 +65,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -80,8 +82,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -89,8 +89,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.IntOffset
-import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -131,7 +129,9 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
+import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
@@ -179,32 +179,42 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
 
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    // 侧边栏状态保存在 ChatVM 中，导航到子页面返回后仍保持展开
+    var leftDrawerOpen by remember { mutableStateOf(vm.leftDrawerOpen) }
+    var rightDrawerOpen by remember { mutableStateOf(vm.rightDrawerOpen) }
 
-    // Handle back press when drawer is open
-    BackHandler(enabled = drawerState.isOpen) {
-        scope.launch {
-            drawerState.close()
-        }
+    // 双向同步到 ViewModel，导航离开/返回时状态保留
+    LaunchedEffect(leftDrawerOpen) { vm.leftDrawerOpen = leftDrawerOpen }
+    LaunchedEffect(rightDrawerOpen) { vm.rightDrawerOpen = rightDrawerOpen }
+
+    // Handle back press when left drawer is open
+    BackHandler(enabled = leftDrawerOpen) {
+        leftDrawerOpen = false
     }
 
-    // Hide keyboard when drawer is open
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) {
-            softwareKeyboardController?.hide()
-        }
+    // Handle back press when right drawer is open
+    BackHandler(enabled = rightDrawerOpen) {
+        rightDrawerOpen = false
+    }
+
+    // 互斥
+    LaunchedEffect(rightDrawerOpen) {
+        if (rightDrawerOpen && leftDrawerOpen) leftDrawerOpen = false
+    }
+    LaunchedEffect(leftDrawerOpen) {
+        if (leftDrawerOpen && rightDrawerOpen) rightDrawerOpen = false
     }
 
     val windowAdaptiveInfo = currentWindowDpSize()
     val isBigScreen =
         windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
 
-    // 进入大屏（永久抽屉）模式时重置抽屉状态为关闭，
-    // 避免从横屏旋转回竖屏后，模态抽屉残留为打开状态且无法关闭（#1304）
+    // 进入大屏模式时重置抽屉状态
     LaunchedEffect(isBigScreen) {
-        if (isBigScreen && drawerState.isOpen) {
-            drawerState.close()
+        if (isBigScreen) {
+            leftDrawerOpen = false
+            rightDrawerOpen = false
         }
     }
 
@@ -311,37 +321,65 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     )
                 }
             ) {
-                ChatPageContent(
-                    inputState = inputState,
-                    loadingJob = loadingJob,
-                    processingStatus = processingStatus,
-                    setting = setting,
-                    conversation = conversation,
-                    drawerState = drawerState,
-                    navController = navController,
-                    vm = vm,
-                    chatListState = chatListState,
-                    enableWebSearch = enableWebSearch,
-                    currentChatModel = currentChatModel,
-                    bigScreen = true,
-                    errors = errors,
-                    onDismissError = { vm.dismissError(it) },
-                    onClearAllErrors = { vm.clearAllErrors() },
-                )
+                Row(Modifier.fillMaxSize()) {
+                    ChatPageContent(
+                        inputState = inputState,
+                        loadingJob = loadingJob,
+                        processingStatus = processingStatus,
+                        setting = setting,
+                        conversation = conversation,
+                        leftDrawerOpen = false,
+                        onLeftDrawerOpenChange = {},
+                        navController = navController,
+                        vm = vm,
+                        chatListState = chatListState,
+                        enableWebSearch = enableWebSearch,
+                        currentChatModel = currentChatModel,
+                        bigScreen = true,
+                        errors = errors,
+                        onDismissError = { vm.dismissError(it) },
+                        onClearAllErrors = { vm.clearAllErrors() },
+                        rightDrawerOpen = false,
+                        onRightDrawerOpenChange = {},
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 右侧永久面板
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(280.dp),
+                        shape = RoundedCornerShape(
+                            topStart = 16.dp,
+                            bottomStart = 16.dp,
+                        ),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 1.dp,
+                    ) {
+                        StudyDrawerContent(navController = navController)
+                    }
+                }
             }
         }
 
         else -> {
-            ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = {
+            DrawerScaffold(
+                leftDrawerOpen = leftDrawerOpen,
+                rightDrawerOpen = rightDrawerOpen,
+                onLeftDrawerOpenChange = { leftDrawerOpen = it },
+                onRightDrawerOpenChange = { rightDrawerOpen = it },
+                leftDrawer = {
                     ChatDrawerContent(
                         navController = navController,
                         current = conversation,
                         vm = vm,
                         settings = setting
                     )
-                }
+                },
+                rightDrawer = {
+                    StudyDrawerContent(
+                        navController = navController,
+                    )
+                },
             ) {
                 ChatPageContent(
                     inputState = inputState,
@@ -349,7 +387,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     processingStatus = processingStatus,
                     setting = setting,
                     conversation = conversation,
-                    drawerState = drawerState,
+                    leftDrawerOpen = leftDrawerOpen,
+                    onLeftDrawerOpenChange = { leftDrawerOpen = it },
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
@@ -359,12 +398,14 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
+                    rightDrawerOpen = rightDrawerOpen,
+                    onRightDrawerOpenChange = { rightDrawerOpen = it },
                 )
             }
         }
     }
-}
 
+}
 @Composable
 private fun ChatPageContent(
     inputState: ChatInputState,
@@ -373,7 +414,8 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
-    drawerState: DrawerState,
+    leftDrawerOpen: Boolean,
+    onLeftDrawerOpenChange: (Boolean) -> Unit,
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
@@ -382,6 +424,9 @@ private fun ChatPageContent(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
+    rightDrawerOpen: Boolean,
+    onRightDrawerOpenChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -391,17 +436,31 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
     var showFilesSheet by remember { mutableStateOf(false) }
+    var showCompressDialog by remember { mutableStateOf(false) }
 
-    // 侧边栏展开触感反馈：只在抽屉从关闭变为完全打开时触发一次。
-    // currentValue（settledValue）在动画/滑动落定后才翻转，因此反馈时机=完全展开。
-    // 首次组合直接跳过：从设置/收藏等页面返回时抽屉恢复为打开状态，不算"展开"，不触发。
-    val drawerHaptic = rememberHaptic()
-    var drawerPrevValue by remember { mutableStateOf(drawerState.currentValue) }
-    LaunchedEffect(drawerState.currentValue) {
-        val prev = drawerPrevValue
-        drawerPrevValue = drawerState.currentValue
-        if (prev == DrawerValue.Closed && drawerState.currentValue == DrawerValue.Open) {
-            drawerHaptic.perform(HapticFeedbackType.GestureEnd)
+    // 自动滚动：检测用户是否滚离底部
+    val isAtBottom by remember {
+        derivedStateOf {
+            val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()
+            lastVisible != null && lastVisible.index >= chatListState.layoutInfo.totalItemsCount - 2
+        }
+    }
+    var userScrolledUp by remember { mutableStateOf(false) }
+    LaunchedEffect(chatListState.isScrollInProgress) {
+        if (!chatListState.isScrollInProgress) {
+            userScrolledUp = !isAtBottom
+        }
+    }
+    LaunchedEffect(isAtBottom) {
+        if (isAtBottom && userScrolledUp) {
+            userScrolledUp = false
+        }
+    }
+
+    // AI 生成时自动滚动（仅在用户未手动滚离时）
+    LaunchedEffect(conversation.currentMessages.size, loadingJob) {
+        if (loadingJob != null && !userScrolledUp) {
+            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
         }
     }
 
@@ -419,41 +478,7 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
-    var rightDrawerOpen by remember { mutableStateOf(false) }
-
-    // Handle back press when right study drawer is open
-    BackHandler(enabled = rightDrawerOpen) {
-        rightDrawerOpen = false
-    }
-
-    // 右侧学习面板抽屉
-    val rightDrawerWidth = 280.dp
-    val rightDrawerWidthPx = with(LocalDensity.current) { rightDrawerWidth.toPx() }
-    val rightDrawerOffsetX = remember { Animatable(rightDrawerWidthPx) }
-
-    // 互斥：右侧抽屉打开时关闭左侧抽屉
-    LaunchedEffect(rightDrawerOpen) {
-        if (rightDrawerOpen && drawerState.isOpen) {
-            drawerState.close()
-        }
-    }
-    // 互斥：左侧抽屉打开时关闭右侧抽屉
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen && rightDrawerOpen) {
-            rightDrawerOpen = false
-        }
-    }
-
-    // 动画同步
-    LaunchedEffect(rightDrawerOpen) {
-        if (rightDrawerOpen) {
-            rightDrawerOffsetX.animateTo(0f, tween(300))
-        } else {
-            rightDrawerOffsetX.snapTo(rightDrawerWidthPx)
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize()
@@ -465,8 +490,8 @@ private fun ChatPageContent(
                     settings = setting,
                     conversation = conversation,
                     bigScreen = bigScreen,
-                    drawerState = drawerState,
                     previewMode = previewMode,
+                    onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
                     onNewChat = {
                         navigateToChatPage(navController)
                     },
@@ -477,7 +502,10 @@ private fun ChatPageContent(
                         vm.updateTitle(it)
                     },
                     onOpenRightDrawer = {
-                        rightDrawerOpen = true
+                        onRightDrawerOpenChange(true)
+                    },
+                    onCompressClick = {
+                        showFilesSheet = true
                     },
                 )
             },
@@ -491,6 +519,23 @@ private fun ChatPageContent(
                     if (todolist != null) {
                         TodolistBanner(
                             todolist = todolist,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                    if (assistant.knowledgeBaseIds.isNotEmpty()) {
+                        KnowledgeBaseChips(
+                            assistant = assistant,
+                            onUpdateAssistant = { updatedAssistant ->
+                                vm.updateSettings(
+                                    setting.copy(
+                                        assistants = setting.assistants.map { a ->
+                                            if (a.id == updatedAssistant.id) updatedAssistant else a
+                                        }
+                                    )
+                                )
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -588,6 +633,7 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
+            Box(modifier = Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = conversation.id,
                 transitionSpec = {
@@ -671,6 +717,32 @@ private fun ChatPageContent(
                 },
             )
             }
+
+            // 回到底部浮动按钮
+            AnimatedVisibility(
+                visible = userScrolledUp,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp),
+            ) {
+                FloatingActionButton(
+                    onClick = {
+                        userScrolledUp = false
+                        scope.launch {
+                            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ArrowDown01,
+                        contentDescription = "回到底部",
+                    )
+                }
+            }
+            }
         }
 
         if (showFilesSheet) {
@@ -684,80 +756,8 @@ private fun ChatPageContent(
             )
         }
     }
+}
 
-    // 右侧学习面板抽屉覆盖层
-    val fraction = 1f - (rightDrawerOffsetX.value / rightDrawerWidthPx)
-    if (fraction > 0.01f) {
-        // 半透明遮罩
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f * fraction))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { rightDrawerOpen = false }
-        )
-        // 抽屉面板
-        Surface(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(rightDrawerWidth)
-                .offset { IntOffset(rightDrawerOffsetX.value.roundToInt(), 0) }
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (rightDrawerOffsetX.value > rightDrawerWidthPx * 0.3f) {
-                                rightDrawerOpen = false
-                            } else {
-                                scope.launch { rightDrawerOffsetX.animateTo(0f, tween(200)) }
-                            }
-                        },
-                        onHorizontalDrag = { _, dragAmount ->
-                            if (dragAmount > 0) { // 右滑关闭
-                                val newOffset = (rightDrawerOffsetX.value + dragAmount)
-                                    .coerceIn(0f, rightDrawerWidthPx)
-                                scope.launch { rightDrawerOffsetX.snapTo(newOffset) }
-                            }
-                        }
-                    )
-                },
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
-        ) {
-            StudyDrawerContent(navController = navController)
-        }
-    }
-
-    // 右边缘滑动手势检测（抽屉关闭时，在右边缘 24dp 范围内左滑触发打开）
-    if (!rightDrawerOpen) {
-        Box(
-            Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(24.dp)
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (rightDrawerOffsetX.value < rightDrawerWidthPx * 0.6f) {
-                                rightDrawerOpen = true
-                            } else {
-                                scope.launch { rightDrawerOffsetX.animateTo(rightDrawerWidthPx, tween(200)) }
-                            }
-                        },
-                        onHorizontalDrag = { _, dragAmount ->
-                            if (dragAmount < 0) { // 左滑展开
-                                val newOffset = (rightDrawerOffsetX.value + dragAmount)
-                                    .coerceIn(0f, rightDrawerWidthPx)
-                                scope.launch { rightDrawerOffsetX.snapTo(newOffset) }
-                            }
-                        }
-                    )
-                }
-        )
-    }
-    }
 }
 
 @Composable
@@ -968,13 +968,14 @@ private fun ChatFilesPickerSheet(
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
-    drawerState: DrawerState,
     bigScreen: Boolean,
     previewMode: Boolean,
+    onOpenLeftDrawer: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onUpdateTitle: (String) -> Unit,
     onOpenRightDrawer: () -> Unit,
+    onCompressClick: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -989,7 +990,8 @@ private fun TopBar(
             if (!bigScreen) {
                 IconButton(
                     onClick = {
-                        scope.launch { drawerState.open() }
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        onOpenLeftDrawer()
                     }
                 ) {
                     Icon(HugeIcons.Menu03, "Messages")
@@ -1034,6 +1036,40 @@ private fun TopBar(
             }
         },
         actions = {
+            // 上下文用量圆圈
+            val assistant = settings.getCurrentAssistant()
+            val sizeInfo = rememberConversationSizeInfo(conversation)
+            val contextLimit = assistant.contextMessageLimit.takeIf { it > 0 } ?: MESSAGE_NODE_WARNING_THRESHOLD
+            val usagePercent = (sizeInfo.nodeCount.toFloat() / contextLimit).coerceIn(0f, 1f)
+            if (usagePercent > 0.5f) {
+                IconButton(
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        onCompressClick()
+                    },
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
+                        CircularProgressIndicator(
+                            progress = { usagePercent },
+                            modifier = Modifier.fillMaxSize(),
+                            strokeWidth = 2.5.dp,
+                            color = when {
+                                usagePercent > 0.9f -> MaterialTheme.colorScheme.error
+                                usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.primary
+                            },
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        )
+                        Text(
+                            text = "${(usagePercent * 100).toInt()}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
             IconButton(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)

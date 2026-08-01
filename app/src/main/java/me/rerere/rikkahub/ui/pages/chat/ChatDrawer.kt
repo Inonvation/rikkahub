@@ -20,14 +20,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -81,7 +80,6 @@ import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
 import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
-import me.rerere.rikkahub.ui.components.ui.Greeting
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import androidx.compose.ui.draw.clip
@@ -94,7 +92,6 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.utils.navigateToChatPage
-import me.rerere.rikkahub.utils.toDp
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -161,77 +158,102 @@ fun ChatDrawerContent(
     var folderToRename by remember { mutableStateOf<Folder?>(null) }
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
 
-    ModalDrawerSheet(
-        modifier = Modifier.width(300.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            BackupReminderCard(
-                settings = settings,
-                onClick = { navController.navigate(Screen.Backup) },
-            )
-
-            // 用户头像和昵称自定义区域
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                UIAvatar(
-                    name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-                    value = settings.displaySetting.userAvatar,
-                    onUpdate = { newAvatar ->
-                        vm.updateSettings(
-                            settings.copy(
-                                displaySetting = settings.displaySetting.copy(
-                                    userAvatar = newAvatar
-                                )
-                            )
-                        )
-                    },
-                    modifier = Modifier.size(50.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
-                                nicknameEditState.open(settings.displaySetting.userNickname)
-                            }
-                        )
-
-                        Icon(
-                            imageVector = HugeIcons.PencilEdit01,
-                            contentDescription = "Edit",
-                            modifier = Modifier
-                                .onClick {
-                                    nicknameEditState.open(settings.displaySetting.userNickname)
-                                }
-                                .size(LocalTextStyle.current.fontSize.toDp())
-                        )
+    DrawerPanel {
+        // 助手选择器（顶部）
+        AssistantPicker(
+            settings = settings,
+            onUpdateSettings = {
+                val updateJob = vm.updateSettings(it)
+                scope.launch {
+                    updateJob.join()
+                    val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                        Uuid.random()
+                    } else {
+                        repo.getConversationsOfAssistant(it.assistantId)
+                            .first()
+                            .firstOrNull()
+                            ?.id ?: Uuid.random()
                     }
-                    Greeting(
-                        style = MaterialTheme.typography.labelMedium,
+                    navigateToChatPage(navigator = navController, chatId = id)
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            onClickSetting = {
+                val currentAssistantId = settings.assistantId
+                navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
+            }
+        )
+
+        // 搜索（占 3/4）+ 历史记录（行尾图标）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                onClick = {
+                    navController.navigate(Screen.MessageSearch)
+                },
+                modifier = Modifier.weight(3f),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Search01,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(R.string.chat_page_search_chats),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
-            DrawerActions(navController = navController)
+            Surface(
+                onClick = {
+                    navController.navigate(Screen.History)
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.TransactionHistory,
+                        contentDescription = stringResource(R.string.chat_page_history),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
+        BackupReminderCard(
+            settings = settings,
+            onClick = { navController.navigate(Screen.Backup) },
+        )
+
+        DrawerSection(
+            title = "文件夹",
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             FolderBar(
                 folders = folders,
                 selectedFolderId = selectedFolderId,
@@ -240,7 +262,14 @@ fun ChatDrawerContent(
                 onRename = { folderToRename = it },
                 onDelete = { folderToDelete = it },
             )
+        }
 
+        DrawerSection(
+            title = "对话",
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
             ConversationList(
                 current = current,
                 conversations = conversations,
@@ -276,99 +305,63 @@ fun ChatDrawerContent(
                     showMoveToFolderSheet = true
                 }
             )
+        }
 
-            // 助手选择器
-            AssistantPicker(
-                settings = settings,
-                onUpdateSettings = {
-                    val updateJob = vm.updateSettings(it)
-                    scope.launch {
-                        updateJob.join()
-                        val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
-                            Uuid.random()
-                        } else {
-                            repo.getConversationsOfAssistant(it.assistantId)
-                                .first()
-                                .firstOrNull()
-                                ?.id ?: Uuid.random()
-                        }
-                        navigateToChatPage(navigator = navController, chatId = id)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                onClickSetting = {
-                    val currentAssistantId = settings.assistantId
-                    navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
-                }
-            )
-
+        // 底部：用户信息 + 快捷操作（合并单行）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+        ) {
+            // 用户信息（左下角）
             Row(
-                horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        nicknameEditState.open(settings.displaySetting.userNickname)
+                    },
             ) {
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.LanguageCircle, null)
+                UIAvatar(
+                    name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                    value = settings.displaySetting.userAvatar,
+                    onUpdate = { newAvatar ->
+                        vm.updateSettings(
+                            settings.copy(
+                                displaySetting = settings.displaySetting.copy(
+                                    userAvatar = newAvatar
+                                )
+                            )
+                        )
                     },
-                    label = {
-                        Text(stringResource(R.string.chat_page_menu_ai_translator))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Translator)
-                    },
+                    modifier = Modifier.size(32.dp),
                 )
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.Image02, null)
-                    },
-                    label = {
-                        Text(stringResource(R.string.chat_page_menu_image_generation))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.ImageGen)
-                    },
-                )
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.InLove, stringResource(R.string.favorite_page_title))
-                    },
-                    label = {
-                        Text(stringResource(R.string.favorite_page_title))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Favorite)
-                    },
-                )
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.ChartColumn, "统计数据")
-                    },
-                    label = {
-                        Text("统计数据")
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Stats)
-                    },
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.Settings03, null)
-                    },
-                    label = { Text(stringResource(R.string.settings)) },
-                    onClick = {
-                        navController.navigate(Screen.Setting)
-                    },
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+
+            DrawerAction(
+                icon = { Icon(HugeIcons.Image02, null) },
+                label = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
+                onClick = { navController.navigate(Screen.ImageGen) },
+            )
+            DrawerAction(
+                icon = { Icon(HugeIcons.InLove, stringResource(R.string.favorite_page_title)) },
+                label = { Text(stringResource(R.string.favorite_page_title)) },
+                onClick = { navController.navigate(Screen.Favorite) },
+            )
+            DrawerAction(
+                icon = { Icon(HugeIcons.Settings03, null) },
+                label = { Text(stringResource(R.string.settings)) },
+                onClick = { navController.navigate(Screen.Setting) },
+            )
         }
     }
 
@@ -645,249 +638,59 @@ fun ChatDrawerContent(
 }
 
 @Composable
-private fun DrawerActions(navController: Navigator) {
-    val hapticController = rememberHaptic()
-    Column {
-        // 搜索 + 历史记录并排
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Surface(
-                onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    navController.navigate(Screen.MessageSearch)
-                },
-                modifier = Modifier.weight(1f),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Search01,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(R.string.chat_page_search_chats),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-
-            Surface(
-                onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    navController.navigate(Screen.History)
-                },
-                modifier = Modifier.weight(1f),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.TransactionHistory,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(R.string.chat_page_history),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-        }
-
-        // 学习面板已移至右侧抽屉
-    }
-}
-
-@Composable
 fun StudyDrawerContent(
     navController: Navigator,
 ) {
-    val hapticController = rememberHaptic()
-    Column(
-        modifier = Modifier
-            .width(280.dp)
-            .fillMaxHeight()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = "学习面板",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+    DrawerPanel {
+        DrawerHeader(
+            icon = HugeIcons.BookOpen01,
+            title = "学习工具",
+            subtitle = "单词 · 笔记 · 复习",
         )
 
-        // 生词面板入口
-        Surface(
-            onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                navController.navigate(Screen.VocabularyPanel)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.BookOpen01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "生词面板",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "英语",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+        DrawerSection(title = "积累") {
+            DrawerListItem(
+                icon = HugeIcons.BookOpen01,
+                title = "生词面板",
+                subtitle = "英语",
+                onClick = { navController.navigate(Screen.VocabularyPanel) },
+            )
+            DrawerListItem(
+                icon = HugeIcons.Note01,
+                title = "笔记",
+                subtitle = "多科目",
+                onClick = { navController.navigate(Screen.NotesPanel) },
+            )
         }
 
-        // 笔记入口
-        Surface(
-            onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                navController.navigate(Screen.NotesPanel)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Note01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "笔记",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "多科目",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+        DrawerSection(title = "巩固") {
+            DrawerListItem(
+                icon = HugeIcons.Alert01,
+                title = "错题本",
+                subtitle = "数学 · 机械原理",
+                onClick = { navController.navigate(Screen.WrongQuestionPanel) },
+            )
+            DrawerListItem(
+                icon = HugeIcons.Bulb,
+                title = "知识点卡片",
+                subtitle = "政治 · 机械原理",
+                onClick = { navController.navigate(Screen.KnowledgeCardPanel) },
+            )
         }
 
-        // 错题本入口
-        Surface(
-            onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                navController.navigate(Screen.WrongQuestionPanel)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Alert01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "错题本",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "数学 · 机械原理",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        Spacer(Modifier.weight(1f))
 
-        // 知识点卡片入口
-        Surface(
-            onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                navController.navigate(Screen.KnowledgeCardPanel)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Bulb,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "知识点卡片",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "政治 · 机械原理",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+        DrawerSection(title = "更多工具") {
+            DrawerListItem(
+                icon = HugeIcons.LanguageCircle,
+                title = stringResource(R.string.chat_page_menu_ai_translator),
+                onClick = { navController.navigate(Screen.Translator) },
+            )
+            DrawerListItem(
+                icon = HugeIcons.ChartColumn,
+                title = "统计数据",
+                onClick = { navController.navigate(Screen.Stats) },
+            )
         }
     }
 }
