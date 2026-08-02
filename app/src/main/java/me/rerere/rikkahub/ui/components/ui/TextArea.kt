@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -198,11 +199,15 @@ private fun FullScreenTextEditor(
     BasicAlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
-            usePlatformDefaultWidth = false
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
         ),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding(),
             verticalArrangement = Arrangement.Bottom
         ) {
             Surface(
@@ -231,9 +236,7 @@ private fun FullScreenTextEditor(
                     TextField(
                         value = editingText,
                         onValueChange = { editingText = it },
-                        modifier = Modifier
-                            .imePadding()
-                            .fillMaxSize(),
+                        modifier = Modifier.fillMaxSize(),
                         shape = RoundedCornerShape(16.dp),
                         placeholder = if (placeholder.isNotEmpty()) {
                             { Text(placeholder) }
