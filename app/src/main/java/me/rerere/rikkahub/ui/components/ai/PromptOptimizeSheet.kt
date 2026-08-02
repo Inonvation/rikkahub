@@ -3,13 +3,11 @@ package me.rerere.rikkahub.ui.components.ai
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -61,7 +59,8 @@ internal fun PromptOptimizeSheet(
 
     ModalBottomSheet(
         onDismissRequest = {
-            vm.cancel()
+            // 仅关闭窗口，不取消工作状态：误触窗口外 / 按返回时保留优化进度与结果，
+            // 后台生成继续；再次打开弹窗可恢复。清状态必须通过"取消"按钮。
             onDismiss()
         },
         sheetState = rememberBottomSheetState(
@@ -150,10 +149,18 @@ internal fun PromptOptimizeSheet(
                 }
 
                 UiState.Loading -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                         RabbitLoadingIndicator(Modifier.size(28.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text(stringResource(R.string.prompt_optimize_loading))
+                        Text(
+                            text = stringResource(R.string.prompt_optimize_loading),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { vm.cancel() }) {
+                            Text(stringResource(R.string.cancel))
+                        }
                     }
                 }
 
@@ -174,8 +181,18 @@ internal fun PromptOptimizeSheet(
                         horizontalArrangement = Arrangement.End,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        TextButton(onClick = { vm.cancel(); onDismiss() }) {
+                        TextButton(onClick = {
+                            // 取消：清除本次优化结果并关闭窗口
+                            vm.cancel()
+                            onDismiss()
+                        }) {
                             Text(stringResource(R.string.cancel))
+                        }
+                        TextButton(onClick = {
+                            // 重选：清除本次优化结果，回到表单重新选场景/语气/深度再优化
+                            vm.cancel()
+                        }) {
+                            Text(stringResource(R.string.prompt_optimize_reselect))
                         }
                         TextButton(onClick = {
                             // 先复位 VM 状态，否则下次打开弹窗会残留上次的优化结果而非场景选择表单

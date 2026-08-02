@@ -1248,6 +1248,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="prompt_optimize_loading">优化中...</string>
   <string name="prompt_optimize_result_title">优化结果</string>
   <string name="prompt_optimize_apply">替换到输入框</string>
+  <string name="prompt_optimize_reselect">重新选择</string>
   <string name="prompt_optimize_empty_input">请先输入要优化的文字</string>
   <string name="prompt_optimize_failed">优化失败：</string>
   <string name="prompt_optimize_extra_note">附加说明（可选）</string>
