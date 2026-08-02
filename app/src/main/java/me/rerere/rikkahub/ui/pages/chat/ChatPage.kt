@@ -137,6 +137,7 @@ import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
+import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
@@ -433,6 +434,7 @@ private fun ChatPageContent(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val todoStorage: TodoStorage = koinInject()
@@ -441,6 +443,8 @@ private fun ChatPageContent(
     val assistant = setting.getCurrentAssistant()
     var showFilesSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
+    var showPromptOptimizeSheet by remember { mutableStateOf(false) }
+    val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
     // 自动滚动：检测用户是否滚离底部
     val isAtBottom by remember {
@@ -623,6 +627,16 @@ private fun ChatPageContent(
                     onMoreClick = {
                         showFilesSheet = true
                     },
+                    onOptimizePromptClick = {
+                        if (inputState.isEmpty()) {
+                            toaster.show(
+                                context.getString(R.string.prompt_optimize_empty_input),
+                                type = ToastType.Error,
+                            )
+                        } else {
+                            showPromptOptimizeSheet = true
+                        }
+                    },
                 )
                 }
             },
@@ -777,6 +791,18 @@ private fun ChatPageContent(
                 assistant = assistant,
                 vm = vm,
                 onDismiss = { showFilesSheet = false },
+            )
+        }
+
+        if (showPromptOptimizeSheet) {
+            PromptOptimizeSheet(
+                state = inputState,
+                vm = promptOptimizeVM,
+                onConfirmReplace = { result ->
+                    inputState.setMessageText(result)
+                    showPromptOptimizeSheet = false
+                },
+                onDismiss = { showPromptOptimizeSheet = false },
             )
         }
     }

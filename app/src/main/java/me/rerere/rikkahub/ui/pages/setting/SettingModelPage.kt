@@ -155,6 +155,16 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
         }
         item {
             ModelSettingItem(
+                title = "提示词优化模型",
+                description = "用于优化聊天输入框提示词的模型，未配置时使用全局默认聊天模型",
+                modelId = settings.promptOptimizeModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(promptOptimizeModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(promptOptimizeModelId = null)) },
+            )
+        }
+        item {
+            ModelSettingItem(
                 title = "Embedding 模型",
                 description = "用于知识库文本向量化，未配置时知识库可单独设置",
                 modelId = settings.embeddingModelId,

@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -97,6 +98,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.FullScreen
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
@@ -141,6 +143,7 @@ fun ChatInput(
     onUpdateSearchService: (Int) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
     onMoreClick: () -> Unit,
+    onOptimizePromptClick: () -> Unit,
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
@@ -344,15 +347,6 @@ fun ChatInput(
                                             onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
                                         },
                                     )
-
-                                    // Workspace
-                                    WorkspacePickerButton(
-                                        assistant = assistant,
-                                        conversation = conversation,
-                                        onUpdateAssistant = onUpdateAssistant,
-                                        onUpdateConversation = onUpdateConversation,
-                                        compact = true,
-                                    )
                                 }
                             }
 
@@ -374,6 +368,17 @@ fun ChatInput(
                         }
 
                         }
+
+                        ActionIconButton(
+                            onClick = onOptimizePromptClick
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.MagicWand01,
+                                contentDescription = stringResource(R.string.prompt_optimize),
+                            )
+                        }
+
+                        Spacer(Modifier.width(8.dp))
 
                         ActionIconButton(
                             onClick = onMoreClick

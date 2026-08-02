@@ -108,6 +108,8 @@ class SettingsStore(
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
         val RERANK_MODEL = stringPreferencesKey("rerank_model")
+        val PROMPT_OPTIMIZE_MODEL = stringPreferencesKey("prompt_optimize_model")
+        val PROMPT_OPTIMIZE_PROMPT = stringPreferencesKey("prompt_optimize_prompt")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -199,6 +201,8 @@ class SettingsStore(
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.let { Uuid.parse(it) },
                 rerankModelId = preferences[RERANK_MODEL]?.let { Uuid.parse(it) },
+                promptOptimizeModelId = preferences[PROMPT_OPTIMIZE_MODEL]?.let { Uuid.parse(it) },
+                promptOptimizePrompt = preferences[PROMPT_OPTIMIZE_PROMPT],
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -398,6 +402,10 @@ class SettingsStore(
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
             settings.embeddingModelId?.let { preferences[EMBEDDING_MODEL] = it.toString() }
             settings.rerankModelId?.let { preferences[RERANK_MODEL] = it.toString() }
+            settings.promptOptimizeModelId?.let { preferences[PROMPT_OPTIMIZE_MODEL] = it.toString() }
+                ?: preferences.remove(PROMPT_OPTIMIZE_MODEL)
+            settings.promptOptimizePrompt?.let { preferences[PROMPT_OPTIMIZE_PROMPT] = it }
+                ?: preferences.remove(PROMPT_OPTIMIZE_PROMPT)
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -568,6 +576,8 @@ data class Settings(
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
     val embeddingModelId: Uuid? = null,
     val rerankModelId: Uuid? = null,
+    val promptOptimizeModelId: Uuid? = null,
+    val promptOptimizePrompt: String? = null,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,

@@ -41,6 +41,10 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MULTIQUERY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_QUERY_REWRITE_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeLevel
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeScene
+import me.rerere.rikkahub.data.ai.prompts.promptOptimizeSystemPrompt
+import me.rerere.rikkahub.data.ai.prompts.toDisplayText
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
@@ -1032,6 +1036,43 @@ class ChatService(
                 solution = ChatErrorSolution.CheckTitleModelSettings,
             )
         }
+    }
+
+    // ---- 提示词优化 ----
+
+    /**
+     * 优化一段输入文字：先用场景×程度的系统提示词重写，返回优化结果。
+     * 未配置提示词优化模型时回退到全局默认聊天模型（settings.chatModelId）。
+     * 注意：失败不进入会话错误气泡（addError），由调用方在弹窗层提示。
+     */
+    internal suspend fun optimizePrompt(
+        text: String,
+        scene: PromptOptimizeScene,
+        level: PromptOptimizeLevel,
+    ): Result<String> = runCatching {
+        val settings = settingsStore.settingsFlow.first()
+        val model = settings.findModelById(settings.promptOptimizeModelId, fallback = settings.chatModelId)
+            ?: throw IllegalStateException("No model available for prompt optimization")
+        val provider = model.findProvider(settings.providers)
+            ?: throw IllegalStateException("No provider available for prompt optimization")
+        val providerHandler = providerManager.getProviderByType(provider)
+        val systemPrompt = settings.promptOptimizePrompt?.let { custom ->
+            // 自定义模板：填入场景/程度/内容占位符
+            custom.applyPlaceholders(
+                "scene" to scene.toDisplayText(),
+                "level" to level.toDisplayText(),
+                "content" to text,
+            )
+        } ?: promptOptimizeSystemPrompt(scene, level)
+        val result = providerHandler.generateText(
+            providerSetting = provider,
+            messages = listOf(
+                UIMessage.system(systemPrompt),
+                UIMessage.user(text),
+            ),
+            params = backgroundTextGenerationParams(model),
+        )
+        result.choices[0].message?.toText()?.trim().orEmpty()
     }
 
     // ---- 生成建议 ----

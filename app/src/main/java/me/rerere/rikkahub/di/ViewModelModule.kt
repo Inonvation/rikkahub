@@ -5,6 +5,7 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailVM
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerVM
 import me.rerere.rikkahub.ui.pages.chat.ChatVM
+import me.rerere.rikkahub.ui.pages.chat.PromptOptimizeVM
 import me.rerere.rikkahub.ui.pages.debug.DebugVM
 import me.rerere.rikkahub.ui.pages.favorite.FavoriteVM
 import me.rerere.rikkahub.ui.pages.search.SearchVM
@@ -60,6 +61,7 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::TranslatorVM)
+    viewModelOf(::PromptOptimizeVM)
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(
             text = it.get(),

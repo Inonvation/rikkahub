@@ -55,12 +55,12 @@ import kotlinx.coroutines.Job
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
+import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -80,6 +80,7 @@ import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
+import kotlin.uuid.Uuid
 
 @Composable
 internal fun FilesPicker(
@@ -175,25 +176,30 @@ internal fun FilesPicker(
                 },
         )
 
-        // Compress History Button
+        // Workspace
+        var showWorkspaceSheet by remember { mutableStateOf(false) }
+        val boundWorkspaceEntry = remember(workspaces, assistant.workspaceId) {
+            workspaces.find { it.id == assistant.workspaceId?.toString() }
+        }
         ListItem(
             leadingContent = {
                 Icon(
-                    imageVector = HugeIcons.Package01,
-                    contentDescription = stringResource(R.string.chat_page_compress_context),
+                    imageVector = HugeIcons.Codesandbox,
+                    contentDescription = stringResource(R.string.assistant_page_workspace),
                 )
             },
             headlineContent = {
-                Text(stringResource(R.string.chat_page_compress_context))
+                Text(stringResource(R.string.assistant_page_workspace))
             },
             trailingContent = {
-                if (conversation.messageNodes.isNotEmpty()) {
-                    Text(
-                        text = stringResource(R.string.chat_page_message_count, conversation.messageNodes.size),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    text = boundWorkspaceEntry?.name
+                        ?: stringResource(R.string.assistant_page_workspace_unbound),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             },
             colors = ListItemDefaults.colors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -202,9 +208,34 @@ internal fun FilesPicker(
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onShowCompressDialogChange(true)
+                    if (workspaces.isEmpty()) {
+                        navController.navigate(Screen.Workspaces)
+                    } else {
+                        showWorkspaceSheet = true
+                    }
                 },
         )
+        if (showWorkspaceSheet) {
+            WorkspaceSelectSheet(
+                assistant = assistant,
+                workspaces = workspaces,
+                onSelect = { workspaceId ->
+                    val newId = workspaceId?.let { Uuid.parse(it) }
+                    if (newId != assistant.workspaceId) {
+                        onUpdateAssistant(assistant.copy(workspaceId = newId))
+                        if (conversation.workspaceCwd != null) {
+                            onUpdateConversation(conversation.copy(workspaceCwd = null))
+                        }
+                    }
+                    showWorkspaceSheet = false
+                },
+                onManage = {
+                    showWorkspaceSheet = false
+                    navController.navigate(Screen.Workspaces)
+                },
+                onDismiss = { showWorkspaceSheet = false },
+            )
+        }
 
         // Workspace CWD
         val boundWorkspace = remember(workspaces, assistant.workspaceId) {

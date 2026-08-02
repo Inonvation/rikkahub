@@ -91,6 +91,17 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 onResetPrompt = { vm.updateSettings(settings.copy(compressPrompt = DEFAULT_COMPRESS_PROMPT)) },
             )
         }
+        item {
+            PromptSettingItem(
+                title = "提示词优化",
+                promptDescription = "自定义提示词优化模板，支持 {scene} / {level} / {content} 占位符。留空时使用内置的按场景×程度的精选提示词。",
+                promptValue = settings.promptOptimizePrompt ?: "",
+                onPromptChange = {
+                    vm.updateSettings(settings.copy(promptOptimizePrompt = it.ifBlank { null }))
+                },
+                onResetPrompt = { vm.updateSettings(settings.copy(promptOptimizePrompt = null)) },
+            )
+        }
     }
 }
 
