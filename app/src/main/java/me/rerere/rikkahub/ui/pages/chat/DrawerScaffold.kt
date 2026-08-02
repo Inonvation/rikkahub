@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -75,6 +76,9 @@ fun DrawerScaffold(
     val directionLock = with(density) { 20.dp.toPx() }
 
     val progress = remember { Animatable(0f) }
+    // 导航返回时 Animatable 会被重置为 0f，但 drawer 状态仍是打开；
+    // 记录"上次 drawer 是否打开"，restore 时直接 snap 而非 animate，避免和 nav pop 过渡重复
+    val drawerWasOpen = rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
     val haptic = rememberHaptic()
@@ -94,7 +98,13 @@ fun DrawerScaffold(
     }
     LaunchedEffect(leftDrawerOpen, rightDrawerOpen) {
         if (!isDragging) {
-            progress.animateTo(target, tween(300, easing = FastOutSlowInEasing))
+            // 导航返回后 restore 时 drawer 应仍处于打开状态，直接 snap 跳过动画
+            if (drawerWasOpen.value && (leftDrawerOpen || rightDrawerOpen)) {
+                progress.snapTo(target)
+            } else {
+                progress.animateTo(target, tween(300, easing = FastOutSlowInEasing))
+            }
+            drawerWasOpen.value = leftDrawerOpen || rightDrawerOpen
         }
     }
 
