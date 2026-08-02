@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -31,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,22 +56,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowUpRight01
+import me.rerere.hugeicons.stroke.CheckmarkCircle01
+import me.rerere.hugeicons.stroke.Circle
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.db.entity.VocabularyEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.pages.study.DeleteSelectionConfirmDialog
 import me.rerere.rikkahub.ui.pages.study.ExampleItem
+import me.rerere.rikkahub.ui.pages.study.StudyDetailActions
+import me.rerere.rikkahub.ui.pages.study.StudySelectionEntryIcon
+import me.rerere.rikkahub.ui.pages.study.StudySelectionState
+import me.rerere.rikkahub.ui.pages.study.StudySelectionTopBar
 import me.rerere.rikkahub.ui.pages.study.TranslationItem
+import me.rerere.rikkahub.ui.pages.study.buildVocabularyMarkdown
 import me.rerere.rikkahub.ui.pages.study.parseExamples
 import me.rerere.rikkahub.ui.pages.study.parseTags
 import me.rerere.rikkahub.ui.pages.study.parseTranslations
+import me.rerere.rikkahub.ui.pages.study.rememberStudySelectionState
 import me.rerere.rikkahub.ui.theme.CustomColors
-import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
-import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,29 +88,44 @@ fun VocabularyPanelPage() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showSettings by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    val selection = rememberStudySelectionState()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val totalWords = wordGroups.sumOf { it.words.size }
+    val visibleWordIds = wordGroups.flatMap { it.words }.map { it.id }
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = {
-                    Column {
-                        Text("生词面板")
-                        Text("${totalWords} 个单词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (selection.enabled) {
+                StudySelectionTopBar(
+                    selectedCount = selection.count,
+                    scrollBehavior = scrollBehavior,
+                    onSelectAll = { selection.selectAll(visibleWordIds) },
+                    onClear = { selection.clear() },
+                    onDelete = { showDeleteConfirm = true },
+                    onExit = { selection.exit() },
+                )
+            } else {
+                LargeTopAppBar(
+                    title = {
+                        Column {
+                            Text("生词面板")
+                            Text("${totalWords} 个单词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    navigationIcon = { BackButton() },
+                    scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
+                    actions = {
+                        StudySelectionEntryIcon(onClick = { selection.enter() })
+                        IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                     }
-                },
-                navigationIcon = { BackButton() },
-                scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
-                actions = {
-                    IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
-                }
-            )
+                )
+            }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(value = searchQuery, onValueChange = { vm.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("搜索单词...") }, leadingIcon = { Icon(HugeIcons.Search01, null) }, singleLine = true)
+            OutlinedTextField(value = searchQuery, onValueChange = { selection.exit(); vm.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("搜索单词...") }, leadingIcon = { Icon(HugeIcons.Search01, null) }, singleLine = true)
             if (wordGroups.isEmpty()) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Text("还没有生词", style = MaterialTheme.typography.bodyLarge)
@@ -125,7 +143,7 @@ fun VocabularyPanelPage() {
                             }
                         }
                         items(group.words, key = { it.id }) { word ->
-                            CompactWordCard(word, settings, onDelete = { vm.delete(word.id) }, onArchive = { vm.archive(word.id) }, onReview = { vm.updateReview(word) })
+                            CompactWordCard(word, settings, selection, onDelete = { vm.delete(word.id) }, onArchive = { vm.archive(word.id) }, onReview = { vm.updateReview(word) })
                         }
                     }
                 }
@@ -134,17 +152,33 @@ fun VocabularyPanelPage() {
     }
     if (showSettings) VocabularySettingsDialog(settings, onUpdate = { vm.updateSettings(it) }, onDismiss = { showSettings = false }, onShowArchived = { showSettings = false; showArchived = true })
     if (showArchived) ArchivedWordsDialog(vm, onDismiss = { showArchived = false })
+    if (showDeleteConfirm) DeleteSelectionConfirmDialog(count = selection.count, onConfirm = {
+        vm.deleteByIds(selection.selectedIds.toList())
+        selection.exit()
+        showDeleteConfirm = false
+    }, onDismiss = { showDeleteConfirm = false })
 }
 
 @Composable
-private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
+private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings, selection: StudySelectionState, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
     var showDetail by remember { mutableStateOf(false) }
     val bgColor by animateColorAsState(targetValue = if (showDetail) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface, animationSpec = tween(200), label = "bg")
+    val selected = word.id in selection.selectedIds
     val firstDef = remember(word.translations, settings.showDefinitionOnCard) {
         if (settings.showDefinitionOnCard) parseTranslations(word.translations).firstOrNull()?.definition ?: "" else ""
     }
-    Card(Modifier.fillMaxWidth().clickable { onReview(); showDetail = true }, colors = CardDefaults.cardColors(containerColor = bgColor)) {
+    Card(Modifier.fillMaxWidth().clickable {
+        if (selection.enabled) selection.toggle(word.id) else { onReview(); showDetail = true }
+    }, colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else bgColor)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            if (selection.enabled) {
+                Icon(
+                    if (selected) HugeIcons.CheckmarkCircle01 else HugeIcons.Circle,
+                    null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(word.word, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -153,10 +187,6 @@ private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings
                 if (firstDef.isNotBlank()) Text(firstDef, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("英语", modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(Modifier.width(6.dp))
                 Text("复习${word.reviewCount}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 Text(" · ${VocabularyPanelVM.formatTime(word.createdAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -167,7 +197,6 @@ private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings
 
 @Composable
 private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, onDismiss: () -> Unit, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
-    val navController = LocalNavController.current
     var canDismiss by remember { mutableStateOf(cooldownSeconds == 0) }
     var remainingSec by remember { mutableIntStateOf(cooldownSeconds) }
     LaunchedEffect(Unit) { if (cooldownSeconds > 0) { while (remainingSec > 0) { delay(1000); remainingSec-- }; canDismiss = true } }
@@ -183,11 +212,11 @@ private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, onDis
                     Text(word.word, style = MaterialTheme.typography.titleLarge)
                     if (word.pronunciation.isNotBlank()) Text("/${word.pronunciation}/", style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (word.sourceConversationId.isNotBlank()) {
-                    IconButton(onClick = { runCatching { navigateToChatPage(navController, Uuid.parse(word.sourceConversationId)) } }) {
-                        Icon(HugeIcons.ArrowUpRight01, "跳转对话", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
+                StudyDetailActions(
+                    title = word.word,
+                    content = buildVocabularyMarkdown(word),
+                    sourceConversationId = word.sourceConversationId,
+                )
             }
         },
         text = {

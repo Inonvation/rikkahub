@@ -1,21 +1,18 @@
 package me.rerere.rikkahub.ui.pages.study.knowledgecards
 
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
+import me.rerere.rikkahub.ui.pages.study.SubjectFilterVM
 
 class KnowledgeCardPanelVM(
     private val knowledgeCardDao: KnowledgeCardDao,
-) : ViewModel() {
-    val politicsCards = knowledgeCardDao.getBySubjectFlow("politics")
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val mechanicsCards = knowledgeCardDao.getBySubjectFlow("mechanics")
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
+) : SubjectFilterVM<KnowledgeCardEntity>(
+    allFlow = knowledgeCardDao.getAllFlow(),
+    subjectsFlow = knowledgeCardDao.getAllSubjectsFlow(),
+    subjectOf = { it.subject },
+) {
     fun updateReview(entity: KnowledgeCardEntity) {
         viewModelScope.launch {
             knowledgeCardDao.update(entity.copy(lastReviewedAt = System.currentTimeMillis(), reviewCount = entity.reviewCount + 1))
@@ -23,6 +20,7 @@ class KnowledgeCardPanelVM(
     }
 
     fun delete(id: String) { viewModelScope.launch { knowledgeCardDao.deleteById(id) } }
+    fun deleteByIds(ids: List<String>) { viewModelScope.launch { if (ids.isNotEmpty()) knowledgeCardDao.deleteByIds(ids) } }
     fun archive(id: String) { viewModelScope.launch { knowledgeCardDao.archive(id) } }
     fun restore(id: String) { viewModelScope.launch { knowledgeCardDao.restore(id) } }
     suspend fun getArchived(): List<KnowledgeCardEntity> = knowledgeCardDao.getArchived()

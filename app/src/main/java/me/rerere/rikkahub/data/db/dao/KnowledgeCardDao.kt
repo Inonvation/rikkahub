@@ -15,6 +15,9 @@ interface KnowledgeCardDao {
     @Query("SELECT * FROM knowledge_cards WHERE archived = 0 AND subject = :subject ORDER BY created_at DESC")
     fun getBySubjectFlow(subject: String): Flow<List<KnowledgeCardEntity>>
 
+    @Query("SELECT DISTINCT subject FROM knowledge_cards WHERE archived = 0")
+    fun getAllSubjectsFlow(): Flow<List<String>>
+
     @Query("SELECT * FROM knowledge_cards WHERE archived = 1 ORDER BY created_at DESC")
     suspend fun getArchived(): List<KnowledgeCardEntity>
 
@@ -41,4 +44,7 @@ interface KnowledgeCardDao {
 
     @Query("DELETE FROM knowledge_cards WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM knowledge_cards WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }

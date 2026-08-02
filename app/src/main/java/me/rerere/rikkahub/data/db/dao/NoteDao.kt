@@ -15,6 +15,12 @@ interface NoteDao {
     @Query("SELECT * FROM study_notes WHERE archived = 0 AND category = :category ORDER BY updated_at DESC")
     fun getByCategoryFlow(category: String): Flow<List<NoteEntity>>
 
+    @Query("SELECT * FROM study_notes WHERE archived = 0 AND subject = :subject ORDER BY updated_at DESC")
+    fun getBySubjectFlow(subject: String): Flow<List<NoteEntity>>
+
+    @Query("SELECT DISTINCT subject FROM study_notes WHERE archived = 0")
+    fun getAllSubjectsFlow(): Flow<List<String>>
+
     @Query("SELECT * FROM study_notes WHERE archived = 1 ORDER BY updated_at DESC")
     suspend fun getArchived(): List<NoteEntity>
 
@@ -41,4 +47,7 @@ interface NoteDao {
 
     @Query("DELETE FROM study_notes WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM study_notes WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }

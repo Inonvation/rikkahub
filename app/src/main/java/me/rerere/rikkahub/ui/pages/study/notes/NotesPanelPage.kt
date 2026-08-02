@@ -54,18 +54,25 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowUpRight01
+import me.rerere.hugeicons.stroke.CheckmarkCircle01
+import me.rerere.hugeicons.stroke.Circle
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.db.entity.NoteEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
-import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.pages.study.DeleteSelectionConfirmDialog
+import me.rerere.rikkahub.ui.pages.study.PlainTitle
+import me.rerere.rikkahub.ui.pages.study.StudyDetailActions
+import me.rerere.rikkahub.ui.pages.study.StudyMarkdownBlock
+import me.rerere.rikkahub.ui.pages.study.StudySelectionEntryIcon
+import me.rerere.rikkahub.ui.pages.study.StudySelectionState
+import me.rerere.rikkahub.ui.pages.study.StudySelectionTopBar
+import me.rerere.rikkahub.ui.pages.study.SubjectTabBar
+import me.rerere.rikkahub.ui.pages.study.buildNoteMarkdown
 import me.rerere.rikkahub.ui.pages.study.parseTags
+import me.rerere.rikkahub.ui.pages.study.rememberStudySelectionState
 import me.rerere.rikkahub.ui.theme.CustomColors
-import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
-import kotlin.uuid.Uuid
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -76,11 +83,15 @@ data class NoteSettings(val cooldownSeconds: Int = 3)
 @Composable
 fun NotesPanelPage() {
     val vm = koinViewModel<NotesPanelVM>()
-    val notes by vm.notes.collectAsStateWithLifecycle()
+    val notes by vm.items.collectAsStateWithLifecycle()
+    val subjects by vm.subjects.collectAsStateWithLifecycle()
+    val selectedSubject by vm.selectedSubject.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showArchived by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(NoteSettings()) }
+    val selection = rememberStudySelectionState()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val grouped = remember(notes) {
         runCatching {
@@ -90,50 +101,83 @@ fun NotesPanelPage() {
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = {
-                    Column {
-                        Text("笔记")
-                        Text("${notes.size} 条笔记", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                },
-                navigationIcon = { BackButton() },
-                scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
-                actions = { IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") } })
+            if (selection.enabled) {
+                StudySelectionTopBar(
+                    selectedCount = selection.count,
+                    scrollBehavior = scrollBehavior,
+                    onSelectAll = { selection.selectAll(notes.map { it.id }) },
+                    onClear = { selection.clear() },
+                    onDelete = { showDeleteConfirm = true },
+                    onExit = { selection.exit() },
+                )
+            } else {
+                LargeTopAppBar(
+                    title = {
+                        Column {
+                            Text("笔记")
+                            Text("${notes.size} 条笔记", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    navigationIcon = { BackButton() },
+                    scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
+                    actions = {
+                        StudySelectionEntryIcon(onClick = { selection.enter() })
+                        IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
+                    })
+            }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { padding ->
-        if (notes.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text("还没有笔记", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp))
-                Text("在对话中 AI 会自动保存有价值的内容", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                grouped.entries.forEach { (dateLabel, list) ->
-                    item(key = "divider_$dateLabel") { Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { HorizontalDivider(Modifier.weight(1f)); Text(dateLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp)); HorizontalDivider(Modifier.weight(1f)) } }
-                    items(list, key = { it.id }) { note -> CompactNoteCard(note, settings, onDelete = { vm.delete(note.id) }, onArchive = { vm.archive(note.id) }) }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            SubjectTabBar(subjects = subjects, selected = selectedSubject, onSelect = { selection.exit(); vm.select(it) })
+            if (notes.isEmpty()) {
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text("还没有笔记", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp))
+                    Text("在对话中 AI 会自动保存有价值的内容", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    grouped.entries.forEach { (dateLabel, list) ->
+                        item(key = "divider_$dateLabel") { Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { HorizontalDivider(Modifier.weight(1f)); Text(dateLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp)); HorizontalDivider(Modifier.weight(1f)) } }
+                        items(list, key = { it.id }) { note -> CompactNoteCard(note, settings, selection, onDelete = { vm.delete(note.id) }, onArchive = { vm.archive(note.id) }) }
+                    }
                 }
             }
         }
     }
     if (showArchived) ArchivedNotesDialog(vm, onDismiss = { showArchived = false })
     if (showSettings) NoteSettingsDialog(settings, onUpdate = { settings = it; showSettings = false }, onDismiss = { showSettings = false }, onShowArchived = { showSettings = false; showArchived = true })
+    if (showDeleteConfirm) DeleteSelectionConfirmDialog(count = selection.count, onConfirm = {
+        vm.deleteByIds(selection.selectedIds.toList())
+        selection.exit()
+        showDeleteConfirm = false
+    }, onDismiss = { showDeleteConfirm = false })
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CompactNoteCard(note: NoteEntity, settings: NoteSettings, onDelete: () -> Unit, onArchive: () -> Unit) {
+private fun CompactNoteCard(note: NoteEntity, settings: NoteSettings, selection: StudySelectionState, onDelete: () -> Unit, onArchive: () -> Unit) {
     var showDetail by remember { mutableStateOf(false) }
     val bgColor by animateColorAsState(targetValue = if (showDetail) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface, animationSpec = tween(200), label = "bg")
     val tags = remember(note.tags) { parseTags(note.tags) }
-    Card(Modifier.fillMaxWidth().clickable { showDetail = true }, colors = CardDefaults.cardColors(containerColor = bgColor)) {
+    val selected = note.id in selection.selectedIds
+    Card(Modifier.fillMaxWidth().clickable {
+        if (selection.enabled) selection.toggle(note.id) else showDetail = true
+    }, colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else bgColor)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            if (selection.enabled) {
+                Icon(
+                    if (selected) HugeIcons.CheckmarkCircle01 else HugeIcons.Circle,
+                    null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             Column(Modifier.weight(1f)) {
-                Text(note.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                PlainTitle(note.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                 Row { Text(note.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); if (tags.isNotEmpty()) Text(" · ${tags.take(2).joinToString(" ")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -150,21 +194,24 @@ private fun CompactNoteCard(note: NoteEntity, settings: NoteSettings, onDelete: 
 
 @Composable
 private fun NoteDetailDialog(note: NoteEntity, tags: List<String>, cooldown: Int, onDismiss: () -> Unit, onDelete: () -> Unit, onArchive: () -> Unit) {
-    val navController = LocalNavController.current
     var canDismiss by remember { mutableStateOf(cooldown == 0) }; var remainingSec by remember { mutableIntStateOf(cooldown) }
     LaunchedEffect(Unit) { if (cooldown > 0) { while (remainingSec > 0) { delay(1000); remainingSec-- }; canDismiss = true } }
     AlertDialog(
         onDismissRequest = { if (canDismiss) onDismiss() },
         title = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(note.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                if (note.sourceConversationId.isNotBlank()) IconButton(onClick = { runCatching { navigateToChatPage(navController, Uuid.parse(note.sourceConversationId)) } }) { Icon(HugeIcons.ArrowUpRight01, "跳转对话", tint = MaterialTheme.colorScheme.primary) }
+                PlainTitle(note.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, maxLines = 2)
+                StudyDetailActions(
+                    title = note.title,
+                    content = buildNoteMarkdown(note),
+                    sourceConversationId = note.sourceConversationId,
+                )
             }
         },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(note.category, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                MarkdownBlock(note.content)
+                StudyMarkdownBlock(note.content)
                 if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
             }
         },

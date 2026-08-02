@@ -19,6 +19,9 @@ data class NoteEntity(
     @ColumnInfo(name = "category")
     val category: String, // 作文模板/好句积累/语法笔记/解题思路/公式定理/论述框架/时政热点/背诵要点/机构图解/公式推导/真题解析
 
+    @ColumnInfo(name = "subject", defaultValue = "other")
+    val subject: String = "other", // 学科：english/math/politics/mechanics/other
+
     @ColumnInfo(name = "tags", defaultValue = "[]")
     val tags: String = "[]", // JSON: List<String>
 

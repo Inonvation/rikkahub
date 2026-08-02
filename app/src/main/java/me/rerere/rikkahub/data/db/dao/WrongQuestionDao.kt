@@ -15,6 +15,9 @@ interface WrongQuestionDao {
     @Query("SELECT * FROM wrong_questions WHERE archived = 0 AND subject = :subject ORDER BY created_at DESC")
     fun getBySubjectFlow(subject: String): Flow<List<WrongQuestionEntity>>
 
+    @Query("SELECT DISTINCT subject FROM wrong_questions WHERE archived = 0")
+    fun getAllSubjectsFlow(): Flow<List<String>>
+
     @Query("SELECT * FROM wrong_questions WHERE archived = 1 ORDER BY created_at DESC")
     suspend fun getArchived(): List<WrongQuestionEntity>
 
@@ -41,4 +44,7 @@ interface WrongQuestionDao {
 
     @Query("DELETE FROM wrong_questions WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM wrong_questions WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }

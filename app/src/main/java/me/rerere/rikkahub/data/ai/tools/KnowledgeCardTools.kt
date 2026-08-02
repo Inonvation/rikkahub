@@ -5,7 +5,6 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -14,6 +13,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
+import me.rerere.rikkahub.data.model.StudySubject
 import me.rerere.rikkahub.ui.pages.study.fixLatexEscapes
 import me.rerere.knowledge.data.dao.KnowledgeChunkDao
 import kotlin.uuid.Uuid
@@ -21,7 +21,7 @@ import kotlin.uuid.Uuid
 fun createKnowledgeCardTool(
     conversationId: String,
     knowledgeCardDao: KnowledgeCardDao,
-    subject: String, // "politics" or "mechanics"
+    defaultSubject: String,
 ): Tool = Tool(
     name = "save_knowledge_card",
     description = """
@@ -33,15 +33,22 @@ fun createKnowledgeCardTool(
             properties = buildJsonObject {
                 put("concept", buildJsonObject {
                     put("type", "string")
-                    put("description", "The concept name")
+                    put("description", "The concept name, short and concise (under 30 characters)")
                 })
                 put("explanation", buildJsonObject {
                     put("type", "string")
-                    put("description", "Detailed explanation of the concept")
+                    put("description", "Detailed explanation of the concept, Markdown and LaTeX allowed")
                 })
                 put("memory_aid", buildJsonObject {
                     put("type", "string")
                     put("description", "Memory aid, mnemonic, or clever trick in Chinese")
+                })
+                put("subject", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray {
+                        add("english"); add("math"); add("politics"); add("mechanics"); add("other")
+                    })
+                    put("description", "Optional subject code (english/math/politics/mechanics/other). If omitted, the assistant's configured subject is used.")
                 })
                 put("tags", buildJsonObject {
                     put("type", "array")
@@ -57,7 +64,8 @@ fun createKnowledgeCardTool(
         val concept = fixLatexEscapes(params["concept"]?.jsonPrimitive?.contentOrNull ?: error("concept is required"))
         val explanation = fixLatexEscapes(params["explanation"]?.jsonPrimitive?.contentOrNull ?: "")
         val memoryAid = params["memory_aid"]?.jsonPrimitive?.contentOrNull ?: ""
-        val tags = params["tags"]?.jsonArray?.toString() ?: "[]"
+        val subject = StudySubject.normalize(params["subject"]?.jsonPrimitive?.contentOrNull ?: defaultSubject)
+        val tags = parseArrayField(params, "tags")
 
         val entity = KnowledgeCardEntity(
             id = Uuid.random().toString(),
@@ -74,6 +82,7 @@ fun createKnowledgeCardTool(
                 buildJsonObject {
                     put("saved", true)
                     put("concept", JsonPrimitive(concept))
+                    put("subject", JsonPrimitive(subject))
                     put("message", JsonPrimitive("已保存到知识点卡片"))
                 }.toString()
             )

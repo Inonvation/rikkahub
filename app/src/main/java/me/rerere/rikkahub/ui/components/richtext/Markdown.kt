@@ -1165,7 +1165,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 // 使其能在文本流中换行，避免单体公式超出可用宽度被挤出屏幕
                 val drawables = splitLatex(
                     latex = formula,
-                    maxWidthPx = fontSizePx * 2,
+                    maxWidthPx = fontSizePx * 4f,
                     fontSize = fontSizePx,
                     color = latexColorArgb,
                 )

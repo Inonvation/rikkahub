@@ -74,6 +74,10 @@ class VocabularyPanelVM(
         viewModelScope.launch { vocabularyDao.deleteById(id) }
     }
 
+    fun deleteByIds(ids: List<String>) {
+        viewModelScope.launch { if (ids.isNotEmpty()) vocabularyDao.deleteByIds(ids) }
+    }
+
     fun archive(id: String) {
         viewModelScope.launch { vocabularyDao.archive(id) }
     }

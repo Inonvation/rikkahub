@@ -672,13 +672,13 @@ fun StudyDrawerContent(
             DrawerListItem(
                 icon = HugeIcons.Alert01,
                 title = "错题本",
-                subtitle = "数学 · 机械原理",
+                subtitle = "多学科",
                 onClick = { navController.navigate(Screen.WrongQuestionPanel) },
             )
             DrawerListItem(
                 icon = HugeIcons.Bulb,
                 title = "知识点卡片",
-                subtitle = "政治 · 机械原理",
+                subtitle = "多学科",
                 onClick = { navController.navigate(Screen.KnowledgeCardPanel) },
             )
         }

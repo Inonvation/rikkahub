@@ -10,6 +10,9 @@ data class WrongQuestionEntity(
     @ColumnInfo(name = "id")
     val id: String,
 
+    @ColumnInfo(name = "title", defaultValue = "")
+    val title: String = "", // 简洁标题（无公式），列表/详情展示用；空则回退 question 纯文本摘要
+
     @ColumnInfo(name = "question")
     val question: String,
 

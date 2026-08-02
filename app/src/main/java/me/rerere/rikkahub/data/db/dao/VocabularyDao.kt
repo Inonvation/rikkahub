@@ -39,6 +39,9 @@ interface VocabularyDao {
     @Query("DELETE FROM vocabulary WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    @Query("DELETE FROM vocabulary WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
     @Query("SELECT * FROM vocabulary WHERE id = :id")
     suspend fun getById(id: String): VocabularyEntity?
 
