@@ -243,7 +243,11 @@ function ScrapeWebPreview({ content }: { content: unknown }) {
 interface AskUserQuestion {
   id: string;
   question: string;
+  rationale?: string;
   options: string[];
+  selectionType?: "text" | "single" | "multi" | "confirmation";
+  placeholder?: string;
+  required?: boolean;
 }
 
 function parseAskUserQuestions(args: unknown): AskUserQuestion[] {
@@ -258,7 +262,13 @@ function parseAskUserQuestions(args: unknown): AskUserQuestion[] {
         if (!id || !question) return null;
         const rawOptions = Array.isArray(record.options) ? record.options : [];
         const options = rawOptions.filter((o): o is string => typeof o === "string");
-        return { id, question, options } satisfies AskUserQuestion;
+        const rationale = typeof record.rationale === "string" ? record.rationale : undefined;
+        const selectionType = (
+          typeof record.selection_type === "string" ? record.selection_type : "text"
+        ) as AskUserQuestion["selectionType"];
+        const placeholder = typeof record.placeholder === "string" ? record.placeholder : undefined;
+        const required = typeof record.required === "boolean" ? record.required : true;
+        return { id, question, rationale, options, selectionType, placeholder, required };
       })
       .filter((q): q is AskUserQuestion => q !== null);
   } catch {
@@ -335,43 +345,90 @@ function AskUserToolStep({
             {questions.length > 1 && (
               <div className="text-sm text-foreground">{q.question}</div>
             )}
+            {q.rationale && (
+              <div className="text-xs text-muted-foreground">{q.rationale}</div>
+            )}
 
             {isPending && onToolApproval ? (
               <>
-                {q.options.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {q.options.map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => setAnswer(q.id, option)}
-                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                          answers[q.id] === option
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
-                        }`}
-                      >
-                        {option}
-                      </button>
-                    ))}
+                {q.selectionType === "confirmation" ? (
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant={answers[q.id] === "是" ? "default" : "outline"}
+                      onClick={() => setAnswer(q.id, "是")}
+                    >
+                      <Check className="mr-1 h-3.5 w-3.5" />
+                      是
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={answers[q.id] === "否" ? "default" : "outline"}
+                      onClick={() => setAnswer(q.id, "否")}
+                    >
+                      <X className="mr-1 h-3.5 w-3.5" />
+                      否
+                    </Button>
                   </div>
+                ) : (
+                  <>
+                    {q.options.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {q.options.map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() =>
+                              q.selectionType === "multi"
+                                ? (() => {
+                                    const current = answers[q.id] ?? "";
+                                    const currentSet = new Set(current ? current.split(", ") : []);
+                                    if (currentSet.has(option)) {
+                                      currentSet.delete(option);
+                                    } else {
+                                      currentSet.add(option);
+                                    }
+                                    setAnswer(q.id, Array.from(currentSet).join(", "));
+                                  })()
+                                : q.selectionType === "single"
+                                  ? setAnswer(q.id, answers[q.id] === option ? "" : option)
+                                  : setAnswer(q.id, option)
+                            }
+                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                              q.selectionType === "multi"
+                                ? ((answers[q.id] ?? "").split(", ").includes(option)
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50")
+                                : answers[q.id] === option
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {q.selectionType !== "single" && q.selectionType !== "multi" && (
+                      <Input
+                        value={answers[q.id] ?? ""}
+                        onChange={(e) => setAnswer(q.id, e.target.value)}
+                        placeholder={q.placeholder ?? q.question}
+                        className="text-sm"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey && allAnswered) {
+                            e.preventDefault();
+                            handleSubmit();
+                          }
+                        }}
+                      />
+                    )}
+                  </>
                 )}
-                <Input
-                  value={answers[q.id] ?? ""}
-                  onChange={(e) => setAnswer(q.id, e.target.value)}
-                  placeholder={q.question}
-                  className="text-sm"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && allAnswered) {
-                      e.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
-                />
               </>
             ) : isAnswered ? (
               <div className="text-sm text-primary">
-                {answeredValues[q.id] ?? tool.approvalState.type === "answered" ? answeredValues[q.id] || "" : ""}
+                {answeredValues[q.id] ?? ""}
               </div>
             ) : null}
           </div>
