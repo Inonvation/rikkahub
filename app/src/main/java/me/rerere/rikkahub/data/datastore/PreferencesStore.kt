@@ -186,6 +186,9 @@ class SettingsStore(
         // 子代理
         val SUB_AGENT_ENABLED = booleanPreferencesKey("enable_sub_agent")
         val SUB_AGENT_MODEL = stringPreferencesKey("sub_agent_model")
+
+        // 行为层提示词
+        val AGENT_BEHAVIOR_PROMPT_ENABLED = booleanPreferencesKey("enable_agent_behavior_prompt")
     }
 
     private val dataStore = context.settingsStore
@@ -309,6 +312,7 @@ class SettingsStore(
                 } ?: emptyMap(),
                 enableSubAgent = preferences[SUB_AGENT_ENABLED] == true,
                 subAgentModelId = preferences[SUB_AGENT_MODEL]?.let { Uuid.parse(it) },
+                enableAgentBehaviorPrompt = preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] != false,
             )
         }
         .map {
@@ -511,6 +515,7 @@ class SettingsStore(
             settings.subAgentModelId?.let {
                 preferences[SUB_AGENT_MODEL] = it.toString()
             } ?: preferences.remove(SUB_AGENT_MODEL)
+            preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] = settings.enableAgentBehaviorPrompt
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -688,6 +693,7 @@ data class Settings(
     val studyToolApprovalOverrides: Map<String, Boolean> = emptyMap(),
     val enableSubAgent: Boolean = false,
     val subAgentModelId: Uuid? = null,
+    val enableAgentBehaviorPrompt: Boolean = true,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

@@ -34,6 +34,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
 import me.rerere.ai.ui.limitContext
+import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -321,6 +322,11 @@ class GenerationHandler(
                 tools.forEach { tool ->
                     appendLine()
                     append(tool.systemPrompt(model, messages))
+                }
+                // 行为层：决策/工具/子代理/提问准则（默认开，可关）。放末尾，不覆盖用户自定义提示词
+                if (settings.enableAgentBehaviorPrompt) {
+                    appendLine()
+                    append(buildAgentBehaviorPrompt(tools))
                 }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))

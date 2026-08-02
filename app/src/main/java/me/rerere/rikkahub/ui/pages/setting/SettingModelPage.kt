@@ -198,6 +198,28 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
 @Composable
 private fun SubAgentSettingItem(settings: Settings, vm: SettingVM) {
     Column {
+        IosGroup(title = "Agent 行为") {
+            item(
+                headlineContent = {
+                    Text(
+                        text = "启用 Agent 行为提示词",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = "自动注入决策/工具调用/子代理委派/提问准则，增强模型工具使用与子代理协作能力",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                trailingContent = {
+                    Switch(
+                        checked = settings.enableAgentBehaviorPrompt,
+                        onCheckedChange = { vm.updateSettings(settings.copy(enableAgentBehaviorPrompt = it)) },
+                    )
+                },
+            )
+        }
         IosGroup(title = "子代理") {
             item(
                 headlineContent = {
