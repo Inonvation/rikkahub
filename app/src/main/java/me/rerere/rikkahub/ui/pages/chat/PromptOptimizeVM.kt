@@ -32,7 +32,7 @@ class PromptOptimizeVM(
         _uiState.value = UiState.Loading
         currentJob = viewModelScope.launch {
             chatService.optimizePrompt(text = inputText, scene = scene, tone = tone, depth = depth, extraNote = extraNote)
-                .onSuccess { _uiState.value = UiState.Success(it) }
+                .onSuccess { _uiState.value = UiState.Success(cleanOptimizedPrompt(it)) }
                 .onFailure { e ->
                     e.printStackTrace()
                     _uiState.value = UiState.Error(e)
@@ -44,4 +44,12 @@ class PromptOptimizeVM(
         currentJob?.cancel()
         _uiState.value = UiState.Idle
     }
+
+    /** 剥掉优化结果首尾的 <optimized_prompt> 标签（含可能的 markdown 代码围栏），返回纯净文本 */
+    private fun cleanOptimizedPrompt(text: String): String = text
+        .replace(Regex("(?s)^\\s*<optimized_prompt>\\s*"), "")
+        .replace(Regex("(?s)\\s*</optimized_prompt>\\s*$"), "")
+        .replace(Regex("(?s)^\\s*```(?:markdown)?\\s*"), "")
+        .replace(Regex("(?s)\\s*```\\s*$"), "")
+        .trim()
 }
