@@ -78,6 +78,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
+        const val CURRENT_DATA_VERSION = 3
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 
@@ -432,6 +433,7 @@ class SettingsStore(
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
+            preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
 
@@ -617,6 +619,7 @@ enum class ChatFontFamily {
 data class DisplaySetting(
     val enableHapticFeedback: Boolean = true,
     val enableUiHapticFeedback: Boolean = true,
+    val createNewConversationOnStart: Boolean = true,
     val enableMessageGenerationHapticEffect: Boolean = false,
     val enableMessageGenerationStartedAndFinishedHapticEffect: Boolean = false,
     val userAvatar: Avatar = Avatar.Dummy,

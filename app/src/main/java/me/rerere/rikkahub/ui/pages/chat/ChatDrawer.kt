@@ -87,7 +87,6 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.ui.hooks.EditStateContent
-import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
@@ -232,7 +231,7 @@ fun ChatDrawerContent(
                     val updateJob = vm.updateSettings(it)
                     scope.launch {
                         updateJob.join()
-                        val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                        val id = if (settings.displaySetting.createNewConversationOnStart) {
                             Uuid.random()
                         } else {
                             repo.getConversationsOfAssistant(it.assistantId)

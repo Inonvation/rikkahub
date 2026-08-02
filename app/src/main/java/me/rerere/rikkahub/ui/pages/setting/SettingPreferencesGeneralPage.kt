@@ -22,7 +22,6 @@ import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.SettingListScaffold
-import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -40,10 +39,6 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
     ) {
         // Conversation
         item {
-            var createNewConversationOnStart by rememberSharedPreferenceBoolean(
-                "create_new_conversation_on_start",
-                true
-            )
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
                 title = stringResource(R.string.setting_page_conversation),
@@ -53,8 +48,10 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                     supportingContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_desc)) },
                     trailingContent = {
                         Switch(
-                            checked = createNewConversationOnStart,
-                            onCheckedChange = { createNewConversationOnStart = it }
+                            checked = displaySetting.createNewConversationOnStart,
+                            onCheckedChange = {
+                                updateDisplaySetting(displaySetting.copy(createNewConversationOnStart = it))
+                            }
                         )
                     },
                 )
