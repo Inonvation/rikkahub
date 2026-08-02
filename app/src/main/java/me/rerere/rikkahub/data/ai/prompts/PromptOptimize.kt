@@ -59,7 +59,26 @@ internal fun promptOptimizeSystemPrompt(
     scene: PromptOptimizeScene,
     tone: PromptOptimizeTone,
     depth: PromptOptimizeDepth,
-): String = sceneSystemPrompt(scene) + "\n\n" + toneGuidance(tone) + "\n\n" + depthGuidance(depth)
+): String = sceneSystemPrompt(scene) + "\n\n" + toneGuidance(tone) + "\n\n" + depthGuidance(depth) + "\n\n" + OUTPUT_FORMAT_CONTRACT
+
+/**
+ * 输出格式契约：强制优化结果带层级与格式规范。
+ * 借鉴 Anthropic metaprompt 的 XML 标签包边界 + Claude Code 的分节结构——
+ * 结构化输出保证可读性，也方便用户直接把结果当模板用。
+ */
+private val OUTPUT_FORMAT_CONTRACT = """
+    ## Output Format
+    Output the optimized prompt inside <optimized_prompt> tags. Structure it with markdown headers,
+    in this order when applicable:
+    ## Role
+    ## Context & Background
+    ## Task (goal and steps)
+    ## Constraints
+    ## Output Format
+    Keep only the sections that apply to the request; drop irrelevant ones. Each section must be a
+    concrete, actionable instruction — state the goal, the context, the constraints and the expected
+    output explicitly. Output nothing outside the <optimized_prompt> tags.
+""".trimIndent()
 
 private fun sceneSystemPrompt(scene: PromptOptimizeScene): String = when (scene) {
     PromptOptimizeScene.GENERAL -> GENERAL_PROMPT
@@ -86,9 +105,10 @@ private val GENERAL_PROMPT = """
     Rules:
     1. Preserve the original intent and key information; do not add content the user did not express
     2. Make the goal, constraints, and expected output explicit; remove ambiguity and repetition
-    3. Use precise, natural phrasing and keep the structure clean
-    4. Output only the optimized text. No explanations, introductions, or prefixes
-    5. Respond in the same language as the user's input
+    3. Make context, scope, and boundaries explicit where useful — what is in scope, what is out of scope, what is assumed
+    4. Use precise, natural phrasing and keep the structure clean
+    5. Output only the optimized text. No explanations, introductions, or prefixes
+    6. Respond in the same language as the user's input
 """.trimIndent()
 
 private val WRITING_PROMPT = """
@@ -97,9 +117,10 @@ private val WRITING_PROMPT = """
     Rules:
     1. Preserve the intent and creative direction; do not drift from the subject
     2. Specify the writing type (article / story / copy / essay, etc.), target reader, length, and structure
-    3. Add useful context such as background, style, and must-avoid items when helpful
-    4. Output only the optimized text. No explanations, introductions, or prefixes
-    5. Respond in the same language as the user's input
+    3. Add useful context such as background, style, tone, and must-avoid items when helpful
+    4. State the expected output form and quality bar (format, sections, length) explicitly
+    5. Output only the optimized text. No explanations, introductions, or prefixes
+    6. Respond in the same language as the user's input
 """.trimIndent()
 
 private val QUESTION_PROMPT = """
@@ -109,8 +130,9 @@ private val QUESTION_PROMPT = """
     1. Preserve what the user actually wants to know; do not change the direction of the question
     2. Clarify vague terms, add necessary background, and split broad questions into answerable ones
     3. State the expected answer form (explanation / steps / examples / comparison) and scope when useful
-    4. Output only the optimized question. No explanations, introductions, or prefixes
-    5. Respond in the same language as the user's input
+    4. Make constraints and boundaries explicit — what is in/out of scope, what the answer should cover
+    5. Output only the optimized question. No explanations, introductions, or prefixes
+    6. Respond in the same language as the user's input
 """.trimIndent()
 
 private val PROGRAMMING_PROMPT = """
@@ -119,9 +141,10 @@ private val PROGRAMMING_PROMPT = """
     Rules:
     1. Preserve the technical intent; clarify the programming language, environment, and constraints
     2. Make the input/output, edge cases, and expected behavior explicit
-    3. Keep technical terms accurate; break multi-step tasks into clear steps
-    4. Output only the optimized text. No explanations, introductions, or prefixes
-    5. Respond in the same language as the user's input
+    3. State the boundaries explicitly — what is in/out of scope, error handling, and acceptance criteria
+    4. Keep technical terms accurate; break multi-step tasks into clear steps
+    5. Output only the optimized text. No explanations, introductions, or prefixes
+    6. Respond in the same language as the user's input
 """.trimIndent()
 
 private val SERIOUS_TONE = """
@@ -169,6 +192,10 @@ internal val DEFAULT_PROMPT_OPTIMIZE_PROMPT = """
     2. Follow the given scene, tone, and detail level to adjust clarity, structure, context, and wording
     3. Output only the optimized text. No explanations, introductions, or prefixes
     4. Respond in the same language as the user's input
+    5. Output the optimized prompt inside <optimized_prompt> tags. Structure it with markdown headers in this
+       order when applicable: ## Role / ## Context & Background / ## Task (goal and steps) / ## Constraints /
+       ## Output Format. Keep only the sections that apply; make each a concrete, actionable instruction.
+       Output nothing outside the <optimized_prompt> tags.
 
     <content>
     {content}
@@ -192,6 +219,9 @@ internal fun defaultPromptOptimizePromptForScene(scene: PromptOptimizeScene): St
         2. Make the goal, constraints, and expected output explicit; remove ambiguity and repetition
         3. Output only the optimized text. No explanations, introductions, or prefixes
         4. Respond in the same language as the user's input
+        5. Output the optimized prompt inside <optimized_prompt> tags. Structure it with markdown headers in this
+           order when applicable: ## Role / ## Context & Background / ## Task (goal and steps) / ## Constraints /
+           ## Output Format. Keep only the sections that apply. Output nothing outside the <optimized_prompt> tags.
 
         <content>
         {content}
@@ -210,6 +240,9 @@ internal fun defaultPromptOptimizePromptForScene(scene: PromptOptimizeScene): St
         2. Specify the writing type, target reader, length, and structure; add useful context when helpful
         3. Output only the optimized text. No explanations, introductions, or prefixes
         4. Respond in the same language as the user's input
+        5. Output the optimized prompt inside <optimized_prompt> tags. Structure it with markdown headers in this
+           order when applicable: ## Role / ## Context & Background / ## Task (goal and steps) / ## Constraints /
+           ## Output Format. Keep only the sections that apply. Output nothing outside the <optimized_prompt> tags.
 
         <content>
         {content}
@@ -248,6 +281,9 @@ internal fun defaultPromptOptimizePromptForScene(scene: PromptOptimizeScene): St
         3. Keep technical terms accurate; break multi-step tasks into clear steps
         4. Output only the optimized text. No explanations, introductions, or prefixes
         5. Respond in the same language as the user's input
+        6. Output the optimized prompt inside <optimized_prompt> tags. Structure it with markdown headers in this
+           order when applicable: ## Role / ## Context & Background / ## Task (goal and steps) / ## Constraints /
+           ## Output Format. Keep only the sections that apply. Output nothing outside the <optimized_prompt> tags.
 
         <content>
         {content}
