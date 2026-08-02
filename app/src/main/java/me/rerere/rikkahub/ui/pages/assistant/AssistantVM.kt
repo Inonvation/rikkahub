@@ -63,7 +63,7 @@ class AssistantVM(
         }
 
         if (uris.isNotEmpty()) {
-            filesManager.deleteChatFiles(uris)
+            filesManager.deleteChatFilesPermanently(uris)
         }
     }
 

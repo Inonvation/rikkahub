@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -36,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -59,10 +62,14 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CheckmarkCircle01
 import me.rerere.hugeicons.stroke.Circle
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.data.db.entity.VocabularyEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.pages.study.DeleteSelectionConfirmDialog
 import me.rerere.rikkahub.ui.pages.study.ExampleItem
 import me.rerere.rikkahub.ui.pages.study.StudyDetailActions
@@ -70,7 +77,9 @@ import me.rerere.rikkahub.ui.pages.study.StudySelectionEntryIcon
 import me.rerere.rikkahub.ui.pages.study.StudySelectionState
 import me.rerere.rikkahub.ui.pages.study.StudySelectionTopBar
 import me.rerere.rikkahub.ui.pages.study.TranslationItem
+import me.rerere.rikkahub.ui.pages.study.buildVocabularyBatchMarkdown
 import me.rerere.rikkahub.ui.pages.study.buildVocabularyMarkdown
+import me.rerere.rikkahub.ui.pages.study.exportTextToFile
 import me.rerere.rikkahub.ui.pages.study.parseExamples
 import me.rerere.rikkahub.ui.pages.study.parseTags
 import me.rerere.rikkahub.ui.pages.study.parseTranslations
@@ -82,6 +91,8 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun VocabularyPanelPage() {
     val vm = koinViewModel<VocabularyPanelVM>()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val wordGroups by vm.wordGroups.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -92,6 +103,7 @@ fun VocabularyPanelPage() {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val totalWords = wordGroups.sumOf { it.words.size }
     val visibleWordIds = wordGroups.flatMap { it.words }.map { it.id }
+    val visibleWords = wordGroups.flatMap { it.words }
 
     Scaffold(
         topBar = {
@@ -116,6 +128,10 @@ fun VocabularyPanelPage() {
                     scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                     actions = {
                         StudySelectionEntryIcon(onClick = { selection.enter() })
+                        IconButton(
+                            onClick = { if (visibleWords.isNotEmpty()) scope.launch { exportTextToFile(context, "生词导出-${visibleWords.size}", buildVocabularyBatchMarkdown(visibleWords)) } },
+                            enabled = visibleWords.isNotEmpty(),
+                        ) { Icon(HugeIcons.Download01, "批量导出") }
                         IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                     }
                 )
@@ -207,39 +223,51 @@ private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, onDis
     AlertDialog(
         onDismissRequest = { if (canDismiss) onDismiss() },
         title = {
+            val tts = LocalTTSState.current
+            val isSpeaking by tts.isSpeaking.collectAsState()
+            val isAvailable by tts.isAvailable.collectAsState()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(word.word, style = MaterialTheme.typography.titleLarge)
                     if (word.pronunciation.isNotBlank()) Text("/${word.pronunciation}/", style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                IconButton(
+                    onClick = { if (isSpeaking) tts.stop() else tts.speak(word.word) },
+                    enabled = isAvailable,
+                ) {
+                    Icon(if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh, contentDescription = if (isSpeaking) "停止朗读" else "朗读")
+                }
                 StudyDetailActions(
                     title = word.word,
                     content = buildVocabularyMarkdown(word),
                     sourceConversationId = word.sourceConversationId,
+                    onDismiss = onDismiss,
                 )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (translations.isNotEmpty()) {
-                    Text("释义", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    translations.forEachIndexed { i, t ->
-                        Row {
-                            Text(t.pos, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(32.dp))
-                            Text(t.definition, style = MaterialTheme.typography.bodyMedium, fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal)
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (translations.isNotEmpty()) {
+                        Text("释义", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        translations.forEachIndexed { i, t ->
+                            Row {
+                                Text(t.pos, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(32.dp))
+                                Text(t.definition, style = MaterialTheme.typography.bodyMedium, fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal)
+                            }
                         }
                     }
-                }
-                if (examples.isNotEmpty()) {
-                    Text("例句", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    examples.take(2).forEach { ex ->
-                        Text(highlightWord(ex.en, word.word), style = MaterialTheme.typography.bodySmall)
-                        Text(ex.zh, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(2.dp))
+                    if (examples.isNotEmpty()) {
+                        Text("例句", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        examples.take(2).forEach { ex ->
+                            Text(highlightWord(ex.en, word.word), style = MaterialTheme.typography.bodySmall)
+                            Text(ex.zh, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(2.dp))
+                        }
                     }
+                    if (word.mnemonic.isNotBlank()) { Text("助记", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); Text(word.mnemonic, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.tertiary) }
+                    if (tags.isNotEmpty()) { FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } } }
                 }
-                if (word.mnemonic.isNotBlank()) { Text("助记", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); Text(word.mnemonic, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.tertiary) }
-                if (tags.isNotEmpty()) { FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } } }
             }
         },
         confirmButton = {

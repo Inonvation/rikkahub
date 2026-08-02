@@ -37,10 +37,13 @@ suspend fun createWorkspaceTools(
     workspaceId: String?,
     workspaceRepository: WorkspaceRepository,
     cwd: String? = null,
+    forceNoApproval: Boolean = false,
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
-    fun needsApproval(name: String) = resolveWorkspaceToolApproval(name, approvalOverrides)
+    // MED-7: forceNoApproval 只跳过"用户审批门"，不跳过工具的路径越界检查（后者在工具 needsApproval lambda 的 || 后半段）
+    fun needsApproval(name: String) =
+        if (forceNoApproval) false else resolveWorkspaceToolApproval(name, approvalOverrides)
 
     val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
 

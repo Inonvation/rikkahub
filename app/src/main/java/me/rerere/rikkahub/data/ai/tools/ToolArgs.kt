@@ -5,6 +5,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import me.rerere.ai.ui.UIMessagePart
 
 /**
  * 容错解析工具参数里的数组字段。
@@ -15,6 +18,20 @@ fun parseArrayField(params: JsonObject, key: String): String {
     return when (el) {
         is JsonArray -> el.toString()
         is JsonPrimitive -> buildJsonArray { add(el) }.toString()
+        is JsonObject -> buildJsonArray { add(el) }.toString()
         else -> "[]"
     }
 }
+
+/**
+ * 构造工具错误返回（JSON：{"error": true, "message": "..."}）。
+ * 学习工具（update/delete/search/stats）共用。
+ */
+internal fun errorResult(message: String): List<UIMessagePart> = listOf(
+    UIMessagePart.Text(
+        buildJsonObject {
+            put("error", true)
+            put("message", JsonPrimitive(message))
+        }.toString()
+    )
+)

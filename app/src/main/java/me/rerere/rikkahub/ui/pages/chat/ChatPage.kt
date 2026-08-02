@@ -11,17 +11,19 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -77,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -89,10 +92,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -100,6 +101,11 @@ import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -111,11 +117,13 @@ import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.BookOpen01
+import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -125,6 +133,8 @@ import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.extractLatestTodoListFromConversation
+import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
+import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
@@ -139,6 +149,7 @@ import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
+import me.rerere.rikkahub.ui.components.message.SubAgentRunningBanner
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -203,12 +214,29 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         rightDrawerOpen = false
     }
 
-    // 互斥
-    LaunchedEffect(rightDrawerOpen) {
-        if (rightDrawerOpen && leftDrawerOpen) leftDrawerOpen = false
-    }
-    LaunchedEffect(leftDrawerOpen) {
-        if (leftDrawerOpen && rightDrawerOpen) rightDrawerOpen = false
+    // 键盘唤起（IME 可见）时自动收回左右侧边栏，避免输入框被遮挡。
+    // 只认"IME 稳定可见"这一状态，并用 200ms 二次确认抑制动画期间的抖动：
+    // 手势打开侧栏会主动收起键盘，收起动画中 insets 从高→0 偶尔会中途抖动回升，
+    // 若把这种瞬时 >0 当成"用户又调出输入法"，会把刚展开的侧栏误关。
+    // 收集器常驻（不随侧栏开关重启），初始 prev 与当前状态对齐，杜绝重启竞态。
+    // 用 WindowInsets.ime.getBottom() 检测 IME（isImeVisible 是 @Composable，无法在 snapshotFlow 中直接读）
+    val imeInsets = WindowInsets.ime
+    val imeDensity = LocalDensity.current
+    LaunchedEffect(Unit) {
+        var prevImeVisible = imeInsets.getBottom(imeDensity) > 0
+        snapshotFlow { imeInsets.getBottom(imeDensity) }.collect { imeBottom ->
+            val imeVisible = imeBottom > 0
+            if (imeVisible && !prevImeVisible) {
+                // IME 由隐藏 → 可见：可能是用户主动打开了输入法，延迟 200ms 再确认一次，
+                // 确保 IME 真的稳定显示（而非收起动画中的瞬时抖动）后才收回侧栏
+                delay(200)
+                if (imeInsets.getBottom(imeDensity) > 0) {
+                    if (leftDrawerOpen) leftDrawerOpen = false
+                    if (rightDrawerOpen) rightDrawerOpen = false
+                }
+            }
+            prevImeVisible = imeVisible
+        }
     }
 
     val windowAdaptiveInfo = currentWindowDpSize()
@@ -292,7 +320,36 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatListState = rememberLazyListState()
+    // 聊天列表滚动状态：初始位置来自 VM（导航到子代理详情返回后恢复进入前的位置）。
+    // 不用 rememberLazyListState()（依赖 SaveableStateHolder，返回时恢复不可靠，导致位置归零）。
+    // 聊天列表滚动状态：初始位置来自 VM（导航到子代理详情返回后恢复进入前的位置）。
+    // 用非 saveable 的 remember + LazyListState（而非 rememberLazyListState）：后者是 saveable，
+    // 导航返回重建时 SaveableStateHolder 会尝试恢复内部位置，但恢复发生在 ChatList items 渲染前，
+    // 恢复的 index 常被 clamp 到 0，随后 snapshotFlow 会把 0 回写 VM 污染保存值，位置永久丢失；
+    // 且 saveable restore 计算量大导致返回卡顿。remember 直接用 VM 值初始化，不走 restore，
+    // 位置准确且返回更快。
+    val chatListState: LazyListState = remember {
+        LazyListState(
+            vm.chatListFirstVisibleItemIndex,
+            vm.chatListFirstVisibleItemScrollOffset,
+        )
+    }
+    // 跳过首帧：LazyListState 首次组合时 items 未渲染，位置可能被 clamp（如 index 0）。
+    // 首帧后 items 已加载，再同步真实的用户滚动，避免把 clamp 值回写 VM。
+    var scrollSyncReady by remember { mutableStateOf(false) }
+    LaunchedEffect(chatListState) {
+        snapshotFlow {
+            chatListState.firstVisibleItemIndex to chatListState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            if (scrollSyncReady) {
+                vm.chatListFirstVisibleItemIndex = index
+                vm.chatListFirstVisibleItemScrollOffset = offset
+            }
+        }
+    }
+    LaunchedEffect(chatListState) {
+        scrollSyncReady = true
+    }
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
             if (nodeId != null) {
@@ -411,6 +468,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
 }
+@OptIn(ExperimentalCoroutinesApi::class)
 @Composable
 private fun ChatPageContent(
     inputState: ChatInputState,
@@ -446,6 +504,35 @@ private fun ChatPageContent(
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
     val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
+    // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）
+    val subAgentRunner: SubAgentRunner = koinInject()
+    val subAgentActiveCount by subAgentRunner.tasksFlow
+        .map { map ->
+            map.values.count {
+                it.parentConversationId == conversation.id &&
+                    (it.status == SubAgentStatus.QUEUED || it.status == SubAgentStatus.RUNNING)
+            }
+        }
+        .collectAsStateWithLifecycle(initialValue = 0)
+
+    // 顶部横幅：本会话进行中的子代理任务（QUEUED/RUNNING），节流避免流式高频重组
+    val activeSubAgentTasks by subAgentRunner.tasksFlow
+        .map { map ->
+            map.values
+                .filter {
+                    it.parentConversationId == conversation.id &&
+                        (it.status == SubAgentStatus.QUEUED || it.status == SubAgentStatus.RUNNING)
+                }
+                .sortedBy { it.createdAt }
+        }
+        .sample(200)
+        .distinctUntilChangedBy { list ->
+            list.map { t ->
+                "${t.taskId}|${t.status}|${t.steps.size}|${t.toolCalls.size}|${t.streamText.length / 512}"
+            }
+        }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
     // 自动滚动：检测用户是否滚离底部
     val isAtBottom by remember {
         derivedStateOf {
@@ -455,10 +542,26 @@ private fun ChatPageContent(
     }
     val userScrolledUp by remember { derivedStateOf { !isAtBottom } }
 
-    // AI 生成时自动滚动（仅在用户未手动滚离时）
+    // 发送后滚动到底的标记：等待消息数量变化后再滚，确保新消息已进入列表
+    var pendingScrollAfterSend by remember { mutableStateOf(false) }
+
+    // 发送后自动滚动到底：目标用 totalItemsCount - 1（不用旧快照 currentMessages.size + 5），
+    // enableAutoScroll 关闭时不强制滚动，保持用户当前位置
+    LaunchedEffect(conversation.messageNodes.size) {
+        if (pendingScrollAfterSend) {
+            pendingScrollAfterSend = false
+            if (setting.displaySetting.enableAutoScroll) {
+                chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
+            }
+        }
+    }
+
+    // AI 生成时自动滚动（仅在用户未手动滚离时）。
+    // 目标统一用 layoutInfo.totalItemsCount - 1（与发送后滚动、ChatList 自动跟随一致），
+    // 不用 currentMessages.size + 5 的旧快照估算（会与 ChatList 的 requestScrollToItem 目标打架导致抖动）。
     LaunchedEffect(conversation.currentMessages.size, loadingJob) {
         if (loadingJob != null && !userScrolledUp) {
-            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
+            chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
         }
     }
 
@@ -577,9 +680,8 @@ private fun ChatPageContent(
                             )
                         } else {
                             vm.handleMessageSend(inputState.getContents())
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
+                            // 发送后自动滚到底（等待新消息进入列表后在 LaunchedEffect 中执行）
+                            pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
                     },
@@ -591,9 +693,7 @@ private fun ChatPageContent(
                             )
                         } else {
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
+                            pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
                     },
@@ -637,21 +737,43 @@ private fun ChatPageContent(
                             showPromptOptimizeSheet = true
                         }
                     },
+                    subAgentActive = subAgentActiveCount > 0,
+                    subAgentActiveCount = subAgentActiveCount,
+                    onOpenSubAgentPanel = {
+                        navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))
+                    },
                 )
                 }
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState = conversation.id,
-                transitionSpec = {
-                    fadeIn(tween(300)) togetherWith fadeOut(tween(200))
-                },
-                label = "ChatContent",
+            // Column 整体应用 Scaffold innerPadding：content 区域与 topBar/bottomBar 是叠放的，
+            // 必须手动 .padding(innerPadding) 避开顶栏（原代码靠 ChatList 内部 top padding 处理，
+            // 改为横幅后统一在 Column 层处理，避免消息列表与顶栏重叠）
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
             ) {
+                // 顶部子代理横幅：进行中的子代理任务横向并排，点击进详情页。
+                // 位于消息列表上方（TopBar 之下），subAgentActiveTasks 为空时自动隐藏。
+                SubAgentRunningBanner(
+                    tasks = activeSubAgentTasks,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                )
+                // 消息列表区：Column 已应用 innerPadding，ChatList 不再自己加 padding
+                Box(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = conversation.id,
+                    transitionSpec = {
+                        fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                    },
+                    label = "ChatContent",
+                ) {
                 ChatList(
-                    innerPadding = innerPadding,
+                    innerPadding = PaddingValues(0.dp),
                     conversation = conversation,
                 state = chatListState,
                 loading = loadingJob != null,
@@ -727,38 +849,35 @@ private fun ChatPageContent(
             )
             }
 
-            // 回到底部按钮（置顶浮层，避免与输入框/知识库气泡互相推挤）
+            // 回到底部按钮：直接放进内容 Box 底部。Scaffold 的 content 区域位于
+            // 输入框（bottomBar）上方，键盘弹起时输入框随 imePadding 增高、content 区域
+            // 同步收缩，按钮 align(BottomCenter) 便稳定跟随输入框上升——既不消失也不被盖。
             if (userScrolledUp) {
-                Popup(
-                    alignment = Alignment.BottomCenter,
-                    offset = IntOffset(
-                        x = 0,
-                        y = -with(LocalDensity.current) { 144.dp.toPx() }.toInt()
-                    ),
-                    onDismissRequest = null,
-                ) {
-                    Surface(
-                        onClick = {
-                            scope.launch {
-                                chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
-                            }
-                        },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = HugeIcons.ArrowDown01,
-                                contentDescription = "回到底部",
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
                         }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp)
+                        .size(36.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = HugeIcons.ArrowDown01,
+                            contentDescription = "回到底部",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
                     }
                 }
             }
 
+            }
             }
         }
 
@@ -798,6 +917,7 @@ private fun ChatPageContent(
             PromptOptimizeSheet(
                 state = inputState,
                 vm = promptOptimizeVM,
+                settings = setting,
                 onConfirmReplace = { result ->
                     inputState.setMessageText(result)
                     showPromptOptimizeSheet = false

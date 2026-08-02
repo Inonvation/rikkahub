@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.ChartBarLine
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
@@ -65,6 +66,7 @@ import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Recycle01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Note01
@@ -352,6 +354,11 @@ fun ChatDrawerContent(
                 )
             }
 
+            DrawerAction(
+                icon = { Icon(HugeIcons.Recycle01, null) },
+                label = { Text("回收站") },
+                onClick = { navController.navigate(Screen.RecycleBin) },
+            )
             DrawerAction(
                 icon = { Icon(HugeIcons.Image02, null) },
                 label = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
@@ -692,9 +699,20 @@ fun StudyDrawerContent(
                 onClick = { navController.navigate(Screen.Translator) },
             )
             DrawerListItem(
+                icon = HugeIcons.ChartBarLine,
+                title = "学习统计",
+                subtitle = "学科分布 · 学习趋势",
+                onClick = { navController.navigate(Screen.StudyStats) },
+            )
+            DrawerListItem(
                 icon = HugeIcons.ChartColumn,
                 title = "统计数据",
                 onClick = { navController.navigate(Screen.Stats) },
+            )
+            DrawerListItem(
+                icon = HugeIcons.Recycle01,
+                title = "回收站",
+                onClick = { navController.navigate(Screen.RecycleBin) },
             )
         }
     }

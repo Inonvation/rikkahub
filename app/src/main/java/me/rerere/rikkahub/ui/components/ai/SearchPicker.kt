@@ -53,6 +53,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
 import me.rerere.search.SearchServiceOptions
@@ -196,6 +197,10 @@ private fun AppSearchSettings(
     settings: Settings,
     onUpdateSearchService: (Int) -> Unit
 ) {
+    val settingsStore = koinInject<SettingsStore>()
+    val scope = rememberCoroutineScope()
+    val toaster = LocalToaster.current
+    val atLeastOneMsg = stringResource(R.string.setting_page_search_at_least_one)
     Card {
         Row(
             modifier = Modifier
@@ -245,15 +250,18 @@ private fun AppSearchSettings(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         itemsIndexed(settings.searchServices) { index, service ->
+            // 多选状态：服务商在 enabledSearchServiceIds 中即为启用（高亮）
+            val isEnabled = service.id in settings.enabledSearchServiceIds
+            val isPrimary = settings.searchServiceSelected == index
             val containerColor = animateColorAsState(
-                if (settings.searchServiceSelected == index) {
+                if (isEnabled) {
                     MaterialTheme.colorScheme.primaryContainer
                 } else {
                     MaterialTheme.colorScheme.surface
                 }
             )
             val textColor = animateColorAsState(
-                if (settings.searchServiceSelected == index) {
+                if (isEnabled) {
                     MaterialTheme.colorScheme.onPrimaryContainer
                 } else {
                     MaterialTheme.colorScheme.onSurface
@@ -265,7 +273,25 @@ private fun AppSearchSettings(
                     contentColor = textColor.value,
                 ),
                 onClick = {
-                    onUpdateSearchService(index)
+                    // 点击：设为主服务商 + 切换多选（一次原子更新，避免与 onUpdateSearchService 竞态覆盖）
+                    val current = settings.enabledSearchServiceIds
+                    val newIds = if (isEnabled) {
+                        if (current.size <= 1) {
+                            // 至少保留一个启用：静默拒绝时提示
+                            toaster.show(atLeastOneMsg)
+                            current
+                        } else current - service.id
+                    } else {
+                        current + service.id
+                    }
+                    scope.launch {
+                        settingsStore.update(
+                            settings.copy(
+                                searchServiceSelected = index,
+                                enabledSearchServiceIds = newIds,
+                            )
+                        )
+                    }
                 },
                 shape = MaterialTheme.shapes.large
             ) {
@@ -291,6 +317,14 @@ private fun AppSearchSettings(
                             options = service,
                             modifier = Modifier
                         )
+                        // 主服务商标注
+                        if (isPrimary) {
+                            Text(
+                                text = stringResource(R.string.search_picker_primary),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }

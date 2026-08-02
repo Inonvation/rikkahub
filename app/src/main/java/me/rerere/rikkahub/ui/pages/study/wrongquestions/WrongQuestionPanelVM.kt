@@ -12,6 +12,7 @@ class WrongQuestionPanelVM(
     allFlow = wrongQuestionDao.getAllFlow(),
     subjectsFlow = wrongQuestionDao.getAllSubjectsFlow(),
     subjectOf = { it.subject },
+    searchPredicate = { w, q -> w.title.contains(q, true) || w.question.contains(q, true) || w.answer.contains(q, true) || w.solution.contains(q, true) || w.knowledgePoints.contains(q, true) },
 ) {
     fun updateReview(entity: WrongQuestionEntity) {
         viewModelScope.launch {

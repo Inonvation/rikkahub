@@ -61,6 +61,11 @@ class ChatVM(
     var leftDrawerOpen by mutableStateOf(false)
     var rightDrawerOpen by mutableStateOf(false)
 
+    // 聊天列表滚动位置 - 保存在 ViewModel 中，导航到子页面（如子代理详情）返回后
+    // 恢复进入前的聊天位置（rememberLazyListState 的 SaveableStateHolder 恢复不可靠）
+    var chatListFirstVisibleItemIndex by mutableStateOf(0)
+    var chatListFirstVisibleItemScrollOffset by mutableStateOf(0)
+
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
@@ -140,7 +145,7 @@ class ChatVM(
         val newAvatar = newSettings.displaySetting.userAvatar
 
         if (oldAvatar is Avatar.Image && oldAvatar != newAvatar) {
-            filesManager.deleteChatFiles(listOf(oldAvatar.url.toUri()))
+            filesManager.deleteChatFilesPermanently(listOf(oldAvatar.url.toUri()))
         }
     }
 

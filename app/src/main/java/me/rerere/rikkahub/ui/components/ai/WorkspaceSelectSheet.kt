@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -29,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Codesandbox
-import me.rerere.hugeicons.stroke.Tick02
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
@@ -43,6 +44,7 @@ internal fun WorkspaceSelectSheet(
     onSelect: (String?) -> Unit,
     onManage: () -> Unit,
     onDismiss: () -> Unit,
+    onSettings: (String) -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -76,6 +78,7 @@ internal fun WorkspaceSelectSheet(
                     title = stringResource(R.string.workspace_no_binding),
                     selected = assistant.workspaceId == null,
                     onClick = { onSelect(null) },
+                    onSettings = null,
                 )
                 workspaces.forEach { workspace ->
                     WorkspaceSelectRow(
@@ -83,6 +86,7 @@ internal fun WorkspaceSelectSheet(
                         status = workspace.shellStatus.toShellStatusLabel(),
                         selected = workspace.id == assistant.workspaceId?.toString(),
                         onClick = { onSelect(workspace.id) },
+                        onSettings = { onSettings(workspace.id) },
                     )
                 }
             }
@@ -119,6 +123,7 @@ private fun WorkspaceSelectRow(
     selected: Boolean,
     onClick: () -> Unit,
     status: String? = null,
+    onSettings: (() -> Unit)? = null,
 ) {
     val hapticController = rememberHaptic()
     ListItem(
@@ -143,15 +148,22 @@ private fun WorkspaceSelectRow(
                 )
             }
         },
-        trailingContent = if (selected) {
+        trailingContent = onSettings?.let {
             {
-                Icon(
-                    imageVector = HugeIcons.Tick02,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+                IconButton(
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        it()
+                    },
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Settings03,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        } else null,
+        },
         colors = ListItemDefaults.colors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.surfaceContainerHigh

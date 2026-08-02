@@ -15,6 +15,8 @@ data class Tool(
     val parameters: () -> InputSchema? = { null },
     val systemPrompt: (model: Model, messages: List<UIMessage>) -> String = { _, _ -> "" },
     val needsApproval: (JsonElement) -> Boolean = { false },
+    /** 工具执行后是否等待异步后台完成（异步 monitor 模式，v2）。返回 true 时母代理本轮 break，不产出最终回复 */
+    val awaitAsyncCompletion: (JsonElement) -> Boolean = { false },
     val execute: suspend (JsonElement) -> List<UIMessagePart>
 )
 

@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,11 +52,13 @@ import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
@@ -75,6 +78,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         return
     }
 
+    val navController = LocalNavController.current
     val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
     val context = remember(tool, loading) {
         ToolUIContext(
@@ -100,6 +104,18 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
+    // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
+    val rendererLoading = renderer.isLoading(context, loading)
+
+    // 执行中自动展开（alwaysOpenPreview 工具如子代理）：像推理 Preview 一样，
+    // 进行中实时展示流式输出与工具步骤，用户手动折叠则尊重用户选择
+    if (renderer.alwaysOpenPreview) {
+        LaunchedEffect(rendererLoading) {
+            if (rendererLoading) {
+                expanded = true
+            }
+        }
+    }
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty()
@@ -108,7 +124,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         expanded = expanded,
         onExpandedChange = { expanded = it },
         icon = {
-            if (loading) {
+            if (rendererLoading) {
                 DotLoading(
                     size = 10.dp
                 )
@@ -126,7 +142,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 text = renderer.title(context),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
+                modifier = Modifier.shimmer(isLoading = rendererLoading),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -161,8 +177,18 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         } else {
             null
         },
-        onClick = if (context.content != null || isPending || images.isNotEmpty()) {
-            { showResult = true }
+        // 点击：alwaysOpenPreview 工具（子代理）直接进全屏详情页（不弹 BottomSheet）；
+        // 普通工具打开 BottomSheet 详情
+        onClick = if (context.content != null || isPending || images.isNotEmpty() || renderer.alwaysOpenPreview) {
+            if (renderer.alwaysOpenPreview) {
+                {
+                    navController.navigate(
+                        Screen.SubAgentDetail(tool.toolCallId, null)
+                    )
+                }
+            } else {
+                { showResult = true }
+            }
         } else {
             null
         },

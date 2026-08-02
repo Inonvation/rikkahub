@@ -12,6 +12,7 @@ class KnowledgeCardPanelVM(
     allFlow = knowledgeCardDao.getAllFlow(),
     subjectsFlow = knowledgeCardDao.getAllSubjectsFlow(),
     subjectOf = { it.subject },
+    searchPredicate = { c, q -> c.concept.contains(q, true) || c.explanation.contains(q, true) || c.memoryAid.contains(q, true) },
 ) {
     fun updateReview(entity: KnowledgeCardEntity) {
         viewModelScope.launch {

@@ -41,6 +41,7 @@ import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.dao.WrongQuestionDao
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.dao.NoteDao
+import me.rerere.rikkahub.data.ai.tools.StudyDaoSet
 import me.rerere.rikkahub.data.ai.tools.StudyTools
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
@@ -187,11 +188,17 @@ val dataSourceModule = module {
     }
 
     single {
-        StudyTools(
+        StudyDaoSet(
             vocabularyDao = get(),
+            noteDao = get(),
             wrongQuestionDao = get(),
             knowledgeCardDao = get(),
-            noteDao = get(),
+        )
+    }
+
+    single {
+        StudyTools(
+            studyDaoSet = get(),
             knowledgeChunkDao = get(),
         )
     }

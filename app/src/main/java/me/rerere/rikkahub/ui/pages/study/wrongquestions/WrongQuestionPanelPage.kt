@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +57,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CheckmarkCircle01
 import me.rerere.hugeicons.stroke.Circle
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import androidx.compose.material3.Slider
 import me.rerere.rikkahub.data.db.entity.WrongQuestionEntity
@@ -68,6 +73,8 @@ import me.rerere.rikkahub.ui.pages.study.StudySelectionState
 import me.rerere.rikkahub.ui.pages.study.StudySelectionTopBar
 import me.rerere.rikkahub.ui.pages.study.SubjectTabBar
 import me.rerere.rikkahub.ui.pages.study.buildWrongQuestionMarkdown
+import me.rerere.rikkahub.ui.pages.study.buildWrongQuestionsBatchMarkdown
+import me.rerere.rikkahub.ui.pages.study.exportTextToFile
 import me.rerere.rikkahub.ui.pages.study.extractPlainText
 import me.rerere.rikkahub.ui.pages.study.parseKnowledgePoints
 import me.rerere.rikkahub.ui.pages.study.parseTags
@@ -87,9 +94,12 @@ private fun WrongQuestionEntity.titleOrFallback(): String =
 @Composable
 fun WrongQuestionPanelPage() {
     val vm = koinViewModel<WrongQuestionPanelVM>()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val questions by vm.items.collectAsStateWithLifecycle()
     val subjects by vm.subjects.collectAsStateWithLifecycle()
     val selectedSubject by vm.selectedSubject.collectAsStateWithLifecycle()
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showArchived by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -121,6 +131,10 @@ fun WrongQuestionPanelPage() {
                     scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                     actions = {
                         StudySelectionEntryIcon(onClick = { selection.enter() })
+                        IconButton(
+                            onClick = { if (questions.isNotEmpty()) scope.launch { exportTextToFile(context, "错题导出-${questions.size}", buildWrongQuestionsBatchMarkdown(questions)) } },
+                            enabled = questions.isNotEmpty(),
+                        ) { Icon(HugeIcons.Download01, "批量导出") }
                         IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                     })
             }
@@ -130,10 +144,15 @@ fun WrongQuestionPanelPage() {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             SubjectTabBar(subjects = subjects, selected = selectedSubject, onSelect = { selection.exit(); vm.select(it) })
+            OutlinedTextField(value = searchQuery, onValueChange = { selection.exit(); vm.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("搜索错题...") }, leadingIcon = { Icon(HugeIcons.Search01, null) }, singleLine = true)
             if (currentQuestions.isEmpty()) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Text("还没有错题", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp))
-                    Text("在对话中解题后 AI 会自动保存", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (searchQuery.isNotBlank()) {
+                        Text("没有找到匹配的错题", style = MaterialTheme.typography.bodyLarge)
+                    } else {
+                        Text("还没有错题", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp))
+                        Text("在对话中解题后 AI 会自动保存", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -205,16 +224,19 @@ private fun QuestionDetailDialog(q: WrongQuestionEntity, knowledgePoints: List<S
                     title = q.titleOrFallback(),
                     content = buildWrongQuestionMarkdown(q),
                     sourceConversationId = q.sourceConversationId,
+                    onDismiss = onDismiss,
                 )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                StudyMarkdownBlock(q.question)
-                if (q.answer.isNotBlank()) { Text("答案", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(q.answer) }
-                if (q.solution.isNotBlank()) { Text("解析", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(q.solution) }
-                if (knowledgePoints.isNotEmpty()) { Text("知识点", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { knowledgePoints.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } } }
-                if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StudyMarkdownBlock(q.question)
+                    if (q.answer.isNotBlank()) { Text("答案", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(q.answer) }
+                    if (q.solution.isNotBlank()) { Text("解析", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(q.solution) }
+                    if (knowledgePoints.isNotEmpty()) { Text("知识点", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { knowledgePoints.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } } }
+                    if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
+                }
             }
         },
         confirmButton = {

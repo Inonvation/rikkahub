@@ -11,6 +11,7 @@ class NotesPanelVM(
     allFlow = noteDao.getAllFlow(),
     subjectsFlow = noteDao.getAllSubjectsFlow(),
     subjectOf = { it.subject },
+    searchPredicate = { n, q -> n.title.contains(q, true) || n.content.contains(q, true) },
 ) {
     fun delete(id: String) { viewModelScope.launch { noteDao.deleteById(id) } }
     fun deleteByIds(ids: List<String>) { viewModelScope.launch { if (ids.isNotEmpty()) noteDao.deleteByIds(ids) } }

@@ -262,6 +262,47 @@ class WorkspaceRepository(
         return deleted
     }
 
+    /** 软删除: 把文件移入回收站(.trash), 可后续恢复 */
+    suspend fun trashFile(
+        id: String,
+        area: WorkspaceStorageArea,
+        path: String,
+        recursive: Boolean,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.moveFileToTrash(workspace.root, path, recursive, area)
+    }
+
+    /** 从回收站恢复到原路径 */
+    suspend fun restoreFile(
+        id: String,
+        area: WorkspaceStorageArea,
+        trashRelativePath: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.restoreFileFromTrash(workspace.root, trashRelativePath, area)
+    }
+
+    /** 列出回收站内的文件 */
+    suspend fun listTrash(
+        id: String,
+        area: WorkspaceStorageArea,
+    ): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext emptyList()
+        manager.ensureWorkspace(workspace.root)
+        manager.listTrashFiles(workspace.root, area)
+    }
+
+    /** 永久删除回收站内的文件 */
+    suspend fun deleteTrashFile(
+        id: String,
+        area: WorkspaceStorageArea,
+        trashRelativePath: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.deleteTrashFile(workspace.root, trashRelativePath, area)
+    }
+
     suspend fun moveFile(
         id: String,
         source: String,

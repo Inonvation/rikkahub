@@ -201,7 +201,40 @@ class FilesManager(
             )
         }
 
+    /**
+     * 删除聊天附件: 默认移入回收站（软删），可从回收站恢复。
+     * 传入的 Uri 是文件型（file: 开头）时按相对路径查 DB 记录后软删；
+     * 磁盘上有文件但查不到 DB 记录（trackManagedFile 异步/失败产生的孤儿）则直接物理删除，避免残留。
+     */
     fun deleteChatFiles(uris: List<Uri>) {
+        appScope.launch(Dispatchers.IO) {
+            val ids = mutableListOf<Long>()
+            val relativePaths = mutableSetOf<String>()
+            uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+                val file = uri.toFile()
+                getRelativePathInFilesDir(file)?.let { relPath ->
+                    relativePaths.add(relPath)
+                    repository.getByPath(relPath)?.let { ids.add(it.id) }
+                }
+            }
+            val softDeleteOk = if (ids.isNotEmpty()) softDeleteChatFiles(ids) else true
+            // 物理删除"有磁盘文件但无 DB 记录"的孤儿（软删未覆盖、也不在相对路径集合内的）
+            if (softDeleteOk) {
+                uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+                    val file = uri.toFile()
+                    val relPath = getRelativePathInFilesDir(file)
+                    // 只有既不在 DB 记录里、也未被软删处理的孤儿才物理删除；
+                    // 有 DB 记录且软删成功的（relativePaths 内）已移入回收站，不能再删。
+                    if (file.exists() && relPath != null && repository.getByPath(relPath) == null && relPath !in relativePaths) {
+                        file.delete()
+                    }
+                }
+            }
+        }
+    }
+
+    /** 彻底删除聊天附件（不经过回收站），供资源清理场景（删头像、删会话时清文件）使用。 */
+    fun deleteChatFilesPermanently(uris: List<Uri>) {
         val relativePaths = mutableSetOf<String>()
         uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
             val file = uri.toFile()
@@ -217,6 +250,82 @@ class FilesManager(
                 }
             }
         }
+    }
+
+    /**
+     * 聊天附件软删除: 把上传目录的文件移入回收站目录, 并更新 DB 记录的 folder/relativePath.
+     * 聊天内点删除仍走 [deleteChatFiles] 彻底删除, 本方法供"移入回收站"场景使用.
+     */
+    suspend fun softDeleteChatFiles(ids: List<Long>): Boolean = withContext(Dispatchers.IO) {
+        var allSuccess = true
+        for (id in ids) {
+            val entity = repository.getById(id) ?: continue
+            if (entity.folder != FileFolders.UPLOAD) continue
+            val source = getFile(entity)
+            if (!source.exists()) {
+                // 磁盘文件已缺失：无软删意义（恢复也拿不到文件），直接删掉 DB 记录，避免回收站堆脏条目
+                repository.deleteById(id)
+                continue
+            }
+            val trashDir = File(context.filesDir, FileFolders.TRASH).apply { mkdirs() }
+            val trashName = uniqueTrashFileName(trashDir, entity.displayName.ifBlank { source.name })
+            if (source.renameTo(File(trashDir, trashName))) {
+                repository.update(
+                    entity.copy(
+                        folder = FileFolders.TRASH,
+                        relativePath = "${FileFolders.TRASH}/$trashName",
+                    )
+                )
+            } else {
+                allSuccess = false
+            }
+        }
+        allSuccess
+    }
+
+    /** 列出回收站内的聊天附件 */
+    suspend fun listTrashChatFiles(): List<ManagedFileEntity> = list(FileFolders.TRASH)
+
+    /** 从回收站恢复聊天附件: 移回上传目录并还原 folder/relativePath */
+    suspend fun restoreChatFile(id: Long): Boolean = withContext(Dispatchers.IO) {
+        val entity = repository.getById(id) ?: return@withContext false
+        if (entity.folder != FileFolders.TRASH) return@withContext false
+        val source = getFile(entity)
+        if (!source.exists()) return@withContext false
+        val uploadDir = File(context.filesDir, FileFolders.UPLOAD).apply { mkdirs() }
+        val newName = FileUtils.buildUuidFileName(displayName = entity.displayName, mimeType = entity.mimeType)
+        if (source.renameTo(File(uploadDir, newName))) {
+            repository.update(
+                entity.copy(
+                    folder = FileFolders.UPLOAD,
+                    relativePath = "${FileFolders.UPLOAD}/$newName",
+                )
+            )
+            true
+        } else {
+            false
+        }
+    }
+
+    /** 永久删除回收站内的聊天附件(仅限回收站记录, 不误删正常文件) */
+    suspend fun deleteTrashChatFilePermanently(id: Long): Boolean = withContext(Dispatchers.IO) {
+        val entity = repository.getById(id) ?: return@withContext false
+        if (entity.folder != FileFolders.TRASH) return@withContext false
+        delete(id)
+    }
+
+    /** 回收站目录内重名时加时间戳后缀, 避免同 displayName 的文件互相覆盖 */
+    private fun uniqueTrashFileName(dir: File, name: String): String {
+        if (!File(dir, name).exists()) return name
+        val base = "${name.substringBeforeLast('.')}_${System.currentTimeMillis()}"
+        val ext = name.substringAfterLast('.', "").takeIf { it.isNotEmpty() }
+        var candidate = if (ext != null) "$base.$ext" else base
+        var n = 1
+        while (File(dir, candidate).exists()) {
+            candidate = if (ext != null) "${base}_$n.$ext" else "${base}_$n"
+            n++
+        }
+        return candidate
     }
 
     suspend fun countChatFiles(): Pair<Int, Long> = withContext(Dispatchers.IO) {
@@ -491,6 +600,7 @@ object FileFolders {
     const val SKILLS = "skills"
     const val FONTS = "fonts"
     const val TOOL_OUTPUTS = "tool_outputs"
+    const val TRASH = "trash"
 }
 
 suspend fun FilesManager.saveUploadFromUri(

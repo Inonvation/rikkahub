@@ -277,17 +277,25 @@ private fun ChatListNormal(
             .fillMaxSize(),
     ) {
         // 自动滚动到底部
-        if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
-                        }
-                    }
+        // 触发条件从"依赖 loading 状态"改为"依赖消息列表 size 变化"（并保留生成中跟随），
+        // 修复第二条消息在生成间隙发出、或键盘视口变化时不再滚到底的问题。
+        // 仅当用户本就位于底部时才跟随滚动，上滑查看时不打扰。
+        // enableAutoScroll 关闭时，新消息到达不再强制跟随到底（尊重用户设置），
+        // 但生成进行中若用户就在底部仍跟随——这是正常 UX。
+        var lastMessageCount by remember { mutableStateOf(conversationUpdated.messageNodes.size) }
+        var wasAtBottom by remember { mutableStateOf(true) }
+        val autoScrollEnabled = settings.displaySetting.enableAutoScroll
+        LaunchedEffect(state) {
+            snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                val currentCount = conversationUpdated.messageNodes.size
+                val countChanged = currentCount != lastMessageCount
+                if (countChanged) lastMessageCount = currentCount
+                if (!state.isScrollInProgress && wasAtBottom &&
+                    ((countChanged && autoScrollEnabled) || loadingState)
+                ) {
+                    state.requestScrollToItem(state.layoutInfo.totalItemsCount - 1)
                 }
+                wasAtBottom = visibleItemsInfo.isAtBottom()
             }
         }
 

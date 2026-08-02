@@ -161,6 +161,38 @@ class WorkspaceManager(
     ): Boolean =
         fileSystem.delete(areaDir(root, area), path, recursive)
 
+    /** 软删除: 把文件移入本区 `.trash`, 可后续恢复 */
+    fun moveFileToTrash(
+        root: String,
+        path: String,
+        recursive: Boolean = false,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): Boolean =
+        fileSystem.moveToTrash(areaDir(root, area), path, recursive)
+
+    /** 从 `.trash` 恢复到原路径 */
+    fun restoreFileFromTrash(
+        root: String,
+        trashRelativePath: String,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): Boolean =
+        fileSystem.restoreFromTrash(areaDir(root, area), trashRelativePath)
+
+    /** 列出本区 `.trash` 内的文件 */
+    fun listTrashFiles(
+        root: String,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): List<WorkspaceFileEntry> =
+        fileSystem.listTrash(areaDir(root, area))
+
+    /** 永久删除 `.trash` 内的文件 */
+    fun deleteTrashFile(
+        root: String,
+        trashRelativePath: String,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): Boolean =
+        fileSystem.deleteFromTrash(areaDir(root, area), trashRelativePath)
+
     fun moveFile(root: String, source: String, target: String, overwrite: Boolean = false): WorkspaceFileEntry =
         fileSystem.move(filesDir(root), source, target, overwrite)
 

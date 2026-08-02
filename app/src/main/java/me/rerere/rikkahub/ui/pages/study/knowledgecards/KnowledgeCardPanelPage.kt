@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -45,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +57,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CheckmarkCircle01
 import me.rerere.hugeicons.stroke.Circle
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
 import me.rerere.rikkahub.data.model.StudySubject
@@ -67,6 +72,8 @@ import me.rerere.rikkahub.ui.pages.study.StudySelectionState
 import me.rerere.rikkahub.ui.pages.study.StudySelectionTopBar
 import me.rerere.rikkahub.ui.pages.study.SubjectTabBar
 import me.rerere.rikkahub.ui.pages.study.buildKnowledgeCardMarkdown
+import me.rerere.rikkahub.ui.pages.study.buildKnowledgeCardsBatchMarkdown
+import me.rerere.rikkahub.ui.pages.study.exportTextToFile
 import me.rerere.rikkahub.ui.pages.study.parseTags
 import me.rerere.rikkahub.ui.pages.study.rememberStudySelectionState
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -81,9 +88,12 @@ data class CardSettings(val cooldownSeconds: Int = 3)
 @Composable
 fun KnowledgeCardPanelPage() {
     val vm = koinViewModel<KnowledgeCardPanelVM>()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val cards by vm.items.collectAsStateWithLifecycle()
     val subjects by vm.subjects.collectAsStateWithLifecycle()
     val selectedSubject by vm.selectedSubject.collectAsStateWithLifecycle()
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showArchived by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -115,6 +125,10 @@ fun KnowledgeCardPanelPage() {
                     scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors,
                     actions = {
                         StudySelectionEntryIcon(onClick = { selection.enter() })
+                        IconButton(
+                            onClick = { if (cards.isNotEmpty()) scope.launch { exportTextToFile(context, "知识点导出-${cards.size}", buildKnowledgeCardsBatchMarkdown(cards)) } },
+                            enabled = cards.isNotEmpty(),
+                        ) { Icon(HugeIcons.Download01, "批量导出") }
                         IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                     }) }
         },
@@ -123,8 +137,15 @@ fun KnowledgeCardPanelPage() {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             SubjectTabBar(subjects = subjects, selected = selectedSubject, onSelect = { selection.exit(); vm.select(it) })
+            OutlinedTextField(value = searchQuery, onValueChange = { selection.exit(); vm.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("搜索知识点...") }, leadingIcon = { Icon(HugeIcons.Search01, null) }, singleLine = true)
             if (currentCards.isEmpty()) {
-                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Text("还没有知识点卡片", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp)); Text("在对话中 AI 讲解重要概念后会自动保存", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    if (searchQuery.isNotBlank()) {
+                        Text("没有找到匹配的知识点", style = MaterialTheme.typography.bodyLarge)
+                    } else {
+                        Text("还没有知识点卡片", style = MaterialTheme.typography.bodyLarge); Spacer(Modifier.height(8.dp)); Text("在对话中 AI 讲解重要概念后会自动保存", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             } else {
                 LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     val grouped = currentCards.groupBy { formatDate(it.createdAt) }
@@ -194,14 +215,17 @@ private fun CardDetailDialog(card: KnowledgeCardEntity, tags: List<String>, cool
                     title = card.concept,
                     content = buildKnowledgeCardMarkdown(card),
                     sourceConversationId = card.sourceConversationId,
+                    onDismiss = onDismiss,
                 )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (card.explanation.isNotBlank()) { Text("解释", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(card.explanation) }
-                if (card.memoryAid.isNotBlank()) { Text("助记", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(card.memoryAid, modifier = Modifier.padding(bottom = 0.dp)) }
-                if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (card.explanation.isNotBlank()) { Text("解释", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(card.explanation) }
+                    if (card.memoryAid.isNotBlank()) { Text("助记", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); StudyMarkdownBlock(card.memoryAid, modifier = Modifier.padding(bottom = 0.dp)) }
+                    if (tags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small).padding(horizontal = 6.dp, vertical = 2.dp)) } }
+                }
             }
         },
         confirmButton = {

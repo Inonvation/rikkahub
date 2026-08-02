@@ -442,6 +442,10 @@ private val STUDY_TOOL_CONFIGS = listOf(
     StudyToolConfig("save_note", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
     StudyToolConfig("save_wrong_question", "question", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
     StudyToolConfig("save_knowledge_card", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
+    StudyToolConfig("update_vocabulary", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
+    StudyToolConfig("update_note", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
+    StudyToolConfig("update_wrong_question", "question", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
+    StudyToolConfig("update_knowledge_card", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
 )
 
 private data class StudyItem(
@@ -465,7 +469,7 @@ internal fun StudyItemsList(parts: List<UIMessagePart>) {
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
                     ?: return@mapNotNull null
-                val label = if (config.toolName == "save_wrong_question") {
+                val label = if (config.toolName in listOf("save_wrong_question", "update_wrong_question")) {
                     "${config.labelPrefix}: ${value.take(20)}"
                 } else {
                     "${config.labelPrefix}: $value"

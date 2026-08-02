@@ -101,10 +101,14 @@ import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
+import me.rerere.rikkahub.ui.pages.chat.SubAgentPanelPage
+import me.rerere.rikkahub.ui.pages.chat.SubAgentDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
+import me.rerere.rikkahub.ui.pages.setting.SettingStudyToolsPage
+import me.rerere.rikkahub.ui.pages.recyclebin.RecycleBinPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
@@ -120,6 +124,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
+import me.rerere.rikkahub.ui.pages.study.stats.StudyStatsPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBasesPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseDetailPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseSettingsPage
@@ -421,6 +426,14 @@ class RouteActivity : ComponentActivity() {
                                 SettingPreferencesGeneralPage()
                             }
 
+                            entry<Screen.SettingStudyTools> {
+                                SettingStudyToolsPage()
+                            }
+
+                            entry<Screen.RecycleBin> {
+                                RecycleBinPage()
+                            }
+
                             entry<Screen.SettingPreferencesUI> {
                                 SettingPreferencesUIPage()
                             }
@@ -520,8 +533,20 @@ class RouteActivity : ComponentActivity() {
                                 SearchPage()
                             }
 
+                            entry<Screen.SubAgentPanel> { key ->
+                                SubAgentPanelPage(key.id)
+                            }
+
+                            entry<Screen.SubAgentDetail> { key ->
+                                SubAgentDetailPage(key.id, key.conversationId)
+                            }
+
                             entry<Screen.Stats> {
                                 StatsPage()
+                            }
+
+                            entry<Screen.StudyStats> {
+                                StudyStatsPage()
                             }
 
                             entry<Screen.KnowledgeBases> {
@@ -674,6 +699,15 @@ sealed interface Screen : NavKey {
     data object SettingPreferencesGeneral : Screen
 
     @Serializable
+    data object SettingStudyTools : Screen
+
+    @Serializable
+    data object RecycleBin : Screen
+
+    @Serializable
+    data object StudyStats : Screen
+
+    @Serializable
     data object SettingPreferencesUI : Screen
 
     @Serializable
@@ -741,6 +775,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object MessageSearch : Screen
+
+    @Serializable
+    data class SubAgentPanel(val id: String) : Screen
+
+    @Serializable
+    data class SubAgentDetail(val id: String, val conversationId: String? = null) : Screen
 
     @Serializable
     data object Stats : Screen

@@ -21,6 +21,7 @@ import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
+import me.rerere.rikkahub.ui.pages.recyclebin.RecycleBinVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
@@ -28,6 +29,7 @@ import me.rerere.rikkahub.ui.pages.study.vocabulary.VocabularyPanelVM
 import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelVM
 import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelVM
 import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelVM
+import me.rerere.rikkahub.ui.pages.study.stats.StudyStatsVM
 import me.rerere.rikkahub.data.DocumentProcessor
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -75,6 +77,7 @@ val viewModelModule = module {
     viewModelOf(::SkillsVM)
     viewModelOf(::SkillDetailVM)
     viewModelOf(::WorkspaceVM)
+    viewModelOf(::RecycleBinVM)
     viewModel<WorkspaceDetailVM> {
         WorkspaceDetailVM(
             id = it.get(),
@@ -119,4 +122,5 @@ val viewModelModule = module {
     viewModelOf(::NotesPanelVM)
     viewModelOf(::WrongQuestionPanelVM)
     viewModelOf(::KnowledgeCardPanelVM)
+    viewModelOf(::StudyStatsVM)
 }

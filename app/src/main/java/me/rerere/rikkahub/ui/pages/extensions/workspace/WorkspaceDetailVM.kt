@@ -94,7 +94,26 @@ class WorkspaceDetailVM(
         }
     }
 
+    /** 移入回收站(软删除), 可从统一回收站恢复 */
     fun delete(entry: WorkspaceFileEntry) {
+        viewModelScope.launch {
+            runCatching {
+                repository.trashFile(
+                    id = id,
+                    area = state.value.area,
+                    path = entry.path,
+                    recursive = entry.isDirectory,
+                )
+            }.onSuccess {
+                refresh()
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "移入回收站失败") }
+            }
+        }
+    }
+
+    /** 彻底删除(不经过回收站, 不可恢复) */
+    fun deletePermanently(entry: WorkspaceFileEntry) {
         viewModelScope.launch {
             runCatching {
                 repository.deleteFile(

@@ -67,6 +67,28 @@ val appModule = module {
         )
     }
 
+    // 子代理
+    single {
+        me.rerere.rikkahub.data.ai.subagent.SubAgentToolAssembler(
+            mcpManager = get(),
+            settingsStore = get(),
+            providerManager = get(),
+            knowledgeManager = get(),
+            workspaceRepository = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.ai.subagent.SubAgentRunner(
+            appScope = get(),
+            providerManager = get(),
+            settingsStore = get(),
+            json = get(),
+            toolAssembler = get(),
+            conversationRepo = get(),
+        )
+    }
+
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；
     // createdAtStart 保证进程启动即订阅，否则后台生成的事件会因无订阅者而丢失
     single(createdAtStart = true) {
@@ -98,6 +120,7 @@ val appModule = module {
             knowledgeManager = get(),
             todoStorage = get(),
             studyTools = get(),
+            subAgentRunner = get(),
         )
     }
 

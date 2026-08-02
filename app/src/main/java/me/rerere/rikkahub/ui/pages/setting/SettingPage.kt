@@ -181,6 +181,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingStudyTools) },
+                        leadingContent = { Icon(HugeIcons.Book03, null) },
+                        headlineContent = { Text("学习工具") },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingSpeech) },
                         leadingContent = { Icon(HugeIcons.Megaphone01, null) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },

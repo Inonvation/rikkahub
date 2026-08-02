@@ -21,9 +21,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -32,7 +31,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -40,7 +38,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,7 +51,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,6 +90,7 @@ import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.insertAtCursor
 import me.rerere.rikkahub.utils.onError
 import me.rerere.rikkahub.utils.onSuccess
+import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -107,22 +105,19 @@ fun AssistantPromptPage(id: String) {
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
+            TopAppBar(
                 title = {
                     Text(stringResource(R.string.assistant_page_tab_prompt))
                 },
                 navigationIcon = {
                     BackButton()
                 },
-                scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
         AssistantPromptContent(
@@ -144,15 +139,14 @@ private fun AssistantPromptContent(
     val context = LocalContext.current
     val templateTransformer = koinInject<TemplateTransformer>()
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .padding(innerPadding)
             .imePadding(),
+        contentPadding = innerPadding + PaddingValues(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -270,6 +264,8 @@ private fun AssistantPromptContent(
             }
         }
 
+        }
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -293,6 +289,8 @@ private fun AssistantPromptContent(
             )
         }
 
+        }
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -316,6 +314,8 @@ private fun AssistantPromptContent(
             )
         }
 
+        }
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -427,6 +427,8 @@ private fun AssistantPromptContent(
             }
         }
 
+        }
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -526,6 +528,8 @@ private fun AssistantPromptContent(
             }
         }
 
+        }
+        item {
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
@@ -562,6 +566,7 @@ private fun AssistantPromptContent(
                     Icon(HugeIcons.Add01, null)
                 }
             }
+        }
         }
     }
 }

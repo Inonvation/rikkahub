@@ -185,6 +185,51 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 modelType = ModelType.RERANKING,
             )
         }
+        item {
+            SubAgentSettingItem(settings = settings, vm = vm)
+        }
+    }
+}
+
+/**
+ * 子代理设置区：启用开关 + 子代理默认模型。
+ * 启用后才在母代理注入 spawn_subagent 工具；模型不配置则跟随全局聊天模型。
+ */
+@Composable
+private fun SubAgentSettingItem(settings: Settings, vm: SettingVM) {
+    Column {
+        IosGroup(title = "子代理") {
+            item(
+                headlineContent = {
+                    Text(
+                        text = "启用子代理",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = "启用后母代理可将任务派发给专用子代理执行",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                trailingContent = {
+                    Switch(
+                        checked = settings.enableSubAgent,
+                        onCheckedChange = { vm.updateSettings(settings.copy(enableSubAgent = it)) },
+                    )
+                },
+            )
+        }
+        if (settings.enableSubAgent) {
+            ModelSettingItem(
+                title = "子代理模型",
+                description = "子代理默认模型，未配置时跟随全局聊天模型",
+                modelId = settings.subAgentModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(subAgentModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(subAgentModelId = null)) },
+            )
+        }
     }
 }
 

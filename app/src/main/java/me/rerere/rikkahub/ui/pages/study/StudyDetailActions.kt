@@ -58,6 +58,7 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.data.entity.KnowledgeBaseWithDocumentCount
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.DocumentProcessor
 import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
 import me.rerere.rikkahub.data.db.entity.NoteEntity
@@ -76,6 +77,9 @@ import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.Screen
 import org.koin.compose.koinInject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.uuid.Uuid
 
 /**
@@ -86,6 +90,7 @@ fun StudyDetailActions(
     title: String,
     content: String,
     sourceConversationId: String = "",
+    onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -97,6 +102,10 @@ fun StudyDetailActions(
     val providerManager: ProviderManager = koinInject()
     val ftsManager: KnowledgeChunkFtsManager = koinInject()
     val scope = rememberCoroutineScope()
+    // 预览导航用的 scope 必须存活于弹窗组合之外：点预览先关闭弹窗，弹窗动画结束后
+    // rememberCoroutineScope 随组合销毁被取消，后台构建 HTML 期间导航会被 CancellationException 静默丢弃。
+    // 注入全局 AppScope（进程级生命周期，由 Koin 管理，避免每次实例新建无法回收的 scope）。
+    val appScope: AppScope = koinInject()
     var expanded by remember { mutableStateOf(false) }
     var showBasePicker by remember { mutableStateOf(false) }
     var anchorHeight by remember { mutableIntStateOf(0) }
@@ -144,9 +153,23 @@ fun StudyDetailActions(
                             label = "预览",
                         ) {
                             expanded = false
-                            val html = buildMarkdownPreviewHtml(context, content, colorScheme)
-                            val contentId = WebViewContentCache.store(context.cacheDir, html)
-                            navController.navigate(Screen.WebView(contentId = contentId))
+                            // 先让调用方关闭详情弹窗，弹窗立即消失，避免构建 HTML 期间主线程同步 IO 造成卡顿闪烁
+                            onDismiss()
+                            // HTML 构建 + 缓存写盘放后台线程，完成后回主线程导航。
+                            // 用 appScope（进程级，存活于弹窗组合之外），弹窗关闭后协程不被取消。
+                            appScope.launch {
+                                val contentId = runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        val html = buildMarkdownPreviewHtml(context, content, colorScheme)
+                                        WebViewContentCache.store(context.cacheDir, html)
+                                    }
+                                }.getOrElse { e ->
+                                    e.printStackTrace()
+                                    toaster.show("预览生成失败：${e.message}", type = ToastType.Error)
+                                    return@launch
+                                }
+                                navController.navigate(Screen.WebView(contentId = contentId))
+                            }
                         }
                         StudyMenuActionItem(
                             icon = { Icon(HugeIcons.Download01, null) },
@@ -300,7 +323,7 @@ private suspend fun importToKnowledgeBase(
     }
 }
 
-private suspend fun exportTextToFile(context: Context, title: String, content: String) {
+internal suspend fun exportTextToFile(context: Context, title: String, content: String) {
     val uri: Uri = withContext(Dispatchers.IO) {
         val file = File(context.appTempFolder, "${sanitizeFileName(title)}-${System.currentTimeMillis()}.md")
         file.writeText(content)
@@ -423,3 +446,24 @@ fun buildVocabularyMarkdown(word: VocabularyEntity): String = buildString {
         appendLine("**标签**: ${tags.joinToString(", ")}")
     }
 }
+
+// ---------- 批量导出 ----------
+
+/** 批量导出的文件头：# 标题 + 导出时间 + 共 N 条 */
+internal fun buildExportHeader(title: String, count: Int): String = buildString {
+    appendLine("# $title")
+    appendLine()
+    appendLine("> 导出时间：${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())} · 共 $count 条")
+}
+
+internal fun buildNotesBatchMarkdown(items: List<NoteEntity>): String =
+    items.joinToString("\n\n---\n\n") { buildNoteMarkdown(it) }
+
+internal fun buildWrongQuestionsBatchMarkdown(items: List<WrongQuestionEntity>): String =
+    items.joinToString("\n\n---\n\n") { buildWrongQuestionMarkdown(it) }
+
+internal fun buildKnowledgeCardsBatchMarkdown(items: List<KnowledgeCardEntity>): String =
+    items.joinToString("\n\n---\n\n") { buildKnowledgeCardMarkdown(it) }
+
+internal fun buildVocabularyBatchMarkdown(items: List<VocabularyEntity>): String =
+    items.joinToString("\n\n---\n\n") { buildVocabularyMarkdown(it) }

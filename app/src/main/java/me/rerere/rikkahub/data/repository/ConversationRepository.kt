@@ -321,7 +321,7 @@ class ConversationRepository(
                 conversationToConversationEntity(conversation)
             )
         }
-        filesManager.deleteChatFiles(fullConversation.files)
+        filesManager.deleteChatFilesPermanently(fullConversation.files)
         todoStorage.delete(conversation.id.toString())
     }
 

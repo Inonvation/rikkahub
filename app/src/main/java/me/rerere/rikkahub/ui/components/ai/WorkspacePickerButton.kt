@@ -109,6 +109,10 @@ fun WorkspacePickerButton(
                 navController.navigate(Screen.Workspaces)
             },
             onDismiss = { showSheet = false },
+            onSettings = { workspaceId ->
+                showSheet = false
+                navController.navigate(Screen.WorkspaceDetail(workspaceId))
+            },
         )
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,12 +90,23 @@ fun DrawerScaffold(
     var dragTotalDelta by remember { mutableFloatStateOf(0f) }
     var dragBaseState by remember { mutableStateOf(DrawerState.Closed) }
     var dragDirection by remember { mutableFloatStateOf(0f) }
+    // 侧栏刚被打开后的"保护期"：期间忽略卡片点击关闭。
+    // 打开侧栏会收起键盘（见下方 hide），键盘收起伴随窗口 resize，
+    // 内容卡片的位置/布局随之变化，clickable 可能把这次布局变化误判成一次点击，
+    // 立即把刚展开的侧栏关掉（表现为"输入法收回、侧栏又折叠回去"）。
+    // 用手势打开（settle 落定非 0）时记录时间戳，400ms 内点击一律忽略。
+    // 初始 0 作哨兵：elapsedRealtime 恒为正，0 表示"从未手势打开过"，保护不生效。
+    var drawerOpenedAt by remember { mutableLongStateOf(0L) }
 
     // 布尔状态 → 目标进度（非拖动时由动画驱动）
     val target = when {
         leftDrawerOpen -> 1f
         rightDrawerOpen -> -1f
         else -> 0f
+    }
+    // 互斥兜底：两个抽屉同时为 true 时左优先，关闭右侧（内部归一，替代调用方的互斥 LaunchedEffect）
+    LaunchedEffect(leftDrawerOpen, rightDrawerOpen) {
+        if (leftDrawerOpen && rightDrawerOpen) onRightDrawerOpenChange(false)
     }
     LaunchedEffect(leftDrawerOpen, rightDrawerOpen) {
         if (!isDragging) {
@@ -133,9 +145,11 @@ fun DrawerScaffold(
     fun beginDrag() {
         isDragging = true
         settleJob?.cancel()
+        // 用当前 progress 判定基准状态，避免展开动画进行中（布尔已 true 但 progress 未到 1）
+        // 被误判为 Closed，从而在动画中段反向滑就能直接开另一侧
         dragBaseState = when {
-            leftDrawerOpen -> DrawerState.LeftOpen
-            rightDrawerOpen -> DrawerState.RightOpen
+            progress.value > 0f -> DrawerState.LeftOpen
+            progress.value < 0f -> DrawerState.RightOpen
             else -> DrawerState.Closed
         }
         dragBaseProgress = progress.value
@@ -147,6 +161,7 @@ fun DrawerScaffold(
         val newProgress = when (dragBaseState) {
             DrawerState.LeftOpen -> (dragBaseProgress + dragTotalDelta / dragScale).coerceIn(0f, 1f)
             DrawerState.RightOpen -> (dragBaseProgress + dragTotalDelta / dragScale).coerceIn(-1f, 0f)
+            // Closed 下 dragBaseProgress 恒为 0，位移直接驱动进度；方向锁定后范围受限，不会误开另一侧
             DrawerState.Closed -> when {
                 dragDirection > 0f -> (dragTotalDelta / dragScale).coerceIn(0f, 1f)
                 dragDirection < 0f -> (dragTotalDelta / dragScale).coerceIn(-1f, 0f)
@@ -160,6 +175,7 @@ fun DrawerScaffold(
         isDragging = false
         val settledTarget = decideSettleTarget(
             baseState = dragBaseState,
+            dragDirection = dragDirection,
             netDelta = dragTotalDelta,
             velocity = velocity,
             threshold = dragThreshold,
@@ -169,6 +185,10 @@ fun DrawerScaffold(
             progress.animateTo(settledTarget, tween(300, easing = FastOutSlowInEasing))
             onLeftDrawerOpenChange(settledTarget > 0f)
             onRightDrawerOpenChange(settledTarget < 0f)
+            if (settledTarget != 0f) {
+                // 记录"刚由手势打开的侧栏"，供内容卡片点击保护使用
+                drawerOpenedAt = android.os.SystemClock.elapsedRealtime()
+            }
             haptic.perform(
                 if (settledTarget != 0f) HapticFeedbackType.GestureThresholdActivate
                 else HapticFeedbackType.GestureEnd
@@ -264,9 +284,15 @@ fun DrawerScaffold(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {
-                    // 抽屉开着时点卡片空白处关闭；兜底消费触控阻止穿透
-                    if (leftDrawerOpen) onLeftDrawerOpenChange(false)
-                    else if (rightDrawerOpen) onRightDrawerOpenChange(false)
+                    // 抽屉开着时点卡片空白处关闭；兜底消费触控阻止穿透。
+                    // 保护期（打开后 400ms 内）忽略点击：手势打开侧栏伴随键盘收起 + resize，
+                    // 该阶段的 clickable 点击多是"布局变化被误判为点击"，放行会把刚展开的侧栏又关掉。
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val insideProtection = drawerOpenedAt != 0L && now - drawerOpenedAt < 400L
+                    if (!insideProtection) {
+                        if (leftDrawerOpen) onLeftDrawerOpenChange(false)
+                        else if (rightDrawerOpen) onRightDrawerOpenChange(false)
+                    }
                 },
             shape = RoundedCornerShape(cardCornerRadius),
             shadowElevation = cardElevation,
@@ -280,14 +306,21 @@ fun DrawerScaffold(
 }
 
 /**
- * 方向驱动松手判定：
- * - 位移超小阈值，或快速甩动（|velocity| > 800），即视为有方向信号。
- * - LeftOpen 左滑 → 关闭；RightOpen 右滑 → 关闭。
- * - Closed 右滑 → 开左，左滑 → 开右。
- * - 无方向信号 → 回弹到起始状态。
+ * 方向驱动松手判定。
+ *
+ * 以手势开始时的 [baseState] + 手势锁定方向 [dragDirection] 为基准，确定可落区间：
+ * - baseState=LeftOpen（左栏已开或展开中，progress≥0）：
+ *   - 手势方向为右（dragDirection>0，继续拉大展开）→ 只有「保持开(1) / 关闭(0)」，永不落负值
+ *   - 手势方向为左（dragDirection<0，反向拉回）→ 只关闭（0），回不到 1，也绝不跨到右栏
+ * - baseState=RightOpen 同理对称。
+ * - baseState=Closed（手势开始时全关）：右滑开左(1)、左滑开右(-1)、无方向回 0。
+ *
+ * 关闭判定只看方向信号（位移超阈值或快速甩动）。关键：**任何一次手势都绝不产生对侧结果**，
+ * 即使手势中途反向或展开动画进行中被打断，也不会出现"左开动画中右滑打开右栏"。
  */
 private fun decideSettleTarget(
     baseState: DrawerState,
+    dragDirection: Float,
     netDelta: Float,
     velocity: Float,
     threshold: Float,
@@ -295,8 +328,16 @@ private fun decideSettleTarget(
     val intendLeft = netDelta < -threshold || (abs(netDelta) <= threshold && velocity < -800f)
     val intendRight = netDelta > threshold || (abs(netDelta) <= threshold && velocity > 800f)
     return when (baseState) {
-        DrawerState.LeftOpen -> if (intendLeft) 0f else 1f
-        DrawerState.RightOpen -> if (intendRight) 0f else -1f
+        DrawerState.LeftOpen -> when {
+            dragDirection < 0f -> 0f // 反向拉回：关闭当前栏，不跨栏
+            intendLeft -> 0f        // 左滑：关闭
+            else -> 1f              // 右滑或未超阈值：保持展开
+        }
+        DrawerState.RightOpen -> when {
+            dragDirection > 0f -> 0f // 反向拉回：关闭当前栏，不跨栏
+            intendRight -> 0f        // 右滑：关闭
+            else -> -1f              // 左滑或未超阈值：保持展开
+        }
         DrawerState.Closed -> when {
             intendRight && !intendLeft -> 1f
             intendLeft && !intendRight -> -1f

@@ -6,8 +6,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeLevel
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeDepth
 import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeScene
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeTone
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.UiState
 
@@ -19,12 +20,18 @@ class PromptOptimizeVM(
 
     private var currentJob: Job? = null
 
-    internal fun optimize(scene: PromptOptimizeScene, level: PromptOptimizeLevel, inputText: String) {
+    internal fun optimize(
+        scene: PromptOptimizeScene,
+        tone: PromptOptimizeTone,
+        depth: PromptOptimizeDepth,
+        inputText: String,
+        extraNote: String = "",
+    ) {
         if (inputText.isBlank()) return
         currentJob?.cancel()
         _uiState.value = UiState.Loading
         currentJob = viewModelScope.launch {
-            chatService.optimizePrompt(text = inputText, scene = scene, level = level)
+            chatService.optimizePrompt(text = inputText, scene = scene, tone = tone, depth = depth, extraNote = extraNote)
                 .onSuccess { _uiState.value = UiState.Success(it) }
                 .onFailure { e ->
                     e.printStackTrace()

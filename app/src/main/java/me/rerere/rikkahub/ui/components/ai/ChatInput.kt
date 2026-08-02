@@ -23,13 +23,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -40,7 +38,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -79,6 +76,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.HazeState
@@ -96,6 +94,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
+import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.MagicWand01
@@ -147,6 +146,11 @@ fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
+    /** 当前会话是否有活跃子代理任务（运行中显示输入框左侧的子代理图标替代快捷消息按钮） */
+    subAgentActive: Boolean = false,
+    /** 活跃子代理任务数（用于图标右上角数量角标，并行多个子代理时显示） */
+    subAgentActiveCount: Int = 0,
+    onOpenSubAgentPanel: (() -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -156,16 +160,9 @@ fun ChatInput(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
-    // 键盘弹出时让底部两角变直角，贴合 IME
-    val imeVisible = WindowInsets.isImeVisible
-    val containerShape = if (imeVisible) {
-        MaterialTheme.shapes.largeIncreased.copy(
-            bottomStart = CornerSize(0.dp),
-            bottomEnd = CornerSize(0.dp),
-        )
-    } else {
-        MaterialTheme.shapes.largeIncreased
-    }
+    // 输入框整体始终是圆角矩形，不随键盘状态改变形状；
+    // 用 imePadding 平滑跟随键盘升降（insets 逐帧变化），底部保留 8dp 间距，
+    // 避免"贴合键盘变直角 + 收起时突变跳一下"。
 
     fun sendMessage() {
         focusManager.clearFocus(force = true)
@@ -220,13 +217,13 @@ fun ChatInput(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp)
-                .padding(bottom = if (imeVisible) 0.dp else 8.dp),
+                .padding(bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(containerShape)
+                    .clip(MaterialTheme.shapes.largeIncreased)
                     .then(
                         if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
                             state = hazeState
@@ -237,7 +234,7 @@ fun ChatInput(
                         }
                         else Modifier
                     ),
-                shape = containerShape,
+                shape = MaterialTheme.shapes.largeIncreased,
                 tonalElevation = 0.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
@@ -253,7 +250,10 @@ fun ChatInput(
                     TextInputRow(
                         state = state,
                         completionProviders = completionProviders,
-                        onSendMessage = { sendMessage() }
+                        onSendMessage = { sendMessage() },
+                        subAgentActive = subAgentActive,
+                        subAgentActiveCount = subAgentActiveCount,
+                        onOpenSubAgentPanel = onOpenSubAgentPanel,
                     )
 
                     Row(
@@ -506,6 +506,9 @@ private fun TextInputRow(
     state: ChatInputState,
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
+    subAgentActive: Boolean = false,
+    subAgentActiveCount: Int = 0,
+    onOpenSubAgentPanel: (() -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val hapticController = rememberHaptic()
@@ -670,11 +673,18 @@ private fun TextInputRow(
                     }
                 }
             },
-            leadingIcon = if (quickMessages.isNotEmpty()) {
-                {
-                    QuickMessageButton(quickMessages = quickMessages, state = state)
+            leadingIcon = when {
+                // 子代理任务运行时：输入框左侧显示子代理图标（替代快捷消息按钮），点击进面板
+                subAgentActive && onOpenSubAgentPanel != null -> {
+                    { SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount) }
                 }
-            } else null,
+
+                quickMessages.isNotEmpty() -> {
+                    { QuickMessageButton(quickMessages = quickMessages, state = state) }
+                }
+
+                else -> null
+            },
         )
         if (isFullScreen) {
             FullScreenEditor(state = state) {
@@ -763,6 +773,40 @@ private fun ChatInputState.applyCompletion(
     textContent.edit {
         replace(start, end, item.insertText)
         selection = TextRange(start + item.insertText.length)
+    }
+}
+
+@Composable
+private fun SubAgentActiveButton(onClick: () -> Unit, count: Int) {
+    val hapticController = rememberHaptic()
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(HugeIcons.Bot, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+        // 并行多个子代理时：右上角数量角标
+        if (count > 1) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp),
+                )
+            }
+        }
     }
 }
 

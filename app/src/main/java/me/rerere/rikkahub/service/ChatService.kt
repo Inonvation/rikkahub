@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
@@ -41,7 +43,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MULTIQUERY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_QUERY_REWRITE_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeLevel
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeDepth
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeTone
 import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeScene
 import me.rerere.rikkahub.data.ai.prompts.promptOptimizeSystemPrompt
 import me.rerere.rikkahub.data.ai.prompts.toDisplayText
@@ -59,9 +62,13 @@ import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
+import me.rerere.rikkahub.data.ai.tools.createSubAgentTools
+import me.rerere.rikkahub.data.ai.tools.isSubAgentPlaceholder
+import me.rerere.rikkahub.data.ai.tools.subAgentResultPayload
 import me.rerere.rikkahub.data.ai.tools.createTodoTool
 import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
+import me.rerere.rikkahub.data.ai.tools.StudyToolPermissions
 import me.rerere.rikkahub.data.ai.tools.StudyTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
@@ -85,6 +92,8 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.promptOptimizePromptForScene
+import me.rerere.rikkahub.data.datastore.promptOptimizeThinkingBudgetForScene
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
@@ -159,6 +168,7 @@ class ChatService(
     private val knowledgeManager: KnowledgeManager,
     private val todoStorage: TodoStorage,
     private val studyTools: StudyTools,
+    private val subAgentRunner: me.rerere.rikkahub.data.ai.subagent.SubAgentRunner,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -213,6 +223,44 @@ class ChatService(
     fun cleanup() = runCatching {
         sessions.values.forEach { it.cleanup() }
         sessions.clear()
+    }
+
+    // ---- 子代理占位回填 ----
+
+    /**
+     * 生成结束后，把仍处于占位（dispatched/queued）的 spawn_subagent Tool.output 回写成终态 JSON 落库。
+     * 幂等：占位被回写成终态后 isSubAgentPlaceholder=false，重复调用跳过。
+     * 为什么在生成后而非工具内：Conversation.updateCurrentMessages 会在每次 chunk 到达时用内存态
+     * 覆盖会话，工具内直接写 repo 会被覆盖丢失。生成结束是唯一稳定时机。
+     */
+    private suspend fun backfillSubAgentPlaceholders(conversationId: Uuid) {
+        val conversation = getConversationFlow(conversationId).value
+        var changed = false
+        val updatedNodes = conversation.messageNodes.map { node ->
+            node.copy(
+                messages = node.messages.map { msg ->
+                    msg.copy(
+                        parts = msg.parts.map { part ->
+                            if (part is UIMessagePart.Tool && part.toolName == "spawn_subagent") {
+                                // taskId == spawn 的 toolCallId（__toolCallId 注入对齐）
+                                val task = subAgentRunner.getTask(part.toolCallId)
+                                if (task != null && task.status.isTerminal && isSubAgentPlaceholder(part.output)) {
+                                    changed = true
+                                    part.copy(
+                                        output = listOf(
+                                            UIMessagePart.Text(subAgentResultPayload(task).toString())
+                                        )
+                                    )
+                                } else part
+                            } else part
+                        }
+                    )
+                }
+            )
+        }
+        if (changed) {
+            saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
+        }
     }
 
     // ---- Session 管理 ----
@@ -562,12 +610,16 @@ class ChatService(
                     if (assistant.enableTodoList) {
                         add(createTodoTool(conversation.id.toString(), todoStorage))
                     }
+                    if (settings.enableSubAgent) {
+                        addAll(createSubAgentTools(subAgentRunner, conversation.id))
+                    }
                     if (assistant.enabledStudyTools.isNotEmpty()) {
                         addAll(studyTools.getTools(
                             enabledTools = assistant.enabledStudyTools,
                             conversationId = conversation.id.toString(),
                             assistantId = assistant.id.toString(),
                             studySubject = assistant.studySubject,
+                            permissions = StudyToolPermissions.fromSettings(settings),
                         ))
                     }
                     if (assistant.enableWebSearch) {
@@ -681,6 +733,9 @@ class ChatService(
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value
             saveConversation(conversationId, finalConversation)
+
+            // 子代理：生成结束后把 spawn 占位回写成终态 JSON 落库（幂等）
+            backfillSubAgentPlaceholders(conversationId)
 
             launchWithConversationReference(conversationId) {
                 generateTitle(conversationId, finalConversation)
@@ -1041,14 +1096,16 @@ class ChatService(
     // ---- 提示词优化 ----
 
     /**
-     * 优化一段输入文字：先用场景×程度的系统提示词重写，返回优化结果。
+     * 优化一段输入文字：先用 场景×语气 的系统提示词重写，返回优化结果。
      * 未配置提示词优化模型时回退到全局默认聊天模型（settings.chatModelId）。
      * 注意：失败不进入会话错误气泡（addError），由调用方在弹窗层提示。
      */
     internal suspend fun optimizePrompt(
         text: String,
         scene: PromptOptimizeScene,
-        level: PromptOptimizeLevel,
+        tone: PromptOptimizeTone,
+        depth: PromptOptimizeDepth,
+        extraNote: String = "",
     ): Result<String> = runCatching {
         val settings = settingsStore.settingsFlow.first()
         val model = settings.findModelById(settings.promptOptimizeModelId, fallback = settings.chatModelId)
@@ -1056,21 +1113,29 @@ class ChatService(
         val provider = model.findProvider(settings.providers)
             ?: throw IllegalStateException("No provider available for prompt optimization")
         val providerHandler = providerManager.getProviderByType(provider)
-        val systemPrompt = settings.promptOptimizePrompt?.let { custom ->
-            // 自定义模板：填入场景/程度/内容占位符
+        // 自定义模板：优先取按场景存储的，fallback 到旧版全局模板；填入场景/语气/深度/内容占位符
+        val systemPrompt = settings.promptOptimizePromptForScene(scene)?.let { custom ->
             custom.applyPlaceholders(
                 "scene" to scene.toDisplayText(),
-                "level" to level.toDisplayText(),
+                "tone" to tone.toDisplayText(),
+                "depth" to depth.toDisplayText(),
                 "content" to text,
+                // 兼容旧版模板里的 {level} 占位符（旧模板用 level 表示程度/语气）
+                "level" to tone.toDisplayText(),
             )
-        } ?: promptOptimizeSystemPrompt(scene, level)
+        } ?: promptOptimizeSystemPrompt(scene, tone, depth)
+        // 附加说明作为额外要求拼进 user 消息，不参与 {content} 占位符本体
+        val userContent = if (extraNote.isNotBlank()) "$text\n\n【额外要求】$extraNote" else text
         val result = providerHandler.generateText(
             providerSetting = provider,
             messages = listOf(
                 UIMessage.system(systemPrompt),
-                UIMessage.user(text),
+                UIMessage.user(userContent),
             ),
-            params = backgroundTextGenerationParams(model),
+            params = backgroundTextGenerationParams(
+                model,
+                reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.promptOptimizeThinkingBudgetForScene(scene)),
+            ),
         )
         result.choices[0].message?.toText()?.trim().orEmpty()
     }

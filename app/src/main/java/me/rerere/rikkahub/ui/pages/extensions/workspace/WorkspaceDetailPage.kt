@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Bash
+import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.File02
@@ -97,6 +98,7 @@ fun WorkspaceDetailPage(id: String) {
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
+    var deletePermanentTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var showInstallDialog by remember { mutableStateOf(false) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -123,7 +125,7 @@ fun WorkspaceDetailPage(id: String) {
         vm.exportFile(entry, outputStream)
     }
 
-    BackHandler(enabled = pagerState.currentPage == 1 && state.path.isNotBlank()) {
+    BackHandler(enabled = pagerState.currentPage == 0 && state.path.isNotBlank()) {
         vm.goUp()
     }
 
@@ -139,7 +141,7 @@ fun WorkspaceDetailPage(id: String) {
                 },
                 navigationIcon = { BackButton() },
                 actions = {
-                    if (pagerState.currentPage == 1) {
+                    if (pagerState.currentPage == 0) {
                         IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) {
                             Icon(
                                 HugeIcons.FileImport,
@@ -163,14 +165,14 @@ fun WorkspaceDetailPage(id: String) {
             NavigationBar {
                 NavigationBarItem(
                     selected = pagerState.currentPage == 0,
-                    label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
-                    icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
+                    label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
+                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
                     onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                 )
                 NavigationBarItem(
                     selected = pagerState.currentPage == 1,
-                    label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
-                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                    label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
+                    icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 )
             }
@@ -184,14 +186,7 @@ fun WorkspaceDetailPage(id: String) {
                 .fillMaxSize(),
         ) { page ->
             when (page) {
-                0 -> WorkspaceBasicPage(
-                    workspace = state.workspace,
-                    installProgress = installProgress,
-                    onInstallRootfs = { showInstallDialog = true },
-                    onToolApprovalChange = vm::setToolApproval,
-                )
-
-                1 -> WorkspaceFilesPage(
+                0 -> WorkspaceFilesPage(
                     state = state,
                     contentPadding = PaddingValues(),
                     onSelectArea = vm::selectArea,
@@ -232,6 +227,7 @@ fun WorkspaceDetailPage(id: String) {
                         }
                     },
                     onDelete = { deleteTarget = it },
+                    onDeletePermanently = { deletePermanentTarget = it },
                     onExport = { entry ->
                         exportTarget = entry
                         exportLauncher.launch(entry.name)
@@ -251,6 +247,13 @@ fun WorkspaceDetailPage(id: String) {
                             context.startActivity(Intent.createChooser(intent, null))
                         }
                     },
+                )
+
+                1 -> WorkspaceBasicPage(
+                    workspace = state.workspace,
+                    installProgress = installProgress,
+                    onInstallRootfs = { showInstallDialog = true },
+                    onToolApprovalChange = vm::setToolApproval,
                 )
             }
         }
@@ -293,7 +296,7 @@ fun WorkspaceDetailPage(id: String) {
         RikkaConfirmDialog(
             show = true,
             title = if (entry.isDirectory) stringResource(R.string.workspace_detail_delete_directory) else stringResource(R.string.workspace_detail_delete_file),
-            confirmText = stringResource(R.string.common_delete),
+            confirmText = "移入回收站",
             dismissText = stringResource(R.string.common_cancel),
             onConfirm = {
                 vm.delete(entry)
@@ -301,7 +304,23 @@ fun WorkspaceDetailPage(id: String) {
             },
             onDismiss = { deleteTarget = null },
         ) {
-            Text(stringResource(R.string.workspace_detail_will_delete, entry.path))
+            Text("将移入回收站，可在回收站中恢复。")
+        }
+    }
+
+    deletePermanentTarget?.let { entry ->
+        RikkaConfirmDialog(
+            show = true,
+            title = "彻底删除",
+            confirmText = stringResource(R.string.common_delete),
+            dismissText = stringResource(R.string.common_cancel),
+            onConfirm = {
+                vm.deletePermanently(entry)
+                deletePermanentTarget = null
+            },
+            onDismiss = { deletePermanentTarget = null },
+        ) {
+            Text("彻底删除后无法恢复，确定删除 ${entry.path} 吗？")
         }
     }
 }
@@ -585,6 +604,7 @@ private fun WorkspaceFilesPage(
     onGoUp: () -> Unit,
     onOpen: (WorkspaceFileEntry) -> Unit,
     onDelete: (WorkspaceFileEntry) -> Unit,
+    onDeletePermanently: (WorkspaceFileEntry) -> Unit,
     onExport: (WorkspaceFileEntry) -> Unit,
     onShare: (WorkspaceFileEntry) -> Unit,
 ) {
@@ -625,6 +645,7 @@ private fun WorkspaceFilesPage(
                 entry = entry,
                 onOpen = { onOpen(entry) },
                 onDelete = { onDelete(entry) },
+                onDeletePermanently = { onDeletePermanently(entry) },
                 onExport = { onExport(entry) },
                 onShare = { onShare(entry) },
             )
@@ -687,6 +708,7 @@ private fun WorkspaceFileCard(
     entry: WorkspaceFileEntry,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    onDeletePermanently: () -> Unit,
     onExport: () -> Unit,
     onShare: () -> Unit,
 ) {
@@ -771,7 +793,7 @@ private fun WorkspaceFileCard(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error) },
+                        text = { Text("移入回收站", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(
                                 imageVector = HugeIcons.Delete01,
@@ -782,6 +804,20 @@ private fun WorkspaceFileCard(
                         onClick = {
                             menuExpanded = false
                             onDelete()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("彻底删除", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onDeletePermanently()
                         },
                     )
                 }

@@ -26,6 +26,8 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeDepth
+import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeScene
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
@@ -110,6 +112,10 @@ class SettingsStore(
         val RERANK_MODEL = stringPreferencesKey("rerank_model")
         val PROMPT_OPTIMIZE_MODEL = stringPreferencesKey("prompt_optimize_model")
         val PROMPT_OPTIMIZE_PROMPT = stringPreferencesKey("prompt_optimize_prompt")
+        val PROMPT_OPTIMIZE_PROMPTS_BY_SCENE = stringPreferencesKey("prompt_optimize_prompts_by_scene")
+        val PROMPT_OPTIMIZE_THINKING_BUDGET = intPreferencesKey("prompt_optimize_thinking_budget")
+        val PROMPT_OPTIMIZE_THINKING_BUDGET_BY_SCENE = stringPreferencesKey("prompt_optimize_thinking_budget_by_scene")
+        val PROMPT_OPTIMIZE_DEPTH_BY_SCENE = stringPreferencesKey("prompt_optimize_depth_by_scene")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -123,6 +129,7 @@ class SettingsStore(
         val SEARCH_SERVICES = stringPreferencesKey("search_services")
         val SEARCH_COMMON = stringPreferencesKey("search_common")
         val SEARCH_SELECTED = intPreferencesKey("search_selected")
+        val SEARCH_ENABLED_SERVICES = stringPreferencesKey("search_enabled_services")
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
@@ -168,6 +175,17 @@ class SettingsStore(
 
         // 知识库文档预处理
         val PDF_OCR_ENABLED = booleanPreferencesKey("pdf_ocr_enabled")
+
+        // 学习工具
+        val STUDY_EDIT_ENABLED = booleanPreferencesKey("study_edit_enabled")
+        val STUDY_DELETE_ENABLED = booleanPreferencesKey("study_delete_enabled")
+        val STUDY_DELETE_APPROVAL_ENABLED = booleanPreferencesKey("study_delete_approval_enabled")
+        val STUDY_STATS_ENABLED = booleanPreferencesKey("study_stats_enabled")
+        val STUDY_TOOL_APPROVAL_OVERRIDES = stringPreferencesKey("study_tool_approval_overrides")
+
+        // 子代理
+        val SUB_AGENT_ENABLED = booleanPreferencesKey("enable_sub_agent")
+        val SUB_AGENT_MODEL = stringPreferencesKey("sub_agent_model")
     }
 
     private val dataStore = context.settingsStore
@@ -206,6 +224,16 @@ class SettingsStore(
                 rerankModelId = preferences[RERANK_MODEL]?.let { Uuid.parse(it) },
                 promptOptimizeModelId = preferences[PROMPT_OPTIMIZE_MODEL]?.let { Uuid.parse(it) },
                 promptOptimizePrompt = preferences[PROMPT_OPTIMIZE_PROMPT],
+                promptOptimizePromptsByScene = preferences[PROMPT_OPTIMIZE_PROMPTS_BY_SCENE]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyMap(),
+                promptOptimizeThinkingBudget = preferences[PROMPT_OPTIMIZE_THINKING_BUDGET] ?: 0,
+                promptOptimizeThinkingBudgetByScene = preferences[PROMPT_OPTIMIZE_THINKING_BUDGET_BY_SCENE]?.let {
+                    JsonInstant.decodeFromString<Map<String, Int>>(it)
+                } ?: emptyMap(),
+                promptOptimizeDepthByScene = preferences[PROMPT_OPTIMIZE_DEPTH_BY_SCENE]?.let {
+                    JsonInstant.decodeFromString<Map<String, String>>(it)
+                } ?: emptyMap(),
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -227,6 +255,9 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: SearchCommonOptions(),
                 searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
+                enabledSearchServiceIds = preferences[SEARCH_ENABLED_SERVICES]?.let {
+                    JsonInstant.decodeFromString<List<kotlin.uuid.Uuid>>(it)
+                } ?: emptyList(),
                 mcpServers = preferences[MCP_SERVERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -269,6 +300,15 @@ class SettingsStore(
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
                 pdfOcrEnabled = preferences[PDF_OCR_ENABLED] == true,
+                studyEditEnabled = preferences[STUDY_EDIT_ENABLED] != false,
+                studyDeleteEnabled = preferences[STUDY_DELETE_ENABLED] == true,
+                studyDeleteApprovalEnabled = preferences[STUDY_DELETE_APPROVAL_ENABLED] != false,
+                studyStatsEnabled = preferences[STUDY_STATS_ENABLED] != false,
+                studyToolApprovalOverrides = preferences[STUDY_TOOL_APPROVAL_OVERRIDES]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptyMap(),
+                enableSubAgent = preferences[SUB_AGENT_ENABLED] == true,
+                subAgentModelId = preferences[SUB_AGENT_MODEL]?.let { Uuid.parse(it) },
             )
         }
         .map {
@@ -360,6 +400,12 @@ class SettingsStore(
                 modeInjections = settings.modeInjections.distinctBy { it.id },
                 lorebooks = settings.lorebooks.distinctBy { it.id },
                 quickMessages = settings.quickMessages.distinctBy { it.id },
+                enabledSearchServiceIds = settings.enabledSearchServiceIds
+                    .filter { id -> settings.searchServices.any { it.id == id } }
+                    .takeIf { it.isNotEmpty() }
+                    ?: settings.searchServices.getOrNull(settings.searchServiceSelected)?.let { listOf(it.id) }
+                    ?: settings.searchServices.firstOrNull()?.let { listOf(it.id) }
+                    ?: emptyList(),
             )
         }
         .onEach {
@@ -410,6 +456,10 @@ class SettingsStore(
                 ?: preferences.remove(PROMPT_OPTIMIZE_MODEL)
             settings.promptOptimizePrompt?.let { preferences[PROMPT_OPTIMIZE_PROMPT] = it }
                 ?: preferences.remove(PROMPT_OPTIMIZE_PROMPT)
+            preferences[PROMPT_OPTIMIZE_PROMPTS_BY_SCENE] = JsonInstant.encodeToString(settings.promptOptimizePromptsByScene)
+            preferences[PROMPT_OPTIMIZE_THINKING_BUDGET] = settings.promptOptimizeThinkingBudget
+            preferences[PROMPT_OPTIMIZE_THINKING_BUDGET_BY_SCENE] = JsonInstant.encodeToString(settings.promptOptimizeThinkingBudgetByScene)
+            preferences[PROMPT_OPTIMIZE_DEPTH_BY_SCENE] = JsonInstant.encodeToString(settings.promptOptimizeDepthByScene)
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -420,6 +470,12 @@ class SettingsStore(
             preferences[SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
             preferences[SEARCH_COMMON] = JsonInstant.encodeToString(settings.searchCommonOptions)
             preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, settings.searchServices.size - 1)
+            preferences[SEARCH_ENABLED_SERVICES] = JsonInstant.encodeToString(
+                settings.enabledSearchServiceIds.ifEmpty {
+                    settings.searchServices.getOrNull(settings.searchServiceSelected)?.let { listOf(it.id) }
+                        ?: settings.searchServices.firstOrNull()?.let { listOf(it.id) } ?: emptyList()
+                }
+            )
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
@@ -446,6 +502,15 @@ class SettingsStore(
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
             preferences[PDF_OCR_ENABLED] = settings.pdfOcrEnabled
+            preferences[STUDY_EDIT_ENABLED] = settings.studyEditEnabled
+            preferences[STUDY_DELETE_ENABLED] = settings.studyDeleteEnabled
+            preferences[STUDY_DELETE_APPROVAL_ENABLED] = settings.studyDeleteApprovalEnabled
+            preferences[STUDY_STATS_ENABLED] = settings.studyStatsEnabled
+            preferences[STUDY_TOOL_APPROVAL_OVERRIDES] = JsonInstant.encodeToString(settings.studyToolApprovalOverrides)
+            preferences[SUB_AGENT_ENABLED] = settings.enableSubAgent
+            settings.subAgentModelId?.let {
+                preferences[SUB_AGENT_MODEL] = it.toString()
+            } ?: preferences.remove(SUB_AGENT_MODEL)
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -583,6 +648,10 @@ data class Settings(
     val rerankModelId: Uuid? = null,
     val promptOptimizeModelId: Uuid? = null,
     val promptOptimizePrompt: String? = null,
+    val promptOptimizePromptsByScene: Map<String, String> = emptyMap(),
+    val promptOptimizeThinkingBudget: Int = 0,
+    val promptOptimizeThinkingBudgetByScene: Map<String, Int> = emptyMap(),
+    val promptOptimizeDepthByScene: Map<String, String> = emptyMap(),
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
@@ -590,6 +659,7 @@ data class Settings(
     val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
+    val enabledSearchServiceIds: List<kotlin.uuid.Uuid> = emptyList(),
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
@@ -611,6 +681,13 @@ data class Settings(
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
     val pdfOcrEnabled: Boolean = false,
+    val studyEditEnabled: Boolean = true,
+    val studyDeleteEnabled: Boolean = false,
+    val studyDeleteApprovalEnabled: Boolean = true,
+    val studyStatsEnabled: Boolean = true,
+    val studyToolApprovalOverrides: Map<String, Boolean> = emptyMap(),
+    val enableSubAgent: Boolean = false,
+    val subAgentModelId: Uuid? = null,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储
@@ -699,6 +776,52 @@ data class BackupReminderConfig(
     val intervalDays: Int = 7,
     val lastBackupTime: Long = 0L,
 )
+
+/** 读取某场景的自定义优化模板：优先取按场景存储的，fallback 到旧版全局模板 */
+internal fun Settings.promptOptimizePromptForScene(scene: PromptOptimizeScene): String? =
+    promptOptimizePromptsByScene[scene.code] ?: promptOptimizePrompt
+
+/** 某场景的思考预算（token）：按场景存储优先，fallback 到旧版全局字段 */
+internal fun Settings.promptOptimizeThinkingBudgetForScene(scene: PromptOptimizeScene): Int =
+    promptOptimizeThinkingBudgetByScene[scene.code] ?: promptOptimizeThinkingBudget
+
+/** 设置某场景的思考预算；仅当与全局值相同时清空该场景条目（回退全局）。
+ *  注意：AUTO=-1 / OFF=0 是合法取值，不能因为 budget<=0 就清空，否则选 AUTO/OFF 会被静默回退成全局值。 */
+internal fun Settings.withPromptOptimizeThinkingBudget(scene: PromptOptimizeScene, budget: Int): Settings {
+    val newMap = if (budget == promptOptimizeThinkingBudget) {
+        promptOptimizeThinkingBudgetByScene - scene.code
+    } else {
+        promptOptimizeThinkingBudgetByScene + (scene.code to budget)
+    }
+    return copy(promptOptimizeThinkingBudgetByScene = newMap)
+}
+
+/** 保存某场景的自定义优化模板；空串/空白表示清除该场景自定义，回退内置提示词 */
+internal fun Settings.withPromptOptimizePrompt(scene: PromptOptimizeScene, prompt: String): Settings {
+    val trimmed = prompt.trim()
+    val newMap = if (trimmed.isBlank()) {
+        promptOptimizePromptsByScene - scene.code
+    } else {
+        promptOptimizePromptsByScene + (scene.code to trimmed)
+    }
+    return copy(promptOptimizePromptsByScene = newMap)
+}
+
+/** 某场景的优化深度（精简/中等/详细）；未按场景配置时回退默认【精简】 */
+internal fun Settings.promptOptimizeDepthForScene(scene: PromptOptimizeScene): PromptOptimizeDepth {
+    val code = promptOptimizeDepthByScene[scene.code]
+    return PromptOptimizeDepth.entries.firstOrNull { it.code == code } ?: PromptOptimizeDepth.CONCISE
+}
+
+/** 保存某场景的优化深度；当所选深度恰为默认【精简】时清空该场景条目（回退默认） */
+internal fun Settings.withPromptOptimizeDepth(scene: PromptOptimizeScene, depth: PromptOptimizeDepth): Settings {
+    val newMap = if (depth == PromptOptimizeDepth.CONCISE) {
+        promptOptimizeDepthByScene - scene.code
+    } else {
+        promptOptimizeDepthByScene + (scene.code to depth.code)
+    }
+    return copy(promptOptimizeDepthByScene = newMap)
+}
 
 fun Settings.isNotConfigured() = providers.all { it.models.isEmpty() }
 

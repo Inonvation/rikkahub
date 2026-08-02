@@ -65,8 +65,20 @@ interface ToolUIRenderer {
     fun title(context: ToolUIContext): String =
         stringResource(R.string.chat_message_tool_call_generic, context.tool.toolName)
 
+    /**
+     * 该工具调用是否处于"执行中"（驱动闪烁/加载动画）。
+     * 默认用「整体生成中 && 工具未回填」；渲染器可覆盖（如子代理用任务的真实状态，
+     * 避免并行执行时"已完成但整体还在生成"被误判为执行中而闪烁）。
+     */
+    @Composable
+    fun isLoading(context: ToolUIContext, defaultLoading: Boolean): Boolean = defaultLoading
+
     /** 步骤展开时是否显示内联摘要 */
     fun hasSummary(context: ToolUIContext): Boolean = false
+
+    /** 即使工具未执行（output 为空，如子代理执行中）也允许点击打开详情。 */
+    val alwaysOpenPreview: Boolean
+        get() = false
 
     /** 步骤展开时的内联摘要 */
     @Composable
@@ -107,6 +119,20 @@ object ToolUIRegistry {
         WriteFileToolUI,
         ShellToolUI,
         TodoWriteToolUI,
+        StudyStatsToolUI,
+        StudyMindmapToolUI,
+        StudySummaryToolUI,
+        StudySearchToolUI,
+        StudyUpdateVocabularyToolUI,
+        StudyUpdateNoteToolUI,
+        StudyUpdateWrongQuestionToolUI,
+        StudyUpdateKnowledgeCardToolUI,
+        StudyDeleteVocabularyToolUI,
+        StudyDeleteNoteToolUI,
+        StudyDeleteWrongQuestionToolUI,
+        StudyDeleteKnowledgeCardToolUI,
+        SubAgentToolUI,
+        AwaitSubAgentToolUI,
     ).associateBy { it.toolName }
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */

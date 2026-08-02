@@ -47,9 +47,11 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.SettingScaffold
+import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -67,6 +69,8 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
     val lazyListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val nav = LocalNavController.current
+    val toaster = LocalToaster.current
+    val atLeastOneMsg = stringResource(R.string.setting_page_search_at_least_one)
     var showAddDialog by remember { mutableStateOf(false) }
 
     SettingScaffold(
@@ -112,6 +116,22 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 ) { isDragging ->
                     SearchProviderCard(
                         service = service,
+                        enabled = service.id in settings.enabledSearchServiceIds,
+                        onToggleEnabled = { checked ->
+                            val current = settings.enabledSearchServiceIds
+                            val newIds = if (checked) {
+                                if (service.id in current) current else current + service.id
+                            } else {
+                                // 至少保留一个启用的服务商；静默拒绝时提示用户
+                                if (current.size <= 1) {
+                                    toaster.show(atLeastOneMsg)
+                                    current
+                                } else {
+                                    current - service.id
+                                }
+                            }
+                            vm.updateSettings(settings.copy(enabledSearchServiceIds = newIds))
+                        },
                         onEdit = {
                             nav.navigate(Screen.SettingSearchDetail(service.id.toString()))
                         },
@@ -248,6 +268,8 @@ private fun AddProviderDialog(
 @Composable
 private fun SearchProviderCard(
     service: SearchServiceOptions,
+    enabled: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     canDelete: Boolean,
@@ -283,6 +305,12 @@ private fun SearchProviderCard(
                 )
                 SearchAbilityTagLine(options = service)
             }
+
+            // 启用开关：勾选进 enabledSearchServiceIds，AI 才能调用该服务商的独立工具
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggleEnabled,
+            )
 
             IconButton(onClick = { showMenu = true }) {
                 Icon(

@@ -234,6 +234,10 @@ internal fun FilesPicker(
                     navController.navigate(Screen.Workspaces)
                 },
                 onDismiss = { showWorkspaceSheet = false },
+                onSettings = { workspaceId ->
+                    showWorkspaceSheet = false
+                    navController.navigate(Screen.WorkspaceDetail(workspaceId))
+                },
             )
         }
 
