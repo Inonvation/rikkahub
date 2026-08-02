@@ -71,7 +71,8 @@ class SubAgentToolAssembler(
                     add(
                         Tool(
                             name = "mcp__${serverName}__${tool.name}",
-                            description = tool.description ?: "",
+                            description = tool.description?.takeIf { it.isNotBlank() }
+                                ?: "Tool from MCP server \"$serverName\".",
                             parameters = { tool.inputSchema },
                             needsApproval = { tool.needsApproval },
                             execute = {

@@ -98,6 +98,7 @@ object SubAgentCatalog {
         ),
         maxSteps = 24,
         timeoutSeconds = 420,
+        allowParallel = true,
     )
 
     /**
@@ -145,6 +146,7 @@ object SubAgentCatalog {
         ),
         maxSteps = 16,
         timeoutSeconds = 420,
+        allowParallel = true,
     )
 
     /**
@@ -189,6 +191,7 @@ object SubAgentCatalog {
         ),
         maxSteps = 32,
         timeoutSeconds = 480,
+        allowParallel = true,
     )
 
     /**
@@ -241,6 +244,7 @@ object SubAgentCatalog {
         ),
         maxSteps = 20,
         timeoutSeconds = 420,
+        allowParallel = true,
     )
 
     val all: List<SubAgentDefinition> = listOf(

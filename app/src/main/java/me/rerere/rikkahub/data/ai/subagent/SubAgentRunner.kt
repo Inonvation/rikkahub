@@ -229,6 +229,21 @@ class SubAgentRunner(
         // 构造消息：system（子代理职责 + 工具提示词）+ 父代理上下文摘要 + 用户任务
         val system = buildString {
             append(def.systemPrompt)
+            // 并行提示：声明允许并行的子代理被母代理并发派发时，提示自己可能不是唯一在跑的 worker。
+            // 不提供任何嵌套派发/协作工具——协作由母代理统一协调（orchestrator-workers）。
+            if (def.allowParallel) {
+                appendLine()
+                appendLine(
+                    """
+                    ## Parallel Sibling Sub-Agents
+                    The parent agent may have spawned other sub-agents in parallel for the same task.
+                    - Do NOT call `spawn_subagent` or `await_subagent` — you have no such tools.
+                    - If you need information another sub-agent may be producing, note the dependency
+                      gap in your result and finish your own portion; the parent agent coordinates.
+                    - Keep your result self-contained and directly usable on its own.
+                    """.trimIndent()
+                )
+            }
             // 统一输出要求：让最终结果对母代理可整合（母代理只收到 resultSummary，看不到中间过程）。
             // 明确"最终输出 = 返回给母代理的 summary"，格式与 await_subagent 返回的 summary 字段语义一致。
             appendLine()
