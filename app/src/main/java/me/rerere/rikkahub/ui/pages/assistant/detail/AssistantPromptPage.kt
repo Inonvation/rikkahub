@@ -274,6 +274,9 @@ private fun AssistantPromptContent(
                 label = {
                     Text(stringResource(R.string.assistant_page_allow_conversation_system_prompt))
                 },
+                description = {
+                    Text(stringResource(R.string.assistant_page_allow_conversation_system_prompt_desc))
+                },
                 tail = {
                     Switch(
                         checked = assistant.allowConversationSystemPrompt,
@@ -298,6 +301,9 @@ private fun AssistantPromptContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_allow_conversation_prompt_injection))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_allow_conversation_prompt_injection_desc))
                 },
                 tail = {
                     Switch(
@@ -339,6 +345,9 @@ private fun AssistantPromptContent(
                             )
                         }
                     }
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_message_template_desc))
                 },
                 content = {
                     val missingMessage = "{{ message }}" !in assistant.messageTemplate
@@ -436,6 +445,9 @@ private fun AssistantPromptContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_preset_messages))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_preset_messages_desc))
                 },
             )
             Column(
@@ -537,6 +549,9 @@ private fun AssistantPromptContent(
                 modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_regex_title))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_regex_desc))
                 },
             )
             Column(

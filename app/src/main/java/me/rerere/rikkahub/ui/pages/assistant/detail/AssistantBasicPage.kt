@@ -180,6 +180,9 @@ internal fun AssistantBasicContent(
                         Text(stringResource(R.string.assistant_page_workspace))
                     },
                     modifier = Modifier.padding(8.dp),
+                    description = {
+                        Text(stringResource(R.string.assistant_page_workspace_desc))
+                    }
                 ) {
                     val selectedWorkspace = workspaces.find { it.id == assistant.workspaceId?.toString() }
                     Select(
@@ -206,6 +209,9 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_use_assistant_avatar))
                     },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_use_assistant_avatar_desc))
+                    },
                     tail = {
                         Switch(
                             checked = assistant.useAssistantAvatar,
@@ -231,6 +237,9 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_chat_model))
                     },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_chat_model_desc))
+                    },
                     content = {
                         ModelSelector(
                             modelId = assistant.chatModelId,
@@ -251,6 +260,9 @@ internal fun AssistantBasicContent(
                     modifier = Modifier.padding(8.dp),
                     label = {
                         Text(stringResource(R.string.assistant_page_temperature))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_temperature_warning))
                     },
                     tail = {
                         Switch(
@@ -295,6 +307,9 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_top_p))
                     },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_top_p_warning))
+                    },
                     tail = {
                         Switch(
                             checked = assistant.topP != null,
@@ -338,6 +353,9 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_context_message_limit))
                     },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_context_message_limit_desc))
+                    },
                 ) {
                     Slider(
                         value = assistant.contextMessageLimit.toFloat(),
@@ -368,6 +386,9 @@ internal fun AssistantBasicContent(
                     modifier = Modifier.padding(8.dp),
                     label = {
                         Text(stringResource(R.string.assistant_page_stream_output))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_stream_output_desc))
                     },
                     tail = {
                         Switch(
@@ -402,6 +423,9 @@ internal fun AssistantBasicContent(
                     label = {
                         Text(stringResource(R.string.assistant_page_max_tokens))
                     },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_max_tokens_desc))
+                    },
                 ) {
                     OutlinedTextField(
                         value = assistant.maxTokens?.toString() ?: "",
@@ -434,6 +458,9 @@ internal fun AssistantBasicContent(
                     modifier = Modifier.padding(8.dp),
                     label = {
                         Text(stringResource(R.string.assistant_page_gradient_background))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_gradient_background_desc))
                     },
                     tail = {
                         Switch(
@@ -473,6 +500,9 @@ internal fun AssistantBasicContent(
                         modifier = Modifier.padding(8.dp),
                         label = {
                             Text(stringResource(R.string.assistant_page_background_opacity))
+                        },
+                        description = {
+                            Text(stringResource(R.string.assistant_page_background_opacity_desc))
                         },
                     ) {
                         Slider(

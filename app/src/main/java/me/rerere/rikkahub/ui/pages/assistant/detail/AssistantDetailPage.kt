@@ -18,14 +18,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,7 +36,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.heroAnimation
@@ -52,10 +54,11 @@ fun AssistantDetailPage(id: String) {
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            LargeFlexibleTopAppBar(
                 title = {
                     Text(
                         text = assistant.name.ifBlank {
@@ -68,25 +71,27 @@ fun AssistantDetailPage(id: String) {
                 navigationIcon = {
                     BackButton()
                 },
+                scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors
             )
         },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 8.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item {
                 AssistantHeader(
                     assistant = assistant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp)
+                    modifier = Modifier.padding(vertical = 8.dp)
                 )
             }
 
             item {
-                CardGroup(
+                IosGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     item(

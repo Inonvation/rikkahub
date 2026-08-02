@@ -60,6 +60,9 @@ fun BackgroundPicker(
         modifier = modifier,
         label = {
             Text(stringResource(R.string.assistant_page_chat_background))
+        },
+        description = {
+            Text(stringResource(R.string.assistant_page_chat_background_desc))
         }
     ) {
         Button(
