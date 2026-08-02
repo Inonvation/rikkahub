@@ -210,6 +210,9 @@ dependencies {
     implementation(libs.barcode.scanning)
     implementation(libs.androidx.camera.core)
 
+    // ML Kit text recognition (bundled, offline Chinese OCR for scanned PDFs)
+    implementation(libs.mlkit.text.recognition.chinese)
+
     // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

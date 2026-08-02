@@ -15,6 +15,7 @@ import me.rerere.document.DocxParser
 import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
+import me.rerere.document.ScannedPdfParser
 import me.rerere.document.XlsxParser
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.chunking.Chunk
@@ -330,7 +331,12 @@ class DocumentProcessor(
         if (!file.exists()) return ""
         return try {
             when (fileType) {
-                "pdf" -> PdfParser.parserPdf(file)
+                "pdf" -> {
+                    // 扫描版 PDF 无文本层，开启全局 OCR 开关时用 ML Kit 本地识别兜底
+                    val enableOcr = settingsStore.settingsFlow.value.pdfOcrEnabled
+                    if (enableOcr) ScannedPdfParser().parse(file, enableOcr = true)
+                    else PdfParser.parserPdf(file)
+                }
                 "docx" -> DocxParser.parse(file)
                 "pptx" -> PptxParser.parse(file)
                 "epub" -> EpubParser.parse(file)

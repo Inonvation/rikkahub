@@ -165,6 +165,9 @@ class SettingsStore(
 
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
+
+        // 知识库文档预处理
+        val PDF_OCR_ENABLED = booleanPreferencesKey("pdf_ocr_enabled")
     }
 
     private val dataStore = context.settingsStore
@@ -265,6 +268,7 @@ class SettingsStore(
                 } ?: BackupReminderConfig(),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
+                pdfOcrEnabled = preferences[PDF_OCR_ENABLED] == true,
             )
         }
         .map {
@@ -441,6 +445,7 @@ class SettingsStore(
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
+            preferences[PDF_OCR_ENABLED] = settings.pdfOcrEnabled
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -605,6 +610,7 @@ data class Settings(
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
+    val pdfOcrEnabled: Boolean = false,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

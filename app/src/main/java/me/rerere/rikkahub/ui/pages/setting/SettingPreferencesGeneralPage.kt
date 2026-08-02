@@ -96,6 +96,27 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             }
         }
 
+        // Document processing
+        item {
+            IosGroup(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                title = stringResource(R.string.setting_page_document_processing),
+            ) {
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_page_pdf_ocr)) },
+                    supportingContent = { Text(stringResource(R.string.setting_page_pdf_ocr_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.pdfOcrEnabled,
+                            onCheckedChange = {
+                                vm.updateSettings(settings.copy(pdfOcrEnabled = it))
+                            }
+                        )
+                    },
+                )
+            }
+        }
+
         // Input
         item {
             IosGroup(

@@ -107,6 +107,7 @@ class RetrievalPipeline(
      * 纯语义检索：仅用向量余弦相似度，不做关键词融合。
      */
     suspend fun semanticSearch(
+        query: String,
         queryEmbedding: FloatArray,
         knowledgeBaseId: String,
         topK: Int = 10,
@@ -129,7 +130,7 @@ class RetrievalPipeline(
         val diversified = mmrDiversify(results, knowledgeBaseId, queryEmbedding, candidateLimit, mmrLambda)
 
         val reranked = if (reranker != null) {
-            reranker.rerank("", diversified, topK)
+            reranker.rerank(query, diversified, topK)
         } else {
             diversified
         }

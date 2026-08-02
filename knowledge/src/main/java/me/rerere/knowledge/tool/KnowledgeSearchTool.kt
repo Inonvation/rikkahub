@@ -204,6 +204,7 @@ class KnowledgeSearchTool(
 
                 if (mode == "semantic" && queryEmbedding != null) {
                     val results = knowledgeManager.semanticSearch(
+                        query = effectiveQuery,
                         queryEmbedding = queryEmbedding,
                         knowledgeBaseId = baseId,
                         topK = overrideTopK,

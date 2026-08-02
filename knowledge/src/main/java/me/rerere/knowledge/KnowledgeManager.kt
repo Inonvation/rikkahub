@@ -53,6 +53,7 @@ class KnowledgeManager(
     }
 
     suspend fun semanticSearch(
+        query: String,
         queryEmbedding: FloatArray,
         knowledgeBaseId: String,
         topK: Int = 10,
@@ -61,6 +62,7 @@ class KnowledgeManager(
         mmrLambda: Float = 0.7f,
     ): List<RetrievalResult> {
         return retrievalPipeline.semanticSearch(
+            query = query,
             queryEmbedding = queryEmbedding,
             knowledgeBaseId = knowledgeBaseId,
             topK = topK,

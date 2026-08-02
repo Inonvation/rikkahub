@@ -10,9 +10,13 @@ import me.rerere.document.DocxParser
 import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
+import me.rerere.document.ScannedPdfParser
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
 import java.io.File
 
-object DocumentAsPromptTransformer : InputMessageTransformer {
+object DocumentAsPromptTransformer : InputMessageTransformer, KoinComponent {
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
@@ -43,8 +47,11 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         }
     }
 
-    private fun parsePdfAsText(file: File): String {
-        return PdfParser.parserPdf(file)
+    private suspend fun parsePdfAsText(file: File): String {
+        // 扫描版 PDF 无文本层，开启全局 OCR 开关时用 ML Kit 本地识别兜底
+        val enableOcr = get<SettingsStore>().settingsFlow.value.pdfOcrEnabled
+        return if (enableOcr) ScannedPdfParser().parse(file, enableOcr = true)
+        else PdfParser.parserPdf(file)
     }
 
     private fun parseDocxAsText(file: File): String {
@@ -67,7 +74,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         return "/upload/${file.name}"
     }
 
-    private fun readDocumentContent(document: UIMessagePart.Document): String {
+    private suspend fun readDocumentContent(document: UIMessagePart.Document): String {
         val file = runCatching { document.url.toUri().toFile() }.getOrNull()
             ?: return "[ERROR, invalid file uri: ${document.fileName}]"
         if (!file.exists() || !file.isFile) {

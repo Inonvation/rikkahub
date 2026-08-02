@@ -847,6 +847,7 @@
   <string name="setting_page_preferences_notification_desc">更新提醒、消息生成通知</string>
   <string name="setting_page_preferences_general">常规</string>
   <string name="setting_page_preferences_general_desc">交互行为、滚动、输入设置</string>
+  <string name="setting_page_document_processing">文档处理</string>
   <string name="setting_page_preferences_ui">界面偏好设置</string>
   <string name="setting_page_preferences_ui_desc">消息显示、字体、代码块</string>
   <string name="setting_page_documentation">使用文档</string>
@@ -870,6 +871,8 @@
   <string name="setting_page_interaction_notification_settings">互动与通知</string>
   <string name="setting_page_knowledge_bases">知识库</string>
   <string name="setting_page_knowledge_bases_desc">RAG 知识库，上传文档供 AI 检索</string>
+  <string name="setting_page_pdf_ocr">扫描 PDF 文字识别</string>
+  <string name="setting_page_pdf_ocr_desc">识别扫描版 PDF（无文字层），离线本地识别，识别后需重新导入文档生效</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">配置MCP服务器</string>
   <string name="setting_page_message_bubbles">消息气泡</string>
