@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
@@ -52,7 +54,8 @@ import me.rerere.hugeicons.stroke.Archive02
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Bulb
-import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.FileAdd
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FileView
 import me.rerere.hugeicons.stroke.Note01
@@ -64,6 +67,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 import java.io.File
@@ -71,7 +75,16 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 private const val DEFAULT_VISIBLE_COUNT = 3
-private val WORKSPACE_FILE_TOOL_NAMES = setOf("workspace_write_file", "workspace_edit_file")
+
+private enum class FileChangeStatus {
+    ADDED,
+    EDITED,
+}
+
+private data class FileChange(
+    val path: String,
+    val status: FileChangeStatus,
+)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalUuidApi::class)
 @Composable
@@ -80,15 +93,8 @@ internal fun EditedFilesList(
     assistant: Assistant?,
 ) {
     val workspaceId = assistant?.workspaceId?.toString() ?: return
-    val editedFiles = remember(parts) {
-        parts.filterIsInstance<UIMessagePart.Tool>()
-            .filter { it.toolName in WORKSPACE_FILE_TOOL_NAMES && it.isExecuted }
-            .mapNotNull { tool ->
-                tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
-            }
-            .distinct()
-    }
-    if (editedFiles.isEmpty()) return
+    val fileChanges = remember(parts) { extractFileChanges(parts) }
+    if (fileChanges.isEmpty()) return
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -98,11 +104,11 @@ internal fun EditedFilesList(
     val toaster = LocalToaster.current
 
     var selectedPath by remember { mutableStateOf<String?>(null) }
-    var expanded by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var importPath by remember { mutableStateOf<String?>(null) }
-    val visibleFiles = if (expanded) editedFiles else editedFiles.take(DEFAULT_VISIBLE_COUNT)
-    val hasMore = editedFiles.size > DEFAULT_VISIBLE_COUNT
+
+    val addedFiles = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
+    val editedFileList = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*"),
@@ -120,50 +126,25 @@ internal fun EditedFilesList(
         }
     }
 
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        visibleFiles.forEach { path ->
-            val fileName = remember(path) { path.substringAfterLast('/') }
-            Surface(
-                onClick = { selectedPath = path },
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.File02,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        text = fileName,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 200.dp),
-                    )
-                }
-            }
-        }
-        if (hasMore && !expanded) {
-            Surface(
-                onClick = { expanded = true },
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ) {
-                Text(
-                    text = "+${editedFiles.size - DEFAULT_VISIBLE_COUNT}",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
-        }
+        FileChangeChipGroup(
+            title = stringResource(R.string.workspace_file_change_added),
+            paths = addedFiles,
+            icon = HugeIcons.FileAdd,
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            onSelect = { selectedPath = it },
+        )
+        FileChangeChipGroup(
+            title = stringResource(R.string.workspace_file_change_edited),
+            paths = editedFileList,
+            icon = HugeIcons.Edit01,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            onSelect = { selectedPath = it },
+        )
     }
 
     if (selectedPath != null) {
@@ -426,6 +407,134 @@ private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, Strin
         WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
     } else {
         WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
+    }
+}
+
+private fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
+    val changes = mutableListOf<FileChange>()
+    parts.filterIsInstance<UIMessagePart.Tool>()
+        .filter { it.isExecuted }
+        .forEach { tool ->
+            when (tool.toolName) {
+                "workspace_write_file" -> {
+                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        ?: return@forEach
+                    val status = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { text ->
+                            runCatching {
+                                JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
+                                    ?.jsonPrimitive?.contentOrNull
+                            }.getOrNull()
+                        }
+                    changes.add(
+                        FileChange(
+                            path = path,
+                            status = if (status == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED,
+                        )
+                    )
+                }
+
+                "workspace_edit_file" -> {
+                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        ?: return@forEach
+                    changes.add(FileChange(path, FileChangeStatus.EDITED))
+                }
+
+                "workspace_shell" -> {
+                    val output = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { text ->
+                            runCatching { JsonInstant.parseToJsonElement(text).jsonObject }.getOrNull()
+                        }
+                        ?: return@forEach
+                    output["addedFiles"]?.jsonArray?.forEach { element ->
+                        element.jsonPrimitive.contentOrNull?.let { path ->
+                            changes.add(FileChange(path, FileChangeStatus.ADDED))
+                        }
+                    }
+                    output["modifiedFiles"]?.jsonArray?.forEach { element ->
+                        element.jsonPrimitive.contentOrNull?.let { path ->
+                            changes.add(FileChange(path, FileChangeStatus.EDITED))
+                        }
+                    }
+                }
+            }
+        }
+    // 同一消息内同一路径可能多次出现，保留最后一次状态
+    return changes.reversed().distinctBy { it.path }.reversed()
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FileChangeChipGroup(
+    title: String,
+    paths: List<String>,
+    icon: ImageVector,
+    containerColor: Color,
+    contentColor: Color,
+    onSelect: (String) -> Unit,
+) {
+    if (paths.isEmpty()) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val visiblePaths = if (expanded) paths else paths.take(DEFAULT_VISIBLE_COUNT)
+    val hasMore = paths.size > DEFAULT_VISIBLE_COUNT
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            visiblePaths.forEach { path ->
+                val fileName = remember(path) { path.substringAfterLast('/') }
+                Surface(
+                    onClick = { onSelect(path) },
+                    shape = RoundedCornerShape(50),
+                    color = containerColor,
+                    contentColor = contentColor,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = fileName,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 200.dp),
+                        )
+                    }
+                }
+            }
+            if (hasMore && !expanded) {
+                Surface(
+                    onClick = { expanded = true },
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Text(
+                        text = "+${paths.size - DEFAULT_VISIBLE_COUNT}",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

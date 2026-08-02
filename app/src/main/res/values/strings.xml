@@ -1262,6 +1262,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_detail_title">Workspace Details</string>
   <string name="workspace_detail_tab_basic">Basic</string>
   <string name="workspace_detail_tab_files">Files</string>
+  <string name="workspace_file_change_added">Added</string>
+  <string name="workspace_file_change_edited">Edited</string>
   <string name="workspace_detail_import_file">Import File</string>
   <string name="workspace_detail_rootfs_install_failed">Rootfs Installation Failed</string>
   <string name="workspace_detail_delete_directory">Delete Directory</string>
@@ -1378,3 +1380,4 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="assistant_page_context_message_limit_unlimited">无限上下文消息</string>
   <string name="assistant_page_context_message_limit_warning">限制上下文会在每次上下文被修剪时使提示词缓存失效。更大的限制修剪频率更低；无限制则从不修剪，并保持缓存完全完好。</string>
 </resources>
+

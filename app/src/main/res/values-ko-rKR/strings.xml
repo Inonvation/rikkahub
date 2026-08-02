@@ -1141,6 +1141,8 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="workspace_detail_title">작업 공간 상세</string>
   <string name="workspace_detail_tab_basic">기본</string>
   <string name="workspace_detail_tab_files">파일</string>
+  <string name="workspace_file_change_added">추가</string>
+  <string name="workspace_file_change_edited">편집</string>
   <string name="workspace_detail_import_file">파일 가져오기</string>
   <string name="workspace_detail_rootfs_install_failed">Rootfs 설치 실패</string>
   <string name="workspace_detail_delete_directory">디렉터리 삭제</string>

@@ -1141,6 +1141,8 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="workspace_detail_title">ワークスペース詳細</string>
   <string name="workspace_detail_tab_basic">基本</string>
   <string name="workspace_detail_tab_files">ファイル</string>
+  <string name="workspace_file_change_added">追加</string>
+  <string name="workspace_file_change_edited">編集</string>
   <string name="workspace_detail_import_file">ファイルをインポート</string>
   <string name="workspace_detail_rootfs_install_failed">Rootfsのインストールに失敗しました</string>
   <string name="workspace_detail_delete_directory">ディレクトリを削除</string>

@@ -3,9 +3,11 @@ package me.rerere.rikkahub.data.ai.tools
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.DiffMetadata
@@ -17,6 +19,7 @@ import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.java.KoinJavaComponent.getKoin
 import java.io.ByteArrayOutputStream
 
@@ -132,8 +135,22 @@ private fun createWriteFileTool(
         val path = params.absolutePath("path")
         val text = params.string("text") ?: error("text is required")
         val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+        val existedBefore = runCatching {
+            workspaceRepository.rootfsFileSize(workspaceId, path) > 0
+        }.getOrDefault(false)
         val entry = workspaceRepository.writeTextInRootfs(workspaceId, path, text, overwrite)
-        listOf(UIMessagePart.Text(entry.toJson().toString()))
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", entry.path)
+                    put("name", entry.name)
+                    put("isDirectory", entry.isDirectory)
+                    put("sizeBytes", entry.sizeBytes)
+                    put("updatedAt", entry.updatedAt)
+                    put("changeStatus", if (existedBefore) "edited" else "added")
+                }.toString()
+            )
+        )
     },
 )
 
@@ -195,6 +212,7 @@ private fun createEditFileTool(
                     if (result.strategy != ExactReplacer.name) put("matchStrategy", result.strategy)
                     put("sizeBytes", entry.sizeBytes)
                     put("updatedAt", entry.updatedAt)
+                    put("changeStatus", "edited")
                 }.toString(),
                 // diff 存入 metadata 供 UI 渲染 diff view, 不会随工具结果发送给 API
                 metadata = diff?.let { d -> DiffMetadata(diff = d).toMetadata() },
@@ -257,7 +275,17 @@ private fun createShellTool(
             ?.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS)
             ?.times(1_000L)
             ?: WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS
+        val beforeSnapshot = runCatching {
+            workspaceRepository.listAllFiles(workspaceId, WorkspaceStorageArea.FILES)
+        }.getOrDefault(emptyList())
         val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis)
+        val afterSnapshot = runCatching {
+            workspaceRepository.listAllFiles(workspaceId, WorkspaceStorageArea.FILES)
+        }.getOrDefault(emptyList())
+        val (addedFiles, modifiedFiles) = computeWorkspaceFileDiff(
+            before = beforeSnapshot,
+            after = afterSnapshot,
+        )
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
@@ -266,6 +294,12 @@ private fun createShellTool(
                     put("stderr", result.stderr)
                     put("timedOut", result.timedOut)
                     if (result.truncated) put("truncated", true)
+                    if (addedFiles.isNotEmpty()) putJsonArray("addedFiles") {
+                        addedFiles.forEach { add(JsonPrimitive(it)) }
+                    }
+                    if (modifiedFiles.isNotEmpty()) putJsonArray("modifiedFiles") {
+                        modifiedFiles.forEach { add(JsonPrimitive(it)) }
+                    }
                 }.toString()
             )
         )
@@ -450,4 +484,28 @@ private fun WorkspaceFileEntry.toJson() = buildJsonObject {
     put("isDirectory", isDirectory)
     put("sizeBytes", sizeBytes)
     put("updatedAt", updatedAt)
+}
+
+/**
+ * 比较 shell 执行前后的工作区文件快照，返回新增和修改的 Rootfs 绝对路径列表。
+ * 路径统一以 /workspace/ 前缀输出，与 write/edit 工具的 path 保持一致。
+ */
+private fun computeWorkspaceFileDiff(
+    before: List<WorkspaceFileEntry>,
+    after: List<WorkspaceFileEntry>,
+): Pair<List<String>, List<String>> {
+    val beforeMap = before.associateBy { it.path }
+    val afterMap = after.associateBy { it.path }
+    val added = afterMap.keys
+        .filter { it !in beforeMap }
+        .sorted()
+        .map { "/workspace/$it" }
+    val modified = afterMap.entries
+        .filter { (path, entry) ->
+            val beforeEntry = beforeMap[path]
+            beforeEntry != null && (beforeEntry.sizeBytes != entry.sizeBytes || beforeEntry.updatedAt != entry.updatedAt)
+        }
+        .map { "/workspace/${it.key}" }
+        .sorted()
+    return added to modified
 }

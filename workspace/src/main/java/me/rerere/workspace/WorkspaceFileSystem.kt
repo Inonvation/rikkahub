@@ -29,6 +29,22 @@ class WorkspaceFileSystem(
             .map { it.toEntry(root) }
     }
 
+    /**
+     * 递归列出 [root] 下所有非隐藏文件（不含目录），用于工作区变更检测快照。
+     * 会跳过隐藏目录及其子文件。
+     */
+    fun listAllFiles(root: File): List<WorkspaceFileEntry> {
+        require(root.exists() && root.isDirectory) { "Root must be an existing directory: ${root.path}" }
+        return root.walk()
+            .filter { it.isFile && !isHiddenWorkspaceName(it.name) }
+            .filter { file ->
+                val relative = file.relativeTo(root).path
+                relative.split(File.separatorChar).none { isHiddenWorkspaceName(it) }
+            }
+            .map { it.toEntry(root) }
+            .toList()
+    }
+
     fun readText(root: File, path: String, charset: Charset = StandardCharsets.UTF_8): String {
         val file = resolvePath(root, path)
         require(file.exists()) { "File does not exist: $path" }

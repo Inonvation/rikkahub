@@ -150,6 +150,18 @@ class WorkspaceRepository(
         manager.listFiles(workspace.root, path, area)
     }
 
+    /**
+     * 递归列出工作区某区域下所有非隐藏文件，用于 shell 执行前后的变更快照。
+     */
+    suspend fun listAllFiles(
+        id: String,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext emptyList()
+        manager.ensureWorkspace(workspace.root)
+        manager.listAllFiles(workspace.root, area)
+    }
+
     suspend fun readText(
         id: String,
         path: String,

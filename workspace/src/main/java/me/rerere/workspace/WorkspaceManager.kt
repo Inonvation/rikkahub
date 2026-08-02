@@ -51,6 +51,15 @@ class WorkspaceManager(
     ): List<WorkspaceFileEntry> =
         fileSystem.list(areaDir(root, area), path)
 
+    /**
+     * 递归列出指定区域下所有非隐藏文件，用于变更检测快照。
+     */
+    fun listAllFiles(
+        root: String,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): List<WorkspaceFileEntry> =
+        fileSystem.listAllFiles(areaDir(root, area))
+
     fun readText(
         root: String,
         path: String,

@@ -1208,6 +1208,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_detail_title">工作区详情</string>
   <string name="workspace_detail_tab_basic">基本</string>
   <string name="workspace_detail_tab_files">文件</string>
+  <string name="workspace_file_change_added">新增</string>
+  <string name="workspace_file_change_edited">编辑</string>
   <string name="workspace_detail_import_file">导入文件</string>
   <string name="workspace_detail_rootfs_install_failed">Rootfs 安装失败</string>
   <string name="workspace_detail_delete_directory">删除目录</string>
