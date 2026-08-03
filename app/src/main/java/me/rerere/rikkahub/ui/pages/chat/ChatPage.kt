@@ -534,14 +534,15 @@ private fun ChatPageContent(
         .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
 
-    // 自动滚动：检测用户是否滚离底部
-    val isAtBottom by remember {
+    // 自动滚动：检测用户是否滚离底部。
+    // 首次进入新会话时列表可能还没完成首次布局（visibleItemsInfo 为空），此时
+    // lastVisible 为 null，不能按"不在底部"处理（否则滚动按钮会短暂闪出一次）。
+    val userScrolledUp by remember {
         derivedStateOf {
             val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()
-            lastVisible != null && lastVisible.index >= chatListState.layoutInfo.totalItemsCount - 2
+            lastVisible != null && lastVisible.index < chatListState.layoutInfo.totalItemsCount - 2
         }
     }
-    val userScrolledUp by remember { derivedStateOf { !isAtBottom } }
 
     // 发送后滚动到底的标记：等待消息数量变化后再滚，确保新消息已进入列表
     var pendingScrollAfterSend by remember { mutableStateOf(false) }
