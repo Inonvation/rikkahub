@@ -11,6 +11,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 自定义签名密钥：`keystore.jks`
 - 签名配置在 `local.properties`（已加入 `.gitignore`）
 
+### 构建 / 安装 / 启动
+
+- **启动入口 Activity**：`me.rerere.rikkahub.RouteActivity`（AndroidManifest.xml 中带 MAIN/LAUNCHER intent-filter）。项目里**没有** `MainActivity`。
+- **包名后缀**：`debug` 与 `release` 两个变体都带 `applicationIdSuffix = ".debug"`，实际包名为 `com.inonvation.rikkahub.debug`。`release` 变体用 debug 签名（`signingConfigs.getByName("debug")`），local.properties 里的 keystore 当前未被 build.gradle 引用。
+- **ABI 拆分包**：默认只打 `arm64-v8a`（`app-arm64-v8a-{debug|release}.apk`）；加 `-PallAbis` 打全 ABI。
+- **构建并安装到设备**：`./gradlew :app:assembleDebug` 后用
+  `adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`。
+- **启动已安装应用**：
+  `adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.inonvation.rikkahub.debug`（查真实入口），再 `adb shell am start -n <package>/<activity>`。
+
 ## Git 工作流
 
 ### 重要：避免误操作

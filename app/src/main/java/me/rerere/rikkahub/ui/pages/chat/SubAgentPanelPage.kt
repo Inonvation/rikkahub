@@ -215,7 +215,8 @@ private fun SubAgentPanelCard(runner: SubAgentRunner, task: SubAgentTask) {
                 status == SubAgentStatus.SUCCEEDED -> task.resultSummary ?: task.streamText
                 status == SubAgentStatus.RUNNING || status == SubAgentStatus.QUEUED ->
                     task.steps.lastOrNull()?.message ?: task.streamText
-                status == SubAgentStatus.FAILED || status == SubAgentStatus.TIMEOUT -> task.error
+                status == SubAgentStatus.FAILED || status == SubAgentStatus.TIMEOUT ||
+                    status == SubAgentStatus.TOKEN_LIMIT -> task.error
                 else -> null
             }
             if (!summary.isNullOrBlank()) {
@@ -234,7 +235,7 @@ private fun SubAgentPanelCard(runner: SubAgentRunner, task: SubAgentTask) {
 
 private fun statusIcon(status: SubAgentStatus) = when (status) {
     SubAgentStatus.SUCCEEDED -> HugeIcons.Tick01
-    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT -> HugeIcons.Alert01
+    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT, SubAgentStatus.TOKEN_LIMIT -> HugeIcons.Alert01
     SubAgentStatus.CANCELLED -> HugeIcons.Cancel01
     SubAgentStatus.QUEUED, SubAgentStatus.RUNNING -> HugeIcons.Clock02
 }
@@ -242,7 +243,7 @@ private fun statusIcon(status: SubAgentStatus) = when (status) {
 @Composable
 private fun statusColor(status: SubAgentStatus) = when (status) {
     SubAgentStatus.SUCCEEDED -> MaterialTheme.colorScheme.primary
-    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT -> MaterialTheme.colorScheme.error
+    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT, SubAgentStatus.TOKEN_LIMIT -> MaterialTheme.colorScheme.error
     SubAgentStatus.CANCELLED -> MaterialTheme.colorScheme.onSurfaceVariant
     SubAgentStatus.QUEUED, SubAgentStatus.RUNNING -> MaterialTheme.colorScheme.onSurfaceVariant
 }

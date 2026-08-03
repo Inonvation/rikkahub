@@ -122,6 +122,8 @@ fun ChatList(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
+    /** 导航返回重组合时，用离开前"是否在底部"初始化自动滚动判定，避免把恢复位置拉回底部 */
+    initialWasAtBottom: Boolean = true,
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
@@ -164,6 +166,7 @@ fun ChatList(
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
+                initialWasAtBottom = initialWasAtBottom,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = onRegenerate,
@@ -194,6 +197,8 @@ private fun ChatListNormal(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
+    /** 导航返回重组合时，用离开前"是否在底部"初始化，避免把恢复位置拉回底部 */
+    initialWasAtBottom: Boolean,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     onRegenerate: (UIMessage) -> Unit,
@@ -283,7 +288,8 @@ private fun ChatListNormal(
         // enableAutoScroll 关闭时，新消息到达不再强制跟随到底（尊重用户设置），
         // 但生成进行中若用户就在底部仍跟随——这是正常 UX。
         var lastMessageCount by remember { mutableStateOf(conversationUpdated.messageNodes.size) }
-        var wasAtBottom by remember { mutableStateOf(true) }
+        // 初值用离开前"是否在底部"（导航返回重组合时，避免离开前不在底部却被拉回底部）
+        var wasAtBottom by remember { mutableStateOf(initialWasAtBottom) }
         val autoScrollEnabled = settings.displaySetting.enableAutoScroll
         LaunchedEffect(state) {
             snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->

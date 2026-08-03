@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.subagent
 
 import kotlinx.serialization.Serializable
+import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import kotlin.time.Clock
@@ -10,10 +11,10 @@ import kotlin.uuid.Uuid
 /** 子代理任务运行时状态（进程内内存态，不持久化；进程死亡即丢失） */
 @Serializable
 enum class SubAgentStatus {
-    QUEUED, RUNNING, SUCCEEDED, FAILED, TIMEOUT, CANCELLED;
+    QUEUED, RUNNING, SUCCEEDED, FAILED, TIMEOUT, CANCELLED, TOKEN_LIMIT;
 
     val isTerminal: Boolean
-        get() = this == SUCCEEDED || this == FAILED || this == TIMEOUT || this == CANCELLED
+        get() = this == SUCCEEDED || this == FAILED || this == TIMEOUT || this == CANCELLED || this == TOKEN_LIMIT
 }
 
 /** 子代理任务实例。taskId 与母代理 Tool.toolCallId 一一对应 */
@@ -32,10 +33,10 @@ data class SubAgentTask(
     var streamText: String = "",
     /** 实时思考内容：子代理 Reasoning 文本的增量累积，供 UI 详情实时展示（像母代理的思考卡片） */
     var reasoning: String = "",
-    /** 结构化消息序列（UIMessage 列表，含 Reasoning/Tool/Text parts 按执行顺序交错），
-     *  供 UI 复用主聊天区的 groupMessageParts + ChainOfThought 渲染思维链时间线。
-     *  实时更新（subAgentRunLoop 每 chunk 上推）；进程内内存态，进程死亡即丢失 */
+    /** 结构化消息序列，供 UI 复用主聊天区的思维链渲染。 */
     var messages: List<UIMessage> = emptyList(),
+    /** 任务累计 token 用量，跨子代理多步骤生成累加。 */
+    var usage: TokenUsage? = null,
     val createdAt: Instant = Clock.System.now(),
     var startedAt: Instant? = null,
     var finishedAt: Instant? = null,
@@ -45,6 +46,8 @@ data class SubAgentTask(
     var result: List<UIMessagePart> = emptyList(),
     var error: String? = null,
     val cancelRequested: Boolean = false,
+    /** 已重试次数（第 1 轮失败后自动重跑，retryCount=1）。JSON blob 向后兼容。 */
+    var retryCount: Int = 0,
 ) {
     fun addStep(message: String, status: SubAgentStatus? = null): SubAgentTask =
         copy(steps = steps + SubAgentStepLog(at = Clock.System.now(), message = message, status = status))

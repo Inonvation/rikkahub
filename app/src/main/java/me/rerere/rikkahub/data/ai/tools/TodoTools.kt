@@ -1,19 +1,14 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -30,14 +25,39 @@ data class TodoItem(
     val id: String,
     val content: String,
     val status: TodoStatus = TodoStatus.pending,
-    val dependencies: List<String> = emptyList(),
 )
 
 @Serializable
 data class TodoList(
     val items: List<TodoItem>,
-    val message: String? = null,
 )
+
+/**
+ * 将 todo 列表渲染成给子代理的只读参考（英文，跟随子代理 prompt 语言）。
+ * 子代理只读此计划对齐输出，不拥有 todo 工具——计划所有权在父代理。
+ */
+fun TodoList.renderReference(): String = buildString {
+    appendLine("## Current Task Plan (read-only reference)")
+    appendLine("The parent agent maintains this plan and may update it while you work. Align your output with it.")
+    appendLine("You have no todo tool — do not attempt to modify this plan; the parent agent owns it.")
+    if (items.isEmpty()) {
+        appendLine("(no tracked items)")
+    } else {
+        items.forEach { item ->
+            val marker = when (item.status) {
+                TodoStatus.pending -> "[ ]"
+                TodoStatus.in_progress -> "[~]"
+                TodoStatus.completed -> "[x]"
+                TodoStatus.cancelled -> "[-]"
+            }
+            appendLine("- $marker ${item.content}  (${item.status.name.replace('_', ' ')})")
+        }
+    }
+}
+
+// 注：早期版本 TodoList 带 message / TodoItem 带 dependencies 默认字段，配合统一 Json 的
+// encodeDefaults=true，storage 序列化时会泄出 "message":null 脏值。删除这两个字段后已无
+// 默认字段可泄；decode 侧 ignoreUnknownKeys=true 仍会丢弃旧文件/旧模型输出里的残留 key。
 
 fun createTodoTool(
     conversationId: String,
@@ -50,7 +70,11 @@ fun createTodoTool(
         Always create a todolist before starting tasks that involve 3+ distinct steps.
         Update item status as you work: mark as in_progress before starting, completed when done, cancelled if irrelevant.
         Pass the FULL todolist each time, not just the delta.
-        The message field is optional — use it to briefly explain what changed.
+
+        IMPORTANT: Update the todo list one step at a time, immediately after each step finishes.
+        Before starting a step, call todo_write to mark it in_progress; when the step finishes,
+        call todo_write right away to mark it completed. Do NOT defer updates and do NOT batch
+        several status changes into one update at the end.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -79,13 +103,6 @@ fun createTodoTool(
                                 })
                                 put("description", "Current status of the task")
                             })
-                            put("dependencies", buildJsonObject {
-                                put("type", "array")
-                                put("items", buildJsonObject {
-                                    put("type", "string")
-                                })
-                                put("description", "IDs of tasks that must complete first")
-                            })
                         })
                         put("required", buildJsonArray {
                             add("id")
@@ -94,24 +111,18 @@ fun createTodoTool(
                         })
                     })
                 })
-                put("message", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Brief summary of what changed in this update")
-                })
             },
             required = listOf("items")
         )
     },
     systemPrompt = { _, _ ->
-        "Use `todo_write` to track complex tasks (3+ steps). Create a plan before starting, update item status (pending→in_progress→completed/cancelled) as you work. Always pass the full list, not just changes. Update after each significant step."
+        "Use `todo_write` to track complex tasks (3+ steps). Create a plan before starting, update item status (pending→in_progress→completed/cancelled) as you work. Always pass the full list, not just changes. Before starting a step, mark it in_progress; when the step finishes, mark it completed — one update per step, immediately, never batch updates at the end."
     },
     execute = { args ->
         val items = args.jsonObject["items"]?.jsonArray
             ?: error("items array is required")
-        val message = args.jsonObject["message"]?.jsonPrimitive?.contentOrNull
         val output = buildJsonObject {
             put("items", items)
-            message?.let { put("message", JsonPrimitive(it)) }
         }
         val outputStr = output.toString()
         // 持久化到文件，防止对话截断/压缩导致数据丢失
@@ -122,60 +133,3 @@ fun createTodoTool(
         listOf(UIMessagePart.Text(outputStr))
     }
 )
-
-/**
- * 从对话中提取最新的 todolist。
- * 优先从消息中的 todo_write 工具调用读取，找不到时从文件存储 fallback。
- * 如果所有任务已完成且用户已发下一条消息，自动清理文件并返回 null。
- */
-fun List<UIMessage>.extractLatestTodoListFromConversation(
-    todoStorage: TodoStorage? = null,
-    conversationId: String? = null,
-): TodoList? {
-    val allTools = this.flatMap { msg ->
-        msg.parts.filterIsInstance<UIMessagePart.Tool>()
-            .filter { it.toolName == "todo_write" }
-    }
-    val latestTodo = allTools.lastOrNull()
-    val fromMessages = if (latestTodo != null) {
-        val jsonStr = if (latestTodo.isExecuted) {
-            latestTodo.output.filterIsInstance<UIMessagePart.Text>()
-                .joinToString("\n") { it.text }
-        } else {
-            latestTodo.input
-        }
-        runCatching { JsonInstant.decodeFromString<TodoList>(jsonStr) }.getOrNull()
-    } else null
-
-    val result = fromMessages
-        ?: todoStorage?.let { conversationId?.let { id -> it.load(id) } }
-        ?: return null
-
-    if (shouldAutoCleanup(result, todoStorage, conversationId)) return null
-
-    return result
-}
-
-private fun List<UIMessage>.shouldAutoCleanup(
-    todoList: TodoList,
-    todoStorage: TodoStorage?,
-    conversationId: String?,
-): Boolean {
-    if (todoStorage == null || conversationId == null) return false
-    if (!todoList.isAllDone()) return false
-
-    val lastTodoMsgIndex = indexOfLast { msg ->
-        msg.parts.any { part ->
-            part is UIMessagePart.Tool && part.toolName == "todo_write" && part.isExecuted
-        }
-    }
-    if (lastTodoMsgIndex < 0) return false
-    val hasUserMessageAfter = drop(lastTodoMsgIndex + 1).any { it.role == MessageRole.USER }
-    if (!hasUserMessageAfter) return false
-
-    todoStorage.delete(conversationId)
-    return true
-}
-
-private fun TodoList.isAllDone(): Boolean =
-    items.all { it.status == TodoStatus.completed || it.status == TodoStatus.cancelled }

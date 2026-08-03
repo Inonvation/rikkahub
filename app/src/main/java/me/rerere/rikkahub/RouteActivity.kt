@@ -104,6 +104,7 @@ import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.chat.SubAgentPanelPage
 import me.rerere.rikkahub.ui.pages.chat.SubAgentDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentActionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
@@ -438,6 +439,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingPreferencesUIPage()
                             }
 
+                            entry<Screen.SettingAgentAction> {
+                                SettingAgentActionPage()
+                            }
+
                             entry<Screen.SettingProvider> {
                                 SettingProviderPage()
                             }
@@ -709,6 +714,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferencesUI : Screen
+
+    @Serializable
+    data object SettingAgentAction : Screen
 
     @Serializable
     data object SettingProvider : Screen

@@ -23,6 +23,8 @@ import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.dao.WrongQuestionDao
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.dao.NoteDao
+import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
+import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
@@ -36,6 +38,8 @@ import me.rerere.rikkahub.data.db.entity.VocabularyEntity
 import me.rerere.rikkahub.data.db.entity.WrongQuestionEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
 import me.rerere.rikkahub.data.db.entity.NoteEntity
+import me.rerere.rikkahub.data.db.entity.SubAgentUsageEntity
+import me.rerere.rikkahub.data.db.entity.SubAgentTaskEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
@@ -58,8 +62,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         WrongQuestionEntity::class,
         KnowledgeCardEntity::class,
         NoteEntity::class,
+        SubAgentUsageEntity::class,
+        SubAgentTaskEntity::class,
     ],
-    version = 33,
+    version = 35,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -114,6 +120,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun knowledgeCardDao(): KnowledgeCardDao
 
     abstract fun noteDao(): NoteDao
+
+    abstract fun subAgentUsageDao(): SubAgentUsageDAO
+
+    abstract fun subAgentTaskDao(): SubAgentTaskDAO
 }
 
 object TokenUsageConverter {

@@ -311,27 +311,6 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         )
                     },
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_todo_list_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_todo_list_desc)) },
-                    trailingContent = {
-                        val currentAssistant = settings.getCurrentAssistant()
-                        Switch(
-                            checked = currentAssistant.enableTodoList,
-                            onCheckedChange = { enabled ->
-                                vm.updateSettings(
-                                    settings.copy(
-                                        assistants = settings.assistants.map { a ->
-                                            if (a.id == currentAssistant.id) {
-                                                a.copy(enableTodoList = enabled)
-                                            } else a
-                                        }
-                                    )
-                                )
-                            }
-                        )
-                    },
-                )
             }
         }
     }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
 import me.rerere.rikkahub.data.db.dao.getMessageCountPerDay
 import me.rerere.rikkahub.data.db.dao.getTokenStats
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -32,6 +33,7 @@ class StatsVM(
     private val conversationDAO: ConversationDAO,
     private val messageNodeDAO: MessageNodeDAO,
     private val settingsStore: SettingsStore,
+    private val subAgentUsageDAO: SubAgentUsageDAO,
 ) : ViewModel() {
 
     private val _stats = MutableStateFlow(AppStats())
@@ -67,15 +69,18 @@ class StatsVM(
         // json_each() + json_extract() 在 SQLite 侧聚合，不再加载完整 JSON 到 Kotlin
         val tokenStats = messageNodeDAO.getTokenStats()
 
+        // 子代理 token 统计（独立表持久化），与主聊天合并
+        val subStats = subAgentUsageDAO.getTokenStats()
+
         val launchCount = settingsStore.settingsFlow.value.launchCount
 
         _stats.value = AppStats(
             isLoading = false,
             totalConversations = totalConversations,
             totalMessages = tokenStats.totalMessages,
-            totalPromptTokens = tokenStats.promptTokens,
-            totalCompletionTokens = tokenStats.completionTokens,
-            totalCachedTokens = tokenStats.cachedTokens,
+            totalPromptTokens = tokenStats.promptTokens + subStats.promptTokens,
+            totalCompletionTokens = tokenStats.completionTokens + subStats.completionTokens,
+            totalCachedTokens = tokenStats.cachedTokens + subStats.cachedTokens,
             conversationsPerDay = conversationsPerDay,
             launchCount = launchCount,
         )

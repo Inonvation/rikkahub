@@ -4,23 +4,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bot
-import me.rerere.hugeicons.stroke.Clock02
 
 /**
- * 子代理工具渲染器（spawn_subagent / await_subagent）——**极简折叠行**。
+ * 子代理工具渲染器（spawn_subagent）——极简折叠行，但**可点击进详情页**。
  *
- * 设计意图（用户需求：子代理不出现在聊天气泡里）：
- * - 只显示一行纯标题（"调用子代理 X" / "等待子代理结果"），**剥离一切状态/结果/摘要/流光**。
- * - 子代理的实时状态只出现在顶部横幅（SubAgentRunningBanner）+ 详情页/面板页。
- * - 不订阅任务 StateFlow，重组开销趋零；图标静态，无 shimmer。
+ * 设计（用户需求）：
+ * - 顶部横幅在全部任务完成后会隐藏，因此母代理聊天气泡里的工具调用位置作为**常驻入口**，
+ *   点击直接进入该子代理的详情页（查看执行历史/结果）。
+ * - 折叠行仍保持极简：只显示标题，不订阅任务 StateFlow，重组开销趋零。
  *
- * 主聊天仍能看到"母代理调用了子代理"这个环节（链式思考不断裂），但不展示结果。
+ * spawn_subagent 的 taskId == tool.toolCallId（派发时对齐），点击可直接定位任务。
  */
 object SubAgentToolUI : ToolUIRenderer {
     override val toolName: String = "spawn_subagent"
 
-    /** 不自动展开，不强制进详情页（状态在顶部横幅展示） */
-    override val alwaysOpenPreview: Boolean = false
+    /** 点击直接进子代理全屏详情页（不弹 BottomSheet） */
+    override val alwaysOpenPreview: Boolean = true
 
     /** 不内联摘要（气泡里不出现子代理结果） */
     override fun hasSummary(context: ToolUIContext): Boolean = false
@@ -36,18 +35,4 @@ object SubAgentToolUI : ToolUIRenderer {
             "调用子代理"
         }
     }
-}
-
-/** await_subagent 的极简渲染器：纯标题"等待子代理结果" */
-object AwaitSubAgentToolUI : ToolUIRenderer {
-    override val toolName: String = "await_subagent"
-
-    override val alwaysOpenPreview: Boolean = false
-
-    override fun hasSummary(context: ToolUIContext): Boolean = false
-
-    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Clock02
-
-    @Composable
-    override fun title(context: ToolUIContext): String = "等待子代理结果"
 }

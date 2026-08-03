@@ -46,6 +46,7 @@ import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
 import me.rerere.hugeicons.stroke.Notification01
 import me.rerere.hugeicons.stroke.PaintBoard
+import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
@@ -160,6 +161,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         onClick = { navController.navigate(Screen.Prompts) },
                         leadingContent = { Icon(HugeIcons.Book03, null) },
                         headlineContent = { Text(stringResource(R.string.extensions_page_prompts)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingAgentAction) },
+                        leadingContent = { Icon(HugeIcons.Bot, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_agent_action)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )
                     item(

@@ -19,6 +19,8 @@ import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
+import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.model.Conversation
@@ -35,6 +37,11 @@ class ConversationRepository(
     private val filesManager: FilesManager,
     private val messageFtsManager: MessageFtsManager,
     private val todoStorage: TodoStorage,
+    private val subAgentUsageDAO: SubAgentUsageDAO,
+    private val subAgentTaskDAO: SubAgentTaskDAO,
+    /** Lazy 注入打破循环依赖：SubAgentRunner 依赖本 Repository，本类依赖它（删会话级联取消子代理）。
+     *  lazy 延迟解析，首次访问时才从 Koin 取实例，避免构造期死锁。 */
+    private val subAgentRunner: kotlin.Lazy<me.rerere.rikkahub.data.ai.subagent.SubAgentRunner>,
 ) {
     companion object {
         private const val PAGE_SIZE = 20
@@ -315,11 +322,17 @@ class ConversationRepository(
             conversation
         }
         messageFtsManager.deleteConversation(conversation.id.toString())
+        // 先停掉该会话运行中的子代理（B3）：否则它们跑完还会 persistTask 把记录写回，产生僵尸数据。
+        // cancel 是同步的（置 CANCELLED + job.cancel），CANCELLED 不触发异步唤醒，无副作用。
+        subAgentRunner.value.cancelByConversation(conversation.id)
         database.withTransaction {
             // message_node 会通过 CASCADE 自动删除
             conversationDAO.delete(
                 conversationToConversationEntity(conversation)
             )
+            // 同步清理该会话的子代理 token 统计与任务历史，避免残留计入全局统计/历史
+            subAgentUsageDAO.deleteByConversation(conversation.id.toString())
+            subAgentTaskDAO.deleteByConversation(conversation.id.toString())
         }
         filesManager.deleteChatFilesPermanently(fullConversation.files)
         todoStorage.delete(conversation.id.toString())

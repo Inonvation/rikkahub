@@ -20,7 +20,11 @@ import java.io.File
 
 val repositoryModule = module {
     single {
-        ConversationRepository(get(), get(), get(), get(), get(), get(), get())
+        // Lazy 注入 SubAgentRunner：SubAgentRunner 依赖本 Repository，用 lazy 打破构造期循环依赖
+        ConversationRepository(
+            get(), get(), get(), get(), get(), get(), get(), get(), get(),
+            lazy { get<me.rerere.rikkahub.data.ai.subagent.SubAgentRunner>() },
+        )
     }
 
     single {

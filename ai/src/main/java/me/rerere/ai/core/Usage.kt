@@ -34,3 +34,14 @@ fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
         cachedTokens = cachedTokens
     )
 }
+
+fun TokenUsage?.sum(other: TokenUsage): TokenUsage {
+    val promptTokens = (this?.promptTokens ?: 0) + other.promptTokens
+    val completionTokens = (this?.completionTokens ?: 0) + other.completionTokens
+    return TokenUsage(
+        promptTokens = promptTokens,
+        completionTokens = completionTokens,
+        cachedTokens = (this?.cachedTokens ?: 0) + other.cachedTokens,
+        totalTokens = promptTokens + completionTokens,
+    )
+}

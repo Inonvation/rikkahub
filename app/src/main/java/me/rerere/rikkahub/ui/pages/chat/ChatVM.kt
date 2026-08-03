@@ -66,6 +66,10 @@ class ChatVM(
     var chatListFirstVisibleItemIndex by mutableStateOf(0)
     var chatListFirstVisibleItemScrollOffset by mutableStateOf(0)
 
+    // 离开时是否位于列表底部 - 跨导航重组合保存。返回重组合后用它初始化 wasAtBottom，
+    // 避免"离开前不在底部、返回却被生成中的自动滚动拉回底部"（导航返回状态重置问题）。
+    var chatListWasAtBottom by mutableStateOf(true)
+
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 

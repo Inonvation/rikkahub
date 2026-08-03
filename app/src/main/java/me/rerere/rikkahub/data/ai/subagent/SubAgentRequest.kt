@@ -13,6 +13,8 @@ data class SubAgentRequest(
     val task: String,
     /** 任务级模型覆盖（可选），优先级最高 */
     val modelId: Uuid? = null,
+    /** 上次执行的部分结果（详情页"重新执行"续跑用）。仅内存传递，不落库。 */
+    val priorContext: String? = null,
 ) {
     companion object {
         // ignoreUnknownKeys: 运行时 args 里可能混入隐藏字段（如 __toolCallId），需容忍未知键

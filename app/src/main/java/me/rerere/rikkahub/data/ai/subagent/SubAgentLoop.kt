@@ -11,6 +11,9 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
+import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.merge
+import me.rerere.ai.core.sum
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
@@ -29,6 +32,10 @@ private const val MAX_MESSAGE_TEXT_CHARS = 8000
 
 /** 子代理上下文保留的最大消息条数：超出裁剪最早的消息，防止无界增长 */
 private const val MAX_CONTEXT_MESSAGES = 30
+
+/** token 预算超限信号：由调用方在 onUsageUpdate 里检测并抛出，runWithTimeout 捕获置 TOKEN_LIMIT。
+ *  走独立异常类型而非复用通用 Exception，避免被当作"模型调用失败"记录日志/触发重试。 */
+class TokenBudgetExceeded : Exception("Sub-agent token budget exceeded")
 
 /**
  * 子代理独立回合循环（精简版 GenerationHandler）。
@@ -64,6 +71,11 @@ suspend fun subAgentRunLoop(
     onMessagesUpdate: (List<UIMessage>) -> Unit = {},
     /** 工具调用回调：执行每个工具前回调（工具名 + 入参摘要），供 UI 展示"调用了哪些工具" */
     onToolCall: (String, String) -> Unit = { _, _ -> },
+    /** 用量回调：每次流式 chunk 携带 usage 时回调累计增量，供调用方跨步骤累加并持久化 */
+    onUsageUpdate: (TokenUsage) -> Unit = {},
+    /** 引导回调：每步生成前调用，返回注入用户引导后的消息列表。
+     *  子代理运行中从详情页发送的引导消息由此注入（subAgentAllowGuidance 开启时）。 */
+    onGuidance: suspend (List<UIMessage>) -> List<UIMessage> = { it },
 ): List<UIMessage> {
     var messages = messages
     var lastMessages: List<UIMessage> = messages
@@ -71,10 +83,14 @@ suspend fun subAgentRunLoop(
     for (stepIndex in 0 until maxSteps) {
         Log.i(TAG, "step #$stepIndex")
 
+        // 0. 每步生成前注入用户引导消息（若子代理运行期间有收到引导）
+        messages = onGuidance(messages)
+
         // 1. 生成（流式，实时输出到 onStreamUpdate；步骤日志覆盖进度感知）
         try {
             // 每步重置 Reasoning delta 提取基线：只回调本步新增的思考增量
             var lastReasoningLen = 0
+            var stepUsage: TokenUsage? = null
             providerImpl.streamText(
                 providerSetting = providerSetting,
                 messages = messages,
@@ -82,6 +98,8 @@ suspend fun subAgentRunLoop(
             ).collect { chunk ->
                 messages = messages.handleMessageChunk(chunk = chunk, model = params.model)
                 lastMessages = messages
+                // 收集本步 usage（chunk 级增量，merge 累积后回调调用方）
+                chunk.usage?.let { stepUsage = stepUsage.merge(it) }
                 // 实时上推结构化消息（供 UI 重建思维链时间线）
                 onMessagesUpdate(messages)
                 // 提取本轮新增文本 delta，实时回调
@@ -102,7 +120,11 @@ suspend fun subAgentRunLoop(
                 }
                 lastReasoningLen = lastReasoning.length
             }
+            stepUsage?.let(onUsageUpdate)
         } catch (e: CancellationException) {
+            throw e
+        } catch (e: TokenBudgetExceeded) {
+            // token 预算耗尽不是模型失败：不记步骤日志、不脱敏包装，原样上抛由 runWithTimeout 处理
             throw e
         } catch (e: Exception) {
             onStep("模型调用失败：${e.message ?: e.javaClass.simpleName}")
@@ -204,9 +226,14 @@ suspend fun subAgentRunLoop(
             } else part
         }
         messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
-        // 保留最近的 N 条消息，防止无界增长
+        // 保留最近的 N 条消息，防止无界增长。system 必须保留：丢弃会失去身份定义/工具说明
         if (messages.size > MAX_CONTEXT_MESSAGES) {
-            messages = messages.takeLast(MAX_CONTEXT_MESSAGES)
+            val system = messages.firstOrNull { it.role == me.rerere.ai.core.MessageRole.SYSTEM }
+            messages = if (system != null) {
+                listOf(system) + messages.takeLast(MAX_CONTEXT_MESSAGES - 1)
+            } else {
+                messages.takeLast(MAX_CONTEXT_MESSAGES)
+            }
         }
         // MED-5: 单条消息内 Text 也做体量上限——handleMessageChunk 把各步 delta 合并进同一条
         // assistant 消息（消息条数基本恒定），真正的膨胀发生在条内的 Text/Tool 累积。

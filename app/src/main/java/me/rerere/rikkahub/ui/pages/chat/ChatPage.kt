@@ -132,7 +132,6 @@ import me.rerere.rikkahub.data.ai.tools.TodoItem
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
-import me.rerere.rikkahub.data.ai.tools.extractLatestTodoListFromConversation
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.event.AppEvent
@@ -344,6 +343,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             if (scrollSyncReady) {
                 vm.chatListFirstVisibleItemIndex = index
                 vm.chatListFirstVisibleItemScrollOffset = offset
+                // 同步"是否在底部"到 VM：导航返回重组合后用它初始化 wasAtBottom，
+                // 避免离开前不在底部、返回却被生成中自动滚动拉回底部
+                vm.chatListWasAtBottom = chatListState.layoutInfo.let { info ->
+                    val last = info.visibleItemsInfo.lastOrNull() ?: return@let true
+                    last.index >= info.totalItemsCount - 2
+                }
             }
         }
     }
@@ -364,11 +369,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    // 切回正在生成中的对话时，滚动到底部以显示最新消息
+    // 切回正在生成中的对话时，滚动到底部以显示最新消息。
+    // 只在该会话"从无生成变为有生成"（loadingJob null→非 null 边沿）时触发——
+    // 导航返回重组合时 loadingJob 值不变，不应重新拉到底（会覆盖已恢复的阅读位置）。
+    var prevLoadingJob by remember { mutableStateOf<Job?>(loadingJob) }
     LaunchedEffect(loadingJob) {
-        if (vm.chatListInitialized && loadingJob != null) {
+        if (vm.chatListInitialized && loadingJob != null && prevLoadingJob == null) {
             chatListState.scrollToItem(conversation.currentMessages.size + 5)
         }
+        prevLoadingJob = loadingJob
     }
 
     when {
@@ -499,6 +508,9 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
+    // 订阅本会话 todo 状态（TodoStorage 是唯一状态源，写入时实时刷新 banner）
+    val todolist by todoStorage.loadAsFlow(conversation.id.toString())
+        .collectAsStateWithLifecycle(initialValue = null)
     var showFilesSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
@@ -515,15 +527,12 @@ private fun ChatPageContent(
         }
         .collectAsStateWithLifecycle(initialValue = 0)
 
-    // 顶部横幅：本会话进行中的子代理任务（QUEUED/RUNNING），节流避免流式高频重组
-    val activeSubAgentTasks by subAgentRunner.tasksFlow
+    // 顶部横幅：本会话的子代理任务（进行中 + 已完成），节流避免流式高频重组
+    val subAgentTasks by subAgentRunner.tasksFlow
         .map { map ->
             map.values
-                .filter {
-                    it.parentConversationId == conversation.id &&
-                        (it.status == SubAgentStatus.QUEUED || it.status == SubAgentStatus.RUNNING)
-                }
-                .sortedBy { it.createdAt }
+                .filter { it.parentConversationId == conversation.id }
+                .sortedByDescending { it.createdAt }
         }
         .sample(200)
         .distinctUntilChangedBy { list ->
@@ -532,6 +541,25 @@ private fun ChatPageContent(
             }
         }
         .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val subAgentCompletedCount = remember(subAgentTasks) {
+        subAgentTasks.count { it.status.isTerminal }
+    }
+    val subAgentTotal = subAgentTasks.size
+    val bannerActiveCount = subAgentTotal - subAgentCompletedCount
+
+    // 自动收起：全部完成且 >10s 后自动折叠横幅；有新活跃任务时重新展开
+    var subAgentBannerDismissed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(bannerActiveCount, subAgentCompletedCount) {
+        if (bannerActiveCount == 0 && subAgentCompletedCount > 0) {
+            delay(10_000)
+            subAgentBannerDismissed = true
+        } else {
+            subAgentBannerDismissed = false
+        }
+    }
+    val showSubAgentBanner =
+        bannerActiveCount > 0 || (subAgentCompletedCount > 0 && !subAgentBannerDismissed)
 
     // 自动滚动：检测用户是否滚离底部
     val isAtBottom by remember {
@@ -560,7 +588,9 @@ private fun ChatPageContent(
     // 目标统一用 layoutInfo.totalItemsCount - 1（与发送后滚动、ChatList 自动跟随一致），
     // 不用 currentMessages.size + 5 的旧快照估算（会与 ChatList 的 requestScrollToItem 目标打架导致抖动）。
     LaunchedEffect(conversation.currentMessages.size, loadingJob) {
-        if (loadingJob != null && !userScrolledUp) {
+        // 生成中自动跟随到底：仅当离开前用户位于底部（vm.chatListWasAtBottom）时，
+        // 避免导航返回重组合后把已恢复的阅读位置拉回底部
+        if (loadingJob != null && !userScrolledUp && vm.chatListWasAtBottom) {
             chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
         }
     }
@@ -611,15 +641,11 @@ private fun ChatPageContent(
                 )
             },
             bottomBar = {
-                val todolist = conversation.currentMessages.extractLatestTodoListFromConversation(
-                    todoStorage = todoStorage,
-                    conversationId = conversation.id.toString(),
-                )
                 Column {
-                    // TodolistBanner - 显示在聊天输入框上方
+                    // TodolistBanner - 显示在聊天输入框上方（订阅 TodoStorage 实时刷新）
                     if (todolist != null) {
                         TodolistBanner(
-                            todolist = todolist,
+                            todolist = todolist!!,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -755,14 +781,6 @@ private fun ChatPageContent(
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                // 顶部子代理横幅：进行中的子代理任务横向并排，点击进详情页。
-                // 位于消息列表上方（TopBar 之下），subAgentActiveTasks 为空时自动隐藏。
-                SubAgentRunningBanner(
-                    tasks = activeSubAgentTasks,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
-                )
                 // 消息列表区：Column 已应用 innerPadding，ChatList 不再自己加 padding
                 Box(modifier = Modifier.weight(1f)) {
                 AnimatedContent(
@@ -782,6 +800,7 @@ private fun ChatPageContent(
                 settings = setting,
                 hazeState = hazeState,
                 errors = errors,
+                initialWasAtBottom = vm.chatListWasAtBottom,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = {
@@ -876,6 +895,20 @@ private fun ChatPageContent(
                     }
                 }
             }
+
+            // 顶部子代理横幅：悬浮在消息列表上方（overlay，不占布局流）。
+            // 展开/折叠的高度变化不参与消息列表布局 → 聊天消息位置零移动。
+            // 无任务时自动隐藏；全部完成后延时自动收起。align TopCenter 使其覆盖在列表顶部。
+            SubAgentRunningBanner(
+                tasks = subAgentTasks,
+                activeCount = bannerActiveCount,
+                completedCount = subAgentCompletedCount,
+                visible = showSubAgentBanner,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, top = 4.dp),
+            )
 
             }
             }
@@ -1396,7 +1429,6 @@ private fun TodolistBanner(
                             val collapsedText = when {
                                 allDone -> "全部完成"
                                 inProgressItems.isNotEmpty() -> inProgressItems.first().content
-                                todolist.message != null -> todolist.message
                                 pendingCount > 0 -> "$pendingCount 项待处理"
                                 else -> "TodoList"
                             }
@@ -1462,16 +1494,6 @@ private fun TodolistBanner(
                 ) {
                     Column {
                         Spacer(Modifier.size(4.dp))
-                        todolist.message?.let { msg ->
-                            Text(
-                                text = msg,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 6.dp),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                         displayItems.forEach { item ->
                             key(item.id) {
                                 val isRemoving = item.id in removingIds.value

@@ -86,6 +86,9 @@ val appModule = module {
             json = get(),
             toolAssembler = get(),
             conversationRepo = get(),
+            usageDao = get(),
+            taskDao = get(),
+            todoStorage = get(),
         )
     }
 
@@ -100,7 +103,9 @@ val appModule = module {
         )
     }
 
-    single {
+    // createdAtStart：ChatService 启动即创建——内部订阅子代理完成流（异步唤醒母代理）
+    // 必须在任何任务完成前就绪，否则完成事件会因无订阅者而丢失（同 ChatNotificationManager 模式）
+    single(createdAtStart = true) {
         ChatService(
             context = get(),
             appScope = get(),

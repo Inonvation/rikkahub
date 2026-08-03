@@ -5,6 +5,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
@@ -13,16 +14,19 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRequest
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
+import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.ai.subagent.SubAgentTask
 import kotlin.uuid.Uuid
 
 /**
- * 母代理侧的子代理工具：spawn_subagent 派发 + await_subagent 取结果。
+ * 母代理侧的子代理工具：spawn_subagent 派发（异步唤醒模式）。
  *
- * 执行模式（await 驱动，修复"母代理偷懒"）：
- * - spawn 后**不中断**母代理生成循环（无 awaitAsyncCompletion break），母代理继续干自己的活
- *   （思考深层需求 / 规划 / 执行其它工具）；需要子代理结果时调 await_subagent 阻塞拿结果。
+ * 执行模式（异步，对齐 Claude Code 背景子代理）：
+ * - spawn 后**不中断**母代理生成循环，母代理继续自由输出/思考/做初步决策，
+ *   甚至可以直接结束回合。
  * - 子代理在 AppScope detached 后台运行，独立于母代理 job。
+ * - 子代理完成时通过 SubAgentRunner.taskCompletedFlow 广播事件，ChatService
+ *   resumeAfterSubAgent 自动唤醒母代理续答并注入结果——母代理**无需任何 await 工具**。
  *
  * 占位状态用 "dispatched"（非 queued/succeeded），避免模型误判"子代理瞬间完成"。
  */
@@ -39,21 +43,28 @@ fun createSubAgentTools(
         }
     }
 
-    // 母代理行为引导：派发后不偷懒，需要结果时 await，拿到后交叉验证汇总。
-    // 用 markdown 分节（业界标准：## Role / ## Usage / ## Task template），
-    // 英文编写（主流模型对英文指令理解更充分），task 模板给母代理明确的填写结构。
+    // 母代理行为引导（异步唤醒模式）：派发后自由继续，可结束回合，完成时自动唤醒注入结果。
     val spawnBehavior = """
         ## Usage
         - After dispatching, **do not wait idle** — continue doing work you can do:
           analyze the user's deeper needs, clarify direction, plan steps, run base work
           that doesn't need the sub-agent, or handle parallel tasks with info you already have.
-        - Remember the returned `taskId`. When the final answer needs the sub-agent's result,
-          call `await_subagent(taskId=...)` to fetch its completion status and summary.
-          You may await multiple sub-agents in parallel (one call per taskId).
+        - The sub-agent runs in the background. When it completes, you will be **woken up
+          automatically** with its result injected into the context. There is no await tool —
+          you never block waiting for it.
+        - You may end this round whenever you have enough to respond, even if sub-agents are
+          still running — they continue in the background and will wake you when done.
         - Once you have results, **cross-verify, synthesize and summarize** them into the best
           possible reply to the user. Do NOT just relay the sub-agent's output verbatim.
-          You know the user's needs best; the sub-agent is an assistant to you.
         - Never assume a sub-agent finished: `dispatched` is only a dispatch marker, not a result.
+        - A timed-out or failed sub-agent may be **auto-retried once by the system** (same task,
+          context preserved). If the final status is still `timeout`/`failed`, the sub-agent may
+          still have produced partial work: use `summary`, `partialSteps` and `partialOutput` to
+          answer as best you can. Do not pretend it succeeded — but do not simply tell the user it
+          failed; salvage whatever partial result is available.
+        - If `spawn_subagent` returns `status=limit_reached`, the concurrency cap is full. Do NOT
+          retry spawn immediately; do other independent work first and try again later, or handle
+          the task yourself.
         - Use sub-agents only when they add clear value (bulk research / long-document analysis /
           independent execution). Do simple things yourself — don't dispatch for the sake of it.
 
@@ -125,6 +136,27 @@ fun createSubAgentTools(
             execute = { args ->
                 val request = SubAgentRequest.fromJsonElement(args)
                     ?: return@Tool listOf(UIMessagePart.Text("{\"error\":\"Invalid subagent request\"}"))
+
+                // 并发上限快速失败：并发已满时返回 limit_reached 错误 JSON，让母代理自行决定
+                // 稍后重试或自己处理（而非无限排队堆积）。强制指令（/search 等）不走此工具，
+                // 由 ChatService 直接派发，不受此限制。
+                if (!subAgentRunner.isConcurrencyAvailable()) {
+                    return@Tool listOf(
+                        UIMessagePart.Text(
+                            buildJsonObject {
+                                put("status", "limit_reached")
+                                put("agentId", request.agentId)
+                                put("maxConcurrent", subAgentRunner.concurrencyLimit())
+                                put("running", subAgentRunner.runningCount.value)
+                                put(
+                                    "message",
+                                    "并发子代理数已达上限，你可以先处理其他可独立完成的任务，稍后重试。"
+                                )
+                            }.toString()
+                        )
+                    )
+                }
+
                 // 从 args 提取隐藏字段 __toolCallId，作为子代理 taskId（与母代理 Tool.toolCallId 对齐，
                 // 让 UI observeTask(toolCallId) 能查到实时任务）——顶部横幅/详情页的关键
                 val toolCallId = (args as? JsonObject)
@@ -134,7 +166,8 @@ fun createSubAgentTools(
                     parentConversationId,
                     taskId = toolCallId ?: kotlin.uuid.Uuid.random().toString(),
                 )
-                // 派发占位：status=dispatched（非 queued/succeeded），明确"未完成，需 await"
+                // 派发占位：status=dispatched（非 queued/succeeded），明确"未完成"。异步唤醒模式——
+                // 母代理继续做自己的事或结束回合，子代理完成时自动唤醒并注入结果。
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {
@@ -143,68 +176,36 @@ fun createSubAgentTools(
                             put("taskId", taskId)
                             put(
                                 "note",
-                                "子代理已后台派发执行中。请继续做你能做的工作；需要结果时调用 await_subagent(taskId=$taskId) 获取。"
+                                "子代理已后台派发执行中。你可以继续做自己的工作，或直接结束本轮——" +
+                                    "子代理完成时会自动唤醒并注入结果。"
                             )
                         }.toString()
                     )
                 )
             },
         ),
-
-        // ---- await_subagent：阻塞等待结果 ----
-        Tool(
-            name = "await_subagent",
-            description = """
-                Block until a previously spawned sub-agent (the `taskId` returned by spawn_subagent)
-                reaches a terminal state, then return its result summary. Execution pauses while waiting.
-
-                ## Usage
-                - Pass the `taskId` returned by spawn_subagent.
-                - Await multiple sub-agents in parallel: call await_subagent once per taskId in the same reply.
-                - After getting results, cross-verify, synthesize and summarize them into the final
-                  reply. Do not relay the raw summary verbatim.
-                - If `status=not_found`, the task is no longer valid (e.g. process restarted);
-                  answer based on whatever info you already have.
-            """.trimIndent(),
-            parameters = {
-                InputSchema.Obj(
-                    properties = buildJsonObject {
-                        put("taskId", buildJsonObject {
-                            put("type", "string")
-                            put("description", "spawn_subagent 返回的 taskId（= 子代理任务 id）")
-                        })
-                    },
-                    required = listOf("taskId"),
-                )
-            },
-            execute = { args ->
-                val taskId = (args as? JsonObject)
-                    ?.get("taskId")?.jsonPrimitive?.contentOrNull
-                    ?: return@Tool listOf(UIMessagePart.Text("{\"error\":\"Missing taskId\"}"))
-                val task = subAgentRunner.awaitTask(taskId)
-                val payload = if (task == null) {
-                    // 任务不存在（进程重启后跟随消息重生成）→ not_found
-                    buildJsonObject {
-                        put("status", "not_found")
-                        put("taskId", taskId)
-                        put("error", "子代理任务不存在（可能已失效）。请基于已有信息尽力作答，或重新派发。")
-                    }
-                } else {
-                    subAgentResultPayload(task)
-                }
-                listOf(UIMessagePart.Text(payload.toString()))
-            },
-        ),
     )
 }
 
-/** 子代理终态结果 payload（spawn 占位回填、await、backfill 三处复用）。 */
+/** 子代理终态结果 payload（spawn 占位回填、backfill 复用）。
+ *  timeout/failed/token_limit 时附上 partialSteps/partialOutput，母代理可据此尽力作答。
+ *  retryCount>0 时附带，母代理据此感知"自动重试过"。 */
 fun subAgentResultPayload(task: SubAgentTask): JsonObject = buildJsonObject {
     put("status", task.status.name.lowercase())
     put("agentId", task.agentId)
     put("taskId", task.taskId)
     put("summary", task.resultSummary ?: "")
+    if (task.retryCount > 0) put("retryCount", JsonPrimitive(task.retryCount))
     task.error?.let { put("error", JsonPrimitive(it)) }
+    if (task.status == SubAgentStatus.TIMEOUT || task.status == SubAgentStatus.FAILED ||
+        task.status == SubAgentStatus.TOKEN_LIMIT
+    ) {
+        task.steps.takeLast(10).joinToString("\n") { it.message }
+            .takeIf { it.isNotBlank() }
+            ?.let { put("partialSteps", JsonPrimitive(it)) }
+        task.streamText.takeIf { it.isNotBlank() }
+            ?.let { put("partialOutput", JsonPrimitive(it.take(2000))) }
+    }
 }
 
 /** 判断 spawn 占位是否仍待回填（dispatched，兼容旧历史 queued）。 */

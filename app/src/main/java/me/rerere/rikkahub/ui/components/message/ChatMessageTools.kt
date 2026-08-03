@@ -184,9 +184,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         onClick = if (context.content != null || isPending || images.isNotEmpty() || renderer.alwaysOpenPreview) {
             if (renderer.alwaysOpenPreview) {
                 {
-                    navController.navigate(
-                        Screen.SubAgentDetail(tool.toolCallId, null)
-                    )
+                    // spawn_subagent：taskId == toolCallId（派发时对齐）。await_subagent 已移除。
+                    val subAgentTaskId = tool.toolCallId
+                    if (!subAgentTaskId.isNullOrBlank()) {
+                        navController.navigate(
+                            Screen.SubAgentDetail(subAgentTaskId, null)
+                        )
+                    }
                 }
             } else {
                 { showResult = true }

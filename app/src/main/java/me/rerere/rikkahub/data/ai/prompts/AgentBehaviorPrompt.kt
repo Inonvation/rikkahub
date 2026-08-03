@@ -23,7 +23,7 @@ internal fun buildAgentBehaviorPrompt(tools: List<Tool>): String {
         }
         appendLine()
         appendLine(ASK_USER_SECTION)
-        if (tools.any { it.name == "spawn_subagent" || it.name == "await_subagent" }) {
+        if (tools.any { it.name == "spawn_subagent" }) {
             appendLine()
             append(SUB_AGENT_DELEGATION_SECTION)
         }
@@ -71,12 +71,16 @@ private val SUB_AGENT_DELEGATION_SECTION = """
       sub-agent result.
 
     Getting results:
-    - When the final answer needs them, call `await_subagent(taskId=...)` once per taskId — you may
-      await several in the same reply.
+    - Sub-agents wake you **automatically** when they complete — their result is injected into your
+      context, so you never block waiting for them. There is no await tool.
+    - You may end this round even while sub-agents run; they finish in the background and wake you.
     - Cross-verify, synthesize and summarize their results into the best answer. Do not relay sub-agent
       output verbatim — you know the user's needs best.
-    - `dispatched` is only a dispatch marker, never a result. If a task is not found or failed, answer
-      from what you already have, or respawn once.
+    - `dispatched` is only a dispatch marker, never a result. A timed-out or failed task may be
+      auto-retried by the system (same task, context preserved); if the final status is still
+      timeout/failed, answer from what you already have — do not respawn yourself.
+    - When a sub-agent result corresponds to an item you track in the todo list, update that item
+      (in_progress / completed) in your synthesis round.
 """.trimIndent()
 
 /**
@@ -85,7 +89,7 @@ private val SUB_AGENT_DELEGATION_SECTION = """
  */
 private fun groupToolsForPrompt(tools: List<Tool>): String {
     val groups = linkedMapOf<String, MutableList<String>>()
-    val known = setOf("spawn_subagent", "await_subagent", "ask_user", "memory_tool", "todo_write")
+    val known = setOf("spawn_subagent", "ask_user", "memory_tool", "todo_write")
     tools.forEach { tool ->
         val prefix = when {
             tool.name in known -> tool.name

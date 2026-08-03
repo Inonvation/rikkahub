@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +21,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,7 +31,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -37,16 +45,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Clock02
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.ai.subagent.SubAgentTask
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.ui.components.message.ChatMessageNerdLine
 import me.rerere.rikkahub.ui.components.message.ChatMessageReasoningStep
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.MessagePartBlock
@@ -55,6 +71,7 @@ import me.rerere.rikkahub.ui.components.message.groupMessageParts
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ai.ui.UIMessage
@@ -78,6 +95,8 @@ import kotlin.time.Instant
 @Composable
 fun SubAgentDetailPage(taskId: String, conversationId: String?) {
     val runner: SubAgentRunner = koinInject()
+    val settingsStore: SettingsStore = koinInject()
+    val navController = LocalNavController.current
     val density = LocalDensity.current
     val scrollState = rememberScrollState()
 
@@ -100,17 +119,33 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
             }
     }.collectAsStateWithLifecycle(initialValue = null)
 
-    val def = task?.agentId?.let { SubAgentCatalog.byId(it) }
-    val agentName = def?.name ?: task?.agentId ?: "subagent"
-    val status = task?.status
+    // 进程重启后任务不在内存里：从 Room 历史库恢复，让详情页仍能展示历史执行结果。
+    // 内存态出现任务（运行中/刚派发）时以内存态为准，覆盖历史快照。
+    var historyTask by remember { mutableStateOf<SubAgentTask?>(null) }
+    LaunchedEffect(task?.taskId, task?.status) {
+        if (task == null) {
+            historyTask = runner.getTaskFromHistory(taskId)
+        } else {
+            historyTask = null
+        }
+    }
+    val currentTask = task ?: historyTask
+
+    val def = currentTask?.agentId?.let { SubAgentCatalog.byId(it) }
+    val agentName = def?.name ?: currentTask?.agentId ?: "subagent"
+    val status = currentTask?.status
     val running = status == SubAgentStatus.QUEUED || status == SubAgentStatus.RUNNING
+
+    // 引导消息：仅当设置开启且任务运行中时显示输入框
+    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    var guidanceText by rememberSaveable { mutableStateOf("") }
 
     // 自动滚动跟随：仅在用户位于底部时滚到最新（仿 ChatPage）
     val bottomThresholdPx = with(density) { 120.dp.toPx() }
     val isAtBottom by remember {
         derivedStateOf { scrollState.maxValue - scrollState.value < bottomThresholdPx }
     }
-    val messagesFingerprint = task?.messages?.hashCode() ?: 0
+    val messagesFingerprint = currentTask?.messages?.hashCode() ?: 0
     LaunchedEffect(messagesFingerprint, status) {
         if (isAtBottom) {
             // 流式期间用瞬移 scrollTo（重启动画会打断渲染导致卡顿）
@@ -133,7 +168,7 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                text = statusLabel(status, task),
+                                text = statusLabel(status, currentTask),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -153,6 +188,25 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                                         )
                                     }
                                 }
+                            } else if (canRerun(status)) {
+                                Spacer(Modifier.width(8.dp))
+                                // 终态（失败/超时/取消/进程中断）可重新执行：以新任务续跑，带上上次部分结果
+                                val scope = rememberCoroutineScope()
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            rerunAndNavigate(runner, navController, taskId)
+                                        }
+                                    },
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Refresh01,
+                                        contentDescription = stringResource(R.string.subagent_detail_rerun),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -160,6 +214,54 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                 navigationIcon = { BackButton() },
                 colors = CustomColors.topBarColors,
             )
+        },
+        bottomBar = {
+            // 引导消息输入框：固定在底部，仅当设置开启且任务运行中显示。
+            // 用 imePadding + navigationBarsPadding 跟随键盘/避开导航栏。
+            if (settings.subAgentAllowGuidance && running) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .imePadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = guidanceText,
+                            onValueChange = { guidanceText = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.subagent_detail_guidance_placeholder),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            minLines = 1,
+                            maxLines = 3,
+                            textStyle = MaterialTheme.typography.bodySmall,
+                        )
+                        IconButton(
+                            onClick = {
+                                if (guidanceText.isNotBlank() && runner.submitGuidance(taskId, guidanceText)) {
+                                    guidanceText = ""
+                                }
+                            },
+                            enabled = guidanceText.isNotBlank(),
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.ArrowUp02,
+                                contentDescription = stringResource(R.string.subagent_detail_guidance_send),
+                                tint = if (guidanceText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
@@ -170,8 +272,8 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val current = task ?: run {
-                // 任务不存在（进程重启后 task 已丢失，只有 tool output 终态 JSON）
+            val current = currentTask ?: run {
+                // 任务不存在（内存与历史库都没有，只有 tool output 终态 JSON）
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -310,6 +412,22 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                 }
             }
 
+            // token 消耗行：终态后展示（复用主聊天区的 NerdLine）
+            val taskUsage = current.usage
+            if (taskUsage != null) {
+                val usageMessage = UIMessage(
+                    role = me.rerere.ai.core.MessageRole.ASSISTANT,
+                    parts = emptyList(),
+                    createdAt = current.createdAt.toLocalDateTime(TimeZone.currentSystemDefault()),
+                    finishedAt = current.finishedAt?.toLocalDateTime(TimeZone.currentSystemDefault()),
+                    usage = taskUsage,
+                )
+                ChatMessageNerdLine(
+                    message = usageMessage,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+
             Spacer(Modifier.padding(bottom = 24.dp))
         }
     }
@@ -345,7 +463,7 @@ private fun ChatBubble(isUser: Boolean, content: @Composable () -> Unit) {
 
 private fun statusIcon(status: SubAgentStatus?): androidx.compose.ui.graphics.vector.ImageVector = when (status) {
     SubAgentStatus.SUCCEEDED -> HugeIcons.Tick01
-    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT -> HugeIcons.Alert01
+    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT, SubAgentStatus.TOKEN_LIMIT -> HugeIcons.Alert01
     SubAgentStatus.CANCELLED -> HugeIcons.Cancel01
     SubAgentStatus.QUEUED, SubAgentStatus.RUNNING -> HugeIcons.Clock02
     null -> HugeIcons.Clock02
@@ -354,7 +472,7 @@ private fun statusIcon(status: SubAgentStatus?): androidx.compose.ui.graphics.ve
 @Composable
 private fun statusColor(status: SubAgentStatus?): androidx.compose.ui.graphics.Color = when (status) {
     SubAgentStatus.SUCCEEDED -> MaterialTheme.colorScheme.primary
-    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT -> MaterialTheme.colorScheme.error
+    SubAgentStatus.FAILED, SubAgentStatus.TIMEOUT, SubAgentStatus.TOKEN_LIMIT -> MaterialTheme.colorScheme.error
     SubAgentStatus.CANCELLED -> MaterialTheme.colorScheme.onSurfaceVariant
     SubAgentStatus.QUEUED, SubAgentStatus.RUNNING -> MaterialTheme.colorScheme.onSurfaceVariant
     null -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -367,13 +485,35 @@ private fun statusLabel(status: SubAgentStatus?, task: SubAgentTask?): String {
         SubAgentStatus.SUCCEEDED -> "Done"
         SubAgentStatus.FAILED -> "Failed"
         SubAgentStatus.TIMEOUT -> "Timeout"
+        SubAgentStatus.TOKEN_LIMIT -> "Token Limit"
         SubAgentStatus.CANCELLED -> "Cancelled"
         null -> ""
     }
+    val retried = task?.retryCount?.takeIf { it > 0 }
     return when {
-        status == SubAgentStatus.SUCCEEDED && task != null -> "$base · ${formatElapsed(task.startedAt, task.finishedAt)}"
-        status == SubAgentStatus.RUNNING -> "$base · ${formatElapsed(task?.startedAt)}"
+        status == SubAgentStatus.SUCCEEDED && task != null ->
+            "$base · ${formatElapsed(task.startedAt, task.finishedAt)}${retried?.let { " · ${it} retr" } ?: ""}"
+        status == SubAgentStatus.RUNNING ->
+            "$base · ${formatElapsed(task?.startedAt)}${retried?.let { " · ${it} retr" } ?: ""}"
+        status == SubAgentStatus.TOKEN_LIMIT && task != null -> "$base · ${formatElapsed(task.startedAt, task.finishedAt)}"
         else -> base
+    }
+}
+
+/** 终态且可续跑：失败/超时/取消（含进程中断的僵尸任务）可重新执行 */
+private fun canRerun(status: SubAgentStatus?): Boolean =
+    status == SubAgentStatus.FAILED || status == SubAgentStatus.TIMEOUT ||
+        status == SubAgentStatus.CANCELLED || status == SubAgentStatus.TOKEN_LIMIT
+
+/** 重新执行当前任务，成功后导航到新任务的详情页 */
+private suspend fun rerunAndNavigate(
+    runner: SubAgentRunner,
+    navController: me.rerere.rikkahub.ui.context.Navigator,
+    taskId: String,
+) {
+    val newId = runner.rerun(taskId)
+    if (newId != null) {
+        navController.navigate(Screen.SubAgentDetail(newId, null))
     }
 }
 

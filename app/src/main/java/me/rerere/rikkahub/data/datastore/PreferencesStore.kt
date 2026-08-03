@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
@@ -41,6 +42,7 @@ import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -68,7 +70,8 @@ private val Context.settingsStore by preferencesDataStore(
         listOf(
             PreferenceStoreV1Migration(),
             PreferenceStoreV2Migration(),
-            PreferenceStoreV3Migration()
+            PreferenceStoreV3Migration(),
+            PreferenceStoreV4Migration()
         )
     }
 )
@@ -80,7 +83,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
-        const val CURRENT_DATA_VERSION = 3
+        const val CURRENT_DATA_VERSION = 4
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 
@@ -186,6 +189,14 @@ class SettingsStore(
         // 子代理
         val SUB_AGENT_ENABLED = booleanPreferencesKey("enable_sub_agent")
         val SUB_AGENT_MODEL = stringPreferencesKey("sub_agent_model")
+        val SUB_AGENT_TIMEOUT_SECONDS = longPreferencesKey("sub_agent_timeout_seconds")
+        val SUB_AGENT_MAX_CONCURRENT = intPreferencesKey("sub_agent_max_concurrent")
+        val SUB_AGENT_ALLOW_GUIDANCE = booleanPreferencesKey("sub_agent_allow_guidance")
+        val SUB_AGENT_MAX_RETRIES = intPreferencesKey("sub_agent_max_retries")
+        val SUB_AGENT_MAX_TOKENS = longPreferencesKey("sub_agent_max_tokens")
+
+        // 任务计划
+        val TODO_LIST_ENABLED = booleanPreferencesKey("enable_todo_list")
 
         // 行为层提示词
         val AGENT_BEHAVIOR_PROMPT_ENABLED = booleanPreferencesKey("enable_agent_behavior_prompt")
@@ -312,7 +323,13 @@ class SettingsStore(
                 } ?: emptyMap(),
                 enableSubAgent = preferences[SUB_AGENT_ENABLED] == true,
                 subAgentModelId = preferences[SUB_AGENT_MODEL]?.let { Uuid.parse(it) },
+                subAgentTimeoutSeconds = preferences[SUB_AGENT_TIMEOUT_SECONDS]?.takeIf { it > 0 },
+                subAgentMaxConcurrent = (preferences[SUB_AGENT_MAX_CONCURRENT] ?: 5).coerceIn(1, 64),
+                subAgentAllowGuidance = preferences[SUB_AGENT_ALLOW_GUIDANCE] == true,
+                subAgentMaxRetries = (preferences[SUB_AGENT_MAX_RETRIES] ?: 1).coerceIn(0, 3),
+                subAgentMaxTokens = preferences[SUB_AGENT_MAX_TOKENS]?.takeIf { it > 0 },
                 enableAgentBehaviorPrompt = preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] != false,
+                enableTodoList = preferences[TODO_LIST_ENABLED] != false,
             )
         }
         .map {
@@ -515,7 +532,17 @@ class SettingsStore(
             settings.subAgentModelId?.let {
                 preferences[SUB_AGENT_MODEL] = it.toString()
             } ?: preferences.remove(SUB_AGENT_MODEL)
+            settings.subAgentTimeoutSeconds?.takeIf { it > 0 }?.let {
+                preferences[SUB_AGENT_TIMEOUT_SECONDS] = it
+            } ?: preferences.remove(SUB_AGENT_TIMEOUT_SECONDS)
+            preferences[SUB_AGENT_MAX_CONCURRENT] = settings.subAgentMaxConcurrent.coerceIn(1, 64)
+            preferences[SUB_AGENT_ALLOW_GUIDANCE] = settings.subAgentAllowGuidance
+            preferences[SUB_AGENT_MAX_RETRIES] = settings.subAgentMaxRetries.coerceIn(0, 3)
+            settings.subAgentMaxTokens?.takeIf { it > 0 }?.let {
+                preferences[SUB_AGENT_MAX_TOKENS] = it
+            } ?: preferences.remove(SUB_AGENT_MAX_TOKENS)
             preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] = settings.enableAgentBehaviorPrompt
+            preferences[TODO_LIST_ENABLED] = settings.enableTodoList
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -691,8 +718,16 @@ data class Settings(
     val studyDeleteApprovalEnabled: Boolean = true,
     val studyStatsEnabled: Boolean = true,
     val studyToolApprovalOverrides: Map<String, Boolean> = emptyMap(),
+    val enableTodoList: Boolean = true,
     val enableSubAgent: Boolean = false,
     val subAgentModelId: Uuid? = null,
+    val subAgentTimeoutSeconds: Long? = null,
+    val subAgentMaxConcurrent: Int = 5,
+    val subAgentAllowGuidance: Boolean = false,
+    /** 子代理超时/瞬态失败自动重试次数（0..3，默认 1） */
+    val subAgentMaxRetries: Int = 1,
+    /** per-task token 预算（null=不限）。累计 usage 超限置 TOKEN_LIMIT 终止 */
+    val subAgentMaxTokens: Long? = null,
     val enableAgentBehaviorPrompt: Boolean = true,
 ) {
     companion object {
@@ -926,7 +961,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         systemPrompt = ENGLISH_TUTOR_PROMPT,
         temperature = 0.3f,
         contextMessageLimit = 20,
-        enableTodoList = false,
         enableTimeReminder = false,
         localTools = listOf(),
         enabledStudyTools = listOf("save_vocabulary", "save_note"),
@@ -940,7 +974,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         temperature = 0.3f,
         reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
         contextMessageLimit = 20,
-        enableTodoList = false,
         enableTimeReminder = false,
         localTools = listOf(),
         enabledStudyTools = listOf("save_wrong_question", "save_note"),
@@ -953,7 +986,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         systemPrompt = POLITICS_TUTOR_PROMPT,
         temperature = 0.3f,
         contextMessageLimit = 20,
-        enableTodoList = false,
         enableTimeReminder = false,
         localTools = listOf(),
         enabledStudyTools = listOf("save_note", "save_knowledge_card", "quiz_user"),
@@ -967,7 +999,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         temperature = 0.3f,
         reasoningLevel = me.rerere.ai.core.ReasoningLevel.HIGH,
         contextMessageLimit = 20,
-        enableTodoList = false,
         enableTimeReminder = false,
         localTools = listOf(),
         enabledStudyTools = listOf("save_wrong_question", "save_note", "save_knowledge_card", "quiz_user"),
@@ -994,7 +1025,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
         """.trimIndent(),
         temperature = 0.8f,
         enableMemory = true,
-        enableTodoList = false,
         enableTimeReminder = false,
         localTools = listOf(),
     ),

@@ -191,7 +191,9 @@ class GenerationHandler(
 
                 val tools = messages.last().getTools().filter { !it.isExecuted }
                 if (tools.isEmpty()) {
-                    // no tool calls, break
+                    // 母代理这轮纯文本没调工具，正常结束。
+                    // 若仍有已派发但未取结果的子代理，交给完成事件流异步唤醒续答，
+                    // 不再强制续轮干等（见 ChatService.resumeAfterSubAgent）。
                     break
                 }
 
@@ -362,21 +364,31 @@ class GenerationHandler(
             }
         )
         if (stream) {
-            providerImpl.streamText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params
-            ).collect {
-                messages = messages.handleMessageChunk(chunk = it, model = model)
-                it.usage?.let { usage ->
-                    messages = messages.mapIndexed { index, message ->
-                        if (index == messages.lastIndex) {
-                            message.copy(usage = message.usage.merge(usage))
-                        } else {
-                            message
+            try {
+                providerImpl.streamText(
+                    providerSetting = provider,
+                    messages = internalMessages,
+                    params = params
+                ).collect {
+                    messages = messages.handleMessageChunk(chunk = it, model = model)
+                    it.usage?.let { usage ->
+                        messages = messages.mapIndexed { index, message ->
+                            if (index == messages.lastIndex) {
+                                message.copy(usage = message.usage.merge(usage))
+                            } else {
+                                message
+                            }
                         }
                     }
+                    onUpdateMessages(messages)
                 }
+            } catch (e: CancellationException) {
+                // 取消（用户停止生成/切会话）仍要把已生成的流式内容落盘，最后 emit 一次
+                onUpdateMessages(messages)
+                throw e
+            } catch (e: Exception) {
+                // 生成中途异常（断网/超时/服务端错误）：保留已输出的内容，不丢
+                Log.e(TAG, "stream error, preserving partial output", e)
                 onUpdateMessages(messages)
             }
         } else {
