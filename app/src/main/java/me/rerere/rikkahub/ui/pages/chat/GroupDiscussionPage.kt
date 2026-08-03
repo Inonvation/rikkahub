@@ -106,8 +106,10 @@ fun GroupDiscussionPage(
     }
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }.collect { visible ->
-            val last = visible.lastOrNull()
-            wasAtBottom = last != null && last.index >= listState.layoutInfo.totalItemsCount - 2
+            // 首次进入时列表可能尚未完成布局（visible 为空），跳过本次更新、
+            // 保留初始值 true（视为在底部），避免「回到底部」按钮短暂闪出。
+            val last = visible.lastOrNull() ?: return@collect
+            wasAtBottom = last.index >= listState.layoutInfo.totalItemsCount - 2
         }
     }
     LaunchedEffect(conversation.messageNodes.size, lastFingerprint) {

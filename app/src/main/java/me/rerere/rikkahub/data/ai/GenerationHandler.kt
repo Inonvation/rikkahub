@@ -406,9 +406,12 @@ class GenerationHandler(
                 onUpdateMessages(messages)
                 throw e
             } catch (e: Exception) {
-                // 生成中途异常（断网/超时/服务端错误）：保留已输出的内容，不丢
+                // 生成中途异常（断网/超时/服务端错误/模型不可用/参数错误）：先保留已输出的内容不丢，
+                // 再重新抛出让上层 onFailure 弹出错误提示——只 Log 不抛会把失败静默吞掉，
+                // 用户会看到消息发出去了却没回复、也没有任何报错。
                 Log.e(TAG, "stream error, preserving partial output", e)
                 onUpdateMessages(messages)
+                throw e
             }
         } else {
             val chunk = providerImpl.generateText(

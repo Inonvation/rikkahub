@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -124,6 +125,16 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+
+/**
+ * 子代理完成时，若母代理正在生成，最多等它结束本回合的时间（毫秒）。
+ * 某些模型派发子代理后 SSE 挂起（不返回内容也不结束），母代理 job 永不结束、
+ * isGenerating 永远 true——若 resume 直接丢弃，子代理结果会永久丢失。超时后取消旧 job 接管续答。
+ */
+private const val RESUME_WAIT_MS = 10_000L
+
+/** resume 续答 job 的最大时长（毫秒）：超过视为续答生成挂起，取消以释放串行锁、避免锁死后继子代理 */
+private const val RESUME_JOB_TIMEOUT_MS = 60_000L
 
 /**
  * 说明：子代理唤醒指令已改为注入 system prompt 末尾（BUG3 修复），不再作为尾部消息。
@@ -510,16 +521,37 @@ class ChatService(
      */
     private suspend fun resumeAfterSubAgent(task: me.rerere.rikkahub.data.ai.subagent.SubAgentTask) {
         val conversationId = task.parentConversationId
+        Log.i(TAG, "resume enter: task=${task.taskId} status=${task.status} conv=$conversationId")
 
-        // 防重入：母代理正在生成时不触发新生成。不标记已消费——当前回合结束后的兜底会补唤醒。
+        // 防重入：母代理正在生成时，**有界等待**它结束本回合再续答，而不是直接丢弃靠兜底。
+        // 兜底只在母代理回合正常结束（onSuccess）时触发；某些模型派发子代理后 SSE 挂起
+        // （不返回内容也不结束），母代理 job 永不结束、isGenerating 永远 true，若此处 return，
+        // 子代理结果会被永久挡在门外（"子代理空转、结果接不到"）。有界等待 + 超时取消旧 job
+        // 强制接管，保证子代理结果必达。正常回合几秒内结束，等待不打断；挂起时超时接管。
         val session = sessions[conversationId]
-        if (session?.isGenerating == true) return
+        if (session?.isGenerating == true) {
+            Log.w(TAG, "resume: parent generating, waiting <= ${RESUME_WAIT_MS}ms (task=${task.taskId})")
+            val runningJob = session.getJob()
+            withTimeoutOrNull(RESUME_WAIT_MS) { runningJob?.join() }
+            if (session.isGenerating) {
+                Log.w(TAG, "resume: parent still generating after wait, cancelling old job to take over (task=${task.taskId})")
+                // 母代理回合仍未结束（SSE 挂起）：取消旧 job 强制接管续答，结果不丢失
+                session.getJob()?.cancel()
+                runCatching { session.getJob()?.join() }
+            }
+        }
 
         // 串行化：同一会话同时只跑一个 resume，避免多子代理相继完成时并发续答互相覆盖
-        if (!resumingConversations.add(conversationId)) return
+        if (!resumingConversations.add(conversationId)) {
+            Log.w(TAG, "resume SKIPPED: another resume in progress (conv=$conversationId task=${task.taskId})")
+            return
+        }
 
         try {
-            if (!resumedTaskIds.add(task.taskId)) return  // 已消费过
+            if (!resumedTaskIds.add(task.taskId)) {
+                Log.w(TAG, "resume SKIPPED: task already resumed (task=${task.taskId})")
+                return  // 已消费过
+            }
 
             // 会话不存在（已删除/从未打开）→ 丢弃
             val conversation = runCatching { getConversationFlow(conversationId).value }.getOrNull() ?: return
@@ -528,7 +560,10 @@ class ChatService(
             val hasSpawn = conversation.messageNodes.flatMap { it.messages }
                 .flatMap { it.parts }
                 .any { it is UIMessagePart.Tool && it.toolName == "spawn_subagent" }
-            if (!hasSpawn) return
+            if (!hasSpawn) {
+                Log.w(TAG, "resume SKIPPED: no spawn part in conversation (conv=$conversationId task=${task.taskId})")
+                return
+            }
 
             Log.i(TAG, "resumeAfterSubAgent: task=${task.taskId} status=${task.status} conversation=$conversationId")
 
@@ -544,11 +579,18 @@ class ChatService(
 
             // 唤醒指令：作为 resume 上下文注入，handleMessageComplete 会把 resumeContext
             // 拼进 system prompt 末尾（BUG3 修复），模型据此续答、并入同一条 assistant 消息。
+            // 摘要直接内联在指令里，不依赖 spawn tool result 的可见性——长对话被 limitContext
+            // 截断或模型忽略工具输出时，结果仍能送达模型，杜绝"结果接了模型却没看到"。
             val agentName = me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog.byId(task.agentId)?.name ?: task.agentId
             val resumePrompt = buildString {
                 appendLine("## Sub-agent result arrived")
                 appendLine("The sub-agent \"$agentName\" (${task.agentId}) has completed with status \"${task.status.name.lowercase()}\".")
-                appendLine("Its result has been injected into the conversation context (see the spawn_subagent tool result).")
+                task.resultSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                    appendLine("Its result summary:")
+                    appendLine("```")
+                    appendLine(summary.take(3000))
+                    appendLine("```")
+                }
                 appendLine("- If your previous answer is already complete, supplement or refine it with this new information.")
                 appendLine("- If you were waiting for other sub-agents, you may continue waiting, or answer based on what you have now.")
                 appendLine("- Do NOT re-answer from scratch; build on your existing answer.")
@@ -573,7 +615,16 @@ class ChatService(
                 }
             }
             session.setJob(job)
-            runCatching { job.join() }
+            Log.i(TAG, "resume job started: task=${task.taskId}")
+            // resume 续答超时保护：若续答生成时模型 SSE 挂起（与派发后挂起同因），job 永不结束，
+            // resumingConversations 锁被永久占用，后续完成的子代理全部卡死（并行多子代理丢失的变种）。
+            // 超时后取消该 resume job，释放锁，让后续子代理能独立补唤醒（scheduleRoundEndResume 兜底）。
+            withTimeoutOrNull(RESUME_JOB_TIMEOUT_MS) { job.join() } ?: run {
+                Log.w(TAG, "resume job TIMEOUT, cancelling: task=${task.taskId}")
+                job.cancel()
+                runCatching { job.join() }
+            }
+            Log.i(TAG, "resume job done: task=${task.taskId}")
         } finally {
             resumingConversations.remove(conversationId)
         }
@@ -926,7 +977,19 @@ class ChatService(
         if (initialConversation.isGroupDiscussion) return
         val assistant = settings.getAssistantById(initialConversation.assistantId)
             ?: settings.getCurrentAssistant()
-        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: return
+        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+        if (model == null) {
+            // 配置的模型在 provider 列表里找不到（模型被删 / provider 被移除 / 未配置）。
+            // 原实现静默 return：用户会看到消息发出去了却没回复、也无任何报错，这里明确提示。
+            addError(
+                IllegalStateException(
+                    "The chat model is unavailable. Please check the model settings of this assistant."
+                ),
+                conversationId,
+                title = context.getString(R.string.error_title_generation),
+            )
+            return
+        }
 
         val senderName = if (assistant.useAssistantAvatar) {
             assistant.name.ifEmpty { context.getString(R.string.assistant_page_default_assistant) }
@@ -1111,10 +1174,17 @@ class ChatService(
             // 兜底取消 Live Update 通知（生成开始前失败时 onCompletion 不会执行）
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
 
-            it.printStackTrace()
-            addError(it, conversationId, title = context.getString(R.string.error_title_generation))
-            Logging.log(TAG, "handleMessageComplete: $it")
-            Logging.log(TAG, it.stackTraceToString())
+            if (it is CancellationException) {
+                // 用户主动停止生成 / resume 超时取消：不补唤醒，避免"已停止却自动续答复活"
+            } else {
+                it.printStackTrace()
+                addError(it, conversationId, title = context.getString(R.string.error_title_generation))
+                Logging.log(TAG, "handleMessageComplete: $it")
+                Logging.log(TAG, it.stackTraceToString())
+
+                // 母代理回合异常结束：补唤醒该会话已完成但未消费的子代理（结果必达）
+                scheduleRoundEndResume(conversationId)
+            }
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value
             saveConversation(conversationId, finalConversation)
@@ -1132,30 +1202,38 @@ class ChatService(
                 }
             }
 
-            // 兜底：母代理正在生成时子代理完成（完成事件被防重入 guard 跳过、未标记消费）的补唤醒。
-            // 也覆盖 resume 回合期间新完成的子代理（被串行化 guard 挡掉的）。
-            // 每个 resume 消费一个 taskId（resumedTaskIds.add），天然终止，不会死循环。
-            // onSuccess 时母代理生成 job 尚未完全结束（isGenerating 仍 true），resume 会命中防重入，
-            // 故在独立协程里等会话生成 job 真正结束后再检查。
-            appScope.launch {
-                // 等当前母代理生成 job 结束，确保 isGenerating 已变 false
-                runCatching { sessions[conversationId]?.getJob()?.join() }
-                delay(200)  // 小延时：等待 session.setJob 的 invokeOnCompletion 把 job 置空
-                val pendingResume = subAgentRunner.tasksFlow.value.values
-                    .filter {
-                        it.parentConversationId == conversationId &&
-                            // 排除 CANCELLED：停止生成/用户取消的子代理不唤醒续答
-                            (it.status == SubAgentStatus.SUCCEEDED ||
-                                it.status == SubAgentStatus.TIMEOUT ||
-                                it.status == SubAgentStatus.FAILED ||
-                                it.status == SubAgentStatus.TOKEN_LIMIT) &&
-                            !resumedTaskIds.contains(it.taskId)
-                    }
-                    .minByOrNull { it.finishedAt ?: it.createdAt }
-                if (pendingResume != null) {
-                    Log.i(TAG, "round-end fallback resume: task=${pendingResume.taskId}")
-                    resumeAfterSubAgent(pendingResume)
+            // 母代理回合正常结束：补唤醒该会话已完成但未消费的子代理
+            scheduleRoundEndResume(conversationId)
+        }
+    }
+
+    /**
+     * 母代理回合结束后的兜底补唤醒：回合进行中子代理完成、resume 被防重入/串行化挡掉且
+     * 未标记消费的，在此补上。成功/失败/取消的回合都要调用——若只在成功路径调用，
+     * 母代理回合异常结束时已完成的子代理结果会永久丢失（"子代理空转、结果接不到"）。
+     *
+     * 在独立协程里执行并等待母代理生成 job 真正结束（isGenerating 变 false）后再检查，
+     * 否则刚结束回合的 resume 会再次命中防重入 guard。
+     */
+    private fun scheduleRoundEndResume(conversationId: Uuid) {
+        appScope.launch {
+            // 等当前母代理生成 job 结束，确保 isGenerating 已变 false
+            runCatching { sessions[conversationId]?.getJob()?.join() }
+            delay(200)  // 小延时：等待 session.setJob 的 invokeOnCompletion 把 job 置空
+            val pendingResume = subAgentRunner.tasksFlow.value.values
+                .filter {
+                    it.parentConversationId == conversationId &&
+                        // 排除 CANCELLED：停止生成/用户取消的子代理不唤醒续答
+                        (it.status == SubAgentStatus.SUCCEEDED ||
+                            it.status == SubAgentStatus.TIMEOUT ||
+                            it.status == SubAgentStatus.FAILED ||
+                            it.status == SubAgentStatus.TOKEN_LIMIT) &&
+                        !resumedTaskIds.contains(it.taskId)
                 }
+                .minByOrNull { it.finishedAt ?: it.createdAt }
+            if (pendingResume != null) {
+                Log.i(TAG, "round-end fallback resume: task=${pendingResume.taskId}")
+                resumeAfterSubAgent(pendingResume)
             }
         }
     }

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.subagent
 
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -387,6 +388,7 @@ class SubAgentRunner(
         if (task.status == SubAgentStatus.CANCELLED) return
         val hasPartial = !task.resultSummary.isNullOrBlank() || task.streamText.isNotBlank()
         if (task.status != SubAgentStatus.SUCCEEDED && !hasPartial) return
+        Log.i("SubAgentRunner", "emitCompleted: task=${task.taskId} status=${task.status} summaryLen=${task.resultSummary?.length ?: 0}")
         _taskCompleted.tryEmit(task)
     }
 
