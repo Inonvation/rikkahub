@@ -28,7 +28,11 @@ data class UIMessage(
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
     val usage: TokenUsage? = null,
-    val translation: String? = null
+    val translation: String? = null,
+    // 群组讨论：发言者标识。普通会话恒为 null；群聊会话里为成员 Assistant id + 名称快照。
+    // 新增可空字段，JSON blob 老数据缺省即反序列化为 null，向后兼容。
+    val speakerId: Uuid? = null,
+    val speakerName: String? = null
 ) {
     private fun appendChunk(chunk: MessageChunk): UIMessage {
         val choice = chunk.choices.getOrNull(0)

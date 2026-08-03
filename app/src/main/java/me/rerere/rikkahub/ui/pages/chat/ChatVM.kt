@@ -70,6 +70,10 @@ class ChatVM(
     // 避免"离开前不在底部、返回却被生成中的自动滚动拉回底部"（导航返回状态重置问题）。
     var chatListWasAtBottom by mutableStateOf(true)
 
+    // 上次观测到的生成 job（跨导航保留）。导航返回重组合时若用 remember 存它会被重置为 null，
+    // 导致"loadingJob null→非 null"边沿被误判、把用户阅读位置强拉到底。存 VM 保证跨导航正确。
+    var prevLoadingJob: Job? by mutableStateOf(null)
+
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
@@ -86,6 +90,9 @@ class ChatVM(
     val conversationJobs = chatService
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    // 子代理完成气泡由 ChatService 在子代理完成时落库（合并进派发消息框架），
+    // 无需在 VM 层收集。
 
     init {
         // 添加对话引用

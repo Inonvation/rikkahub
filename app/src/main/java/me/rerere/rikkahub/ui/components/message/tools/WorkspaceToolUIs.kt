@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -232,7 +234,8 @@ object WriteFileToolUI : ToolUIRenderer {
     }
 }
 
-/** 内联摘要: 按扩展名语法高亮展示文件内容首部若干行 */
+/** 内联摘要: 按扩展名语法高亮展示文件内容首部若干行。
+ *  loading 时保留预览（内容即待写入文本），右上角叠加小转圈标示执行中。 */
 @Composable
 private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
     val preview = remember(text) {
@@ -255,6 +258,16 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (loading) {
+            // 执行中指示：右上角小转圈，与其它工具执行态统一
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(14.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 

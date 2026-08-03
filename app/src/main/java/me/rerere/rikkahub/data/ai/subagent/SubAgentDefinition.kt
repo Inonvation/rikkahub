@@ -18,6 +18,8 @@ data class SubAgentDefinition(
     val description: String,
     val systemPrompt: String,
     val capabilities: Set<SubAgentCapability> = emptySet(),
+    /** 短指令别名（如 "plan"→/plan），用户手动派发子代理用。null 时仅支持 /<id> 全称指令。 */
+    val commandAlias: String? = null,
     val defaultModelId: Uuid? = null,
     val maxSteps: Int = 16,
     val timeoutSeconds: Long = 300,

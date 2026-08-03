@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import android.util.Log
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,6 +85,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -103,9 +105,8 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -148,7 +149,6 @@ import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
-import me.rerere.rikkahub.ui.components.message.SubAgentRunningBanner
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -370,14 +370,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     // 切回正在生成中的对话时，滚动到底部以显示最新消息。
-    // 只在该会话"从无生成变为有生成"（loadingJob null→非 null 边沿）时触发——
-    // 导航返回重组合时 loadingJob 值不变，不应重新拉到底（会覆盖已恢复的阅读位置）。
-    var prevLoadingJob by remember { mutableStateOf<Job?>(loadingJob) }
+    // 只在该会话"从无生成变为有生成"（loadingJob null→非 null 边沿）时触发。
+    // prevLoadingJob 存 VM 跨导航保留：导航返回重组合时 loadingJob 值不变，
+    // prevLoadingJob 也保持（而非被 remember 重置为 null），因此不会误判边沿、
+    // 不会把已恢复的阅读位置强拉到底。
     LaunchedEffect(loadingJob) {
-        if (vm.chatListInitialized && loadingJob != null && prevLoadingJob == null) {
+        if (vm.chatListInitialized && loadingJob != null && vm.prevLoadingJob == null) {
             chatListState.scrollToItem(conversation.currentMessages.size + 5)
         }
-        prevLoadingJob = loadingJob
+        vm.prevLoadingJob = loadingJob
     }
 
     when {
@@ -426,7 +427,10 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 1.dp,
                     ) {
-                        StudyDrawerContent(navController = navController)
+                        val activity = LocalContext.current as ComponentActivity
+                        RightDrawerContent(
+                            navController = navController,
+                        )
                     }
                 }
             }
@@ -447,7 +451,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     )
                 },
                 rightDrawer = {
-                    StudyDrawerContent(
+                    RightDrawerContent(
                         navController = navController,
                     )
                 },
@@ -516,7 +520,9 @@ private fun ChatPageContent(
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
     val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
-    // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）
+    // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）。
+    // distinctUntilChanged：只在计数变化时通知（0→N→0），子代理流式更新期间
+    // 计数稳定，避免每次流式 chunk 都触发整个 ChatPageContent 重组（发烫/掉帧来源）。
     val subAgentRunner: SubAgentRunner = koinInject()
     val subAgentActiveCount by subAgentRunner.tasksFlow
         .map { map ->
@@ -525,41 +531,8 @@ private fun ChatPageContent(
                     (it.status == SubAgentStatus.QUEUED || it.status == SubAgentStatus.RUNNING)
             }
         }
+        .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
-
-    // 顶部横幅：本会话的子代理任务（进行中 + 已完成），节流避免流式高频重组
-    val subAgentTasks by subAgentRunner.tasksFlow
-        .map { map ->
-            map.values
-                .filter { it.parentConversationId == conversation.id }
-                .sortedByDescending { it.createdAt }
-        }
-        .sample(200)
-        .distinctUntilChangedBy { list ->
-            list.map { t ->
-                "${t.taskId}|${t.status}|${t.steps.size}|${t.toolCalls.size}|${t.streamText.length / 512}"
-            }
-        }
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-
-    val subAgentCompletedCount = remember(subAgentTasks) {
-        subAgentTasks.count { it.status.isTerminal }
-    }
-    val subAgentTotal = subAgentTasks.size
-    val bannerActiveCount = subAgentTotal - subAgentCompletedCount
-
-    // 自动收起：全部完成且 >10s 后自动折叠横幅；有新活跃任务时重新展开
-    var subAgentBannerDismissed by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(bannerActiveCount, subAgentCompletedCount) {
-        if (bannerActiveCount == 0 && subAgentCompletedCount > 0) {
-            delay(10_000)
-            subAgentBannerDismissed = true
-        } else {
-            subAgentBannerDismissed = false
-        }
-    }
-    val showSubAgentBanner =
-        bannerActiveCount > 0 || (subAgentCompletedCount > 0 && !subAgentBannerDismissed)
 
     // 自动滚动：检测用户是否滚离底部
     val isAtBottom by remember {
@@ -868,10 +841,16 @@ private fun ChatPageContent(
             )
             }
 
-            // 回到底部按钮：直接放进内容 Box 底部。Scaffold 的 content 区域位于
-            // 输入框（bottomBar）上方，键盘弹起时输入框随 imePadding 增高、content 区域
-            // 同步收缩，按钮 align(BottomCenter) 便稳定跟随输入框上升——既不消失也不被盖。
-            if (userScrolledUp) {
+            // 回到底部按钮：悬浮（overlay）在内容 Box 底部，不参与布局流。
+            // 出现/消失用透明度过渡（animateFloatAsState），避免突现/突隐造成视觉卡顿；
+            // 不用 AnimatedVisibility：它在 Column/Box 双 scope 下重载解析有歧义，
+            // 且 animateFloat 更轻量，不参与布局、纯绘制层过渡。
+            val scrollBtnAlpha by animateFloatAsState(
+                targetValue = if (userScrolledUp) 1f else 0f,
+                animationSpec = tween(200),
+                label = "scrollToBottom",
+            )
+            if (scrollBtnAlpha > 0f) {
                 Surface(
                     onClick = {
                         scope.launch {
@@ -883,7 +862,8 @@ private fun ChatPageContent(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 16.dp)
-                        .size(36.dp),
+                        .size(36.dp)
+                        .graphicsLayer { alpha = scrollBtnAlpha },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -895,20 +875,6 @@ private fun ChatPageContent(
                     }
                 }
             }
-
-            // 顶部子代理横幅：悬浮在消息列表上方（overlay，不占布局流）。
-            // 展开/折叠的高度变化不参与消息列表布局 → 聊天消息位置零移动。
-            // 无任务时自动隐藏；全部完成后延时自动收起。align TopCenter 使其覆盖在列表顶部。
-            SubAgentRunningBanner(
-                tasks = subAgentTasks,
-                activeCount = bannerActiveCount,
-                completedCount = subAgentCompletedCount,
-                visible = showSubAgentBanner,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, top = 4.dp),
-            )
 
             }
             }

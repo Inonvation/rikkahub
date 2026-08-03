@@ -86,6 +86,11 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionCreatePage
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionEditPage
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionListPage
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionPage
+import me.rerere.rikkahub.ui.pages.chat.GroupDetailPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesPage
@@ -361,6 +366,26 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.AssistantDetail> { key ->
                                 AssistantDetailPage(key.id)
+                            }
+
+                            entry<Screen.GroupDiscussionCreate> {
+                                GroupDiscussionCreatePage()
+                            }
+
+                            entry<Screen.GroupDiscussionList> {
+                                GroupDiscussionListPage()
+                            }
+
+                            entry<Screen.GroupDetail> { key ->
+                                GroupDetailPage(id = key.id)
+                            }
+
+                            entry<Screen.GroupDiscussionEdit> { key ->
+                                GroupDiscussionEditPage(id = key.id)
+                            }
+
+                            entry<Screen.GroupDiscussion> { key ->
+                                GroupDiscussionPage(id = key.id)
                             }
 
                             entry<Screen.AssistantBasic> { key ->
@@ -655,6 +680,20 @@ sealed interface Screen : NavKey {
     @Serializable
     data class AssistantDetail(val id: String) : Screen
 
+    @Serializable
+    data object GroupDiscussionCreate : Screen
+
+    @Serializable
+    data object GroupDiscussionList : Screen
+
+    @Serializable
+    data class GroupDetail(val id: String) : Screen
+
+    @Serializable
+    data class GroupDiscussionEdit(val id: String) : Screen
+
+    @Serializable
+    data class GroupDiscussion(val id: String) : Screen
     @Serializable
     data class AssistantBasic(val id: String) : Screen
 

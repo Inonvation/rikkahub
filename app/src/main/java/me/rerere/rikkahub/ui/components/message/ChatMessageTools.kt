@@ -67,6 +67,16 @@ import me.rerere.rikkahub.utils.JsonInstant
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
+/**
+ * 工具气泡展开状态的进程级存储（key = toolCallId，UUID 全局唯一）。
+ *
+ * 导航到子代理详情/面板等页面返回时，Chat 重新组合，remember/rememberSaveable 都不可靠
+ * （Navigation 3 对非栈顶 entry 的组合槽位重建，saveable 恢复不稳定）。存进程级单例，
+ * 只要 App 进程存活，任何导航路径都能保持用户对工具气泡的展开/折叠意图。
+ * toolCallId 全局唯一（UUID），天然隔离不同会话/消息，不串状态。
+ */
+private val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
+
 @Composable
 fun ChainOfThoughtScope.ChatMessageToolStep(
     tool: UIMessagePart.Tool,
@@ -99,9 +109,15 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         )
     }
 
-    var showResult by remember { mutableStateOf(false) }
-    var showDenyDialog by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(true) }
+    var showResult by remember(tool.toolCallId) { mutableStateOf(false) }
+    var showDenyDialog by remember(tool.toolCallId) { mutableStateOf(false) }
+    // 展开状态存进程级单例 map（toolBubbleExpanded 是 mutableStateMapOf，读写自动触发重组）。
+    // 跨导航保留：Navigation 3 对非栈顶 entry 组合重建，remember/rememberSaveable 恢复不可靠，
+    // 单例 map 只要进程存活就稳定保留。默认展开（map 无记录）。
+    val expanded = toolBubbleExpanded[tool.toolCallId] ?: true
+    val onExpandedChange: (Boolean) -> Unit = { value ->
+        if (value) toolBubbleExpanded.remove(tool.toolCallId) else toolBubbleExpanded[tool.toolCallId] = false
+    }
     val hapticController = rememberHaptic()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
@@ -109,22 +125,12 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
     val rendererLoading = renderer.isLoading(context, loading)
 
-    // 执行中自动展开（alwaysOpenPreview 工具如子代理）：像推理 Preview 一样，
-    // 进行中实时展示流式输出与工具步骤，用户手动折叠则尊重用户选择
-    if (renderer.alwaysOpenPreview) {
-        LaunchedEffect(rendererLoading) {
-            if (rendererLoading) {
-                expanded = true
-            }
-        }
-    }
-
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty()
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
-        onExpandedChange = { expanded = it },
+        onExpandedChange = onExpandedChange,
         icon = {
             if (rendererLoading) {
                 DotLoading(

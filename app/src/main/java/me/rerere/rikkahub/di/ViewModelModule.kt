@@ -5,6 +5,11 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailVM
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerVM
 import me.rerere.rikkahub.ui.pages.chat.ChatVM
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionCreateVM
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionEditVM
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionListVM
+import me.rerere.rikkahub.ui.pages.chat.GroupDiscussionVM
+import me.rerere.rikkahub.ui.pages.chat.GroupDetailVM
 import me.rerere.rikkahub.ui.pages.chat.PromptOptimizeVM
 import me.rerere.rikkahub.ui.pages.debug.DebugVM
 import me.rerere.rikkahub.ui.pages.favorite.FavoriteVM
@@ -52,6 +57,34 @@ val viewModelModule = module {
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
     viewModelOf(::AssistantVM)
+    viewModelOf(::GroupDiscussionCreateVM)
+    viewModel<GroupDiscussionListVM> {
+        GroupDiscussionListVM(
+            chatService = get(),
+            groupRepository = get(),
+        )
+    }
+    viewModel<GroupDetailVM> { params ->
+        GroupDetailVM(
+            id = params.get(),
+            chatService = get(),
+            conversationRepo = get(),
+        )
+    }
+    viewModel<GroupDiscussionVM> { params ->
+        GroupDiscussionVM(
+            id = params.get(),
+            chatService = get(),
+            settingsStore = get(),
+        )
+    }
+    viewModel<GroupDiscussionEditVM> { params ->
+        GroupDiscussionEditVM(
+            id = params.get(),
+            chatService = get(),
+            settingsStore = get(),
+        )
+    }
     viewModel<AssistantDetailVM> {
         AssistantDetailVM(
             id = it.get(),

@@ -66,7 +66,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.graphics.toColorInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
@@ -120,6 +122,7 @@ private fun generateMarkdownHtml(content: String): String {
 
 // ---- Main composable ----
 
+@OptIn(FlowPreview::class)
 @Composable
 fun MarkdownNew(
     content: String,
@@ -137,6 +140,8 @@ fun MarkdownNew(
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
+            // 流式合并：连续 chunk 只解析最后一次，避免每 chunk 重生成 HTML + Jsoup.parse
+            .debounce(50)
             .mapLatest { generateMarkdownHtml(it) }
             .catch { it.printStackTrace() }
             .flowOn(Dispatchers.Default)

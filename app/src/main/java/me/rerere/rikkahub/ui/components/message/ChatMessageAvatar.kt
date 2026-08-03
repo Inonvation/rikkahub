@@ -62,6 +62,45 @@ fun ChatMessageAssistantAvatar(
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
     val useAssistantAvatar = assistant?.useAssistantAvatar == true
+
+    // 群组讨论：按发言人渲染（speakerId 命中成员 Assistant 头像，speakerName 快照兜底）
+    if (message.role == MessageRole.ASSISTANT && message.speakerId != null) {
+        val memberAssistant = settings.assistants.find { it.id == message.speakerId }
+        val speakerAvatar = memberAssistant?.avatar
+        val speakerName = message.speakerName?.ifEmpty { null }
+            ?: memberAssistant?.name
+            ?: stringResource(R.string.assistant_page_default_assistant)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier
+        ) {
+            if (showIcon) {
+                UIAvatar(
+                    name = speakerName,
+                    modifier = Modifier.size(28.dp),
+                    value = speakerAvatar ?: Avatar.Dummy,
+                    loading = loading,
+                )
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (settings.displaySetting.showModelName) {
+                    Text(
+                        text = speakerName,
+                        style = MaterialTheme.typography.labelLargeEmphasized,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        return
+    }
+
     if (message.role == MessageRole.ASSISTANT && (model != null || useAssistantAvatar)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),

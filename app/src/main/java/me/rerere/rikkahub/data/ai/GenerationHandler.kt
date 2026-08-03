@@ -88,6 +88,11 @@ class GenerationHandler(
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         conversationId: String? = null,
+        /** 续答唤醒指令（子代理完成时注入）。追加为 provider 看到的**最后一条 USER 消息**，
+         *  不写进 system（保持 system 前缀字节不变 → prompt cache 命中，对齐 Claude Code
+         *  "用消息不用 prompt 编辑"的做法）。只进 internalMessages（发送列表），不落持久化列表，
+         *  因此不会触发 handleMessageChunk 分段。默认 null 不影响普通生成。 */
+        resumeContext: String? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -168,6 +173,7 @@ class GenerationHandler(
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
                     conversationId = conversationId,
+                    resumeContext = resumeContext,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -302,6 +308,7 @@ class GenerationHandler(
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         conversationId: String? = null,
+        resumeContext: String? = null,
     ) {
         val internalMessages = buildList {
             val system = buildString {
@@ -346,6 +353,18 @@ class GenerationHandler(
             conversationId = conversationId,
         )
 
+        // 续答唤醒指令：作为 provider 看到的最后一条 USER 消息追加（transforms 之后，避免被
+        // 输入转换器改写；不写 system 保持缓存前缀稳定）。只进 internalMessages 发送列表，
+        // 不落持久化 messages —— handleMessageChunk 仍并入上一条 assistant 消息，不分段。
+        val messagesToSend = if (!resumeContext.isNullOrBlank()) {
+            internalMessages + UIMessage(
+                role = MessageRole.USER,
+                parts = listOf(UIMessagePart.Text(resumeContext)),
+            )
+        } else {
+            internalMessages
+        }
+
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(
             model = model,
@@ -367,7 +386,7 @@ class GenerationHandler(
             try {
                 providerImpl.streamText(
                     providerSetting = provider,
-                    messages = internalMessages,
+                    messages = messagesToSend,
                     params = params
                 ).collect {
                     messages = messages.handleMessageChunk(chunk = it, model = model)
@@ -394,7 +413,7 @@ class GenerationHandler(
         } else {
             val chunk = providerImpl.generateText(
                 providerSetting = provider,
-                messages = internalMessages,
+                messages = messagesToSend,
                 params = params,
             )
             messages = messages.handleMessageChunk(chunk = chunk, model = model)

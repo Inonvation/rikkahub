@@ -69,7 +69,9 @@ import kotlin.time.Instant
 fun SubAgentPanelPage(conversationId: String) {
     val runner: SubAgentRunner = koinInject()
 
-    // 派生：按会话过滤 + 节流。指纹只在结构性变化时触发重组（状态/步骤数/工具数/文本长度桶）
+    // 派生：按会话过滤 + 节流。指纹只含结构性变化（状态/步骤数/工具数）——
+    // 卡片显示最近步骤/结果摘要，不依赖流式文本长度；去掉 streamText/reasoning 依赖，
+    // 子代理流式输出不再高频重组整个面板。
     val tasks by remember(conversationId) {
         runner.tasksFlow
             .map { map ->
@@ -80,8 +82,7 @@ fun SubAgentPanelPage(conversationId: String) {
             .sample(200)
             .distinctUntilChangedBy { list ->
                 list.map { t ->
-                    "${t.taskId}|${t.status}|${t.steps.size}|${t.toolCalls.size}|" +
-                        "${t.streamText.length / 512}|${t.reasoning.length / 512}"
+                    "${t.taskId}|${t.status}|${t.steps.size}|${t.toolCalls.size}"
                 }
             }
     }.collectAsStateWithLifecycle(initialValue = emptyList())

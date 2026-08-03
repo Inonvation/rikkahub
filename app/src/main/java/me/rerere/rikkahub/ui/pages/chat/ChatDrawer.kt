@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -25,6 +26,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +72,7 @@ import me.rerere.hugeicons.stroke.Recycle01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Note01
+import me.rerere.hugeicons.stroke.UserGroup
 import me.rerere.hugeicons.stroke.Bulb
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.TransactionHistory
@@ -656,15 +659,14 @@ fun ChatDrawerContent(
 }
 
 @Composable
-fun StudyDrawerContent(
+fun ColumnScope.StudyDrawerSections(
     navController: Navigator,
 ) {
-    DrawerPanel {
-        DrawerHeader(
-            icon = HugeIcons.BookOpen01,
-            title = "学习工具",
-            subtitle = "单词 · 笔记 · 复习",
-        )
+    DrawerHeader(
+        icon = HugeIcons.BookOpen01,
+        title = "学习工具",
+        subtitle = "单词 · 笔记 · 复习",
+    )
 
         DrawerSection(title = "积累") {
             DrawerListItem(
@@ -698,6 +700,8 @@ fun StudyDrawerContent(
 
         Spacer(Modifier.weight(1f))
 
+        GroupDiscussionSections(navController = navController)
+
         DrawerSection(title = "更多工具") {
             DrawerListItem(
                 icon = HugeIcons.LanguageCircle,
@@ -721,6 +725,31 @@ fun StudyDrawerContent(
                 onClick = { navController.navigate(Screen.RecycleBin) },
             )
         }
+}
+
+@Composable
+fun ColumnScope.GroupDiscussionSections(
+    navController: Navigator,
+) {
+    DrawerSection(title = "AI 群组") {
+        DrawerListItem(
+            icon = HugeIcons.UserGroup,
+            title = "群组中心",
+            subtitle = "新建和管理群组",
+            onClick = {
+                navController.navigate(Screen.GroupDiscussionList)
+            },
+        )
+    }
+}
+
+/** 右侧栏整体：学习工具分区 + AI 群组 + 更多工具，共用一个 DrawerPanel */
+@Composable
+fun RightDrawerContent(
+    navController: Navigator,
+) {
+    DrawerPanel {
+        StudyDrawerSections(navController = navController)
     }
 }
 
@@ -757,7 +786,6 @@ private fun DrawerAction(
         }
     }
 }
-
 @Composable
 private fun FolderBar(
     folders: List<Folder>,

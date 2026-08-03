@@ -2,9 +2,12 @@ package me.rerere.rikkahub.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity
+@Entity(
+    indices = [Index(value = ["group_id"])],
+)
 data class ConversationEntity(
     @PrimaryKey
     val id: String,
@@ -32,4 +35,8 @@ data class ConversationEntity(
     val workspaceCwd: String = "",
     @ColumnInfo("folder_id", defaultValue = "")
     val folderId: String = "",
+    @ColumnInfo("discussion_json", defaultValue = "")
+    val discussionJson: String = "",
+    @ColumnInfo("group_id", defaultValue = "")
+    val groupId: String = "",
 )

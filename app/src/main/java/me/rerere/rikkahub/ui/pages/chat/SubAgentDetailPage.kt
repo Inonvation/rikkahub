@@ -308,13 +308,13 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                     when (block) {
                         is MessagePartBlock.ThinkingBlock -> {
                             if (block.steps.isNotEmpty()) {
-                                val isReasoningOnlyBlock = block.steps.all { it is ThinkingStep.ReasoningStep }
                                 ChainOfThought(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 12.dp),
                                     steps = block.steps,
-                                    collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                    // 详情页卡片满宽：不做自适应宽度，label 恒满宽、箭头位置稳定不跳
+                                    collapsedAdaptiveWidth = false,
                                     cardColors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     ),
@@ -325,7 +325,7 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                                                 reasoning = step.reasoning,
                                                 model = null,
                                                 assistant = null,
-                                                collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                                collapsedAdaptiveWidth = false,
                                             )
                                         }
 

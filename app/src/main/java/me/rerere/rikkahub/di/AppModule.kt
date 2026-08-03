@@ -78,6 +78,17 @@ val appModule = module {
         )
     }
 
+    // 群组讨论
+    single {
+        me.rerere.rikkahub.data.ai.discussion.DiscussionToolAssembler(
+            mcpManager = get(),
+            knowledgeManager = get(),
+            workspaceRepository = get(),
+            localTools = get(),
+            providerManager = get(),
+        )
+    }
+
     single {
         me.rerere.rikkahub.data.ai.subagent.SubAgentRunner(
             appScope = get(),
@@ -126,6 +137,9 @@ val appModule = module {
             todoStorage = get(),
             studyTools = get(),
             subAgentRunner = get(),
+            discussionToolAssembler = get(),
+            groupRepository = get(),
+            json = get(),
         )
     }
 

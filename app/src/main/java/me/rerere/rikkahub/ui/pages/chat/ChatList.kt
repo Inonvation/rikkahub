@@ -305,12 +305,13 @@ private fun ChatListNormal(
             }
         }
 
-        // 判断最近是否滚动
+        // 判断最近是否滚动：滚动开始即显示；滚动结束后才延时隐藏。
+        // 原来"滚动进行中 delay(1500) 后强制隐藏"会在快速滚动时反复闪烁
+        // （滚一下藏一下又滚又藏），且滚动结束又 delay 一次造成双倍等待。
+        // 改为：开始滚动 → 显示；停止滚动 → 等 1.5s 再隐藏。滚动期间稳定显示。
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
                 isRecentScroll = true
-                delay(1500)
-                isRecentScroll = false
             } else {
                 delay(1500)
                 isRecentScroll = false

@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -397,8 +402,13 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 }
             }
 
-            // 展开内容（缩进对齐 label）
-            if (contentVisible && hasContent) {
+            // 展开内容（缩进对齐 label）。用 AnimatedVisibility 让展开/收起平滑过渡
+            // （垂直展开 + 淡入淡出，复用 JsonTree/SubAgentRunningBanner 的模式）
+            AnimatedVisibility(
+                visible = contentVisible && hasContent,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
                 Box(
                     modifier = Modifier
                         .then(
@@ -410,7 +420,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         )
                         .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
                 ) {
-                    content()
+                    // hasContent 已保证非空，这里用安全调用满足编译器对可空 content 的检查
+                    content?.invoke()
                 }
             }
         }

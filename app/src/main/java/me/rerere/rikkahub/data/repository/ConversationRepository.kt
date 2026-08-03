@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.DiscussionConfig
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
@@ -56,6 +57,22 @@ class ConversationRepository(
             val nodes = loadMessageNodes(entity.id)
             conversationEntityToConversation(entity, nodes)
         }
+    }
+
+    /** 某群组下的全部会话（不含消息节点），供群组详情历史列表用 */
+    fun getConversationsOfGroup(groupId: Uuid): Flow<List<Conversation>> {
+        return conversationDAO
+            .getConversationsOfGroup(groupId.toString())
+            .map { flow ->
+                flow.map { entity -> conversationEntityToConversation(entity, emptyList()) }
+            }
+    }
+
+    /** 某群组下的全部会话（一次性查询，供删除前停生成等用） */
+    suspend fun getConversationsOfGroupOnce(groupId: Uuid): List<Conversation> {
+        return conversationDAO
+            .getConversationsOfGroupOnce(groupId.toString())
+            .map { entity -> conversationEntityToConversation(entity, emptyList()) }
     }
 
     fun getConversationsOfAssistant(assistantId: Uuid): Flow<List<Conversation>> {
@@ -378,6 +395,8 @@ class ConversationRepository(
             lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
             workspaceCwd = conversation.workspaceCwd ?: "",
             folderId = conversation.folderId?.toString() ?: "",
+            discussionJson = conversation.discussion?.let { JsonInstant.encodeToString(it) } ?: "",
+            groupId = conversation.groupId?.toString() ?: "",
         )
     }
 
@@ -399,6 +418,9 @@ class ConversationRepository(
             lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
             workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
             folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
+            discussion = conversationEntity.discussionJson.ifEmpty { null }
+                ?.let { runCatching { JsonInstant.decodeFromString<DiscussionConfig>(it) }.getOrNull() },
+            groupId = conversationEntity.groupId.ifEmpty { null }?.let { Uuid.parse(it) },
         )
     }
 

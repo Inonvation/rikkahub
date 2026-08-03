@@ -15,6 +15,7 @@ object SubAgentCatalog {
         id = "planner",
         name = "规划子代理",
         description = "把模糊需求拆成步骤化、可执行的规划方案（目标/步骤/风险/验收）。适用于任务拆解、方案设计、学习计划规划。",
+        commandAlias = "plan",
         systemPrompt = """
             ## Role
             You are a task-planning sub-agent. Turn a vague requirement from the user (or the parent
@@ -60,6 +61,7 @@ object SubAgentCatalog {
         id = "web_researcher",
         name = "信息搜索子代理",
         description = "多来源网络检索、实时资讯、交叉核实。适用于需要大量信息搜集、最新资讯、多来源验证的问题。",
+        commandAlias = "search",
         systemPrompt = """
             ## Role
             You are a web research sub-agent. Research the given topic with multiple sources and
@@ -109,6 +111,7 @@ object SubAgentCatalog {
         id = "document_analyst",
         name = "文档分析子代理",
         description = "读取并分析上传的文档（PDF/Word/PPT/EPUB/XLSX 等），做内容提炼、要点归纳、对比、结构化问答。适用于长文档分析、材料总结、合同对比。",
+        commandAlias = "doc",
         systemPrompt = """
             ## Role
             You are a document-analysis sub-agent. Read local documents specified by the user (or the
@@ -157,6 +160,7 @@ object SubAgentCatalog {
         id = "code_runner",
         name = "代码执行子代理",
         description = "在沙盒环境里编写并执行代码、运行 shell 命令、处理文件，返回执行结果。适用于数据处理脚本、批量文件操作、命令行任务。",
+        commandAlias = "code",
         systemPrompt = """
             ## Role
             You are a code-execution sub-agent. Write and run code/commands in a sandbox workspace to
@@ -202,6 +206,7 @@ object SubAgentCatalog {
         id = "data_analyst",
         name = "数据整理与分析子代理",
         description = "对结构化数据（表格/知识库/文档）做清洗、统计、分类汇总与分析。适用于数据整理、统计计算、趋势分析。",
+        commandAlias = "data",
         systemPrompt = """
             ## Role
             You are a data-analysis sub-agent. Clean, summarize and analyze structured data

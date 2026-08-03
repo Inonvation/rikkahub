@@ -54,6 +54,14 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
 
+    /** 某群组下的全部会话，按最近更新排序（群组历史列表） */
+    @Query("SELECT * FROM conversationentity WHERE group_id = :groupId ORDER BY update_at DESC")
+    fun getConversationsOfGroup(groupId: String): Flow<List<ConversationEntity>>
+
+    /** 某群组下的全部会话（一次性查询） */
+    @Query("SELECT * FROM conversationentity WHERE group_id = :groupId ORDER BY update_at DESC")
+    suspend fun getConversationsOfGroupOnce(groupId: String): List<ConversationEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
     suspend fun existsById(id: String): Boolean
 

@@ -31,9 +31,16 @@ data class Conversation(
     val workspaceCwd: String? = null,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
+    // 群组讨论配置，null = 普通会话。群聊会话的 assistantId 为 GROUP_DISCUSSION_ASSISTANT_ID
+    val discussion: DiscussionConfig? = null,
+    // 所属 AI 群组（多会话）。null = 非群组会话。
+    // 群组会话的配置在 Group.config，discussion 字段已废弃（迁移后恒为 null）
+    val groupId: Uuid? = null,
     @Transient
     val newConversation: Boolean = false
 ) {
+    /** 是否为群组讨论会话（当前仅按 groupId 判定） */
+    val isGroupDiscussion: Boolean get() = groupId != null
     val files: List<Uri>
         get() = messageNodes
             .flatMap { node -> node.messages.flatMap { it.parts } }

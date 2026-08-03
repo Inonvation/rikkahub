@@ -184,7 +184,28 @@ suspend fun subAgentRunLoop(
                 )
                 return@forEach
             }
-            if (tool.approvalState is ToolApprovalState.Pending) return@forEach
+            if (tool.approvalState is ToolApprovalState.Pending) {
+                // 防御性兜底：Pending 审批工具在子代理里没有审批路径。正常路径不会走到这
+                // （生成时审批工具已置 Pending 并 break 等待），走到说明异常——回填错误让
+                // 模型读到并调整，避免 executedTools 为空 → break → 被误判为"完成"。
+                // 与 needsApproval 分支的回填语义一致（错误 JSON 让模型调整而非假成功）。
+                executedTools += tool.copy(
+                    output = listOf(
+                        UIMessagePart.Text(
+                            json.encodeToString(buildJsonObject {
+                                put(
+                                    "error",
+                                    JsonPrimitive(
+                                        "Tool ${tool.toolName} is awaiting user approval in the parent conversation " +
+                                            "and cannot complete inside a sub-agent. Skip it and continue."
+                                    )
+                                )
+                            })
+                        )
+                    )
+                )
+                return@forEach
+            }
 
             runCatching {
                 val def = tools.find { it.name == tool.toolName }

@@ -82,7 +82,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
@@ -230,6 +232,7 @@ private fun parseMarkdown(content: String): MarkdownParseResult {
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtml())
 }
 
+@OptIn(FlowPreview::class)
 @Composable
 fun MarkdownBlock(
     content: String,
@@ -240,11 +243,14 @@ fun MarkdownBlock(
     var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
 
     // 监听内容变化，重新解析AST树
-    // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
+    // 后台线程解析AST树防掉帧。流式输出每 chunk 都变一次 content，用 debounce 合并
+    // 连续 chunk（最后一次内容稳定后 ~50ms 内只解析一次），避免长文本每 chunk 全量重解析。
+    // 静态内容只触发一次解析，无感知；流式时显著降频。
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
+            .debounce(50)
             .mapLatest { parseMarkdown(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)

@@ -124,8 +124,13 @@ class SubAgentRunner(
         def: SubAgentDefinition,
         request: SubAgentRequest,
     ): me.rerere.ai.provider.Model? {
+        // request.modelId 是 string（模型可能传 "default"/"auto"/具体 id）。宽松解析：
+        // 能按 Uuid 解析则用（兼容已存库的 Uuid 形式）；解析失败当未指定（回落默认模型）。
+        val requestedUuid = request.modelId?.let { id ->
+            runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull()
+        }
         val candidates = listOfNotNull(
-            request.modelId,
+            requestedUuid,
             def.defaultModelId,
             settings.subAgentModelId,
             settings.chatModelId,
@@ -218,12 +223,13 @@ class SubAgentRunner(
                 existing
             }
         }
+        // request.modelId 是 string（宽松接受 "default" 等非 Uuid），存入任务时解析成 Uuid 再存
         val initial = SubAgentTask(
             taskId = taskId,
             agentId = request.agentId,
             parentConversationId = parentConversationId,
             request = request.task,
-            modelId = request.modelId,
+            modelId = request.modelId?.let { runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull() },
         )
         _tasks.update { (it + (taskId to initial)).trimToMax() }
         if (def == null) {
@@ -519,7 +525,7 @@ class SubAgentRunner(
         val request = SubAgentRequest(
             agentId = task.agentId,
             task = task.request,
-            modelId = task.modelId,
+            modelId = task.modelId?.toString(),
             priorContext = prior?.take(1500),
         )
         val newId = Uuid.random().toString()
@@ -732,13 +738,6 @@ class SubAgentRunner(
                 "$role: ${msg.toText()}"
             }
             .take(1600)
-    }
-
-    private fun UIMessage.toText(): String = parts.joinToString(separator = " ") { part ->
-        when (part) {
-            is UIMessagePart.Text -> part.text
-            else -> ""
-        }
     }
 
     // ---- 异步派发 ----

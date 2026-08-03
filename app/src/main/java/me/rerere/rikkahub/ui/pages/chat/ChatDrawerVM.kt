@@ -35,7 +35,7 @@ import kotlin.uuid.Uuid
 class ChatDrawerVM(
     private val context: Application,
     private val settingsStore: SettingsStore,
-    conversationRepo: ConversationRepository,
+    private val conversationRepo: ConversationRepository,
     private val folderRepo: FolderRepository,
     private val chatService: ChatService,
     private val savedStateHandle: SavedStateHandle,

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
@@ -41,7 +43,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.subagent.SubAgentRequest
+import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MULTIQUERY_PROMPT
@@ -109,6 +111,7 @@ import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.repository.GroupRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.web.BadRequestException
@@ -123,12 +126,9 @@ import kotlin.uuid.Uuid
 private const val TAG = "ChatService"
 
 /**
- * 子代理完成唤醒消息的固定 marker id：resume 生成时作为尾部消息唤醒母代理，
- * 写回会话时按此 id 剔除，避免落库累积污染上下文、也不展示给用户。
+ * 说明：子代理唤醒指令已改为注入 system prompt 末尾（BUG3 修复），不再作为尾部消息。
+ * 历史版本曾用固定 marker id 的消息做尾部唤醒，现保留一段注释说明。
  */
-private val SUB_AGENT_WAKEUP_MESSAGE_ID: kotlin.uuid.Uuid =
-    kotlin.uuid.Uuid.parse("00000000-0000-0000-0000-00000000a1d5")
-
 internal fun backgroundTextGenerationParams(
     model: Model,
     reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
@@ -180,6 +180,9 @@ class ChatService(
     private val todoStorage: TodoStorage,
     private val studyTools: StudyTools,
     private val subAgentRunner: me.rerere.rikkahub.data.ai.subagent.SubAgentRunner,
+    private val discussionToolAssembler: me.rerere.rikkahub.data.ai.discussion.DiscussionToolAssembler,
+    private val groupRepository: GroupRepository,
+    private val json: kotlinx.serialization.json.Json,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -221,6 +224,145 @@ class ChatService(
 
     fun dismissError(id: Uuid) {
         _errors.update { list -> list.filter { it.id != id } }
+    }
+
+    // ---- 群组讨论 ----
+
+    private val discussionOrchestrator by lazy {
+        me.rerere.rikkahub.data.ai.discussion.GroupDiscussionOrchestrator(
+            settingsStore = settingsStore,
+            providerManager = providerManager,
+            toolAssembler = discussionToolAssembler,
+            json = json,
+            read = { conversationId -> getConversationFlow(conversationId).value },
+            update = { conversationId, transform -> updateConversationState(conversationId, transform) },
+            persist = { conversationId, conversation ->
+                saveConversation(conversationId, conversation)
+                // 群组有活动 → 让群组中心按活跃度排序
+                conversation.groupId?.let { groupId ->
+                    runCatching { groupRepository.touchUpdateAt(groupId) }
+                }
+            },
+            readGroup = { groupId -> groupRepository.getGroupById(groupId) },
+        )
+    }
+
+    fun getDiscussionStateFlow(conversationId: Uuid): kotlinx.coroutines.flow.StateFlow<me.rerere.rikkahub.data.ai.discussion.DiscussionState> {
+        return discussionOrchestrator.state(conversationId)
+    }
+
+    /** 清理某会话的讨论内存态（会话/群组被删除时调用，防残留脏状态） */
+    fun clearDiscussionState(conversationId: Uuid) {
+        discussionOrchestrator.clearConversation(conversationId)
+    }
+
+    /**
+     * 恢复/继续讨论。生成中调用仅设 hint（下一轮消费，不重复启动）。
+     * 暂停/完成后调用会从 transcript 重新推导下一位续跑，不重复已完成的轮次。
+     */
+    fun resumeDiscussion(conversationId: Uuid, nextSpeakerId: kotlin.uuid.Uuid? = null) {
+        discussionOrchestrator.setNextSpeakerHint(conversationId, nextSpeakerId)
+        val session = sessions[conversationId] ?: return
+        if (session.isGenerating) return
+        val job = appScope.launch {
+            runCatching { discussionOrchestrator.runDiscussion(conversationId) }
+        }
+        session.setJob(job)
+    }
+
+    /** 指定下一位发言者（讨论页控制条用） */
+    fun setNextSpeaker(conversationId: Uuid, memberId: kotlin.uuid.Uuid) {
+        resumeDiscussion(conversationId, memberId)
+    }
+
+    /**
+     * 新建群组：写 Group + 首个空会话，**不自动开始**。
+     * 进入讨论页后输入主题发送才启动。返回 groupId（== 首个会话 id，供导航/编辑复用）。
+     */
+    suspend fun createGroup(
+        title: String,
+        config: me.rerere.rikkahub.data.model.DiscussionConfig,
+    ): Uuid {
+        val groupId = Uuid.random()
+        val now = java.time.Instant.now()
+        groupRepository.insert(
+            me.rerere.rikkahub.data.model.Group(
+                id = groupId,
+                name = title,
+                config = config,
+                createAt = now,
+                updateAt = now,
+            )
+        )
+        // 首个会话：group_id = groupId（用 insertConversation，saveConversation 会跳过空新会话）
+        val conversation = me.rerere.rikkahub.data.model.Conversation.ofId(
+            id = groupId,
+            assistantId = me.rerere.rikkahub.data.model.GROUP_DISCUSSION_ASSISTANT_ID,
+        ).copy(
+            groupId = groupId,
+        )
+        conversationRepo.insertConversation(conversation)
+        val session = getOrCreateSession(groupId)
+        updateConversation(groupId, conversation)
+        return groupId
+    }
+
+    /** 在群组下新建一场空对话，返回会话 id */
+    suspend fun createGroupConversation(groupId: Uuid): Uuid {
+        val conversationId = Uuid.random()
+        val conversation = me.rerere.rikkahub.data.model.Conversation.ofId(
+            id = conversationId,
+            assistantId = me.rerere.rikkahub.data.model.GROUP_DISCUSSION_ASSISTANT_ID,
+        ).copy(
+            groupId = groupId,
+        )
+        conversationRepo.insertConversation(conversation)
+        val session = getOrCreateSession(conversationId)
+        updateConversation(conversationId, conversation)
+        return conversationId
+    }
+
+    /**
+     * 更新群组配置（改名 / 成员 / 模式 / 轮数 / 风格等）。
+     * 写 Group（全量覆盖 config_json），群下所有会话共享。
+     * 调用方负责：若群下正在生成需先 stopGroupGeneration 暂停。
+     */
+    suspend fun updateGroupConfig(
+        groupId: Uuid,
+        title: String,
+        config: me.rerere.rikkahub.data.model.DiscussionConfig,
+    ) {
+        val existing = groupRepository.getGroupById(groupId) ?: return
+        groupRepository.update(
+            existing.copy(
+                name = title,
+                config = config,
+                updateAt = java.time.Instant.now(),
+            )
+        )
+    }
+
+    /** 群组流（Room 驱动，自动刷新） */
+    fun getGroupFlow(groupId: Uuid): kotlinx.coroutines.flow.StateFlow<me.rerere.rikkahub.data.model.Group?> {
+        return groupRepository.getGroupFlow(groupId)
+            .stateIn(appScope, SharingStarted.Eagerly, null)
+    }
+
+    /** 停掉群组下所有正在进行的生成 */
+    suspend fun stopGroupGeneration(groupId: Uuid) {
+        conversationRepo.getConversationsOfGroupOnce(groupId).forEach { conv ->
+            stopGeneration(conv.id)
+        }
+    }
+
+    /** 删除群组：先停全部生成，再逐个删除会话（级联清理），最后删 Group */
+    suspend fun deleteGroup(groupId: Uuid) {
+        stopGroupGeneration(groupId)
+        conversationRepo.getConversationsOfGroupOnce(groupId).forEach { conv ->
+            discussionOrchestrator.clearConversation(conv.id)
+            conversationRepo.deleteConversation(conv)
+        }
+        groupRepository.deleteGroup(groupId)
     }
 
     fun clearAllErrors() {
@@ -266,6 +408,64 @@ class ChatService(
                             } else part
                         }
                     )
+                }
+            )
+        }
+        if (changed) {
+            saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
+        }
+    }
+
+    /**
+     * 子代理完成：往派发它的 assistant 消息里、spawn 气泡之后追加完成气泡 part（落库）。
+     *
+     * 与 backfillSubAgentPlaceholders 同思路：按 taskId 定位派发消息（spawn toolCallId == taskId），
+     * 在其 parts 末尾追加 spawn_subagent_completed tool part。渲染走现有工具气泡管线
+     * （ToolUIRegistry → SubAgentCompletedToolUI，toolCallId == taskId 点击进详情页）。
+     *
+     * 关键时序：必须在 resume 的 handleMessageComplete 读会话快照**之前**落库，否则续答流式
+     * updateCurrentMessages(chunk.messages) 会用不含气泡 part 的快照把它覆盖掉。
+     * 幂等：该 taskId 的完成气泡已存在则跳过（重进会话/重复 resume 不重复插入）。
+     */
+    private suspend fun insertSubAgentCompletionPart(
+        conversationId: Uuid,
+        task: me.rerere.rikkahub.data.ai.subagent.SubAgentTask,
+    ) {
+        val conversation = getConversationFlow(conversationId).value
+        var changed = false
+        val updatedNodes = conversation.messageNodes.map { node ->
+            node.copy(
+                messages = node.messages.map { msg ->
+                    val hasSpawn = msg.parts.any {
+                        it is UIMessagePart.Tool && it.toolName == "spawn_subagent"
+                    }
+                    val alreadyInserted = msg.parts.any {
+                        it is UIMessagePart.Tool &&
+                            it.toolName == "spawn_subagent_completed" &&
+                            it.toolCallId == task.taskId
+                    }
+                    if (hasSpawn && !alreadyInserted) {
+                        changed = true
+                        // 追加到 AI 消息末尾（spawn 派发 + AI 已输出文本之后）作收尾：
+                        // 气泡排在消息后部，AI 收到结果后的续答文本自然继续跟在它后面，
+                        // 阅读顺序即执行顺序（派发 → AI 继续输出 → 子代理完成 → 续答）。
+                        // 注意：续答流式合并发生在落库之后，会追加在气泡后方，不影响本顺序。
+                        msg.copy(
+                            parts = msg.parts + UIMessagePart.Tool(
+                                toolCallId = task.taskId,
+                                toolName = "spawn_subagent_completed",
+                                input = buildJsonObject {
+                                    put("agentId", task.agentId)
+                                    put("status", task.status.name.lowercase())
+                                    put("summary", task.resultSummary.orEmpty())
+                                }.toString(),
+                                output = listOf(
+                                    UIMessagePart.Text(subAgentResultPayload(task).toString())
+                                ),
+                                approvalState = ToolApprovalState.Approved,
+                            )
+                        )
+                    } else msg
                 }
             )
         }
@@ -337,8 +537,13 @@ class ChatService(
             // backfillSubAgentPlaceholders 幂等：已回填的跳过。
             backfillSubAgentPlaceholders(conversationId)
 
-            // 唤醒消息：作为一条追加消息唤醒母代理（缓存友好——只改尾部，不动前缀）。
-            // 用固定 marker id 标记，handleMessageComplete 写回会话时剔除，用户不可见。
+            // 子代理完成气泡：往派发它的 assistant 消息里追加 spawn_subagent_completed 气泡 part。
+            // 必须在 handleMessageComplete 读会话快照**之前**落库，续答流式才不会把它覆盖掉；
+            // 渲染走现有工具气泡管线，续答文本（BUG3 已合并进同一消息）自然在其之后。
+            insertSubAgentCompletionPart(conversationId, task)
+
+            // 唤醒指令：作为 resume 上下文注入，handleMessageComplete 会把 resumeContext
+            // 拼进 system prompt 末尾（BUG3 修复），模型据此续答、并入同一条 assistant 消息。
             val agentName = me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog.byId(task.agentId)?.name ?: task.agentId
             val resumePrompt = buildString {
                 appendLine("## Sub-agent result arrived")
@@ -348,92 +553,29 @@ class ChatService(
                 appendLine("- If you were waiting for other sub-agents, you may continue waiting, or answer based on what you have now.")
                 appendLine("- Do NOT re-answer from scratch; build on your existing answer.")
             }
-            handleMessageComplete(conversationId, resumeContext = resumePrompt)
+
+            // 与 sendMessage/regenerate/approval 一致：注册标准生成 job，让 resume 期间
+            // isGenerating/停止按钮/stopGeneration/自动滚动全部生效（BUG4：resume 可中断）。
+            // job.join() 保持 resumingConversations 串行化——否则 finally 提前释放锁，
+            // 后续完成的子代理会并发 resume 互相 setJob 取消。
+            // 注意：不加 _generationDoneFlow.emit（避免每次 resume 重复触发 haptic/TTS）。
+            val session = getOrCreateSession(conversationId)
+            val previousJob = session.getJob()
+            previousJob?.cancel()
+            val job = appScope.launch {
+                try {
+                    runCatching { previousJob?.join() }
+                    handleMessageComplete(conversationId, resumeContext = resumePrompt)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    e.printStackTrace()
+                    addError(e, conversationId, title = context.getString(R.string.error_title_generation))
+                }
+            }
+            session.setJob(job)
+            runCatching { job.join() }
         } finally {
             resumingConversations.remove(conversationId)
-        }
-    }
-
-    // ---- 强制指令子代理（/search /plan /doc /code /data） ----
-
-    /**
-     * 用户以 /search 等指令显式派发子代理：
-     * 1. 插入合成 assistant 消息（含 spawn_subagent Tool part，占位输出）
-     * 2. 直接 runAsync 派发（不走母代理 spawn 工具，不受并发上限限制）
-     * 3. awaitTask 等待终态，回填 tool output（落库）
-     * 4. 让母代理综合生成最终回复
-     */
-    private suspend fun handleForcedSubAgent(conversationId: Uuid, agentId: String, taskText: String) {
-        if (taskText.isBlank()) {
-            handleMessageComplete(conversationId)
-            return
-        }
-
-        val taskId = kotlin.uuid.Uuid.random().toString()
-
-        // 1. 插入合成 assistant 消息（含 spawn_subagent tool part），占位输出 "dispatched"
-        val syntheticTool = UIMessagePart.Tool(
-            toolCallId = taskId,
-            toolName = "spawn_subagent",
-            input = buildJsonObject {
-                put("agentId", agentId)
-                put("task", taskText)
-            }.toString(),
-            approvalState = ToolApprovalState.Approved,
-        )
-        val conversation = getConversationFlow(conversationId).value
-        val withTool = conversation.copy(
-            messageNodes = conversation.messageNodes + UIMessage(
-                role = MessageRole.ASSISTANT,
-                parts = listOf(syntheticTool),
-            ).toMessageNode()
-        )
-        updateConversation(conversationId, withTool)
-
-        // 2. 强制派发子代理。立即把 taskId 标记为"已消费"：forced 路径自己 await + 回填 +
-        // 综合生成，子代理完成事件若触发 resumeAfterSubAgent 会重复续答，这里提前标记避免。
-        resumedTaskIds.add(taskId)
-        subAgentRunner.runAsync(SubAgentRequest(agentId = agentId, task = taskText), conversationId, taskId = taskId)
-
-        // 3. 等待终态并回填 output
-        val task = subAgentRunner.awaitTask(taskId)
-        val payload = if (task == null) {
-            buildJsonObject {
-                put("status", "not_found")
-                put("taskId", taskId)
-            }.toString()
-        } else {
-            subAgentResultPayload(task).toString()
-        }
-        backfillForcedToolOutput(conversationId, taskId, payload)
-
-        // 4. 让母代理综合生成最终回复（子代理结果已在上下文里）
-        handleMessageComplete(conversationId)
-    }
-
-    /** 按 toolCallId 找到合成的 spawn_subagent tool part 并回填 output */
-    private suspend fun backfillForcedToolOutput(conversationId: Uuid, taskId: String, payload: String) {
-        val conversation = getConversationFlow(conversationId).value
-        var changed = false
-        val updatedNodes = conversation.messageNodes.map { node ->
-            node.copy(
-                messages = node.messages.map { msg ->
-                    msg.copy(
-                        parts = msg.parts.map { part ->
-                            if (part is UIMessagePart.Tool &&
-                                part.toolCallId == taskId &&
-                                part.toolName == "spawn_subagent"
-                            ) {
-                                changed = true
-                                part.copy(output = listOf(UIMessagePart.Text(payload)))
-                            } else part
-                        }
-                    )
-                }
-            )
-        }
-        if (changed) {
-            saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
         }
     }
 
@@ -530,7 +672,10 @@ class ChatService(
         val conversation = conversationRepo.getConversationById(conversationId)
         if (conversation != null) {
             updateConversation(conversationId, conversation)
-            settingsStore.updateAssistant(conversation.assistantId)
+            // 群组讨论会话用哨兵 assistantId，不更新"当前助手"全局状态
+            if (!conversation.isGroupDiscussion) {
+                settingsStore.updateAssistant(conversation.assistantId)
+            }
         } else {
             // 新建对话, 并添加预设消息
             val currentSettings = settingsStore.settingsFlowRaw.first()
@@ -562,36 +707,77 @@ class ChatService(
                 val settings = settingsStore.settingsFlow.first()
                 val assistant = settings.getAssistantById(currentConversation.assistantId)
                     ?: settings.getCurrentAssistant()
+
+                // 群组讨论：跳过助手正则预处理，直接追加用户消息，交给调度器继续讨论
+                if (currentConversation.isGroupDiscussion) {
+                    // 首次话题：会话标题为空时用首条文本截断做标题（历史列表可读）
+                    val firstText = content.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text.orEmpty().trim()
+                    val title = if (currentConversation.title.isBlank() && firstText.isNotEmpty()) {
+                        firstText.take(30)
+                    } else {
+                        currentConversation.title
+                    }
+                    val newConversation = currentConversation.copy(
+                        title = title,
+                        updateAt = java.time.Instant.now(),
+                        messageNodes = currentConversation.messageNodes + UIMessage(
+                            role = MessageRole.USER,
+                            parts = content,
+                        ).toMessageNode(),
+                    )
+                    saveConversation(conversationId, newConversation)
+                    if (answer) {
+                        runCatching { discussionOrchestrator.runDiscussion(conversationId) }
+                    }
+                    _generationDoneFlow.emit(conversationId)
+                    return@launch
+                }
+
                 val processedContent = preprocessUserInputParts(content, assistant)
 
-                // 添加消息到列表
+                // 子代理指令（/search xxx 等）：把指令改写成明确的普通用户消息再落库，
+                // 母代理走正常生成流程——思考、spawn_subagent 派发、子代理后台跑、完成时
+                // 自动唤醒续答返回。支持一条消息多个指令（换行分隔）。
+                val cmds = if (answer) {
+                    processedContent.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { SubAgentCommands.parseAll(it) }
+                        ?.ifEmpty { null }
+                } else null
+                val settingsNow = settingsStore.settingsFlow.first()
+                // cmds 非空时 rewriteToInstruction 必然返回改写文本（同源解析），此处兜底保持原样
+                val effectiveContent = if (cmds != null && settingsNow.enableSubAgent) {
+                    val instruction = processedContent.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { SubAgentCommands.rewriteToInstruction(it) }
+                    processedContent.map { part ->
+                        if (part is UIMessagePart.Text && instruction != null) {
+                            part.copy(text = instruction)
+                        } else part
+                    }
+                } else processedContent
+                if (cmds != null && !settingsNow.enableSubAgent) {
+                    // 子代理未开启：提示用户先去 Agent Action 设置页开启，不执行
+                    addError(
+                        IllegalStateException(context.getString(R.string.error_sub_agent_disabled)),
+                        conversationId,
+                        title = context.getString(R.string.error_title_sub_agent),
+                    )
+                }
+
+                // 添加消息到列表（指令已改写成"请使用子代理"的普通消息）
                 val newConversation = currentConversation.copy(
                     messageNodes = currentConversation.messageNodes + UIMessage(
                         role = MessageRole.USER,
-                        parts = processedContent,
+                        parts = effectiveContent,
                     ).toMessageNode(),
                 )
                 saveConversation(conversationId, newConversation)
 
                 // 开始补全
                 if (answer) {
-                    val settings = settingsStore.settingsFlow.first()
-                    val text = content.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text?.trim()
-                    val cmd = text?.let { SubAgentCommands.parse(it) }
-                    if (cmd != null) {
-                        if (!settings.enableSubAgent) {
-                            // 子代理未开启：提示用户先去 Agent Action 设置页开启，不执行
-                            addError(
-                                IllegalStateException(context.getString(R.string.error_sub_agent_disabled)),
-                                conversationId,
-                                title = context.getString(R.string.error_title_sub_agent),
-                            )
-                        } else {
-                            handleForcedSubAgent(conversationId, cmd.first.agentId, cmd.second)
-                        }
-                    } else {
-                        handleMessageComplete(conversationId)
-                    }
+                    handleMessageComplete(conversationId)
                 }
 
                 _generationDoneFlow.emit(conversationId)
@@ -736,6 +922,8 @@ class ChatService(
     ) {
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = getConversationFlow(conversationId).value
+        // 群组讨论会话不走常规生成链路，由 GroupDiscussionOrchestrator 调度
+        if (initialConversation.isGroupDiscussion) return
         val assistant = settings.getAssistantById(initialConversation.assistantId)
             ?: settings.getCurrentAssistant()
         val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: return
@@ -773,22 +961,14 @@ class ChatService(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
+                // 唤醒指令作为 provider 看到的最后一条 USER 消息注入（GenerationHandler 内部
+                // 追加到发送列表末尾），不写 system、不进持久化消息列表：system 前缀稳定 → 缓存命中；
+                // 持久化尾部保持上一条 ASSISTANT → 续答并入同一条消息（BUG3 修复 + 缓存优化）。
                 messages = conversation.currentMessages.let { msgs ->
-                    val base = if (messageRange != null) {
+                    if (messageRange != null) {
                         msgs.subList(messageRange.start, messageRange.endInclusive + 1)
                     } else {
                         msgs
-                    }
-                    // 异步唤醒：唤醒消息追加到消息尾部（缓存友好，不动 system 前缀）。
-                    // 带 marker id，写回会话时剔除，用户不可见。
-                    if (resumeContext != null) {
-                        base + UIMessage(
-                            id = SUB_AGENT_WAKEUP_MESSAGE_ID,
-                            role = MessageRole.SYSTEM,
-                            parts = listOf(UIMessagePart.Text(resumeContext)),
-                        )
-                    } else {
-                        base
                     }
                 },
                 assistant = assistant,
@@ -797,6 +977,7 @@ class ChatService(
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversation.id.toString(),
+                resumeContext = resumeContext,
                 memories = if (assistant.useGlobalMemory) {
                     memoryRepository.getGlobalMemories()
                 } else {
@@ -913,10 +1094,7 @@ class ChatService(
                             )
                         }
                         val updatedConversation = getConversationFlow(conversationId).value
-                            .updateCurrentMessages(
-                                // 剔除子代理唤醒消息：不落库、不展示，母代理当轮已读到
-                                chunk.messages.filterNot { it.id == SUB_AGENT_WAKEUP_MESSAGE_ID }
-                            )
+                            .updateCurrentMessages(chunk.messages)
                         updateConversation(conversationId, updatedConversation)
 
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
@@ -1379,6 +1557,8 @@ class ChatService(
     // ---- 生成建议 ----
 
     suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) {
+        // 群组讨论不生成建议
+        if (conversation.isGroupDiscussion) return
         runCatching {
             val settings = settingsStore.settingsFlow.first()
             if (!settings.enableSuggestion) return
