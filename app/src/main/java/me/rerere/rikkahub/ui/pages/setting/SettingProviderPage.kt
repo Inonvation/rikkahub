@@ -110,6 +110,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
 
     SettingScaffold(
         title = stringResource(R.string.setting_provider_page_title),
+        loading = settings.init,
         actions = {
             RecommendProviderButton { provider ->
                 vm.updateSettings(

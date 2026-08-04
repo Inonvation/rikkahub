@@ -68,6 +68,7 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_SYSTEM_TTS_ID
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.SettingsLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalTTSState
@@ -144,6 +145,14 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
+        if (settings.init) {
+            SettingsLoadingIndicator(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+            return@Scaffold
+        }
         when (selectedPage) {
             0 -> Column(modifier = Modifier.padding(innerPadding)) {
                 TTSPlaybackSpeedSetting(

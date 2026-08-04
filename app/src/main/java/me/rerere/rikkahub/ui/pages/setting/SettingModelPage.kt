@@ -54,6 +54,7 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
     SettingScaffold(
         title = stringResource(R.string.setting_model_page_title),
+        loading = settings.init,
         bottomBar = {
             BottomAppBar(
                 containerColor = CustomColors.cardColorsOnSurfaceContainer.containerColor

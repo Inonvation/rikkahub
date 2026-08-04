@@ -109,6 +109,7 @@ import me.rerere.rikkahub.ui.components.ai.ModelTypeTag
 import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.SettingsLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
 import me.rerere.rikkahub.ui.components.ui.SiliconFlowPowerByIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -221,6 +222,14 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             }
         }
     ) {
+        if (settings.init) {
+            SettingsLoadingIndicator(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(it)
+            )
+            return@Scaffold
+        }
         HorizontalPager(
             state = pager,
             modifier = Modifier
@@ -870,7 +879,7 @@ private fun ModelPicker(
                     .imePadding(),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // 标题栏和添加所有按�?
+                // 标题栏和添加所有按�?
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

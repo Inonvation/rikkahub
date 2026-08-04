@@ -38,6 +38,7 @@ fun SettingStudyToolsPage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = "学习工具",
+        loading = settings.init,
     ) {
         // 权限
         item {

@@ -80,6 +80,7 @@ fun SettingSearchDetailPage(
 
     SettingScaffold(
         title = options.displayName,
+        loading = settings.init,
         actions = {
             if (settings.searchServices.size > 1) {
                 IconButton(

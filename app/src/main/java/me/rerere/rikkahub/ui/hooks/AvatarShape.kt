@@ -14,16 +14,23 @@ import kotlin.math.roundToInt
 
 @Composable
 fun rememberAvatarShape(loading: Boolean): Shape {
-    val infiniteTransition = rememberInfiniteTransition()
-    val rotateAngle = infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 3000,
-                easing = LinearEasing
-            ),
+    // 仅在加载中创建无限旋转动画：列表里每个可见头像都会调用本函数，
+    // 若无条件创建，加载完成（loading=false）后动画仍常驻运行（每 3s 转一圈），
+    // 造成多余的每帧刷新与功耗。加载完成后直接返回静态圆形。
+    return if (loading) {
+        val infiniteTransition = rememberInfiniteTransition()
+        val rotateAngle = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = 3000,
+                    easing = LinearEasing
+                ),
+            )
         )
-    )
-    return if (loading) MaterialShapes.Cookie6Sided.toShape(rotateAngle.value.roundToInt()) else CircleShape
+        MaterialShapes.Cookie6Sided.toShape(rotateAngle.value.roundToInt())
+    } else {
+        CircleShape
+    }
 }

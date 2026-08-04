@@ -122,6 +122,7 @@ fun SettingWebPage() {
 
     SettingScaffold(
         title = stringResource(R.string.setting_page_web_server),
+        loading = settings.init,
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = {

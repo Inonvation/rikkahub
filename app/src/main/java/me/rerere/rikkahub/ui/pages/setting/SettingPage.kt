@@ -75,6 +75,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = stringResource(R.string.settings),
+        loading = settings.init,
     ) {
         if (settings.isNotConfigured()) {
             item {

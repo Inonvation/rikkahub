@@ -75,6 +75,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
 
     SettingScaffold(
         title = stringResource(R.string.setting_page_search_title),
+        loading = settings.init,
         actions = {
             IconButton(
                 onClick = { showAddDialog = true }

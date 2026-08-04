@@ -92,6 +92,7 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = stringResource(R.string.setting_page_preferences_ui),
+        loading = settings.init,
     ) {
         // Message Bubbles
         item {

@@ -27,6 +27,7 @@ fun SettingAgentActionPage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = stringResource(R.string.setting_agent_action),
+        loading = settings.init,
     ) {
         item {
             IosGroup(

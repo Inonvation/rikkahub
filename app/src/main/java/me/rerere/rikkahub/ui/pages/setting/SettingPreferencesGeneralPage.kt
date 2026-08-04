@@ -36,6 +36,7 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = stringResource(R.string.setting_page_preferences_general),
+        loading = settings.init,
     ) {
         // Conversation
         item {

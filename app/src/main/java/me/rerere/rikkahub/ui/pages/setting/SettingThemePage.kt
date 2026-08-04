@@ -99,6 +99,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
 
     SettingListScaffold(
         title = stringResource(R.string.setting_page_theme_setting),
+        loading = settings.init,
     ) {
         if (settings.dynamicColor) {
             item("dynamicColorHint") {
