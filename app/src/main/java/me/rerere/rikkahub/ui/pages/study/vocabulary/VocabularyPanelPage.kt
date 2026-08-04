@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.study.vocabulary
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -66,10 +67,13 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.hugeicons.stroke.View
+import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.data.db.entity.VocabularyEntity
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalTTSState
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.study.DeleteSelectionConfirmDialog
 import me.rerere.rikkahub.ui.pages.study.ExampleItem
 import me.rerere.rikkahub.ui.pages.study.StudyDetailActions
@@ -99,6 +103,8 @@ fun VocabularyPanelPage() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showSettings by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
+    // 一键显示/隐藏所有卡片的翻译，默认隐藏
+    var showAllDef by remember { mutableStateOf(false) }
     val selection = rememberStudySelectionState()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val totalWords = wordGroups.sumOf { it.words.size }
@@ -132,6 +138,15 @@ fun VocabularyPanelPage() {
                             onClick = { if (visibleWords.isNotEmpty()) scope.launch { exportTextToFile(context, "生词导出-${visibleWords.size}", buildVocabularyBatchMarkdown(visibleWords)) } },
                             enabled = visibleWords.isNotEmpty(),
                         ) { Icon(HugeIcons.Download01, "批量导出") }
+                        // 一键显示/隐藏所有卡片翻译
+                        IconButton(
+                            onClick = { showAllDef = !showAllDef },
+                        ) {
+                            Icon(
+                                if (showAllDef) HugeIcons.View else HugeIcons.ViewOff,
+                                if (showAllDef) "隐藏所有翻译" else "显示所有翻译",
+                            )
+                        }
                         IconButton(onClick = { showSettings = true }) { Icon(HugeIcons.Settings03, "设置") }
                     }
                 )
@@ -159,7 +174,7 @@ fun VocabularyPanelPage() {
                             }
                         }
                         items(group.words, key = { it.id }) { word ->
-                            CompactWordCard(word, settings, selection, onDelete = { vm.delete(word.id) }, onArchive = { vm.archive(word.id) }, onReview = { vm.updateReview(word) })
+                            CompactWordCard(word, settings, selection, showAllDef = showAllDef, onDelete = { vm.delete(word.id) }, onArchive = { vm.archive(word.id) }, onReview = { vm.updateReview(word) })
                         }
                     }
                 }
@@ -176,15 +191,31 @@ fun VocabularyPanelPage() {
 }
 
 @Composable
-private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings, selection: StudySelectionState, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
+private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings, selection: StudySelectionState, showAllDef: Boolean, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
     var showDetail by remember { mutableStateOf(false) }
     val bgColor by animateColorAsState(targetValue = if (showDetail) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface, animationSpec = tween(200), label = "bg")
     val selected = word.id in selection.selectedIds
-    val firstDef = remember(word.translations, settings.showDefinitionOnCard) {
-        if (settings.showDefinitionOnCard) parseTranslations(word.translations).firstOrNull()?.definition ?: "" else ""
+    // 卡片显示释义：仅由一键「显示所有翻译」控制
+    val firstDef = remember(word.translations, showAllDef) {
+        if (showAllDef) parseTranslations(word.translations).firstOrNull()?.definition ?: "" else ""
     }
-    Card(Modifier.fillMaxWidth().clickable {
-        if (selection.enabled) selection.toggle(word.id) else { onReview(); showDetail = true }
+    val tts = LocalTTSState.current
+    Card(Modifier.fillMaxWidth().animateContentSize().clickable {
+        if (selection.enabled) {
+            selection.toggle(word.id)
+        } else {
+            // 设置里开了「点击卡片后自动朗读」时，自动朗读单词（带释义/例句语境，多音字更准确）
+            if (settings.autoSpeakOnCardTap) {
+                val trans = parseTranslations(word.translations)
+                val exs = parseExamples(word.examples)
+                tts.speakWordWithContext(
+                    word.word,
+                    word.pronunciation,
+                    contextText = buildTtsSpeakText(trans, exs, settings.speakExample),
+                )
+            }
+            onReview(); showDetail = true
+        }
     }, colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else bgColor)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             if (selection.enabled) {
@@ -208,11 +239,11 @@ private fun CompactWordCard(word: VocabularyEntity, settings: VocabularySettings
             }
         }
     }
-    if (showDetail) WordDetailDialog(word, settings.cooldownSeconds, onDismiss = { showDetail = false }, onDelete = onDelete, onArchive = onArchive, onReview = onReview)
+    if (showDetail) WordDetailDialog(word, settings.cooldownSeconds, settings.speakExample, onDismiss = { showDetail = false }, onDelete = onDelete, onArchive = onArchive, onReview = onReview)
 }
 
 @Composable
-private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, onDismiss: () -> Unit, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
+private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, speakExample: Boolean, onDismiss: () -> Unit, onDelete: () -> Unit, onArchive: () -> Unit, onReview: () -> Unit) {
     var canDismiss by remember { mutableStateOf(cooldownSeconds == 0) }
     var remainingSec by remember { mutableIntStateOf(cooldownSeconds) }
     LaunchedEffect(Unit) { if (cooldownSeconds > 0) { while (remainingSec > 0) { delay(1000); remainingSec-- }; canDismiss = true } }
@@ -232,7 +263,17 @@ private fun WordDetailDialog(word: VocabularyEntity, cooldownSeconds: Int, onDis
                     if (word.pronunciation.isNotBlank()) Text("/${word.pronunciation}/", style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(
-                    onClick = { if (isSpeaking) tts.stop() else tts.speak(word.word) },
+                    onClick = {
+                        if (isSpeaking) {
+                            tts.stop()
+                        } else {
+                            tts.speakWordWithContext(
+                                word.word,
+                                word.pronunciation,
+                                contextText = buildTtsSpeakText(translations, examples, speakExample),
+                            )
+                        }
+                    },
                     enabled = isAvailable,
                 ) {
                     Icon(if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh, contentDescription = if (isSpeaking) "停止朗读" else "朗读")
@@ -311,7 +352,8 @@ private fun ArchivedWordsDialog(vm: VocabularyPanelVM, onDismiss: () -> Unit) {
 private fun VocabularySettingsDialog(settings: VocabularySettings, onUpdate: (VocabularySettings) -> Unit, onDismiss: () -> Unit, onShowArchived: () -> Unit) {
     var cooldown by remember { mutableIntStateOf(settings.cooldownSeconds) }
     var sortBy by remember { mutableStateOf(settings.sortBy) }
-    var showDef by remember { mutableStateOf(settings.showDefinitionOnCard) }
+    var autoSpeak by remember { mutableStateOf(settings.autoSpeakOnCardTap) }
+    var speakExample by remember { mutableStateOf(settings.speakExample) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("生词面板设置") },
@@ -332,19 +374,61 @@ private fun VocabularySettingsDialog(settings: VocabularySettings, onUpdate: (Vo
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("卡片显示主要释义", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = showDef, onCheckedChange = { showDef = it })
+                    Text("点击卡片后自动朗读", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = autoSpeak, onCheckedChange = { autoSpeak = it })
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("朗读英语例句", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = speakExample, onCheckedChange = { speakExample = it })
+                }
+                // 一键清除 TTS 朗读缓存
+                val tts = LocalTTSState.current
+                val scope = rememberCoroutineScope()
+                val toaster = LocalToaster.current
+                TextButton(
+                    onClick = {
+                        tts.clearDiskCache()
+                        scope.launch {
+                            toaster.show("已清除 TTS 朗读缓存")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("清除 TTS 朗读缓存") }
                 TextButton(onClick = onShowArchived, modifier = Modifier.fillMaxWidth()) { Text("查看已归档生词") }
             }
         },
-        confirmButton = { TextButton(onClick = { onUpdate(settings.copy(cooldownSeconds = cooldown, sortBy = sortBy, showDefinitionOnCard = showDef)); onDismiss() }) { Text("保存") } },
+        confirmButton = { TextButton(onClick = { onUpdate(settings.copy(cooldownSeconds = cooldown, sortBy = sortBy, autoSpeakOnCardTap = autoSpeak, speakExample = speakExample)); onDismiss() }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 
-private fun highlightWord(sentence: String, word: String) = buildAnnotatedString {
-    val escaped = Regex.escape(word)
+/**
+ * 构造朗读文本：释义正文（去掉词性前缀）+ 可选的第一个英文例句（例句翻译不读）。
+ * 接在英文单词后一起朗读。释义给出语义上下文，多音字按释义对应读音走。
+ */
+private fun buildTtsSpeakText(
+    translations: List<TranslationItem>,
+    examples: List<ExampleItem>,
+    speakExample: Boolean,
+): String? {
+    val defs = translations
+        .filter { it.definition.isNotBlank() }
+        .take(2)
+        .map { it.definition.trim() }
+    val sb = StringBuilder()
+    if (defs.isNotEmpty()) sb.append(defs.joinToString("；"))
+    // 开启「朗读英语例句」时，追加第一个英文例句（不含中文翻译）
+    if (speakExample) {
+        val firstEn = examples.firstOrNull { it.en.isNotBlank() }?.en?.trim()
+        if (!firstEn.isNullOrBlank()) {
+            if (sb.isNotEmpty()) sb.append("。")
+            sb.append(firstEn)
+        }
+    }
+    return sb.toString().takeIf { it.isNotBlank() }
+}
+
+private fun highlightWord(sentence: String, word: String) = buildAnnotatedString {    val escaped = Regex.escape(word)
     // Try word boundary first, fall back to case-insensitive contains
     val pattern = Regex("\\b$escaped\\b|$escaped(?!\\w)", RegexOption.IGNORE_CASE)
     var last = 0

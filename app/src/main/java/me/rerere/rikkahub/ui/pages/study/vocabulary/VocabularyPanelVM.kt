@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.datastore.VocabularySettingsStore
 import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.entity.VocabularyEntity
 import java.time.Instant
@@ -18,7 +19,10 @@ import java.time.temporal.ChronoUnit
 data class VocabularySettings(
     val cooldownSeconds: Int = 3,
     val sortBy: String = "time",
-    val showDefinitionOnCard: Boolean = false,
+    /** 点击卡片后自动朗读单词，默认关闭 */
+    val autoSpeakOnCardTap: Boolean = false,
+    /** 朗读时附带朗读第一个英文例句（不含例句翻译），默认关闭 */
+    val speakExample: Boolean = false,
 )
 
 data class WordGroup(
@@ -29,11 +33,13 @@ data class WordGroup(
 
 class VocabularyPanelVM(
     private val vocabularyDao: VocabularyDao,
+    private val settingsStore: VocabularySettingsStore,
 ) : ViewModel() {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 
-    val settings = MutableStateFlow(VocabularySettings())
+    val settings: StateFlow<VocabularySettings> = settingsStore.settingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), VocabularySettings())
 
     private val rawWords = vocabularyDao.getAllFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -56,7 +62,9 @@ class VocabularyPanelVM(
     }
 
     fun updateSettings(newSettings: VocabularySettings) {
-        settings.value = newSettings
+        viewModelScope.launch {
+            settingsStore.update(newSettings)
+        }
     }
 
     fun updateReview(entity: VocabularyEntity) {
