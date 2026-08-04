@@ -97,7 +97,7 @@ fun WorkspacePickerButton(
             onSelect = { workspaceId ->
                 val newId = workspaceId?.let { Uuid.parse(it) }
                 if (newId != assistant.workspaceId) {
-                    onUpdateAssistant(assistant.copy(workspaceId = newId))
+                    onUpdateAssistant(assistant.copy(workspaceId = newId, defaultWorkspaceCwd = null))
                     if (conversation.workspaceCwd != null) {
                         onUpdateConversation(conversation.copy(workspaceCwd = null))
                     }

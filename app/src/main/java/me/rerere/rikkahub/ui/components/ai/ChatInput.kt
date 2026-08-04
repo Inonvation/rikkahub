@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -217,8 +220,11 @@ fun ChatInput(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp)
-                .padding(bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = 6.dp)
+                // 多行文本增长 / 附件行出现/移除时平滑过渡高度，避免瞬时跳变。
+                // 用克制 tween 而非默认 spring，避免高度轻微过冲回弹的粘滞感。
+                .animateContentSize(animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Surface(
                 modifier = Modifier
@@ -473,6 +479,16 @@ fun ChatInput(
                 }
             }
 
+            // 工作目录 + 统计栏：位于 imePadding 作用域内，键盘弹起自动避让
+            WorkspaceFooterBar(
+                assistant = assistant,
+                conversation = conversation,
+                settings = settings,
+                onUpdateAssistant = onUpdateAssistant,
+                onUpdateConversation = onUpdateConversation,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
         }
     }
 }
@@ -644,10 +660,16 @@ private fun TextInputRow(
                 },
             shape = MaterialTheme.shapes.largeIncreased,
             placeholder = {
-                Text(stringResource(R.string.chat_input_placeholder))
+                // 子代理运行中：主输入框发送走引导逻辑，placeholder 提示当前处于引导模式
+                Text(
+                    stringResource(
+                        if (subAgentActive) R.string.chat_input_placeholder_guidance
+                        else R.string.chat_input_placeholder
+                    )
+                )
             },
-            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 17.dp),
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             keyboardOptions = KeyboardOptions(
                 imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
             ),

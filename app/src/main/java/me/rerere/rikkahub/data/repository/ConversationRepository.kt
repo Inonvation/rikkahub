@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.SubAgentUsageEntity
 import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
 import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.files.FilesManager
@@ -354,6 +355,10 @@ class ConversationRepository(
         filesManager.deleteChatFilesPermanently(fullConversation.files)
         todoStorage.delete(conversation.id.toString())
     }
+
+    /** 某会话的子代理用量明细流（任务终态落库后触发），供聊天底部栏并入缓存/费用统计。 */
+    fun observeSubAgentUsage(conversationId: String): Flow<List<SubAgentUsageEntity>> =
+        subAgentUsageDAO.observeByConversation(conversationId)
 
     suspend fun searchMessages(
         keyword: String,

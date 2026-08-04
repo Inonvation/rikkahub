@@ -6,6 +6,7 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,8 +24,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,11 +39,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -99,9 +105,43 @@ fun WorkspaceDetailPage(id: String) {
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var deletePermanentTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
+    // 多选模式：selecting 为模式开关，selectedPaths 为已选 path 集合（相对当前存储区根）
+    var selecting by remember { mutableStateOf(false) }
+    var selectedPaths by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // 批量操作目标与移动弹窗状态
+    var batchTrashTargets by remember { mutableStateOf<List<WorkspaceFileEntry>?>(null) }
+    var batchDeleteTargets by remember { mutableStateOf<List<WorkspaceFileEntry>?>(null) }
+    var moveSources by remember { mutableStateOf<List<WorkspaceFileEntry>>(emptyList()) }
+    var showMoveTargetPicker by remember { mutableStateOf(false) }
     var showInstallDialog by remember { mutableStateOf(false) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+
+    fun exitSelect() {
+        selecting = false
+        selectedPaths = emptySet()
+    }
+
+    fun toggleSelect(path: String) {
+        selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+    }
+
+    fun enterSelect(path: String) {
+        selecting = true
+        selectedPaths = selectedPaths + path
+    }
+
+    fun toggleSelectAll() {
+        selectedPaths = if (selectedPaths.size == state.entries.size) {
+            emptySet()
+        } else {
+            state.entries.map { it.path }.toSet()
+        }
+    }
+
+    // 当前目录下已选中的条目（供批量操作使用）
+    val selectedEntries = state.entries.filter { it.path in selectedPaths }
+
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -129,6 +169,13 @@ fun WorkspaceDetailPage(id: String) {
         vm.goUp()
     }
 
+    // 多选模式下返回键先退出多选（定义在 goUp 之后，优先级更高）
+    BackHandler(enabled = selecting) { exitSelect() }
+    // 切换存储区/目录时自动退出多选
+    LaunchedEffect(state.area, state.path) {
+        exitSelect()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -142,6 +189,15 @@ fun WorkspaceDetailPage(id: String) {
                 navigationIcon = { BackButton() },
                 actions = {
                     if (pagerState.currentPage == 0) {
+                        if (selecting) {
+                            TextButton(onClick = { exitSelect() }) {
+                                Text("完成")
+                            }
+                        } else {
+                            TextButton(onClick = { selecting = true }) {
+                                Text("多选")
+                            }
+                        }
                         IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) {
                             Icon(
                                 HugeIcons.FileImport,
@@ -162,19 +218,34 @@ fun WorkspaceDetailPage(id: String) {
             )
         },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 0,
-                    label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
-                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
-                    onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+            if (selecting) {
+                SelectActionBar(
+                    selectedCount = selectedPaths.size,
+                    totalCount = state.entries.size,
+                    onSelectAll = { toggleSelectAll() },
+                    onMove = {
+                        moveSources = selectedEntries
+                        showMoveTargetPicker = true
+                    },
+                    onTrash = { batchTrashTargets = selectedEntries },
+                    onDelete = { batchDeleteTargets = selectedEntries },
+                    onDismiss = { exitSelect() },
                 )
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 1,
-                    label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
-                    icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
-                    onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                )
+            } else {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = pagerState.currentPage == 0,
+                        label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
+                        icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                    )
+                    NavigationBarItem(
+                        selected = pagerState.currentPage == 1,
+                        label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
+                        icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
+                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                    )
+                }
             }
         },
         containerColor = CustomColors.topBarColors.containerColor,
@@ -191,6 +262,14 @@ fun WorkspaceDetailPage(id: String) {
                     contentPadding = PaddingValues(),
                     onSelectArea = vm::selectArea,
                     onGoUp = vm::goUp,
+                    selecting = selecting,
+                    selectedPaths = selectedPaths,
+                    onToggleSelect = { toggleSelect(it.path) },
+                    onLongPressSelect = { enterSelect(it.path) },
+                    onMove = { entry ->
+                        moveSources = listOf(entry)
+                        showMoveTargetPicker = true
+                    },
                     onOpen = { entry ->
                         when {
                             entry.isDirectory -> vm.open(entry)
@@ -322,6 +401,54 @@ fun WorkspaceDetailPage(id: String) {
         ) {
             Text("彻底删除后无法恢复，确定删除 ${entry.path} 吗？")
         }
+    }
+
+    batchTrashTargets?.let { targets ->
+        RikkaConfirmDialog(
+            show = true,
+            title = "移入回收站",
+            confirmText = "移入回收站",
+            dismissText = stringResource(R.string.common_cancel),
+            onConfirm = {
+                vm.trashEntries(targets)
+                batchTrashTargets = null
+                exitSelect()
+            },
+            onDismiss = { batchTrashTargets = null },
+        ) {
+            Text("将选中的 ${targets.size} 项移入回收站，可在回收站中恢复。")
+        }
+    }
+
+    batchDeleteTargets?.let { targets ->
+        RikkaConfirmDialog(
+            show = true,
+            title = "彻底删除",
+            confirmText = stringResource(R.string.common_delete),
+            dismissText = stringResource(R.string.common_cancel),
+            onConfirm = {
+                vm.deleteEntries(targets)
+                batchDeleteTargets = null
+                exitSelect()
+            },
+            onDismiss = { batchDeleteTargets = null },
+        ) {
+            Text("彻底删除后无法恢复，确定删除选中的 ${targets.size} 项吗？")
+        }
+    }
+
+    if (showMoveTargetPicker) {
+        WorkspaceMoveTargetPickerSheet(
+            workspaceId = id,
+            area = state.area,
+            sources = moveSources,
+            onSelectTarget = { targetDir ->
+                vm.moveEntries(moveSources, targetDir)
+                showMoveTargetPicker = false
+                exitSelect()
+            },
+            onDismiss = { showMoveTargetPicker = false },
+        )
     }
 }
 
@@ -602,6 +729,11 @@ private fun WorkspaceFilesPage(
     contentPadding: PaddingValues,
     onSelectArea: (WorkspaceStorageArea) -> Unit,
     onGoUp: () -> Unit,
+    selecting: Boolean,
+    selectedPaths: Set<String>,
+    onToggleSelect: (WorkspaceFileEntry) -> Unit,
+    onLongPressSelect: (WorkspaceFileEntry) -> Unit,
+    onMove: (WorkspaceFileEntry) -> Unit,
     onOpen: (WorkspaceFileEntry) -> Unit,
     onDelete: (WorkspaceFileEntry) -> Unit,
     onDeletePermanently: (WorkspaceFileEntry) -> Unit,
@@ -643,11 +775,16 @@ private fun WorkspaceFilesPage(
         items(state.entries, key = { "${state.area.name}:${it.path}" }) { entry ->
             WorkspaceFileCard(
                 entry = entry,
+                selecting = selecting,
+                selected = entry.path in selectedPaths,
+                onToggleSelect = { onToggleSelect(entry) },
+                onLongPressSelect = { onLongPressSelect(entry) },
                 onOpen = { onOpen(entry) },
                 onDelete = { onDelete(entry) },
                 onDeletePermanently = { onDeletePermanently(entry) },
                 onExport = { onExport(entry) },
                 onShare = { onShare(entry) },
+                onMove = { onMove(entry) },
             )
         }
     }
@@ -706,18 +843,27 @@ private fun WorkspacePathBar(
 @Composable
 private fun WorkspaceFileCard(
     entry: WorkspaceFileEntry,
+    selecting: Boolean,
+    selected: Boolean,
+    onToggleSelect: () -> Unit,
+    onLongPressSelect: () -> Unit,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onDeletePermanently: () -> Unit,
     onExport: () -> Unit,
     onShare: () -> Unit,
+    onMove: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen),
+            .combinedClickable(
+                onClick = { if (selecting) onToggleSelect() else onOpen() },
+                // 未进入多选时，长按进入多选并选中该项
+                onLongClick = { if (!selecting) onLongPressSelect() },
+            ),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
@@ -726,6 +872,13 @@ private fun WorkspaceFileCard(
                 .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (selecting) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onToggleSelect() },
+                    modifier = Modifier.padding(end = 4.dp),
+                )
+            }
             Icon(
                 imageVector = if (entry.isDirectory) HugeIcons.Folder01 else HugeIcons.File02,
                 contentDescription = null,
@@ -793,6 +946,19 @@ private fun WorkspaceFileCard(
                         )
                     }
                     DropdownMenuItem(
+                        text = { Text("移动到…") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = HugeIcons.Folder01,
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onMove()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("移入回收站", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(
@@ -820,6 +986,72 @@ private fun WorkspaceFileCard(
                             onDeletePermanently()
                         },
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelectActionBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onSelectAll: () -> Unit,
+    onMove: () -> Unit,
+    onTrash: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "已选 $selectedCount 项",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onSelectAll) {
+                    Text(if (selectedCount == totalCount) "取消全选" else "全选")
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(HugeIcons.Cancel01, contentDescription = "退出选择")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(
+                    onClick = onMove,
+                    enabled = selectedCount > 0,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Folder01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("移动", modifier = Modifier.padding(start = 6.dp))
+                }
+                FilledTonalButton(
+                    onClick = onTrash,
+                    enabled = selectedCount > 0,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Delete01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("回收站", modifier = Modifier.padding(start = 6.dp))
+                }
+                FilledTonalButton(
+                    onClick = onDelete,
+                    enabled = selectedCount > 0,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Cancel01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("彻底删除", modifier = Modifier.padding(start = 6.dp))
                 }
             }
         }

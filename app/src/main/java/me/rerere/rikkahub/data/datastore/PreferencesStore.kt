@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.datastore.core.IOException
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -25,6 +26,8 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.ai.cost.CostCurrency
+import me.rerere.rikkahub.data.ai.cost.ModelPricingConfig
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeDepth
@@ -200,6 +203,11 @@ class SettingsStore(
 
         // 行为层提示词
         val AGENT_BEHAVIOR_PROMPT_ENABLED = booleanPreferencesKey("enable_agent_behavior_prompt")
+
+        // 会话费用
+        val MODEL_PRICING = stringPreferencesKey("model_pricing")
+        val COST_CURRENCY = stringPreferencesKey("cost_currency")
+        val COST_USD_CNY_RATE = doublePreferencesKey("cost_usd_cny_rate")
     }
 
     private val dataStore = context.settingsStore
@@ -330,6 +338,13 @@ class SettingsStore(
                 subAgentMaxTokens = preferences[SUB_AGENT_MAX_TOKENS]?.takeIf { it > 0 },
                 enableAgentBehaviorPrompt = preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] != false,
                 enableTodoList = preferences[TODO_LIST_ENABLED] != false,
+                costCurrency = preferences[COST_CURRENCY]?.let {
+                    runCatching { CostCurrency.valueOf(it) }.getOrNull()
+                } ?: CostCurrency.RMB,
+                costUsdCnyRate = preferences[COST_USD_CNY_RATE]?.takeIf { it > 0 } ?: 7.2,
+                modelPricingOverrides = preferences[MODEL_PRICING]?.let {
+                    runCatching { JsonInstant.decodeFromString<List<ModelPricingConfig>>(it) }.getOrNull()
+                } ?: emptyList(),
             )
         }
         .map {
@@ -543,6 +558,9 @@ class SettingsStore(
             } ?: preferences.remove(SUB_AGENT_MAX_TOKENS)
             preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] = settings.enableAgentBehaviorPrompt
             preferences[TODO_LIST_ENABLED] = settings.enableTodoList
+            preferences[COST_CURRENCY] = settings.costCurrency.name
+            preferences[COST_USD_CNY_RATE] = settings.costUsdCnyRate.coerceAtLeast(1.0)
+            preferences[MODEL_PRICING] = JsonInstant.encodeToString(settings.modelPricingOverrides)
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -729,6 +747,12 @@ data class Settings(
     /** per-task token 预算（null=不限）。累计 usage 超限置 TOKEN_LIMIT 终止 */
     val subAgentMaxTokens: Long? = null,
     val enableAgentBehaviorPrompt: Boolean = true,
+    /** 会话费用显示货币（默认人民币，用户可在费用配置窗修改，全局持久化） */
+    val costCurrency: CostCurrency = CostCurrency.RMB,
+    /** RMB 显示时的美元→人民币汇率 */
+    val costUsdCnyRate: Double = 7.2,
+    /** 用户自定的模型定价覆盖（精确 modelId 匹配，优先于内置预置表） */
+    val modelPricingOverrides: List<ModelPricingConfig> = emptyList(),
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

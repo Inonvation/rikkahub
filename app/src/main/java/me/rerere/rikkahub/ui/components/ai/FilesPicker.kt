@@ -61,6 +61,7 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -192,14 +193,31 @@ internal fun FilesPicker(
                 Text(stringResource(R.string.assistant_page_workspace))
             },
             trailingContent = {
-                Text(
-                    text = boundWorkspaceEntry?.name
-                        ?: stringResource(R.string.assistant_page_workspace_unbound),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = boundWorkspaceEntry?.name
+                            ?: stringResource(R.string.assistant_page_workspace_unbound),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // 工作区设置入口：进入当前所选工作区设置界面，同时关闭外层弹窗
+                    if (boundWorkspaceEntry != null) {
+                        IconButton(
+                            onClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                onDismiss()
+                                navController.navigate(Screen.WorkspaceDetail(boundWorkspaceEntry.id))
+                            },
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Settings03,
+                                contentDescription = stringResource(R.string.assistant_page_workspace_settings),
+                            )
+                        }
+                    }
+                }
             },
             colors = ListItemDefaults.colors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -222,7 +240,8 @@ internal fun FilesPicker(
                 onSelect = { workspaceId ->
                     val newId = workspaceId?.let { Uuid.parse(it) }
                     if (newId != assistant.workspaceId) {
-                        onUpdateAssistant(assistant.copy(workspaceId = newId))
+                        // 换工作区：会话 cwd 与助手默认 cwd 一并重置（旧路径在新工作区可能不存在）
+                        onUpdateAssistant(assistant.copy(workspaceId = newId, defaultWorkspaceCwd = null))
                         if (conversation.workspaceCwd != null) {
                             onUpdateConversation(conversation.copy(workspaceCwd = null))
                         }
@@ -236,6 +255,8 @@ internal fun FilesPicker(
                 onDismiss = { showWorkspaceSheet = false },
                 onSettings = { workspaceId ->
                     showWorkspaceSheet = false
+                    // 关闭外层「更多选项」弹窗，避免从设置页返回后弹窗残留（延迟退出 bug）
+                    onDismiss()
                     navController.navigate(Screen.WorkspaceDetail(workspaceId))
                 },
             )
@@ -270,6 +291,8 @@ internal fun FilesPicker(
                     currentCwd = conversation.workspaceCwd,
                     onSelectCwd = { newCwd ->
                         onUpdateConversation(conversation.copy(workspaceCwd = newCwd))
+                        // 同步保存为助手的默认工作目录，新对话沿用
+                        onUpdateAssistant(assistant.copy(defaultWorkspaceCwd = newCwd))
                     },
                     onDismiss = { showCwdSheet = false },
                 )
@@ -340,7 +363,7 @@ private fun InjectionQuickConfigSheet(
 }
 
 @Composable
-private fun ImagePickButton(onClick: () -> Unit = {}) {
+fun ImagePickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
         Icon(HugeIcons.Image02, null)
     }, text = {

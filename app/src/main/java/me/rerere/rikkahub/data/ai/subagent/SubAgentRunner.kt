@@ -454,6 +454,7 @@ class SubAgentRunner(
                     taskId = task.taskId,
                     conversationId = task.parentConversationId.toString(),
                     agentId = task.agentId,
+                    modelId = task.modelId?.toString(),
                     status = task.status.name,
                     promptTokens = usage.promptTokens.toLong(),
                     completionTokens = usage.completionTokens.toLong(),
@@ -577,7 +578,9 @@ class SubAgentRunner(
             null
         } ?: Conversation.ofId(id = initial.parentConversationId)
 
-        var task = initial
+        // 用实际解析出的模型覆盖 task.modelId（request 可能未指定，而 resolveModel 会落到
+        // defaultModelId / subAgentModelId / chatModelId），确保用量落库时记录真实计费模型。
+        var task = initial.copy(modelId = model.id)
 
         fun addStep(message: String): SubAgentTask {
             task = task.addStep(message)

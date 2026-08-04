@@ -44,6 +44,7 @@ import me.rerere.rikkahub.data.db.entity.SubAgentUsageEntity
 import me.rerere.rikkahub.data.db.entity.SubAgentTaskEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
+import me.rerere.rikkahub.data.db.migrations.Migration_38_39
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -68,7 +69,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         SubAgentTaskEntity::class,
         GroupEntity::class,
     ],
-    version = 38,
+    version = 39,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

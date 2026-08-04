@@ -130,6 +130,89 @@ class WorkspaceDetailVM(
         }
     }
 
+    /** 批量移入回收站（多选） */
+    fun trashEntries(entries: List<WorkspaceFileEntry>) {
+        viewModelScope.launch {
+            val area = state.value.area
+            val errors = mutableListOf<String>()
+            entries.forEach { entry ->
+                runCatching {
+                    repository.trashFile(
+                        id = id,
+                        area = area,
+                        path = entry.path,
+                        recursive = entry.isDirectory,
+                    )
+                }.onFailure { error -> errors += "${entry.name}：${error.message}" }
+            }
+            reportBatchErrors(errors)
+            refresh()
+        }
+    }
+
+    /** 批量彻底删除（多选） */
+    fun deleteEntries(entries: List<WorkspaceFileEntry>) {
+        viewModelScope.launch {
+            val area = state.value.area
+            val errors = mutableListOf<String>()
+            entries.forEach { entry ->
+                runCatching {
+                    repository.deleteFile(
+                        id = id,
+                        area = area,
+                        path = entry.path,
+                        recursive = entry.isDirectory,
+                    )
+                }.onFailure { error -> errors += "${entry.name}：${error.message}" }
+            }
+            reportBatchErrors(errors)
+            refresh()
+        }
+    }
+
+    /**
+     * 批量移动到目标目录。[targetDir] 为当前存储区内相对路径（"" 表示根目录）。
+     * 逐个移动；自动跳过 no-op（源已在目标目录）与"目录移入自身或其子目录"。
+     */
+    fun moveEntries(entries: List<WorkspaceFileEntry>, targetDir: String) {
+        viewModelScope.launch {
+            val area = state.value.area
+            val errors = mutableListOf<String>()
+            entries.forEach { entry ->
+                val target = if (targetDir.isBlank()) entry.name else "$targetDir/${entry.name}"
+                // no-op：源已在目标目录
+                if (target == entry.path) return@forEach
+                // 目录不能移入自身或其子目录
+                if (entry.isDirectory && target.startsWith(entry.path + "/")) {
+                    errors += "${entry.name}：不能移动到自身或其子目录"
+                    return@forEach
+                }
+                runCatching {
+                    repository.moveFile(
+                        id = id,
+                        source = entry.path,
+                        target = target,
+                        overwrite = false,
+                        area = area,
+                    )
+                }.onFailure { error -> errors += "${entry.name}：${error.message}" }
+            }
+            reportBatchErrors(errors)
+            refresh()
+        }
+    }
+
+    /** 批量操作的失败汇总写入错误卡片（最多展示前 3 条） */
+    private fun reportBatchErrors(errors: List<String>) {
+        if (errors.isEmpty()) return
+        _state.update {
+            it.copy(
+                error = errors.take(3).joinToString("\n") +
+                    if (errors.size > 3) "\n… 共 ${errors.size} 项失败" else "",
+            )
+        }
+    }
+
     fun importFile(inputStream: InputStream, fileName: String) {
         viewModelScope.launch {
             runCatching {

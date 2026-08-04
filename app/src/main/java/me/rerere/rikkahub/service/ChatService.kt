@@ -498,6 +498,12 @@ class ChatService(
                                     put("agentId", task.agentId)
                                     put("status", task.status.name.lowercase())
                                     put("summary", task.resultSummary.orEmpty())
+                                    // 子代理 token 用量与执行时长：落库随气泡持久化，完成气泡下方展示。
+                                    // 终态时 task.usage 已跨步骤累加完整，durationMillis = finishedAt - startedAt。
+                                    put("promptTokens", JsonPrimitive(task.usage?.promptTokens ?: 0))
+                                    put("completionTokens", JsonPrimitive(task.usage?.completionTokens ?: 0))
+                                    put("cachedTokens", JsonPrimitive(task.usage?.cachedTokens ?: 0))
+                                    put("durationMs", JsonPrimitive(task.durationMillis ?: 0L))
                                 }.toString(),
                                 output = listOf(
                                     UIMessagePart.Text(subAgentResultPayload(task).toString())
@@ -807,7 +813,10 @@ class ChatService(
                 id = conversationId,
                 assistantId = assistant.id,
                 newConversation = true
-            ).updateCurrentMessages(assistant.presetMessages)
+            )
+                // 新对话继承助手上次选择的默认工作目录
+                .copy(workspaceCwd = assistant.defaultWorkspaceCwd)
+                .updateCurrentMessages(assistant.presetMessages)
             updateConversation(conversationId, newConversation)
         }
     }

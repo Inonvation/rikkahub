@@ -17,6 +17,9 @@ data class SubAgentUsageEntity(
     val conversationId: String,
     @ColumnInfo("agent_id")
     val agentId: String,
+    /** 实际计费模型 id（任务继承主模型时为 null） */
+    @ColumnInfo("model_id")
+    val modelId: String? = null,
     val status: String,
     @ColumnInfo("prompt_tokens")
     val promptTokens: Long,
