@@ -142,6 +142,23 @@ private const val RESUME_WAIT_MS = 10_000L
 /** resume 续答 job 的最大时长（毫秒）：超过视为续答生成挂起，取消以释放串行锁、避免锁死后继子代理 */
 private const val RESUME_JOB_TIMEOUT_MS = 60_000L
 
+/** /init 指令改写后的基础指令：让母代理探索工作区并生成/更新 .agent 下的结构索引与项目概况 */
+private const val WORKSPACE_INIT_INSTRUCTION =
+    "Please initialize the current workspace:\n" +
+        "1. Explore /workspace with workspace_list_files to understand the directory structure and each directory's purpose.\n" +
+        "2. Create or update /workspace/.agent/INDEX.md describing the workspace layout and directory purposes.\n" +
+        "3. Update the Project section of /workspace/.agent/MEMORY.md with a brief summary of what this workspace is working on.\n" +
+        "The environment config (/workspace/.agent/AGENTS.md, MEMORY.md, notes/) is already initialized by the app; recreate it if missing."
+
+/** /init 指令改写后的最终消息: 基础指令 + 用户 /init 后的可选说明 */
+private fun workspaceInitInstruction(task: String): String = buildString {
+    append(WORKSPACE_INIT_INSTRUCTION)
+    if (task.isNotBlank()) {
+        append("\nUser's note for this workspace: ")
+        append(task.take(500))
+    }
+}
+
 /**
  * 说明：子代理唤醒指令已改为注入 system prompt 末尾（BUG3 修复），不再作为尾部消息。
  * 历史版本曾用固定 marker id 的消息做尾部唤醒，现保留一段注释说明。
@@ -871,27 +888,50 @@ class ChatService(
 
                 val processedContent = preprocessUserInputParts(content, assistant)
 
+                val rawText = processedContent.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text
+                // 工作区初始化指令 /init [说明]：改写为让母代理探索并生成 .agent/INDEX.md、更新 MEMORY，
+                // 改写前由 app 确保环境配置(AGENTS/MEMORY/notes)就绪。需已绑定可用工作区。
+                // 与子代理命令同风格解析：命令词取首个空格前, 其后内容作为初始化说明。
+                val isInitCommand = answer && rawText?.trim()?.let { it.substringBefore(' ') == "/init" } == true
+                val initTask = rawText?.trim()?.removePrefix("/init")?.trim() ?: ""
+
                 // 子代理指令（/search xxx 等）：把指令改写成明确的普通用户消息再落库，
                 // 母代理走正常生成流程——思考、spawn_subagent 派发、子代理后台跑、完成时
                 // 自动唤醒续答返回。支持一条消息多个指令（换行分隔）。
-                val cmds = if (answer) {
-                    processedContent.filterIsInstance<UIMessagePart.Text>()
-                        .firstOrNull()?.text
-                        ?.let { SubAgentCommands.parseAll(it) }
-                        ?.ifEmpty { null }
+                val cmds = if (answer && !isInitCommand) {
+                    rawText?.let { SubAgentCommands.parseAll(it) }?.ifEmpty { null }
                 } else null
                 val settingsNow = settingsStore.settingsFlow.first()
-                // cmds 非空时 rewriteToInstruction 必然返回改写文本（同源解析），此处兜底保持原样
-                val effectiveContent = if (cmds != null && settingsNow.enableSubAgent) {
-                    val instruction = processedContent.filterIsInstance<UIMessagePart.Text>()
-                        .firstOrNull()?.text
-                        ?.let { SubAgentCommands.rewriteToInstruction(it) }
-                    processedContent.map { part ->
-                        if (part is UIMessagePart.Text && instruction != null) {
-                            part.copy(text = instruction)
-                        } else part
+                val effectiveContent = when {
+                    // /init：先确保 .agent 环境配置，再改写为初始化指令让母代理执行
+                    isInitCommand -> {
+                        val workspaceId = assistant.workspaceId?.toString()
+                        val workspace = workspaceId?.let { workspaceRepository.getById(it) }
+                        if (workspace == null || workspace.shellStatus != WorkspaceShellStatus.READY.name) {
+                            addError(
+                                IllegalStateException(context.getString(R.string.error_workspace_not_bound)),
+                                conversationId,
+                                title = context.getString(R.string.error_title_workspace),
+                            )
+                            return@launch
+                        }
+                        runCatching { workspaceRepository.ensureAgentsFile(workspaceId) }
+                        runCatching { workspaceRepository.ensureMemoryIndex(workspaceId) }
+                        processedContent.map { part ->
+                            if (part is UIMessagePart.Text) part.copy(text = workspaceInitInstruction(initTask)) else part
+                        }
                     }
-                } else processedContent
+                    // cmds 非空时 rewriteToInstruction 必然返回改写文本（同源解析），此处兜底保持原样
+                    cmds != null && settingsNow.enableSubAgent -> {
+                        val instruction = rawText?.let { SubAgentCommands.rewriteToInstruction(it) }
+                        processedContent.map { part ->
+                            if (part is UIMessagePart.Text && instruction != null) {
+                                part.copy(text = instruction)
+                            } else part
+                        }
+                    }
+                    else -> processedContent
+                }
                 if (cmds != null && !settingsNow.enableSubAgent) {
                     // 子代理未开启：提示用户先去 Agent Action 设置页开启，不执行
                     addError(
