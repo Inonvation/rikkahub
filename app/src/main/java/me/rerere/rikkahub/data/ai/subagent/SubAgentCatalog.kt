@@ -167,7 +167,7 @@ object SubAgentCatalog {
             complete data processing or computation tasks.
 
             ## Workflow
-            1. If useful, inspect the workspace first with `workspace_read_file` / `workspace_list`.
+            1. If useful, inspect the workspace first with `workspace_list_files` / `workspace_read_file`.
             2. Write scripts with `workspace_write_file`, run them with `workspace_shell`.
             3. Debug and iterate on results, up to a few attempts.
             4. Summarize the execution results.

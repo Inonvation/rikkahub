@@ -202,8 +202,14 @@ class WorkspaceManager(
     ): Boolean =
         fileSystem.deleteFromTrash(areaDir(root, area), trashRelativePath)
 
-    fun moveFile(root: String, source: String, target: String, overwrite: Boolean = false): WorkspaceFileEntry =
-        fileSystem.move(filesDir(root), source, target, overwrite)
+    fun moveFile(
+        root: String,
+        source: String,
+        target: String,
+        overwrite: Boolean = false,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): WorkspaceFileEntry =
+        fileSystem.move(areaDir(root, area), source, target, overwrite)
 
     fun glob(root: String, pattern: String, path: String = ""): List<WorkspaceFileEntry> =
         fileSystem.glob(filesDir(root), pattern, path)
@@ -217,6 +223,62 @@ class WorkspaceManager(
         includeGlob: String? = null,
     ): List<WorkspaceSearchMatch> =
         fileSystem.grep(filesDir(root), query, path, regex, ignoreCase, includeGlob)
+
+    /**
+     * 按 Rootfs 内绝对路径列出目录内容。路径解析与 read/write/edit 一致,
+     * 支持 /workspace、bind mount 与 Rootfs 内部路径。返回的 path 为 Rootfs 绝对路径,
+     * 可直接作为 read/edit 等工具入参。
+     */
+    fun listFilesInRootfs(root: String, path: String): List<WorkspaceFileEntry> {
+        val location = resolveRootfsPath(root, path)
+        return fileSystem.list(location.rootDir, location.relativePath)
+            .map { it.toAbsoluteRootfs(path, location.relativePath) }
+    }
+
+    /**
+     * 按 Rootfs 内绝对路径做 glob 匹配。pattern 相对 workspace root 解析(与 files 区 glob 语义一致)。
+     * 返回的 path 为 Rootfs 绝对路径。
+     */
+    fun globInRootfs(root: String, pattern: String, path: String): List<WorkspaceFileEntry> {
+        require(pattern.isNotBlank()) { "Glob pattern is required" }
+        val location = resolveRootfsPath(root, path)
+        return fileSystem.glob(location.rootDir, pattern, location.relativePath)
+            .map { it.toAbsoluteRootfs(path, location.relativePath) }
+    }
+
+    /**
+     * 按 Rootfs 内绝对路径做内容搜索。支持 Rootfs 内部, 但大目录(如 /usr)可能较慢。
+     * 返回的 path 为 Rootfs 绝对路径。
+     */
+    fun grepInRootfs(
+        root: String,
+        query: String,
+        path: String,
+        regex: Boolean = false,
+        ignoreCase: Boolean = true,
+        includeGlob: String? = null,
+    ): List<WorkspaceSearchMatch> {
+        require(query.isNotBlank()) { "Search query is required" }
+        val location = resolveRootfsPath(root, path)
+        return fileSystem.grep(location.rootDir, query, location.relativePath, regex, ignoreCase, includeGlob)
+            .map { it.toAbsoluteRootfs(path, location.relativePath) }
+    }
+
+    /**
+     * 把相对 [location.rootDir] 的 path 转成 Rootfs 绝对路径: 去掉 [relativePrefix] 前缀再拼
+     * [rootfsPath], 避免 /workspace/sub/sub/xxx 这类前缀重复。
+     */
+    private fun absoluteRootfsPath(path: String, relativePrefix: String, rootfsPath: String): String {
+        val stripped = if (relativePrefix.isBlank()) path else path.removePrefix("$relativePrefix/")
+        val prefix = rootfsPath.trimEnd('/').ifBlank { "/" }
+        return if (prefix == "/") "/$stripped" else "$prefix/$stripped"
+    }
+
+    private fun WorkspaceFileEntry.toAbsoluteRootfs(rootfsPath: String, relativePrefix: String): WorkspaceFileEntry =
+        copy(path = absoluteRootfsPath(path, relativePrefix, rootfsPath))
+
+    private fun WorkspaceSearchMatch.toAbsoluteRootfs(rootfsPath: String, relativePrefix: String): WorkspaceSearchMatch =
+        copy(path = absoluteRootfsPath(path, relativePrefix, rootfsPath))
 
     fun executeCommand(
         root: String,

@@ -16,9 +16,11 @@ import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceSearchMatch
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.uuid.Uuid
@@ -122,6 +124,9 @@ class WorkspaceRepository(
                 rootfsInstaller.install(workspace.root, url, onProgress)
             }
             updateShellState(workspace, WorkspaceShellStatus.READY.name)
+            // rootfs 就绪后生成环境自描述文件, 让 AI 开局了解环境; 失败不阻塞安装成功(下次会话懒兜底)
+            runCatching { ensureAgentsFile(workspace.id) }
+                .onFailure { Log.w(TAG, "generate AGENTS.md failed after install", it) }
             return true
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
@@ -160,6 +165,41 @@ class WorkspaceRepository(
         val workspace = dao.getById(id) ?: return@withContext emptyList()
         manager.ensureWorkspace(workspace.root)
         manager.listAllFiles(workspace.root, area)
+    }
+
+    /** 按 Rootfs 内绝对路径列出目录内容(支持 /workspace、bind mount、rootfs 内部) */
+    suspend fun listFilesInRootfs(
+        id: String,
+        path: String,
+    ): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext emptyList()
+        manager.ensureWorkspace(workspace.root)
+        manager.listFilesInRootfs(workspace.root, path)
+    }
+
+    /** 按 Rootfs 内绝对路径做 glob 匹配 */
+    suspend fun globInRootfs(
+        id: String,
+        pattern: String,
+        path: String,
+    ): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext emptyList()
+        manager.ensureWorkspace(workspace.root)
+        manager.globInRootfs(workspace.root, pattern, path)
+    }
+
+    /** 按 Rootfs 内绝对路径做内容搜索 */
+    suspend fun grepInRootfs(
+        id: String,
+        query: String,
+        path: String,
+        regex: Boolean,
+        ignoreCase: Boolean,
+        includeGlob: String?,
+    ): List<WorkspaceSearchMatch> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext emptyList()
+        manager.ensureWorkspace(workspace.root)
+        manager.grepInRootfs(workspace.root, query, path, regex, ignoreCase, includeGlob)
     }
 
     suspend fun readText(
@@ -320,10 +360,11 @@ class WorkspaceRepository(
         source: String,
         target: String,
         overwrite: Boolean,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
-        manager.moveFile(workspace.root, source, target, overwrite)
+        manager.moveFile(workspace.root, source, target, overwrite, area)
     }
 
     suspend fun executeCommand(
@@ -339,6 +380,82 @@ class WorkspaceRepository(
             manager.ensureWorkspace(workspace.root)
             manager.executeCommand(workspace.root, command, cwd, timeoutMillis, stdin)
         }
+    }
+
+    /** 读取 .agent 下注入型配置(AGENTS/MEMORY)内容; 不存在或过大返回 null */
+    private suspend fun readAgentConfigFile(id: String, relativePath: String): String? =
+        withContext(Dispatchers.IO) {
+            val workspace = dao.getById(id) ?: return@withContext null
+            val file = File(manager.filesDir(workspace.root), relativePath)
+            if (!file.isFile || file.length() > MAX_AGENTS_READ_BYTES) return@withContext null
+            runCatching { file.readText(Charsets.UTF_8) }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
+
+    /** 读取环境自描述文件 AGENTS.md 内容, 用于注入 system prompt */
+    suspend fun readAgentsFileContent(id: String): String? = readAgentConfigFile(id, AGENTS_FILE)
+
+    /** 读取经验索引 MEMORY.md 内容, 用于注入 system prompt */
+    suspend fun readMemoryIndex(id: String): String? = readAgentConfigFile(id, MEMORY_FILE)
+
+    /** 确保 MEMORY.md 索引与 notes 详情文件齐备; 已有有效内容保留, 索引缺失/空白则重新生成 */
+    suspend fun ensureMemoryIndex(id: String): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.ensureWorkspace(workspace.root)
+        val filesDir = manager.filesDir(workspace.root)
+        val memoryFile = File(filesDir, MEMORY_FILE)
+        if (memoryFile.isFile && memoryFile.readPrefixIsNotBlank()) {
+            ensureNoteFiles(filesDir)
+            return@withContext true
+        }
+        manager.writeText(workspace.root, MEMORY_FILE, MEMORY_INDEX_TEMPLATE + "\n")
+        ensureNoteFiles(filesDir)
+        true
+    }
+
+    /** 补建缺失的 notes 详情文件(带引导文案), 均为 .agent 下可信常量路径, 不走用户输入 */
+    private fun ensureNoteFiles(filesDir: File) {
+        AGENT_NOTE_GUIDES.forEach { (notePath, guide) ->
+            val noteFile = File(filesDir, notePath)
+            if (!noteFile.isFile) {
+                val header = notePath.substringAfterLast('/').removeSuffix(".md")
+                noteFile.parentFile?.mkdirs()
+                noteFile.writeText("# $header\n\n($guide)\n")
+            }
+        }
+    }
+
+    /** 确保 /workspace/.agent/AGENTS.md 存在: 有效内容保留, 旧版根文件一次性迁移, 缺失/空白时探测生成 */
+    suspend fun ensureAgentsFile(id: String): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.ensureWorkspace(workspace.root)
+        val filesDir = manager.filesDir(workspace.root)
+        val agentsFile = File(filesDir, AGENTS_FILE)
+        // 已生成且非空白(空白视为被清空的损坏文件)则跳过, 绝不覆盖 AI 维护的有效版本
+        if (agentsFile.isFile && agentsFile.readPrefixIsNotBlank()) return@withContext true
+
+        // 一次性迁移: 旧版本在 files 区根生成 AGENTS.md, 移到 .agent/ (空白目标先删, 避免 rename 失败)
+        val legacyFile = File(filesDir, LEGACY_AGENTS_FILE)
+        if (legacyFile.isFile) {
+            agentsFile.parentFile?.mkdirs()
+            if (agentsFile.exists()) agentsFile.delete()
+            if (legacyFile.renameTo(agentsFile)) return@withContext true
+        }
+
+        val result = manager.executeCommand(
+            root = workspace.root,
+            command = AGENTS_FILE_SCRIPT,
+            timeoutMillis = AGENTS_SCRIPT_TIMEOUT_MS,
+        )
+        if (result.timedOut || result.exitCode != 0 || result.stdout.isBlank()) {
+            Log.w(
+                TAG,
+                "AGENTS.md generation failed: exit=${result.exitCode}, timedOut=${result.timedOut}, " +
+                    "stderr=${result.stderr.take(200)}",
+            )
+            return@withContext false
+        }
+        manager.writeText(workspace.root, AGENTS_FILE, result.stdout.trimEnd() + "\n")
+        true
     }
 
     suspend fun delete(id: String): Boolean {
@@ -392,5 +509,75 @@ class WorkspaceRepository(
     companion object {
         private const val TAG = "WorkspaceRepository"
         private const val MAX_PREVIEW_BYTES = 512L * 1024
+
+        /** 注入 system prompt 时读取 AGENTS.md 的大小上限, 防 AI 把文件写大撑爆内存 */
+        private const val MAX_AGENTS_READ_BYTES = 64L * 1024
+
+        /** 环境自描述文件名, 位于 workspace files 区 .agent 目录(对应 Rootfs /workspace/.agent/AGENTS.md) */
+        private const val AGENTS_FILE = ".agent/AGENTS.md"
+        /** 旧版本在 files 区根生成 AGENTS.md, 用于一次性迁移 */
+        private const val LEGACY_AGENTS_FILE = "AGENTS.md"
+        private const val AGENTS_SCRIPT_TIMEOUT_MS = 60_000L
+
+        /** 经验索引文件名(注入 system prompt), 位于 .agent 目录; 细节放在 notes/ 按需读 */
+        private const val MEMORY_FILE = ".agent/MEMORY.md"
+        private val MEMORY_INDEX_TEMPLATE = """
+            # Workspace Memory (index)
+
+            Index of this workspace's accumulated experience. Details live in the files below.
+            Update the relevant file after installing a tool, solving a tricky problem, or settling a project workflow. Keep entries concise.
+
+            - Toolchain  -> notes/toolchain.md   (installed tools and versions; update after installing)
+            - Pitfalls   -> notes/pitfalls.md    (gotchas and their fixes)
+            - Workflows  -> notes/workflows.md   (build/run commands for workspace projects)
+            - Project    -> notes/project.md     (current work in progress and its state)
+        """.trimIndent()
+        private val AGENT_NOTE_GUIDES = mapOf(
+            ".agent/notes/toolchain.md" to "Installed tools and versions; update after installing something new.",
+            ".agent/notes/pitfalls.md" to "Gotchas and their fixes encountered in this workspace.",
+            ".agent/notes/workflows.md" to "Build/run commands for the workspace's projects.",
+            ".agent/notes/project.md" to "Current work in progress and its state.",
+        )
+
+        /**
+         * 探测脚本: 在 PRoot 内执行, 直接输出 Markdown 内容, app 端不做解析。
+         * 仅列出已安装的关键工具, 控制 AGENTS.md 体积。
+         */
+        private val AGENTS_FILE_SCRIPT = """
+            {
+            echo "# Workspace Environment (auto-generated by RikkaHub, keep updated)"
+            echo ""
+            echo "Read this first. It describes the Linux sandbox. After installing new tools, update the Installed list with workspace_edit_file."
+            echo ""
+            . /etc/os-release 2>/dev/null
+            echo "Distro: ${'$'}{PRETTY_NAME:-unknown}"
+            if command -v apt >/dev/null 2>&1; then echo "Package manager: apt"
+            elif command -v apk >/dev/null 2>&1; then echo "Package manager: apk"
+            elif command -v pacman >/dev/null 2>&1; then echo "Package manager: pacman"
+            elif command -v dnf >/dev/null 2>&1; then echo "Package manager: dnf"
+            elif command -v yum >/dev/null 2>&1; then echo "Package manager: yum"
+            fi
+            for t in python3 node npm yarn git gcc g++ make cmake curl wget jq tar zip unzip openssl sqlite3 perl ruby ffmpeg; do
+                command -v "${'$'}{t}" >/dev/null 2>&1 && printf 'Installed: %s\n' "${'$'}{t}"
+            done
+            if timeout 3 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null; then echo "Network: yes"; else echo "Network: no"; fi
+            echo "Mounts: /workspace (persistent files), /skills, /upload (convention read-only), /tool_outputs"
+            echo ""
+            echo "Rules:"
+            echo "- Use absolute paths. /workspace is the persistent files area."
+            echo "- Each workspace_shell call is a fresh process; cd/export do not persist. Use absolute paths or 'cd /path && cmd'."
+            echo "- Keep this file updated: after installing a tool, add it to Installed."
+            }
+        """.trimIndent()
     }
 }
+
+/** 读文件前 512 字节判断是否非空白, 用于识别被清空的损坏文件 */
+private fun File.readPrefixIsNotBlank(): Boolean = runCatching {
+    if (length() == 0L) return@runCatching false
+    inputStream().use { input ->
+        val buf = ByteArray(512)
+        val read = input.read(buf)
+        read > 0 && String(buf, 0, read, Charsets.UTF_8).trim().isNotEmpty()
+    }
+}.getOrDefault(false)

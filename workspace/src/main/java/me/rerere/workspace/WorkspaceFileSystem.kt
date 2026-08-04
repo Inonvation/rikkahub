@@ -214,7 +214,10 @@ class WorkspaceFileSystem(
             paths
                 .filter { Files.isRegularFile(it) || Files.isDirectory(it) }
                 .filter { !isHiddenWorkspaceName(it.toFile().name) }
-                .filter { matcher.matches(root.toPath().relativize(it).normalizeForMatch()) }
+                // 匹配相对 [start]（起始目录）的路径, 而非相对 [root]: 这样调用方传入
+                // path=起始目录 后, 用 "*.kt" 这类相对该目录的直觉 pattern 即可命中,
+                // 不必在 pattern 里带目录前缀。path 为空时 start == root, 行为与旧版一致。
+                .filter { matcher.matches(start.toPath().relativize(it).normalizeForMatch()) }
                 .take(config.maxListEntries)
                 .map { it.toFile().toEntry(root) }
                 .toList()

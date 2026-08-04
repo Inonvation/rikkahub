@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -16,9 +17,11 @@ import me.rerere.ai.ui.toMetadata
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.generateUnifiedDiff
+import me.rerere.workspace.MAX_OUTPUT_CHARS
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceSearchMatch
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.java.KoinJavaComponent.getKoin
 import java.io.ByteArrayOutputStream
@@ -26,11 +29,18 @@ import java.io.ByteArrayOutputStream
 private const val SHELL_TIMEOUT_MAX_SECONDS = 600L
 private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
 
+/** 输出被截断时追加在 stdout 末尾的提示, 让 AI 明确知道并改用分片读取 */
+private val TRUNCATED_OUTPUT_MARKER =
+    "\n\n... [output truncated at ${MAX_OUTPUT_CHARS / 1024}KB, use head/tail or workspace_grep to read parts] ..."
+
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
+    "workspace_list_files" to false,
+    "workspace_glob" to false,
+    "workspace_grep" to false,
 )
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
@@ -55,6 +65,9 @@ suspend fun createWorkspaceTools(
         createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
+        createListFilesTool(workspaceId, ::needsApproval, workspaceRepository),
+        createGlobTool(workspaceId, ::needsApproval, workspaceRepository),
+        createGrepTool(workspaceId, ::needsApproval, workspaceRepository),
     )
 }
 
@@ -74,6 +87,8 @@ private fun createReadFileTool(
     description = """
         Read a file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
         Use /workspace for the workspace files area.
+        Cannot list a directory - use workspace_list_files instead.
+        For files larger than 8MB, use workspace_shell with head/tail/grep to read parts.
         Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -230,11 +245,13 @@ private fun createShellTool(
     name = "workspace_shell",
     description = buildString {
         append("Run a shell command in the assistant's bound workspace Rootfs. The workspace files area is mounted at /workspace. ")
+        append("Each call is a fresh process: cd/export do not persist between calls. Use absolute paths or 'cd /path && cmd'. ")
         append("Use cwd for a path relative to the workspace files root. ")
         if (!defaultCwd.isNullOrBlank()) {
             append("Defaults to '$defaultCwd'. ")
         }
-        append("Requires Rootfs to be installed and ready.")
+        append("Output is capped at 128KB and truncated with a marker. Timeout defaults to 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. ")
+        append("Added/modified files under /workspace are reported after the command. Requires Rootfs to be installed and ready.")
     },
     parameters = {
         InputSchema.Obj(
@@ -290,7 +307,7 @@ private fun createShellTool(
             UIMessagePart.Text(
                 buildJsonObject {
                     put("exitCode", result.exitCode)
-                    put("stdout", result.stdout)
+                    put("stdout", if (result.truncated) result.stdout + TRUNCATED_OUTPUT_MARKER else result.stdout)
                     put("stderr", result.stderr)
                     put("timedOut", result.timedOut)
                     if (result.truncated) put("truncated", true)
@@ -305,6 +322,164 @@ private fun createShellTool(
         )
     },
 )
+
+private fun createListFilesTool(
+    workspaceId: String,
+    needsApproval: (String) -> Boolean,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_list_files",
+    description = """
+        List a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
+        Use /workspace for the workspace files area. Defaults to /workspace.
+        Returns file entries with name, path, isDirectory and sizeBytes.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                putPathProperty(required = false)
+            },
+            required = emptyList(),
+        )
+    },
+    needsApproval = { needsApproval("workspace_list_files") },
+    execute = {
+        val path = it.jsonObject.optionalRootfsPath("path") ?: "/workspace"
+        val entries = workspaceRepository.listFilesInRootfs(workspaceId, path)
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", path)
+                    putJsonArray("entries") {
+                        entries.forEach { add(it.toJson()) }
+                    }
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createGlobTool(
+    workspaceId: String,
+    needsApproval: (String) -> Boolean,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_glob",
+    description = """
+        Glob-match files under a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
+        Use /workspace for the workspace files area. Defaults to /workspace.
+        pattern is relative to the search path: e.g. with path /workspace use "ai-output/txt/*.txt" or "**/*.txt".
+        A leading /workspace prefix in pattern is tolerated and stripped. Returns matching entries with absolute Rootfs paths.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                putPathProperty(required = false)
+                put("pattern", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Glob pattern, relative to the workspace files root")
+                })
+            },
+            required = listOf("pattern"),
+        )
+    },
+    needsApproval = { needsApproval("workspace_glob") },
+    execute = {
+        val params = it.jsonObject
+        val path = params.optionalRootfsPath("path") ?: "/workspace"
+        val rawPattern = params.string("pattern") ?: error("pattern is required")
+        // 容错: AI 常把 Rootfs 绝对前缀(如 /workspace/...)写进 pattern, 剥离到相对基准, 避免匹配落空
+        val pattern = rawPattern.removePrefix(path.trimEnd('/')).removePrefix("/")
+        val entries = workspaceRepository.globInRootfs(workspaceId, pattern, path)
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", path)
+                    put("pattern", pattern)
+                    putJsonArray("matches") {
+                        entries.forEach { add(it.toJson()) }
+                    }
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createGrepTool(
+    workspaceId: String,
+    needsApproval: (String) -> Boolean,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_grep",
+    description = """
+        Search file contents under a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
+        Use /workspace for the workspace files area. Defaults to /workspace.
+        Returns matching lines with absolute Rootfs path, line number and text.
+        Searching large directories (e.g. the whole rootfs) can be slow.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                putPathProperty(required = false)
+                put("query", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Text or regex to search for")
+                })
+                put("regex", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Treat query as a regular expression. Defaults to false.")
+                })
+                put("ignoreCase", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Case-insensitive search. Defaults to true.")
+                })
+                put("includeGlob", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Only search files matching this glob (relative to the workspace files root). Optional.")
+                })
+            },
+            required = listOf("query"),
+        )
+    },
+    needsApproval = { needsApproval("workspace_grep") },
+    execute = {
+        val params = it.jsonObject
+        val path = params.optionalRootfsPath("path") ?: "/workspace"
+        val query = params.string("query") ?: error("query is required")
+        val regex = params["regex"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        val ignoreCase = params["ignoreCase"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+        val includeGlob = params.string("includeGlob")
+        val matches = workspaceRepository.grepInRootfs(workspaceId, query, path, regex, ignoreCase, includeGlob)
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", path)
+                    put("query", query)
+                    putJsonArray("matches") {
+                        matches.forEach { m ->
+                            add(
+                                buildJsonObject {
+                                    put("path", m.path)
+                                    put("line", m.line)
+                                    put("text", m.text)
+                                }
+                            )
+                        }
+                    }
+                }.toString()
+            )
+        )
+    },
+)
+
+/** 可选 Rootfs 绝对路径: 缺省或空返回 null */
+private fun kotlinx.serialization.json.JsonObject.optionalRootfsPath(name: String): String? {
+    val path = string(name)?.replace('\\', '/')?.trim() ?: return null
+    if (path.isBlank()) return null
+    require(path.startsWith("/")) { "$name must be an absolute path inside Rootfs" }
+    require(path.none { it.code == 0 }) { "$name contains invalid character" }
+    return path
+}
 
 private fun kotlinx.serialization.json.JsonObject.string(name: String): String? =
     this[name]?.jsonPrimitive?.contentOrNull
