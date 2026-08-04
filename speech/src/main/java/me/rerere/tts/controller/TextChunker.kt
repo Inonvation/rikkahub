@@ -40,6 +40,10 @@ class TextChunker(
 data class TtsChunk(
     val id: java.util.UUID = java.util.UUID.randomUUID(),
     val index: Int,
-    val text: String
+    val text: String,
+    /** 发音人（voice）覆盖；为空时各 provider 回退自己的默认配置。 */
+    val voice: String? = null,
+    /** IPA 音标提示（如 /riːd/）；非空时传给支持发音指令的 provider。 */
+    val pronunciation: String? = null,
 )
 

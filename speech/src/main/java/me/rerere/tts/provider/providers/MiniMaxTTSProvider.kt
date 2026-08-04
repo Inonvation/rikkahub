@@ -59,7 +59,7 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
                 put("exclude_aggregated_audio", true)
             })
             put("voice_setting", buildJsonObject {
-                put("voice_id", providerSetting.voiceId)
+                put("voice_id", request.voice ?: providerSetting.voiceId)
                 put("speed", providerSetting.speed)
             })
         }

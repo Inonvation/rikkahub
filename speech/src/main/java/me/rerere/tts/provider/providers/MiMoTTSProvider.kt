@@ -150,7 +150,7 @@ class MiMoTTSProvider : TTSProvider<TTSProviderSetting.MiMo> {
             })
             put("audio", buildJsonObject {
                 put("format", "pcm16")
-                put("voice", providerSetting.voice)
+                put("voice", request.voice ?: providerSetting.voice)
             })
             put("stream", true)
         }

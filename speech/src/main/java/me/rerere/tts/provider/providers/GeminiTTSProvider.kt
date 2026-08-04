@@ -76,7 +76,7 @@ class GeminiTTSProvider : TTSProvider<TTSProviderSetting.Gemini> {
                 put("speechConfig", JSONObject().apply {
                     put("voiceConfig", JSONObject().apply {
                         put("prebuiltVoiceConfig", JSONObject().apply {
-                            put("voiceName", providerSetting.voiceName)
+                            put("voiceName", request.voice ?: providerSetting.voiceName)
                         })
                     })
                 })

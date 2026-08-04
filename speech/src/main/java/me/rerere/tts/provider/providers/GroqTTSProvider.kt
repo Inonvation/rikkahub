@@ -31,7 +31,7 @@ class GroqTTSProvider : TTSProvider<TTSProviderSetting.Groq> {
         val requestBody = JSONObject().apply {
             put("model", providerSetting.model)
             put("input", request.text)
-            put("voice", providerSetting.voice)
+            put("voice", request.voice ?: providerSetting.voice)
             put("response_format", "wav")
         }
 

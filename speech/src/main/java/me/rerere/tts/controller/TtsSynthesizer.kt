@@ -22,7 +22,10 @@ class TtsSynthesizer(
         chunk: TtsChunk
     ): TTSResponse = withContext(Dispatchers.IO) {
         collectToResponse(
-            ttsManager.generateSpeech(setting, TTSRequest(text = chunk.text))
+            ttsManager.generateSpeech(
+                setting,
+                TTSRequest(text = chunk.text, voice = chunk.voice, pronunciation = chunk.pronunciation)
+            )
         )
     }
 

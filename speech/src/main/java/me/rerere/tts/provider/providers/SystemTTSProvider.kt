@@ -20,6 +20,17 @@ import kotlin.coroutines.resumeWithException
 
 private const val TAG = "SystemTTSProvider"
 
+/** 判断文本是否以英文为主（用于选择朗读语言引擎）。 */
+internal fun isMostlyEnglish(text: String): Boolean {
+    if (text.isBlank()) return false
+    // CJK 统一表意文字 + 日文假名
+    val cjk = text.count {
+        (it.code in 0x4E00..0x9FFF) || (it.code in 0x3040..0x30FF) || (it.code in 0x3400..0x4DBF)
+    }
+    val asciiLetters = text.count { it.isLetter() && it.code < 0x80 }
+    return asciiLetters > cjk && asciiLetters >= 3
+}
+
 class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
     override fun generateSpeech(
         context: Context,
@@ -33,7 +44,8 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
                     val ttsInstance = tts ?: error("TextToSpeech instance is null")
 
                 // Set language
-                val locale = Locale.getDefault()
+                // 文本以英文为主时优先用英文引擎，避免中文设备用默认 locale 读英文带口音
+                val locale = if (isMostlyEnglish(request.text)) Locale.US else Locale.getDefault()
                 val langResult = ttsInstance.setLanguage(locale)
 
                 if (langResult == TextToSpeech.LANG_MISSING_DATA ||

@@ -33,8 +33,9 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             put("model", providerSetting.model)
             put("input", JSONObject().apply {
                 put("text", request.text)
-                put("voice", providerSetting.voice)
-                put("language_type", providerSetting.languageType)
+                put("voice", request.voice ?: providerSetting.voice)
+                // 有英文音色覆盖时强制英文，避免按中文规则读英文单词
+                put("language_type", if (request.voice != null) "en" else providerSetting.languageType)
             })
         }
 

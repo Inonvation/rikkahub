@@ -52,7 +52,7 @@ class StepTTSProvider : TTSProvider<TTSProviderSetting.Step> {
         val requestBody = buildJsonObject {
             put("model", providerSetting.model)
             put("input", request.text)
-            put("voice", providerSetting.voice)
+            put("voice", request.voice ?: providerSetting.voice)
             put("responseFormat", providerSetting.responseFormat)
             put("speed", providerSetting.speed)
             put("volume", providerSetting.volume)

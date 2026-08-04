@@ -22,6 +22,10 @@ import me.rerere.tts.model.PlaybackStatus
 import me.rerere.tts.model.TTSResponse
 import me.rerere.tts.provider.TTSManager
 import me.rerere.tts.provider.TTSProviderSetting
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.security.MessageDigest
 import java.util.UUID
 
 private const val TAG = "TtsController"
@@ -32,7 +36,7 @@ private const val TAG = "TtsController"
  * - 对外 API 与原版兼容
  */
 class TtsController(
-    context: Context,
+    private val context: Context,
     private val ttsManager: TTSManager
 ) {
     // 协程作用域
@@ -42,6 +46,13 @@ class TtsController(
     private val chunker = TextChunker(maxChunkLength = 160)
     private val synthesizer = TtsSynthesizer(ttsManager)
     private val audio = AudioPlayer(context)
+
+    // 磁盘发音缓存目录：同一 provider+音色+文本 → 同一音频，保证发音一致
+    private val diskCacheDir: File by lazy {
+        File(context.cacheDir, "tts_cache").apply { mkdirs() }
+    }
+    // 缓存序列化：保留真实音频格式与采样率（Gemini/Qwen/MiMo 是 PCM、Groq 是 WAV 等）
+    private val cacheJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
     // Provider & 作业
     private var currentProvider: TTSProviderSetting? = null
@@ -104,8 +115,10 @@ class TtsController(
      * 朗读文本
      * - flush=true: 清空当前进度并重新开始
      * - flush=false: 继续队列，追加朗读
+     * - voiceOverride: 发音人（voice）覆盖，为空时由 provider 用自己配置的音色
+     * - pronunciation: IPA 音标提示（如 /riːd/），非空时传给支持发音指令的 provider
      */
-    fun speak(text: String, flush: Boolean = true) {
+    fun speak(text: String, flush: Boolean = true, voiceOverride: String? = null, pronunciation: String? = null) {
         if (text.isBlank()) return
         val provider = currentProvider
         if (provider == null) {
@@ -116,15 +129,19 @@ class TtsController(
         val newChunks = chunker.split(text)
         if (newChunks.isEmpty()) return
 
+        val voiceChunks = if (voiceOverride != null || pronunciation != null) {
+            newChunks.map { it.copy(voice = voiceOverride, pronunciation = pronunciation) }
+        } else newChunks
+
         if (flush) {
             internalReset()
-            allChunks.addAll(newChunks)
-            queue.addAll(newChunks)
+            allChunks.addAll(voiceChunks)
+            queue.addAll(voiceChunks)
             _currentChunk.update { 0 }
         } else {
             // 追加时，重映射 index 以保持全局顺序
             val startIndex = (allChunks.lastOrNull()?.index ?: -1) + 1
-            val remapped = newChunks.mapIndexed { i, c -> c.copy(index = startIndex + i) }
+            val remapped = voiceChunks.mapIndexed { i, c -> c.copy(index = startIndex + i) }
             allChunks.addAll(remapped)
             queue.addAll(remapped)
         }
@@ -217,6 +234,13 @@ class TtsController(
         audio.release()
     }
 
+    /** 清空磁盘发音缓存（下次朗读会重新合成）。 */
+    fun clearDiskCache() {
+        runCatching {
+            diskCacheDir.listFiles()?.forEach { it.delete() }
+        }
+    }
+
     // region 内部：播放调度
     private fun startWorker() {
         val provider = currentProvider
@@ -290,6 +314,10 @@ class TtsController(
 
         for (i in begin until endExclusive) {
             val chunk = allChunks.getOrNull(i) ?: continue
+            // 已命中磁盘缓存的 chunk 无需再合成，避免冗余请求
+            if (cacheFileFor(provider, chunk).exists()) {
+                continue
+            }
             cache.computeIfAbsent(chunk.id) {
                 scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
             }
@@ -298,14 +326,52 @@ class TtsController(
     }
 
     private suspend fun awaitOrCreate(chunk: TtsChunk, provider: TTSProviderSetting): TTSResponse {
+        // 先查磁盘缓存：同一 provider+音色+文本 命中直接返回，保证发音一致
+        val cacheFile = cacheFileFor(provider, chunk)
+        if (cacheFile.exists() && cacheFile.length() > 0) {
+            val cached = runCatching {
+                cacheJson.decodeFromString<TTSResponse>(cacheFile.readText())
+            }.getOrNull()
+            if (cached != null && cached.audioData.isNotEmpty()) {
+                return cached
+            }
+            // 缓存损坏则删除，走重新合成
+            runCatching { cacheFile.delete() }
+        }
+
         val deferred = cache.computeIfAbsent(chunk.id) {
             scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
         }
         return try {
-            deferred.await()
+            val response = deferred.await()
+            // 合成成功写入磁盘缓存，下次同词同音色直接命中
+            runCatching {
+                cacheFile.writeText(cacheJson.encodeToString(TTSResponse.serializer(), response))
+            }
+            response
         } finally {
             // 可按需保留缓存（此处保留，便于重播/重试）
         }
     }
+
+    /** 磁盘缓存 key：provider 类型 + 音色 + 音标 + 文本的哈希。 */
+    private fun diskCacheKey(provider: TTSProviderSetting, chunk: TtsChunk): String {
+        val raw = buildString {
+            append(provider::class.simpleName)
+            append("|")
+            append(provider.id)
+            append("|")
+            append(chunk.voice ?: "")
+            append("|")
+            append(chunk.pronunciation ?: "")
+            append("|")
+            append(chunk.text)
+        }
+        val digest = MessageDigest.getInstance("MD5").digest(raw.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun cacheFileFor(provider: TTSProviderSetting, chunk: TtsChunk): File =
+        File(diskCacheDir, diskCacheKey(provider, chunk) + ".json")
     // endregion
 }

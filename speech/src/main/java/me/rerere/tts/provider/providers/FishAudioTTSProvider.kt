@@ -30,8 +30,9 @@ class FishAudioTTSProvider : TTSProvider<TTSProviderSetting.FishAudio> {
     ): Flow<AudioChunk> = flow {
         val requestBody = JSONObject().apply {
             put("text", request.text)
-            if (providerSetting.referenceId.isNotBlank()) {
-                put("reference_id", providerSetting.referenceId)
+            val effectiveReference = request.voice ?: providerSetting.referenceId
+            if (effectiveReference.isNotBlank()) {
+                put("reference_id", effectiveReference)
             }
             put("format", providerSetting.format)
             put("temperature", providerSetting.temperature.toDouble())

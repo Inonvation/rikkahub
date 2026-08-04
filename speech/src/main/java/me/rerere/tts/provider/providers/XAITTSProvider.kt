@@ -30,7 +30,7 @@ class XAITTSProvider : TTSProvider<TTSProviderSetting.XAI> {
     ): Flow<AudioChunk> = flow {
         val requestBody = JSONObject().apply {
             put("text", request.text)
-            put("voice_id", providerSetting.voiceId)
+            put("voice_id", request.voice ?: providerSetting.voiceId)
             put("language", providerSetting.language)
         }
 

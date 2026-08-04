@@ -40,7 +40,7 @@ class ElevenLabsTTSProvider : TTSProvider<TTSProviderSetting.ElevenLabs> {
         Log.i(TAG, "generateSpeech: model=${providerSetting.model}, voiceId=${providerSetting.voiceId}")
 
         val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/v1/text-to-speech/${providerSetting.voiceId}?output_format=mp3_44100_128")
+            .url("${providerSetting.baseUrl}/v1/text-to-speech/${request.voice ?: providerSetting.voiceId}?output_format=mp3_44100_128")
             .addHeader("xi-api-key", providerSetting.apiKey)
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
