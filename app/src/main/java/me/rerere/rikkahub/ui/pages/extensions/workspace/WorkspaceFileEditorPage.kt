@@ -49,6 +49,8 @@ fun WorkspaceFileEditorPage(
     val scope = rememberCoroutineScope()
     val editable = area == WorkspaceStorageArea.FILES
     val fileName = path.substringAfterLast('/').ifBlank { path }
+    // JSON 文件启用「结构」树状预览模式
+    val isJson = fileName.substringAfterLast('.', "").lowercase() == "json"
 
     val textState = rememberTextFieldState()
     var loading by remember { mutableStateOf(true) }
@@ -142,6 +144,7 @@ fun WorkspaceFileEditorPage(
                     .padding(innerPadding)
                     .imePadding(),
                 sourceEditable = editable,
+                jsonStructure = isJson,
             )
         }
     }

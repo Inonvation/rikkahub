@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,9 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -243,89 +241,63 @@ private fun AppSearchSettings(
         }
     }
 
-    LazyVerticalGrid(
+    LazyColumn(
         modifier = modifier.fillMaxSize(),
-        columns = GridCells.Adaptive(150.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        itemsIndexed(settings.searchServices) { index, service ->
-            // 多选状态：服务商在 enabledSearchServiceIds 中即为启用（高亮）
+        itemsIndexed(settings.searchServices) { _, service ->
             val isEnabled = service.id in settings.enabledSearchServiceIds
-            val isPrimary = settings.searchServiceSelected == index
-            val containerColor = animateColorAsState(
-                if (isEnabled) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surface
-                }
-            )
-            val textColor = animateColorAsState(
-                if (isEnabled) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                }
-            )
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = containerColor.value,
-                    contentColor = textColor.value,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ),
-                onClick = {
-                    // 点击：设为主服务商 + 切换多选（一次原子更新，避免与 onUpdateSearchService 竞态覆盖）
-                    val current = settings.enabledSearchServiceIds
-                    val newIds = if (isEnabled) {
-                        if (current.size <= 1) {
-                            // 至少保留一个启用：静默拒绝时提示
-                            toaster.show(atLeastOneMsg)
-                            current
-                        } else current - service.id
-                    } else {
-                        current + service.id
-                    }
-                    scope.launch {
-                        settingsStore.update(
-                            settings.copy(
-                                searchServiceSelected = index,
-                                enabledSearchServiceIds = newIds,
-                            )
-                        )
-                    }
-                },
-                shape = MaterialTheme.shapes.large
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                         .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AutoAIIcon(
                         name = service.displayName,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                     Column(
                         modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
                             text = service.displayName,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                         )
-                        SearchAbilityTagLine(
-                            options = service,
-                            modifier = Modifier
-                        )
-                        // 主服务商标注
-                        if (isPrimary) {
-                            Text(
-                                text = stringResource(R.string.search_picker_primary),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
+                        SearchAbilityTagLine(options = service)
                     }
+                    // 右侧开关：控制该服务商是否启用（AI 能否调用其独立工具）
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = { checked ->
+                            val current = settings.enabledSearchServiceIds
+                            val newIds = if (checked) {
+                                current + service.id
+                            } else {
+                                if (current.size <= 1) {
+                                    // 至少保留一个启用：静默拒绝时提示
+                                    toaster.show(atLeastOneMsg)
+                                    current
+                                } else current - service.id
+                            }
+                            scope.launch {
+                                settingsStore.update(
+                                    settings.copy(
+                                        enabledSearchServiceIds = newIds,
+                                    )
+                                )
+                            }
+                        },
+                    )
                 }
             }
         }

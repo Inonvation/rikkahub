@@ -94,6 +94,11 @@ internal class HighlightEngine(languages: List<Language>) {
                 // rather than taking the whole page down.
                 if (highlightDebugMode) throw error
                 Result(plainTokens(code), 0.0, top)
+            } catch (_: StackOverflowError) {
+                // 深递归/灾难性回溯时降级为纯文本，避免拖垮页面
+                Result(plainTokens(code), 0.0, top)
+            } catch (_: OutOfMemoryError) {
+                Result(plainTokens(code), 0.0, top)
             }
         }
 

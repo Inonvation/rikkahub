@@ -323,7 +323,9 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     val jsonElement = remember(body) {
-                        runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull()
+                        // 超大 body 不解析为 JsonElement，避免构建整棵树内存翻倍 OOM
+                        if (body.length > 512 * 1024) null
+                        else runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull()
                     }
                     if (jsonElement != null) {
                         JsonTree(
@@ -368,7 +370,9 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     val jsonElement = remember(body) {
-                        runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull()
+                        // 超大 body 不解析为 JsonElement，避免构建整棵树内存翻倍 OOM
+                        if (body.length > 512 * 1024) null
+                        else runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull()
                     }
                     if (jsonElement != null) {
                         JsonTree(

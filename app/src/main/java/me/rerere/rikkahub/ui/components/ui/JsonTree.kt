@@ -1,8 +1,5 @@
 package me.rerere.rikkahub.ui.components.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -50,6 +47,8 @@ fun JsonTree(
     initialExpandLevel: Int = 1
 ) {
     var selectedString by remember { mutableStateOf<String?>(null) }
+    // 渲染规模控制：共享计数器，防止超大/超深 JSON 导致 OOM 或 StackOverflow
+    val budget = remember { JsonBudget() }
 
     Column(modifier = modifier.horizontalScroll(rememberScrollState())) {
         JsonNode(
@@ -57,7 +56,18 @@ fun JsonTree(
             key = null,
             depth = 0,
             initialExpandLevel = initialExpandLevel,
-            onStringClick = { selectedString = it }
+            onStringClick = { selectedString = it },
+            budget = budget,
+        )
+    }
+
+    if (budget.truncated) {
+        Text(
+            text = "内容过大，已按 ${JsonBudget.MAX_NODES} 个节点截断展示（可展开查看局部）",
+            fontFamily = JetbrainsMono,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
     }
 
@@ -79,17 +89,42 @@ fun JsonTree(
     }
 }
 
+/**
+ * JSON 树渲染的规模预算。节点数量超限或深度超限时停止展开子节点，
+ * 避免超大/超深 JSON 一次性组合所有节点导致 OOM 或 StackOverflow。
+ */
+internal class JsonBudget {
+    var remaining = MAX_NODES
+    var truncated = false
+
+    /** 尝试消耗一个节点预算，返回是否还有预算继续展开子节点。 */
+    fun consume(): Boolean {
+        if (remaining <= 0) {
+            truncated = true
+            return false
+        }
+        remaining--
+        return true
+    }
+
+    companion object {
+        const val MAX_NODES = 5000
+        const val MAX_DEPTH = 30
+    }
+}
+
 @Composable
 private fun JsonNode(
     element: JsonElement,
     key: String?,
     depth: Int,
     initialExpandLevel: Int,
-    onStringClick: (String) -> Unit
+    onStringClick: (String) -> Unit,
+    budget: JsonBudget,
 ) {
     when (element) {
-        is JsonObject -> JsonObjectNode(element, key, depth, initialExpandLevel, onStringClick)
-        is JsonArray -> JsonArrayNode(element, key, depth, initialExpandLevel, onStringClick)
+        is JsonObject -> JsonObjectNode(element, key, depth, initialExpandLevel, onStringClick, budget)
+        is JsonArray -> JsonArrayNode(element, key, depth, initialExpandLevel, onStringClick, budget)
         is JsonPrimitive -> JsonPrimitiveNode(element, key, depth, onStringClick)
         is JsonNull -> JsonNullNode(key, depth)
     }
@@ -101,7 +136,8 @@ private fun JsonObjectNode(
     key: String?,
     depth: Int,
     initialExpandLevel: Int,
-    onStringClick: (String) -> Unit
+    onStringClick: (String) -> Unit,
+    budget: JsonBudget,
 ) {
     var expanded by rememberSaveable { mutableStateOf(depth < initialExpandLevel) }
     val entries = remember(obj) { obj.entries.toList() }
@@ -132,28 +168,24 @@ private fun JsonObjectNode(
             )
         }
 
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(),
-            exit = shrinkVertically()
-        ) {
-            Column {
-                entries.forEach { (childKey, childElement) ->
-                    JsonNode(
-                        element = childElement,
-                        key = childKey,
-                        depth = depth + 1,
-                        initialExpandLevel = initialExpandLevel,
-                        onStringClick = onStringClick
-                    )
-                }
-                Row(modifier = Modifier.padding(start = (depth * 16 + 14).dp)) {
-                    Text(
-                        text = "}",
-                        fontFamily = JetbrainsMono,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        // 折叠或达到深度/节点上限时不再组合子节点，避免 OOM 与 StackOverflow
+        if (expanded && depth < JsonBudget.MAX_DEPTH && budget.consume()) {
+            entries.forEach { (childKey, childElement) ->
+                JsonNode(
+                    element = childElement,
+                    key = childKey,
+                    depth = depth + 1,
+                    initialExpandLevel = initialExpandLevel,
+                    onStringClick = onStringClick,
+                    budget = budget,
+                )
+            }
+            Row(modifier = Modifier.padding(start = (depth * 16 + 14).dp)) {
+                Text(
+                    text = "}",
+                    fontFamily = JetbrainsMono,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -165,7 +197,8 @@ private fun JsonArrayNode(
     key: String?,
     depth: Int,
     initialExpandLevel: Int,
-    onStringClick: (String) -> Unit
+    onStringClick: (String) -> Unit,
+    budget: JsonBudget,
 ) {
     var expanded by rememberSaveable { mutableStateOf(depth < initialExpandLevel) }
 
@@ -195,28 +228,23 @@ private fun JsonArrayNode(
             )
         }
 
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(),
-            exit = shrinkVertically()
-        ) {
-            Column {
-                array.forEachIndexed { index, childElement ->
-                    JsonNode(
-                        element = childElement,
-                        key = index.toString(),
-                        depth = depth + 1,
-                        initialExpandLevel = initialExpandLevel,
-                        onStringClick = onStringClick
-                    )
-                }
-                Row(modifier = Modifier.padding(start = (depth * 16 + 14).dp)) {
-                    Text(
-                        text = "]",
-                        fontFamily = JetbrainsMono,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        if (expanded && depth < JsonBudget.MAX_DEPTH && budget.consume()) {
+            array.forEachIndexed { index, childElement ->
+                JsonNode(
+                    element = childElement,
+                    key = index.toString(),
+                    depth = depth + 1,
+                    initialExpandLevel = initialExpandLevel,
+                    onStringClick = onStringClick,
+                    budget = budget,
+                )
+            }
+            Row(modifier = Modifier.padding(start = (depth * 16 + 14).dp)) {
+                Text(
+                    text = "]",
+                    fontFamily = JetbrainsMono,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

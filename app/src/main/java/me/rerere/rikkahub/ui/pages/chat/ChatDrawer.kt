@@ -711,7 +711,6 @@ fun ColumnScope.StudyDrawerSections(
             DrawerListItem(
                 icon = HugeIcons.ChartBarLine,
                 title = "学习统计",
-                subtitle = "学科分布 · 学习趋势",
                 onClick = { navController.navigate(Screen.StudyStats) },
             )
             DrawerListItem(

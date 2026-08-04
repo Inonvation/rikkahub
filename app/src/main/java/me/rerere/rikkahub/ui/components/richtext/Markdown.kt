@@ -84,7 +84,6 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
@@ -117,6 +116,9 @@ private val flavour by lazy {
         makeHttpsAutoLinks = true, useSafeLinks = true
     )
 }
+
+/** Markdown 实时解析的最大文本长度；超过则降级为纯文本，避免流式期间每 chunk 全量重解析。 */
+private const val MARKDOWN_PARSE_MAX_CHARS = 100_000
 
 private val parser by lazy {
     MarkdownParser(flavour)
@@ -240,17 +242,26 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
+    // 超大文本降级为纯文本：流式期间每 chunk 都全量重解析成本过高，极端长文本不做实时解析。
+    // 阈值以下保留正常 Markdown 渲染。
+    if (content.length > MARKDOWN_PARSE_MAX_CHARS) {
+        Text(
+            text = content,
+            modifier = modifier,
+            style = style,
+        )
+        return
+    }
+
     var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
 
     // 监听内容变化，重新解析AST树
-    // 后台线程解析AST树防掉帧。流式输出每 chunk 都变一次 content，用 debounce 合并
-    // 连续 chunk（最后一次内容稳定后 ~50ms 内只解析一次），避免长文本每 chunk 全量重解析。
-    // 静态内容只触发一次解析，无感知；流式时显著降频。
+    // 后台线程解析AST树防掉帧。流式输出每 chunk 都变一次 content，去掉 debounce：
+    // 每 chunk 即时解析即时上屏，避免「冻结→停顿后整段蹦出」的卡顿体验。
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .debounce(50)
             .mapLatest { parseMarkdown(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)

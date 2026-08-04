@@ -344,11 +344,11 @@ class SubAgentRunner(
                 round++
                 seedMessages = task.messages.takeIf { it.isNotEmpty() }
                 // 置回 RUNNING 继续下一轮：保留已执行内容作为 seed，详情页显示连续时间线。
-                // 清掉上一轮的 finishedAt，避免时长统计残留上一轮的结束时间。
+                // 保留首次 startedAt（不重置），让 durationMillis 统计"首次启动→最终结束"的总耗时，
+                // 与跨轮累计的 token 用量口径一致；只清掉上一轮的 finishedAt，避免时长统计残留。
                 // 直接用 _tasks.update 绕过 updateTaskSafely 的终态保护（这里是从终态主动转回运行态）
                 task = task.copy(
                     status = SubAgentStatus.RUNNING,
-                    startedAt = Clock.System.now(),
                     finishedAt = null,
                     retryCount = round,
                     error = null,

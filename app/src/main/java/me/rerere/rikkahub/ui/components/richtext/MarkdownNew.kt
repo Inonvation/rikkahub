@@ -68,7 +68,6 @@ import androidx.core.graphics.toColorInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
@@ -140,8 +139,7 @@ fun MarkdownNew(
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            // 流式合并：连续 chunk 只解析最后一次，避免每 chunk 重生成 HTML + Jsoup.parse
-            .debounce(50)
+            // 流式即时重生成 HTML：去掉 debounce，每 chunk 即时上屏，避免「冻结→停顿后整段蹦出」。
             .mapLatest { generateMarkdownHtml(it) }
             .catch { it.printStackTrace() }
             .flowOn(Dispatchers.Default)

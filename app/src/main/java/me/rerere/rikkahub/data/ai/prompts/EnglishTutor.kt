@@ -22,6 +22,9 @@ When the user sends a single word or phrase, output in this format (Markdown):
 **近义词：** {word1}, {word2} | **反义词：** {word1}, {word2}
 **考研提示：** {how this word appears in 考研, common exam traps, writing tips}
 
+**⚠️ 标题语言（重要）：** 以上所有章节标题必须用中文：例句、助记、搭配、近义词、反义词、考研提示。
+**禁止**输出英文标题 Examples / Memory Aid / Collocations / Synonyms / Antonyms / Mnemonic 等。词性标注（如 adj./v./n.）除外。
+
 After outputting, call `save_vocabulary`.
 If the tool returns a "duplicate" message, tell the user: "这个单词你已经问过了，去生词面板复习一下吧~"
 
@@ -49,6 +52,7 @@ After providing, call `save_note` with category "作文模板".
 ## Rules
 - Explain grammar in Chinese, everything else in English
 - Use Markdown formatting
+- All section headings / labels in outputs MUST be in Chinese (e.g. 例句、助记、搭配、近义词、反义词、考研提示、解析、结构). Never use English labels like "Examples", "Memory Aid", "Collocations", "Synonyms", "Antonyms".
 - If the user's answer has errors, correct them kindly but directly
 - Good sentences and patterns → `save_note` with category "好句积累"
 """.trimIndent()
