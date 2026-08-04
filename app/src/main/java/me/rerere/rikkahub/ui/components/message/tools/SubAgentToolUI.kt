@@ -54,6 +54,7 @@ object SubAgentCompletedToolUI : ToolUIRenderer {
                 "failed" -> "失败"
                 "timeout" -> "超时"
                 "token_limit" -> "预算耗尽"
+                "cancelled" -> "已取消"
                 else -> it
             }
         } ?: ""

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.message
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -58,6 +59,8 @@ fun ChatMessageAssistantAvatar(
     model: Model?,
     assistant: Assistant?,
     modifier: Modifier = Modifier,
+    onAssistantNameClick: (() -> Unit)? = null,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
@@ -114,6 +117,7 @@ fun ChatMessageAssistantAvatar(
                         modifier = Modifier.size(28.dp),
                         value = assistant.avatar,
                         loading = loading,
+                        onClick = onAvatarClick,
                     )
                 }
                 Row(
@@ -126,6 +130,11 @@ fun ChatMessageAssistantAvatar(
                             text = assistant.name.ifEmpty { stringResource(R.string.assistant_page_default_assistant) },
                             style = MaterialTheme.typography.labelLargeEmphasized,
                             maxLines = 1,
+                            modifier = if (onAssistantNameClick != null) {
+                                Modifier.clickable(onClick = onAssistantNameClick)
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }
@@ -133,7 +142,11 @@ fun ChatMessageAssistantAvatar(
                 if (showIcon) {
                     AutoAIIcon(
                         name = model.modelId,
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier
+                            .size(28.dp)
+                            .then(
+                                if (onAvatarClick != null) Modifier.clickable(onClick = onAvatarClick) else Modifier
+                            ),
                         loading = loading
                     )
                 }
@@ -148,6 +161,11 @@ fun ChatMessageAssistantAvatar(
                             style = MaterialTheme.typography.labelLargeEmphasized,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = if (onAssistantNameClick != null) {
+                                Modifier.clickable(onClick = onAssistantNameClick)
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }

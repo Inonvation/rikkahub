@@ -133,10 +133,17 @@ object ToolUIRegistry {
         StudyDeleteKnowledgeCardToolUI,
         SubAgentToolUI,
         SubAgentCompletedToolUI,
+        GuidanceToolUI,
     ).associateBy { it.toolName }
 
-    /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */
-    fun resolve(toolName: String): ToolUIRenderer = renderers[toolName] ?: DefaultToolUIRenderer
+    /** 查找工具对应的渲染器, 未注册时返回默认渲染器。
+     *  精确匹配失败时回退到 `toolName.substringBefore("__")` 前缀再查一次——
+     *  支持每服务商独立工具（search_web__{id} / scrape_web__{id}）复用基础渲染器。
+     *  安全性：未注册的 `mcp__{server}__{tool}` 前缀是 "mcp"（不在注册表内）→ 仍走默认。 */
+    fun resolve(toolName: String): ToolUIRenderer =
+        renderers[toolName]
+            ?: toolName.substringBefore("__").let { prefix -> renderers[prefix] }
+            ?: DefaultToolUIRenderer
 }
 
 internal fun JsonElement?.getStringContent(key: String): String? =
@@ -192,11 +199,16 @@ fun DefaultToolPreview(
                     context.tool.output.fastForEach { part ->
                         when (part) {
                             is UIMessagePart.Text -> HighlightCodeBlock(
-                                code = runCatching {
-                                    JsonInstantPretty.encodeToString(
-                                        JsonInstant.parseToJsonElement(part.text)
-                                    )
-                                }.getOrElse { part.text },
+                                code = if (part.text.length > 1_000_000) {
+                                    // 超大输出跳过 JSON 美化，避免构建整棵 JsonElement 内存翻倍 OOM
+                                    part.text
+                                } else {
+                                    runCatching {
+                                        JsonInstantPretty.encodeToString(
+                                            JsonInstant.parseToJsonElement(part.text)
+                                        )
+                                    }.getOrElse { part.text }
+                                },
                                 language = "json",
                                 style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
                             )

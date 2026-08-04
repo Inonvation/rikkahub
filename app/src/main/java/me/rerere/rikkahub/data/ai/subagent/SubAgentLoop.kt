@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.ai.subagent
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -10,6 +12,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
@@ -127,6 +130,12 @@ suspend fun subAgentRunLoop(
             // token 预算耗尽不是模型失败：不记步骤日志、不脱敏包装，原样上抛由 runWithTimeout 处理
             throw e
         } catch (e: Exception) {
+            // 协程被取消期间收到的流式异常（如超时/用户取消触发 OkHttp 的
+            // "stream was reset: CANCEL"）是取消的副作用，应转成 CancellationException，
+            // 让上层按"超时/取消"归类（TIMEOUT/CANCELLED），而不是误报为普通失败（FAILED）。
+            if (!currentCoroutineContext().isActive) {
+                throw CancellationException("Sub-agent stream cancelled: ${e.message}", e)
+            }
             onStep("模型调用失败：${e.message ?: e.javaClass.simpleName}")
             throw e
         }
@@ -249,7 +258,7 @@ suspend fun subAgentRunLoop(
         messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
         // 保留最近的 N 条消息，防止无界增长。system 必须保留：丢弃会失去身份定义/工具说明
         if (messages.size > MAX_CONTEXT_MESSAGES) {
-            val system = messages.firstOrNull { it.role == me.rerere.ai.core.MessageRole.SYSTEM }
+            val system = messages.firstOrNull { it.role == MessageRole.SYSTEM }
             messages = if (system != null) {
                 listOf(system) + messages.takeLast(MAX_CONTEXT_MESSAGES - 1)
             } else {
@@ -290,7 +299,7 @@ suspend fun subAgentRunLoop(
  * 保证母代理能读到有价值的检索/抓取结果。
  */
 fun subAgentResultSummary(messages: List<UIMessage>): Pair<String, List<UIMessagePart>> {
-    val lastAssistant = messages.lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+    val lastAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
     // 取最后一段 Text（而非全部拼接），规避多步合并后 toText() 混入开场白
     val text = lastAssistant?.parts
         ?.filterIsInstance<UIMessagePart.Text>()
@@ -344,14 +353,16 @@ private fun truncateParts(parts: List<UIMessagePart>, json: Json): List<UIMessag
     }
 }
 
-/** 有界重编码 JSON：字符串截断、数组保留前 6 个元素，保证产物合法 */
-private fun truncateSafely(text: String, json: Json): String {
+/** 有界重编码 JSON：字符串截断、数组保留前 6 个元素，保证产物合法。
+ *  internal：供主聊天 [me.rerere.rikkahub.data.ai.GenerationHandler] 复用同一结构安全截断，
+ *  避免主聊天截断破坏 JSON 导致搜索等工具详情/渲染失效。 */
+internal fun truncateSafely(text: String, json: Json): String {
     val elem = runCatching { json.parseToJsonElement(text) }.getOrNull()
     if (elem == null) return text.take(MAX_TOOL_OUTPUT_CHARS) + "\n...[truncated]"
     return json.encodeToString(boundJson(elem))
 }
 
-private fun boundJson(elem: JsonElement): JsonElement = when (elem) {
+internal fun boundJson(elem: JsonElement): JsonElement = when (elem) {
     is JsonPrimitive -> if (elem.toString().startsWith('"')) {
         JsonPrimitive(if (elem.content.length > 500) elem.content.take(500) + "…[截断]" else elem.content)
     } else {

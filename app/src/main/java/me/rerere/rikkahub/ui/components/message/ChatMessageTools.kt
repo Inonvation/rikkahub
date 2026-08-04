@@ -190,8 +190,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         onClick = if (context.content != null || isPending || images.isNotEmpty() || renderer.alwaysOpenPreview) {
             if (renderer.alwaysOpenPreview) {
                 {
-                    // spawn_subagent：taskId == toolCallId（派发时对齐）。await_subagent 已移除。
-                    val subAgentTaskId = tool.toolCallId
+                    // spawn_subagent_completed 详情页导航：taskId 在 input 里（完成气泡 toolCallId 是随机 id，
+                    // 不能再用 toolCallId 定位任务）。兼容旧数据：input 无 taskId 时回退 toolCallId（旧格式 taskId==toolCallId）。
+                    val taskIdFromInput = (tool.inputAsJson() as? JsonObject)
+                        ?.get("taskId")?.jsonPrimitive?.contentOrNull
+                    val subAgentTaskId = taskIdFromInput?.takeIf { it.isNotBlank() } ?: tool.toolCallId
                     if (!subAgentTaskId.isNullOrBlank()) {
                         navController.navigate(
                             Screen.SubAgentDetail(subAgentTaskId, null)
@@ -293,8 +296,9 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     val multiAnswers = remember { mutableStateMapOf<String, Set<String>>() }
 
     // Auto-open the sheet when the tool becomes pending
-    LaunchedEffect(isPending) {
-        if (isPending) showSheet = true
+    // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃
+    LaunchedEffect(isPending, questions.isEmpty()) {
+        if (isPending && questions.isNotEmpty()) showSheet = true
     }
 
     ControlledChainOfThoughtStep(
@@ -316,6 +320,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
             Text(
                 text = when {
                     isAnswered -> "已回答 ${questions.size} 个问题"
+                    questions.isEmpty() -> "模型未返回有效问题"
                     questions.size <= 1 -> questions.firstOrNull()?.question ?: "..."
                     else -> stringResource(R.string.chat_message_tool_ask_questions, questions.size)
                 },

@@ -61,6 +61,7 @@ import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.CalendarAdd01
+import me.rerere.hugeicons.stroke.Compass01
 import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.VolumeHigh
@@ -75,7 +76,9 @@ import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.utils.openUrl
+import me.rerere.rikkahub.utils.toLocalDateTime
 import org.koin.compose.koinInject
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
@@ -130,29 +133,106 @@ object MemoryToolUI : ToolUIRenderer {
         val memoryRepo: MemoryRepository = koinInject()
         val scope = rememberCoroutineScope()
         val memoryId = (context.content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
-        DefaultToolPreview(
-            context = context,
-            headerActions = if (action(context) in listOf(ACTION_CREATE, ACTION_EDIT) && memoryId != null) {
-                {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                memoryRepo.deleteMemory(memoryId)
-                                onDismissRequest()
+        val act = action(context)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxHeight(0.8f)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_message_tool_call_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    if (act in listOf(ACTION_CREATE, ACTION_EDIT) && memoryId != null) {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    memoryRepo.deleteMemory(memoryId)
+                                    onDismissRequest()
+                                }
                             }
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Delete01,
+                                contentDescription = stringResource(R.string.tool_ui_delete_memory)
+                            )
                         }
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Delete01,
-                            contentDescription = stringResource(R.string.tool_ui_delete_memory)
-                        )
                     }
                 }
-            } else {
-                null
-            },
-        )
+            }
+
+            when (act) {
+                ACTION_DELETE -> item {
+                    Text(
+                        text = stringResource(R.string.tool_ui_memory_deleted_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        modifier = Modifier.shimmer(isLoading = context.loading),
+                    )
+                }
+
+                else -> {
+                    val memoryContent = context.content.getStringContent("content")
+                    if (memoryContent.isNullOrBlank()) {
+                        item {
+                            Text(
+                                text = stringResource(R.string.tool_ui_memory_no_content),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.shimmer(isLoading = context.loading),
+                            )
+                        }
+                    } else {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = stringResource(R.string.tool_ui_memory_memory_content),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                )
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                ) {
+                                    MarkdownBlock(
+                                        content = memoryContent,
+                                        modifier = Modifier
+                                            .padding(16.dp)
+                                            .fillMaxWidth(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                MemoryTimeText(content = context.content)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+/** 记忆工具输出里的时间行（创建/更新时间），旧输出无时间字段则不显示。 */
+@Composable
+private fun MemoryTimeText(content: JsonElement?) {
+    val obj = content as? JsonObject
+    val ts = obj?.get("updatedAt")?.jsonPrimitiveOrNull?.longOrNull
+        ?: obj?.get("createdAt")?.jsonPrimitiveOrNull?.longOrNull
+    if (ts == null || ts <= 0) return
+    Text(
+        text = "更新于 ${Instant.ofEpochMilli(ts).toLocalDateTime()}",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+    )
 }
 
 /**
@@ -858,5 +938,37 @@ object TodoWriteToolUI : ToolUIRenderer {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
         )
+    }
+}
+
+/**
+ * 用户引导消息（user_guidance）：主聊天向 AI 发送引导时，由 ChatService.appendGuidancePart
+ * 以可见工具气泡追加进 AI 消息。折叠行显示引导文本摘要，点击看 JSON 详情。
+ */
+object GuidanceToolUI : ToolUIRenderer {
+    override val toolName: String = "user_guidance"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Compass01
+
+    @Composable
+    override fun title(context: ToolUIContext): String = "用户引导"
+
+    private fun guidanceText(context: ToolUIContext): String? =
+        context.content.getStringContent("text")
+
+    override fun hasSummary(context: ToolUIContext): Boolean = !guidanceText(context).isNullOrBlank()
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val text = guidanceText(context)
+        if (text != null) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

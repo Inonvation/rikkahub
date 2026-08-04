@@ -37,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.yield
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
@@ -95,6 +96,8 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         if (loading) {
             if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
                 state.expandState = ReasoningCardState.Preview
+            // 让位一帧，避免滚动动画抢占正文渲染与自动滚动，减少流式时的滚动卡顿
+            yield()
             state.scrollState.animateScrollTo(state.scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
@@ -108,9 +111,11 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
 
     LaunchedEffect(loading) {
         if (loading) {
+            // 时长标签只显示到秒（1 位小数），200ms 刷新足够，
+            // 比 50ms 轮询减少 4 倍重组频率，降低推理流式期间的消息重组开销。
             while (isActive) {
                 state.duration = (reasoning.finishedAt ?: Clock.System.now()) - reasoning.createdAt
-                delay(50)
+                delay(200)
             }
         }
     }

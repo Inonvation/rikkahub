@@ -7,7 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -15,8 +17,10 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -35,6 +39,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
+import me.rerere.rikkahub.data.ai.subagent.boundJson
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -411,6 +416,12 @@ class GenerationHandler(
                 // 用户会看到消息发出去了却没回复、也没有任何报错。
                 Log.e(TAG, "stream error, preserving partial output", e)
                 onUpdateMessages(messages)
+                // 协程被取消期间收到的流式异常（如 OkHttp 取消竞态的 "stream was reset: CANCEL"）
+                // 本质是取消的副作用，应视为取消而非真实错误——否则会冒泡成用户可见报错。
+                // 取消后当前协程 isActive 立即变 false，此判断可捕获绝大多数取消竞态。
+                if (!currentCoroutineContext().isActive) {
+                    throw CancellationException("Generation cancelled during stream", e)
+                }
                 throw e
             }
         } else {
@@ -449,24 +460,41 @@ class GenerationHandler(
         Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
 
         val fullText = textParts.joinToString("\n") { it.text }
-        val preview = fullText.take(TOOL_OUTPUT_PREVIEW_CHARS)
 
         val fileName = "${toolCallId}.txt"
         val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
         File(outputDir, fileName).writeText(fullText)
+        val fullOutputPath = "/tool_outputs/$fileName"
 
-        return listOf(
-            UIMessagePart.Text(
-                buildString {
-                    appendLine("[Tool output truncated: $totalChars characters total]")
-                    appendLine("Full output saved to: /tool_outputs/$fileName")
-                    appendLine("Use shell to read: `cat /tool_outputs/$fileName`")
-                    appendLine("Use shell to search: `grep \"pattern\" /tool_outputs/$fileName`")
-                    appendLine()
-                    append(preview)
+        // 结构安全截断：JSON 工具输出（搜索/抓取等）重编码为合法 JSON——渲染器仍能读到
+        // items/urls 渲染卡片（否则 ChatMessageToolStep 解析失败 → 内容为空 map → 无卡片），
+        // 同时注入文件路径与截断标记，模型仍能 cat 完整结果。非 JSON（shell 等）回退纯文本截断。
+        // 对象输出注入 truncated/full_output_path；数组输出（conversation_search 等按数组读）
+        // 只做有界裁剪、保持数组形状，避免渲染器读到意外结构。
+        val safeJson = runCatching {
+            val elem = json.parseToJsonElement(fullText)
+            when (elem) {
+                is JsonObject -> {
+                    val bounded = boundJson(elem).jsonObject.toMutableMap()
+                    bounded["truncated"] = JsonPrimitive(true)
+                    bounded["full_output_path"] = JsonPrimitive(fullOutputPath)
+                    json.encodeToString(JsonObject(bounded))
                 }
-            )
-        ) + nonTextParts
+
+                else -> json.encodeToString(boundJson(elem))
+            }
+        }.getOrNull()
+
+        val truncatedText = safeJson ?: buildString {
+            appendLine("[Tool output truncated: $totalChars characters total]")
+            appendLine("Full output saved to: $fullOutputPath")
+            appendLine("Use shell to read: `cat $fullOutputPath`")
+            appendLine("Use shell to search: `grep \"pattern\" $fullOutputPath`")
+            appendLine()
+            append(fullText.take(TOOL_OUTPUT_PREVIEW_CHARS))
+        }
+
+        return listOf(UIMessagePart.Text(truncatedText)) + nonTextParts
     }
 
     /**
@@ -518,8 +546,10 @@ class GenerationHandler(
                         error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                     }
                     Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
-                    // 注入隐藏字段 __toolCallId，供需要运行时 toolCallId 的工具使用（如子代理 taskId 对齐 UI）
-                    val executeArgs = if (args is kotlinx.serialization.json.JsonObject) {
+                    // 隐藏字段 __toolCallId 只注入声明需要的工具（如 spawn_subagent 用它对齐 UI 任务 id）。
+                    // 默认不注入：MCP 等工具会把 args 原样转发远程，多出的字段会让远程 schema 校验失败
+                    // （如 tavily 的 pydantic unexpected_keyword_argument）。
+                    val executeArgs = if (args is kotlinx.serialization.json.JsonObject && toolDef.injectToolCallId) {
                         val withId = args.toMutableMap().apply {
                             put("__toolCallId", JsonPrimitive(tool.toolCallId))
                         }

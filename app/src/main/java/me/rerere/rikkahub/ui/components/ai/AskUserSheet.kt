@@ -27,12 +27,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
@@ -78,16 +81,62 @@ fun AskUserSheet(
 ) {
     val hapticController = rememberHaptic()
 
+    // 模型未返回有效问题时渲染友好空态，避免 questions[0] 越界崩溃
+    if (questions.isEmpty()) {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = title ?: "提问",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "模型未返回有效的问题，无法作答。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(HugeIcons.Cancel01, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("关闭")
+                    }
+                }
+            }
+        }
+        return
+    }
+
     // Start on the first unanswered question
     var selectedIndex by remember(questions) {
         mutableIntStateOf(questions.indexOfFirst { !isQuestionAnswered(it, answers, multiAnswers) }.coerceAtLeast(0))
     }
 
-    /** Explicitly advance to next unanswered question (no auto-advance loop). */
-    fun advance() {
-        // Only advance if the current question is actually answered now
-        if (!isQuestionAnswered(questions[selectedIndex], answers, multiAnswers)) return
-        val nextUnanswered = ((selectedIndex + 1) until questions.size)
+    /**
+     * 回答完一个问题后自动跳到其后的第一个未回答问题。
+     * 仅在「该问题确实已答」时前进；点击 tab 切换不会触发，保证用户可随时点任意问题修改。
+     */
+    fun advanceFrom(answeredIndex: Int) {
+        if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers)) return
+        val nextUnanswered = ((answeredIndex + 1) until questions.size)
             .firstOrNull { i -> !isQuestionAnswered(questions[i], answers, multiAnswers) }
         if (nextUnanswered != null) {
             selectedIndex = nextUnanswered
@@ -187,7 +236,7 @@ fun AskUserSheet(
                         question = q,
                         answer = answers[q.id] ?: "",
                         onAnswerChange = { answers[q.id] = it },
-                        onSelected = { advance() },
+                        onSelected = { advanceFrom(selectedIndex) },
                     )
                     "multi" -> MultiSelectInput(
                         question = q,
@@ -196,18 +245,23 @@ fun AskUserSheet(
                             val cur = (multiAnswers[q.id] ?: emptySet()).toMutableSet()
                             if (cur.contains(option)) cur.remove(option) else cur.add(option)
                             multiAnswers[q.id] = cur
-                            advance()
+                            advanceFrom(selectedIndex)
                         },
                     )
                     "confirmation" -> ConfirmationInput(
                         answer = answers[q.id] ?: "",
                         onAnswerChange = { answers[q.id] = it },
-                        onSelected = { advance() },
+                        onSelected = { advanceFrom(selectedIndex) },
                     )
                     else -> TextQuestionInput(
                         question = q,
                         answer = answers[q.id] ?: "",
-                        onAnswerChange = { answers[q.id] = it },
+                        onAnswerChange = {
+                            val wasBlank = answers[q.id].isNullOrBlank()
+                            answers[q.id] = it
+                            // 文本题：从空变为非空时自动跳到下一个未回答问题
+                            if (wasBlank && it.isNotBlank()) advanceFrom(selectedIndex)
+                        },
                     )
                 }
 
@@ -303,16 +357,23 @@ private fun TextQuestionInput(question: AskUserQuestion, answer: String, onAnswe
         }
     }
 
+    val focusRequester = remember { FocusRequester() }
     OutlinedTextField(
         value = answer,
         onValueChange = onAnswerChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester),
         textStyle = MaterialTheme.typography.bodySmall,
         placeholder = question.placeholder.takeIf { it.isNotBlank() }?.let { { Text(it) } },
         singleLine = false,
         minLines = 1,
         maxLines = 3,
     )
+    // 切到该问题时自动聚焦文本框（仅聚焦，不强制跳转/切换问题）
+    LaunchedEffect(question.id) {
+        focusRequester.requestFocus()
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

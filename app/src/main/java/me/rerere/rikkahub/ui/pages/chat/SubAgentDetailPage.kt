@@ -61,6 +61,7 @@ import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.ai.subagent.SubAgentTask
+import me.rerere.rikkahub.data.ai.subagent.SUBAGENT_GUIDANCE_MARKER
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.message.ChatMessageNerdLine
 import me.rerere.rikkahub.ui.components.message.ChatMessageReasoningStep
@@ -177,7 +178,7 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                                 // 运行中的异步任务可取消
                                 if (runner.isCancellable(taskId)) {
                                     IconButton(
-                                        onClick = { runner.cancel(taskId) },
+                                        onClick = { runner.cancel(taskId, notifyParent = true) },
                                         modifier = Modifier.size(24.dp),
                                     ) {
                                         Icon(
@@ -298,74 +299,87 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                 }
             }
 
-            // 2. 内容区：完全复用主聊天区的 groupMessageParts 渲染管线——
+            // 2. 内容区：按 messages 原始顺序渲染——
+            //    - 引导 USER 消息（speakerName == SUBAGENT_GUIDANCE_MARKER）→ "用户引导"气泡
+            //    - assistant 消息 → 复用主聊天区 groupMessageParts 渲染思维链 + 文本气泡
             //    思考/工具交错时间线 + Text 气泡按原始顺序穿插（AI 调完工具输出一段话再继续调，
             //    中间穿插的话都显示），工具执行中显示"调用中"状态
-            val assistantMsg = current.messages.lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
-            if (assistantMsg != null) {
-                val blocks = remember(assistantMsg.parts) { assistantMsg.parts.groupMessageParts() }
-                blocks.forEach { block ->
-                    when (block) {
-                        is MessagePartBlock.ThinkingBlock -> {
-                            if (block.steps.isNotEmpty()) {
-                                ChainOfThought(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp),
-                                    steps = block.steps,
-                                    // 详情页卡片满宽：不做自适应宽度，label 恒满宽、箭头位置稳定不跳
-                                    collapsedAdaptiveWidth = false,
-                                    cardColors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    ),
-                                ) { step ->
-                                    when (step) {
-                                        is ThinkingStep.ReasoningStep -> key(step.reasoning.createdAt) {
-                                            ChatMessageReasoningStep(
-                                                reasoning = step.reasoning,
-                                                model = null,
-                                                assistant = null,
-                                                collapsedAdaptiveWidth = false,
-                                            )
-                                        }
+            var renderedAssistant = false
+            for (msg in current.messages) {
+                when {
+                    msg.speakerName == SUBAGENT_GUIDANCE_MARKER -> {
+                        // 用户引导气泡（去掉注入时给模型看的前缀）
+                        GuidanceBubble(text = msg.toText().removePrefix("【用户引导】"))
+                    }
 
-                                        is ThinkingStep.ToolStep -> key(
-                                            step.tool.toolCallId.ifBlank { step.hashCode().toString() }
-                                        ) {
-                                            // 工具执行中（未回填 output）→ loading=true 显示"调用中"；
-                                            // 完成后 loading=false。onToolApproval/onToolAnswer=null（无审批路径）
-                                            ChatMessageToolStep(
-                                                tool = step.tool,
-                                                loading = running && !step.tool.isExecuted,
-                                                onToolApproval = null,
-                                                onToolAnswer = null,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    msg.role == me.rerere.ai.core.MessageRole.ASSISTANT && !renderedAssistant -> {
+                        renderedAssistant = true
+                        val blocks = remember(msg.parts) { msg.parts.groupMessageParts() }
+                        blocks.forEach { block ->
+                            when (block) {
+                                is MessagePartBlock.ThinkingBlock -> {
+                                    if (block.steps.isNotEmpty()) {
+                                        ChainOfThought(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp),
+                                            steps = block.steps,
+                                            // 详情页卡片满宽：不做自适应宽度，label 恒满宽、箭头位置稳定不跳
+                                            collapsedAdaptiveWidth = false,
+                                            cardColors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            ),
+                                        ) { step ->
+                                            when (step) {
+                                                is ThinkingStep.ReasoningStep -> key(step.reasoning.createdAt) {
+                                                    ChatMessageReasoningStep(
+                                                        reasoning = step.reasoning,
+                                                        model = null,
+                                                        assistant = null,
+                                                        collapsedAdaptiveWidth = false,
+                                                    )
+                                                }
 
-                        is MessagePartBlock.ContentBlock -> key(block.index) {
-                            when (val part = block.part) {
-                                is UIMessagePart.Text -> {
-                                    if (part.text.isNotBlank()) {
-                                        ChatBubble(isUser = false) {
-                                            MarkdownBlock(
-                                                content = part.text,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            )
+                                                is ThinkingStep.ToolStep -> key(
+                                                    step.tool.toolCallId.ifBlank { step.hashCode().toString() }
+                                                ) {
+                                                    // 工具执行中（未回填 output）→ loading=true 显示"调用中"；
+                                                    // 完成后 loading=false。onToolApproval/onToolAnswer=null（无审批路径）
+                                                    ChatMessageToolStep(
+                                                        tool = step.tool,
+                                                        loading = running && !step.tool.isExecuted,
+                                                        onToolApproval = null,
+                                                        onToolAnswer = null,
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
 
-                                else -> {}
+                                is MessagePartBlock.ContentBlock -> key(block.index) {
+                                    when (val part = block.part) {
+                                        is UIMessagePart.Text -> {
+                                            if (part.text.isNotBlank()) {
+                                                ChatBubble(isUser = false) {
+                                                    MarkdownBlock(
+                                                        content = part.text,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        else -> {}
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            } else {
+            }
+            if (!renderedAssistant) {
                 // 没有结构化 assistant 消息（任务完成但 messages 为空，或任务已结束）。
                 // 兜底：用 resultSummary / streamText 渲染最终结果，避免"任务完成却空白"。
                 val fallbackText = current.resultSummary
@@ -428,6 +442,30 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                 )
             }
 
+            // 任务结束时间：终态后展示（精确到秒）。
+            // 成功显示"完成于"，失败/超时/取消等显示"结束于"，让用户明确任务的收尾时刻。
+            val finishedAt = current.finishedAt
+            if (current.status.isTerminal && finishedAt != null) {
+                val local = finishedAt.toLocalDateTime(TimeZone.currentSystemDefault())
+                val timeStr = "%04d-%02d-%02d %02d:%02d:%02d".format(
+                    local.year, local.monthNumber, local.dayOfMonth,
+                    local.hour, local.minute, local.second,
+                )
+                val label = if (current.status == SubAgentStatus.SUCCEEDED) "完成于" else "结束于"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = "$label $timeStr",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                }
+            }
+
             Spacer(Modifier.padding(bottom = 24.dp))
         }
     }
@@ -456,6 +494,47 @@ private fun ChatBubble(isUser: Boolean, content: @Composable () -> Unit) {
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 content()
+            }
+        }
+    }
+}
+
+/**
+ * 用户引导气泡：右侧 secondaryContainer 样式，带"用户引导"标签。
+ * 由 SubAgentRunner.drainGuidance 注入的带 SUBAGENT_GUIDANCE_MARKER 标记的 USER 消息渲染而来。
+ */
+@Composable
+private fun GuidanceBubble(text: String) {
+    if (text.isBlank()) return
+    val shape = RoundedCornerShape(
+        topStart = 16.dp,
+        topEnd = 4.dp,
+        bottomEnd = 16.dp,
+        bottomStart = 16.dp,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Surface(
+            shape = shape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.widthIn(max = 460.dp),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text(
+                    text = "用户引导",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                )
+                Spacer(Modifier.padding(4.dp))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
     }

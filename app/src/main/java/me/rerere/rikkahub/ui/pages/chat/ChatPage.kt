@@ -143,6 +143,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
@@ -510,6 +511,8 @@ private fun ChatPageContent(
     val workspaceRepository: WorkspaceRepository = koinInject()
     val todoStorage: TodoStorage = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
+    // 点击助手名称弹出助手选择器（切换助手后新开聊天窗口）
+    var showAssistantPicker by remember { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
     // 订阅本会话 todo 状态（TodoStorage 是唯一状态源，写入时实时刷新 banner）
@@ -565,7 +568,11 @@ private fun ChatPageContent(
         // 生成中自动跟随到底：仅当离开前用户位于底部（vm.chatListWasAtBottom）时，
         // 避免导航返回重组合后把已恢复的阅读位置拉回底部
         if (loadingJob != null && !userScrolledUp && vm.chatListWasAtBottom) {
-            chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
+            // 用 requestScrollToItem（瞬跳）而非 animateScrollToItem：
+            // ChatList 的自动跟随循环（snapshotFlow 监听 layoutInfo）也在用 request 滚到底，
+            // 若此处带动画，动画滚动会被那次 request 打断，目标虽一致但表现为时断时续的抖动。
+            // 统一为 request 后目标一致、无竞争，生成中跟随更平滑。
+            chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
         }
     }
 
@@ -678,6 +685,17 @@ private fun ChatPageContent(
                                 parts = inputState.getContents(),
                                 messageId = inputState.editingMessage!!,
                             )
+                        } else if (subAgentActiveCount > 0) {
+                            // 子代理运行中：主输入框发送走引导逻辑（引导合并进 AI 气泡，不单独成条）。
+                            // 有附件时回退普通发送，避免静默丢附件。
+                            val contents = inputState.getContents()
+                            val hasAttachment = contents.any { it !is UIMessagePart.Text }
+                            if (hasAttachment) {
+                                vm.handleMessageSend(contents)
+                            } else {
+                                vm.sendGuidance(inputState.textContent.text.toString())
+                            }
+                            pendingScrollAfterSend = true
                         } else {
                             vm.handleMessageSend(inputState.getContents())
                             // 发送后自动滚到底（等待新消息进入列表后在 LaunchedEffect 中执行）
@@ -839,7 +857,26 @@ private fun ChatPageContent(
                     vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
                     vm.saveConversationAsync()
                 },
+                onAssistantNameClick = {
+                    showAssistantPicker = true
+                },
             )
+            }
+
+            if (showAssistantPicker) {
+                AssistantPickerSheet(
+                    settings = setting,
+                    currentAssistant = assistant,
+                    onAssistantSelected = { selected ->
+                        showAssistantPicker = false
+                        // 切换助手：更新全局当前助手，再新开聊天窗口（新窗口按全局当前助手绑定会话）
+                        vm.updateSettings(setting.copy(assistantId = selected.id))
+                        navigateToChatPage(navController)
+                    },
+                    onDismiss = {
+                        showAssistantPicker = false
+                    }
+                )
             }
 
             // 回到底部按钮：悬浮（overlay）在内容 Box 底部，不参与布局流。
@@ -855,7 +892,10 @@ private fun ChatPageContent(
                 Surface(
                     onClick = {
                         scope.launch {
-                            chatListState.animateScrollToItem(conversation.currentMessages.size + 5)
+                            // 目标统一为布局实际总项数 - 1（与自动滚动、MessageJumper 一致）：
+                            // 旧写法用 conversation.currentMessages.size + 5 估算，当列表尾部
+                            // 有错误卡片/加载指示器/滚动垫片等额外 item 时滚不到精确底部。
+                            chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
                         }
                     },
                     shape = CircleShape,
@@ -863,7 +903,8 @@ private fun ChatPageContent(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 16.dp)
-                        .size(36.dp)
+                        // 36dp 小于 Material 最小触摸目标（48dp），放大到 44dp 改善易点性
+                        .size(44.dp)
                         .graphicsLayer { alpha = scrollBtnAlpha },
                 ) {
                     Box(contentAlignment = Alignment.Center) {

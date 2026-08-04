@@ -189,6 +189,12 @@ class ChatVM(
         chatService.sendMessage(_conversationId, content, answer)
     }
 
+    /** 向主 AI 发送引导消息（子代理运行中主输入框发送走此路径）：合并进 AI 气泡、不单独成条 */
+    fun sendGuidance(text: String) {
+        if (text.isBlank()) return
+        chatService.sendGuidance(_conversationId, text)
+    }
+
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
         if (parts.isEmptyInputMessage()) return
         viewModelScope.launch {

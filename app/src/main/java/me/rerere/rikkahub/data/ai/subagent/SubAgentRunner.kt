@@ -27,6 +27,8 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.Tool
 import me.rerere.ai.core.merge
 import me.rerere.ai.core.sum
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
@@ -50,6 +52,12 @@ import kotlin.uuid.Uuid
 
 /** 进程内任务表容量上限：超出淘汰最早完成的任务，防止无界增长 */
 private const val MAX_TASKS = 50
+
+/**
+ * 引导消息标记：注入子代理的引导 USER 消息用 speakerName 标记，
+ * 详情页据此把引导渲染成"用户引导"气泡（区别于任务描述/父摘要等普通 USER 消息）。
+ */
+const val SUBAGENT_GUIDANCE_MARKER = "subagent_guidance"
 
 /**
  * 子代理执行引擎：接收母代理派发的任务，解析模型、装配工具、跑独立回合，
@@ -124,7 +132,7 @@ class SubAgentRunner(
         settings: Settings,
         def: SubAgentDefinition,
         request: SubAgentRequest,
-    ): me.rerere.ai.provider.Model? {
+    ): Model? {
         // request.modelId 是 string（模型可能传 "default"/"auto"/具体 id）。宽松解析：
         // 能按 Uuid 解析则用（兼容已存库的 Uuid 形式）；解析失败当未指定（回落默认模型）。
         val requestedUuid = request.modelId?.let { id ->
@@ -140,7 +148,7 @@ class SubAgentRunner(
         // B1: 子代理依赖工具完成多步执行，模型不支持 TOOL 能力时工具永不触发、白跑成纯文本。
         candidates.forEach { id ->
             val m = settings.findModelById(id)
-            if (m != null && m.abilities.contains(me.rerere.ai.provider.ModelAbility.TOOL)) return m
+            if (m != null && m.abilities.contains(ModelAbility.TOOL)) return m
         }
         return null
     }
@@ -186,11 +194,10 @@ class SubAgentRunner(
             }
             // def 可能为 null（unknown agentId）——此时 registerTask 已把任务置 FAILED，
             // initial 里 error 已填。这里用 initial 的状态兜底，避免 def!! NPE。
-            val resolvedDef = def
-            if (resolvedDef == null || initial.status == SubAgentStatus.FAILED) {
+            if (def == null || initial.status == SubAgentStatus.FAILED) {
                 return initial
             }
-            return runWithTimeout(resolvedDef, settings, request, initial, taskId)
+            return runWithTimeout(def, settings, request, initial, taskId)
         } finally {
             releaseConcurrencySlot()
         }
@@ -286,15 +293,11 @@ class SubAgentRunner(
                     // 超时保留已输出的部分结果：从 _tasks 读最新态（onMessagesUpdate 回调更新的是
                     // _tasks 里的实例，局部 task 可能滞后），提取摘要，母代理仍能读到已生成内容。
                     val latest = _tasks.value[taskId] ?: task
-                    val partialSummary = subAgentResultSummary(latest.messages).first
-                        .takeIf { it.isNotBlank() }
-                        ?: latest.streamText.takeIf { it.isNotBlank() }
-                        ?: latest.steps.joinToString("\n") { it.message }.takeLast(500)
                     latest.copy(
                         status = SubAgentStatus.TIMEOUT,
                         finishedAt = Clock.System.now(),
                         error = "任务超时（${timeoutSeconds}s）",
-                        resultSummary = latest.resultSummary ?: partialSummary,
+                        resultSummary = latest.resultSummary ?: partialResultSummary(latest),
                     )
                 } catch (e: CancellationException) {
                     val latest = _tasks.value[taskId] ?: task
@@ -309,28 +312,20 @@ class SubAgentRunner(
                 } catch (e: TokenBudgetExceeded) {
                     // token 预算耗尽：保留部分结果，置 TOKEN_LIMIT（不可重试，重试只会继续烧 token）
                     val latest = _tasks.value[taskId] ?: task
-                    val partialSummary = subAgentResultSummary(latest.messages).first
-                        .takeIf { it.isNotBlank() }
-                        ?: latest.streamText.takeIf { it.isNotBlank() }
-                        ?: latest.steps.joinToString("\n") { it.message }.takeLast(500)
                     latest.copy(
                         status = SubAgentStatus.TOKEN_LIMIT,
                         finishedAt = Clock.System.now(),
                         error = "token 预算耗尽（${latest.usage?.totalTokens ?: "?"}）",
-                        resultSummary = latest.resultSummary ?: partialSummary,
+                        resultSummary = latest.resultSummary ?: partialResultSummary(latest),
                     )
                 } catch (e: Exception) {
                     // 执行异常同样保留已输出内容，避免失败时母代理读到空壳
                     val latest = _tasks.value[taskId] ?: task
-                    val partialSummary = subAgentResultSummary(latest.messages).first
-                        .takeIf { it.isNotBlank() }
-                        ?: latest.streamText.takeIf { it.isNotBlank() }
-                        ?: latest.steps.joinToString("\n") { it.message }.takeLast(500)
                     latest.copy(
                         status = SubAgentStatus.FAILED,
                         finishedAt = Clock.System.now(),
                         error = sanitizeError(e.message ?: e.javaClass.simpleName),
-                        resultSummary = latest.resultSummary ?: partialSummary,
+                        resultSummary = latest.resultSummary ?: partialResultSummary(latest),
                     )
                 }
                 task = attempt
@@ -366,10 +361,14 @@ class SubAgentRunner(
             persistTask(task)
             guidanceChannels.remove(taskId)
         }
-        _tasks.update { it + (taskId to task) }
+        // 重试循环退出后：若 cancel 已在重试间隙把任务置 CANCELLED（如重试判断时发现已取消而 break），
+        // 以 CANCELLED 为准，避免用本地的 TIMEOUT/FAILED 覆盖"用户取消"这一终态。
+        // emitCompleted 对 CANCELLED 直接过滤，不会双发（手动取消由 cancel(notifyParent) 单独广播）。
+        val finalTask = _tasks.value[taskId]?.takeIf { it.status == SubAgentStatus.CANCELLED } ?: task
+        _tasks.update { it + (taskId to finalTask) }
         taskJobs.remove(taskId)
-        emitCompleted(task)
-        return task
+        emitCompleted(finalTask)
+        return finalTask
     }
 
     /** 是否值得自动重试的失败。配置类错误（模型/provider 未配置、未知子代理）重试必重蹈覆辙，不重试 */
@@ -380,10 +379,20 @@ class SubAgentRunner(
             !error.contains("Unknown subagent")
     }
 
+    /** 提取任务的部分结果摘要（超时/token 超限/失败时保留给母代理，避免读到空壳） */
+    private fun partialResultSummary(task: SubAgentTask): String {
+        return subAgentResultSummary(task.messages).first
+            .takeIf { it.isNotBlank() }
+            ?: task.streamText.takeIf { it.isNotBlank() }
+            ?: task.steps.joinToString("\n") { it.message }.takeLast(500)
+    }
+
     /** 终态完成后广播事件（供母代理异步唤醒）。
      *  仅广播"有实际产出"的终态：SUCCEEDED 必然有结果；TIMEOUT/FAILED 仅在存在
      *  部分结果（摘要/流式文本）时广播，避免"空失败"唤醒母代理续答一句废话。
-     *  CANCELLED 一律不广播——停止/取消后不唤醒母代理。 */
+     *  CANCELLED 一律不广播——批量停止/删会话后不唤醒母代理。
+     *  注意：手动取消单个任务（详情页/面板取消按钮）不走这里，由 [cancel] 的
+     *  notifyParent 分支直接广播 CANCELLED 任务，唤醒母代理感知取消。 */
     private fun emitCompleted(task: SubAgentTask) {
         if (task.status == SubAgentStatus.CANCELLED) return
         val hasPartial = !task.resultSummary.isNullOrBlank() || task.streamText.isNotBlank()
@@ -760,22 +769,37 @@ class SubAgentRunner(
 
     /** 取消任务：取消关联协程并置状态为 CANCELLED。
      *  仅对异步任务（[runAsync]，登记在 taskJobs）有效并返回 true；未登记的返回 false。
-     *  调用方据此决定是否显示取消按钮。 */
-    fun cancel(taskId: String): Boolean {
+     *  调用方据此决定是否显示取消按钮。
+     *
+     *  @param notifyParent 手动取消单个任务（详情页/面板取消按钮）时传 true：广播完成事件，
+     *   唤醒母代理续答，让它感知"该子代理已被取消"并在后续输出中体现。
+     *   批量停止生成/删会话走 [cancelByConversation]（不传），保持"停止生成不唤醒母代理"语义。 */
+    fun cancel(taskId: String, notifyParent: Boolean = false): Boolean {
         val job = taskJobs[taskId] ?: return false
         job.cancel()
+        // 记录取消前是否处于运行态：仅对"确实从 QUEUED/RUNNING 取消"的任务广播，
+        // 避免对已终态（已完成/超时等）任务重复 notifyParent 唤醒母代理。
+        val wasRunning = _tasks.value[taskId]?.status?.let {
+            it == SubAgentStatus.QUEUED || it == SubAgentStatus.RUNNING
+        } == true
         _tasks.update { map ->
             val task = map[taskId] ?: return@update map
             if (task.status == SubAgentStatus.QUEUED || task.status == SubAgentStatus.RUNNING) {
                 map + (taskId to task.copy(status = SubAgentStatus.CANCELLED, error = "用户取消"))
             } else map
         }
+        // 手动取消：广播 CANCELLED 任务（绕过 emitCompleted 的 CANCELLED 过滤——取消任务
+        // 可能没有任何部分结果，但母代理必须知情才能回应该取消）。批量路径不传 notifyParent。
+        if (notifyParent && wasRunning) {
+            _tasks.value[taskId]?.let { _taskCompleted.tryEmit(it) }
+        }
         return true
     }
 
     /**
      * 取消某会话的全部运行中子代理（用户停止生成 / 删除会话时级联调用）。
-     * CANCELLED 不触发完成事件（emitCompleted 过滤），故停止后不会异步唤醒母代理。
+     * CANCELLED 不触发完成事件（emitCompleted 过滤；cancel 默认 notifyParent=false），
+     * 故停止后不会异步唤醒母代理。
      */
     fun cancelByConversation(conversationId: Uuid) {
         _tasks.value.values
@@ -800,7 +824,13 @@ class SubAgentRunner(
         var result = messages
         while (true) {
             val text = ch.tryReceive().getOrNull() ?: break
-            result = result + UIMessage.user("【用户引导】$text")
+            // speakerName 标记：详情页据此把引导渲染成"用户引导"气泡（区别于任务/父摘要等普通 USER 消息）。
+            // "【用户引导】" 前缀保留给模型，帮助它理解这是一条引导指令；UI 渲染时去掉。
+            result = result + UIMessage(
+                role = MessageRole.USER,
+                parts = listOf(UIMessagePart.Text("【用户引导】$text")),
+                speakerName = SUBAGENT_GUIDANCE_MARKER,
+            )
         }
         return result
     }

@@ -117,6 +117,8 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onAssistantNameClick: (() -> Unit)? = null,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val settings = LocalSettings.current.displaySetting
@@ -148,7 +150,17 @@ fun ChatMessage(
                     model = model,
                     assistant = assistant,
                     loading = loading,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onAssistantNameClick = onAssistantNameClick,
+                    onAvatarClick = if (assistant != null) {
+                        {
+                            navController.navigate(
+                                Screen.AssistantDetail(assistant.id.toString())
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
                 ChatMessageUserAvatar(
                     message = message,

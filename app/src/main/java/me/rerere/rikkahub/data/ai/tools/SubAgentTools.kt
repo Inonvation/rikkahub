@@ -133,6 +133,9 @@ fun createSubAgentTools(
                     required = listOf("agentId", "task"),
                 )
             },
+            // 需要运行时 toolCallId：GenerationHandler 注入 __toolCallId 到 args，
+            // execute 里把它作为子代理 taskId（与母代理 Tool.toolCallId 对齐）
+            injectToolCallId = true,
             execute = { args ->
                 val request = SubAgentRequest.fromJsonElement(args)
                     ?: return@Tool listOf(UIMessagePart.Text("{\"error\":\"Invalid subagent request\"}"))
