@@ -67,6 +67,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
@@ -397,7 +398,7 @@ private suspend fun importFileToKnowledgeBase(
 
         toaster.show("已导入「${fileName}」到知识库，请在知识库中处理该文档")
     } catch (e: Exception) {
-        toaster.show("导入失败: ${e.message}")
+        toaster.show("导入失败: ${explainErrorText(e.message)}")
     }
 }
 

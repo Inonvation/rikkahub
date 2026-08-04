@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import org.koin.compose.koinInject
@@ -78,7 +79,7 @@ fun ImagePreviewDialog(
                             }.onFailure {
                                 it.printStackTrace()
                                 toaster.show(
-                                    message = it.toString(),
+                                    message = explainErrorText(it.message),
                                     type = ToastType.Error
                                 )
                             }

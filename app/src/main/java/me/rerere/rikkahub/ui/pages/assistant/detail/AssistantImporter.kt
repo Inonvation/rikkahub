@@ -41,6 +41,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.R
@@ -87,7 +88,7 @@ private fun SillyTavernImporter(
                         )
                     }.onFailure { exception ->
                         exception.printStackTrace()
-                        toaster.show(exception.message ?: context.getString(R.string.assistant_importer_import_failed))
+                        toaster.show(explainErrorText(exception.message ?: context.getString(R.string.assistant_importer_import_failed)))
                     }
                 } finally {
                     isLoading = false
@@ -113,7 +114,7 @@ private fun SillyTavernImporter(
                         )
                     }.onFailure { exception ->
                         exception.printStackTrace()
-                        toaster.show(exception.message ?: context.getString(R.string.assistant_importer_import_failed))
+                        toaster.show(explainErrorText(exception.message ?: context.getString(R.string.assistant_importer_import_failed)))
                     }
                 } finally {
                     isLoading = false

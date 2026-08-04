@@ -70,6 +70,7 @@ import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.navigateToChatPage
 import me.rerere.rikkahub.utils.writeClipboardText
 import me.rerere.ai.provider.ProviderManager
@@ -165,7 +166,7 @@ fun StudyDetailActions(
                                     }
                                 }.getOrElse { e ->
                                     e.printStackTrace()
-                                    toaster.show("预览生成失败：${e.message}", type = ToastType.Error)
+                                    toaster.show("预览生成失败：${explainErrorText(e.message)}", type = ToastType.Error)
                                     return@launch
                                 }
                                 navController.navigate(Screen.WebView(contentId = contentId))

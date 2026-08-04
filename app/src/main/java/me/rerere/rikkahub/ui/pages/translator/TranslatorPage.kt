@@ -58,6 +58,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.getText
 import org.koin.androidx.compose.koinViewModel
 import java.util.Locale
@@ -76,7 +77,7 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
     // 处理错误
     LaunchedEffect(Unit) {
         vm.errorFlow.collect { error ->
-            toaster.show(error.message ?: "错误", type = ToastType.Error)
+            toaster.show(explainErrorText(error.message), type = ToastType.Error)
         }
     }
 

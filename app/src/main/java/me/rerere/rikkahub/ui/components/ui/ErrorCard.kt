@@ -20,7 +20,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
@@ -46,6 +50,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatErrorSolution
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.utils.toExplainedError
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.uuid.Uuid
 
@@ -121,6 +126,10 @@ fun ErrorCard(
     val checkTitleModelSettings = stringResource(R.string.chat_page_check_title_model_settings)
     val linkColor = MaterialTheme.colorScheme.primary
 
+    // 通俗化翻译 + 详情弹窗状态
+    val explained = remember(error) { error.error.toExplainedError() }
+    var showDetail by remember { mutableStateOf(false) }
+
     // 5 秒后自动消失
     LaunchedEffect(error.id) {
         delay(5000)
@@ -154,10 +163,32 @@ fun ErrorCard(
                     )
                 }
                 Text(
-                    text = error.error.message ?: "Unknown error",
+                    text = explained.reason,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                     overflow = TextOverflow.Ellipsis,
+                )
+                // 查看详情 → 弹出完整原始错误
+                Text(
+                    text = buildAnnotatedString {
+                        withLink(
+                            LinkAnnotation.Clickable(
+                                tag = "error_detail",
+                                styles = TextLinkStyles(
+                                    style = SpanStyle(
+                                        color = linkColor,
+                                        textDecoration = TextDecoration.Underline,
+                                    )
+                                ),
+                                linkInteractionListener = {
+                                    showDetail = true
+                                },
+                            )
+                        ) {
+                            append("查看详情 ›")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
                 )
                 if (error.solution == ChatErrorSolution.CheckTitleModelSettings) {
                     Text(
@@ -191,7 +222,7 @@ fun ErrorCard(
                     scope.launch {
                         clipboard.setClipEntry(
                             ClipEntry(
-                                clipData = ClipData.newPlainText("Error", error.error.message ?: "Unknown error")
+                                clipData = ClipData.newPlainText("Error", explained.rawMessage)
                             )
                         )
                     }
@@ -220,5 +251,12 @@ fun ErrorCard(
                 )
             }
         }
+    }
+
+    if (showDetail) {
+        ErrorDetailDialog(
+            error = error,
+            onDismiss = { showDetail = false },
+        )
     }
 }
