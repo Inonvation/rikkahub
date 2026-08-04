@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.message
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +50,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Tick01
@@ -66,6 +69,18 @@ import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
+
+/** 默认折叠的工具：内容重、标题已表达意图的工作区文件类工具，以及高频更新的 todo 计划 */
+private val COLLAPSED_BY_DEFAULT_TOOLS = setOf(
+    "workspace_read_file",
+    "workspace_write_file",
+    "workspace_edit_file",
+    "workspace_shell",
+    "todo_write",
+)
+
+private fun isCollapsedByDefaultTool(toolName: String): Boolean =
+    toolName in COLLAPSED_BY_DEFAULT_TOOLS
 
 /**
  * 工具气泡展开状态的进程级存储（key = toolCallId，UUID 全局唯一）。
@@ -113,10 +128,14 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     var showDenyDialog by remember(tool.toolCallId) { mutableStateOf(false) }
     // 展开状态存进程级单例 map（toolBubbleExpanded 是 mutableStateMapOf，读写自动触发重组）。
     // 跨导航保留：Navigation 3 对非栈顶 entry 组合重建，remember/rememberSaveable 恢复不可靠，
-    // 单例 map 只要进程存活就稳定保留。默认展开（map 无记录）。
-    val expanded = toolBubbleExpanded[tool.toolCallId] ?: true
+    // 单例 map 只要进程存活就稳定保留。
+    // 默认折叠工作区文件类工具（读取/写入/编辑/shell，输入输出内容大、标题本身已表达意图），
+    // 其余工具保持展开（map 无记录 → 按 isCollapsedByDefault 决定初始值）。
+    val expanded = toolBubbleExpanded[tool.toolCallId] ?: !isCollapsedByDefaultTool(tool.toolName)
     val onExpandedChange: (Boolean) -> Unit = { value ->
-        if (value) toolBubbleExpanded.remove(tool.toolCallId) else toolBubbleExpanded[tool.toolCallId] = false
+        // 始终写入显式值：初始默认按工具类型推导，用户一旦操作就记录真实意图。
+        // 不能 remove 后回落默认——折叠类工具默认 false，remove 会让"展开"操作丢失。
+        toolBubbleExpanded[tool.toolCallId] = value
     }
     val hapticController = rememberHaptic()
     val isPending = tool.approvalState is ToolApprovalState.Pending
@@ -124,6 +143,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
     val rendererLoading = renderer.isLoading(context, loading)
+    // 折叠类工具：点击优先展开/收起内联摘要，而不是直接弹 BottomSheet
+    val collapsedByDefault = isCollapsedByDefaultTool(tool.toolName)
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty()
@@ -202,8 +223,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         } else {
             null
         },
-        // 点击：alwaysOpenPreview 工具（子代理）直接进全屏详情页（不弹 BottomSheet）；
-        // 普通工具打开 BottomSheet 详情
+        // 点击：折叠类工具走默认展开/收起（点击切换内联摘要），完整详情走预览内的"查看完整详情"入口；
+        // 子代理（alwaysOpenPreview）直接进全屏详情页；其余情况打开 BottomSheet 详情
         onClick = if (context.content != null || isPending || images.isNotEmpty() || renderer.alwaysOpenPreview) {
             if (renderer.alwaysOpenPreview) {
                 {
@@ -252,6 +273,33 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                         )
+                    }
+                    // 折叠类工具的摘要下方提供"查看完整详情"入口，展开后仍需弹窗看全量内容
+                    if (collapsedByDefault && renderer.hasSummary(context) && !isPending) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .clickable {
+                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                    showResult = true
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_message_tool_view_full_detail),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Icon(
+                                imageVector = HugeIcons.ArrowRight01,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }

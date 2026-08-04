@@ -94,6 +94,18 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         )
                     },
                 )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_display_page_double_tap_collapse_thinking_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_display_page_double_tap_collapse_thinking_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = displaySetting.doubleTapCollapseThinking,
+                            onCheckedChange = {
+                                updateDisplaySetting(displaySetting.copy(doubleTapCollapseThinking = it))
+                            }
+                        )
+                    },
+                )
             }
         }
 

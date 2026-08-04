@@ -54,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -96,6 +97,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.LocalConversationId
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
@@ -322,6 +324,7 @@ private fun ChatListNormal(
         }
 
         ChatFontProvider(displaySetting = settings.displaySetting) {
+            CompositionLocalProvider(LocalConversationId provides conversation.id.toString()) {
             LazyColumn(
                 state = state,
                 contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
@@ -429,6 +432,7 @@ private fun ChatListNormal(
                         .fillMaxWidth()
                         .height(5.dp)
                 )
+            }
             }
             }
         }

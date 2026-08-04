@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,7 +47,8 @@ import kotlin.uuid.Uuid
 import org.koin.compose.koinInject
 
 /**
- * 聊天输入框下方的单行栏：左边当前工作目录（可点切换），右边平均缓存命中率 + 会话费用（可点配置）。
+ * 聊天输入框下方的单行栏：左边当前工作目录（可点切换），右侧两个指标——平均缓存命中率、
+ * 会话费用（可点配置）。数字等宽特性（tnum）+ 0 占位固定位数，数字变化不互相推挤。
  *
  * 放在 ChatInput 的 imePadding 作用域内，键盘弹起时随输入框一起上移、不被遮挡。
  */
@@ -100,6 +102,7 @@ fun WorkspaceFooterBar(
         }
         mainCost + subCost
     }
+
     val currentModelStr = settings.getCurrentChatModel()?.modelId
     val ready = boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name
     val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
@@ -183,28 +186,28 @@ fun WorkspaceFooterBar(
                 }
             }
 
-            val cacheText = cacheHitRate?.let { "平均缓存 ${"%.2f".format(it * 100)}%" } ?: "平均缓存 -"
-            val costText = if (settings.costCurrency == CostCurrency.USD) {
-                CostCalculator.formatUsd(totalCost)
+            // 右侧指标：平均缓存 / 费用。与整体同字体，数字开等宽特性（tnum）+ 0 占位固定位数，
+            // 数字变化宽度不变（骨架屏式稳定），不推挤相邻项
+            val cacheStr = if (cacheHitRate != null) {
+                "平均缓存 ${"%05.2f".format(cacheHitRate * 100)}%"
             } else {
-                CostCalculator.formatCny(totalCost)
+                "平均缓存 00.00%" // 骨架屏占位：数据未到先以 0 显示，宽度与真实值一致
             }
-            Text(
-                text = "$cacheText · $costText",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                modifier = Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
+            val costSymbol = if (settings.costCurrency == CostCurrency.USD) "$" else "¥"
+            val costStr = "$costSymbol${"%05.2f".format(totalCost)}"
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                IndicatorText(text = cacheStr)
+                IndicatorText(
+                    text = costStr,
+                    onClick = {
                         hapticController.perform(HapticFeedbackType.KeyboardTap)
                         showCostSheet = true
-                    }
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            )
+                    },
+                )
+            }
         }
     }
 
@@ -228,4 +231,34 @@ fun WorkspaceFooterBar(
             onDismiss = { showCostSheet = false },
         )
     }
+}
+
+/**
+ * footer 指标文本：与整体同字体（无自定义字体族），数字开等宽特性 tnum（tabular figures）保证
+ * 每位数字等宽，配合调用方用 0 占位固定位数，数字变化宽度不变、不推挤相邻项。
+ * onClick 非空时可点击（费用段），否则纯展示。
+ */
+@Composable
+private fun IndicatorText(
+    text: String,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+    onClick: (() -> Unit)? = null,
+) {
+    val modifier = Modifier
+        .clip(MaterialTheme.shapes.small)
+        .let { if (onClick != null) it.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+        ) { onClick() } else it }
+        .padding(vertical = 4.dp)
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontFeatureSettings = "tnum", // 数字等宽：00.00 与 32.50 宽度一致
+        ),
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }

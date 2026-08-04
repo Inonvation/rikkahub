@@ -53,6 +53,10 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.message.ChainOfThoughtIntent
+import me.rerere.rikkahub.ui.components.message.LocalConversationId
+import me.rerere.rikkahub.ui.components.message.getChainOfThoughtIntent
+import me.rerere.rikkahub.ui.components.message.setChainOfThoughtIntent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 private val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
@@ -83,7 +87,16 @@ fun <T> ChainOfThought(
     collapsedAdaptiveWidth: Boolean = false,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    val conversationId = LocalConversationId.current
+    val intent = getChainOfThoughtIntent(conversationId)
+    var expanded by remember(steps, intent) {
+        mutableStateOf(
+            when (intent) {
+                ChainOfThoughtIntent.ExpandAll -> true
+                ChainOfThoughtIntent.CollapseAll, ChainOfThoughtIntent.Default -> false
+            }
+        )
+    }
     val hapticController = rememberHaptic()
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
@@ -121,7 +134,18 @@ fun <T> ChainOfThought(
                                 }
                             )
                             .clip(MaterialTheme.shapes.small)
-                            .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded }
+                            .clickable {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                expanded = !expanded
+                                // 思考/工具分组的折叠控制条：记录会话级意图，后续思考链沿用。
+                                // （展开 = 想看全，收起 = 不打扰；生成中的 preview 状态不受此影响）
+                                if (conversationId != null) {
+                                    setChainOfThoughtIntent(
+                                        conversationId,
+                                        if (expanded) ChainOfThoughtIntent.ExpandAll else ChainOfThoughtIntent.CollapseAll
+                                    )
+                                }
+                            }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
