@@ -45,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
@@ -68,7 +69,6 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -95,6 +95,7 @@ import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ExportDialog
+import me.rerere.rikkahub.ui.components.ui.ExpandableTextField
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Select
@@ -104,6 +105,7 @@ import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
@@ -119,6 +121,9 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
     // 批量选择状态（每个 tab 独立）
     var modeSelecting by rememberSaveable { mutableStateOf(false) }
     var lorebookSelecting by rememberSaveable { mutableStateOf(false) }
+    // 选中的项（收进 VM，随页面生命周期释放，避免模块级全局变量跨页面残留）
+    val selectedModeInjections = vm.selectedModeInjections
+    val selectedLorebooks = vm.selectedLorebooks
 
     Scaffold(
         topBar = {
@@ -212,36 +217,44 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-        ) { page ->
-            when (page) {
-                0 -> ModeInjectionTab(
-                    modeInjections = settings.modeInjections,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) },
-                    selecting = modeSelecting,
-                    onSelectingChange = { modeSelecting = it },
-                    selectedItems = selectedModeInjections,
-                )
+        // 等待 Settings 从 DataStore 加载完成，避免先用默认值渲染、加载后再跳变成真实配置
+        if (settings.init) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+            ) { page ->
+                when (page) {
+                    0 -> ModeInjectionTab(
+                        modeInjections = settings.modeInjections,
+                        onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) },
+                        selecting = modeSelecting,
+                        onSelectingChange = { modeSelecting = it },
+                        selectedItems = selectedModeInjections,
+                    )
 
-                1 -> LorebookTab(
-                    lorebooks = settings.lorebooks,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) },
-                    selecting = lorebookSelecting,
-                    onSelectingChange = { lorebookSelecting = it },
-                    selectedItems = selectedLorebooks,
-                )
+                    1 -> LorebookTab(
+                        lorebooks = settings.lorebooks,
+                        onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) },
+                        selecting = lorebookSelecting,
+                        onSelectingChange = { lorebookSelecting = it },
+                        selectedItems = selectedLorebooks,
+                    )
+                }
             }
         }
     }
 }
-
-// 批量选择状态（放在顶层以跨 recomposition 保持）
-private val selectedModeInjections = mutableStateListOf<kotlin.uuid.Uuid>()
-private val selectedLorebooks = mutableStateListOf<kotlin.uuid.Uuid>()
 
 @Composable
 private fun ModeInjectionTab(
@@ -276,7 +289,7 @@ private fun ModeInjectionTab(
             onUpdate(currentModeInjections + imported)
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
-            toaster.show(importFailedMsg.format(error.message))
+            toaster.show(importFailedMsg.format(explainErrorText(error.message)))
         }
     }
 
@@ -701,14 +714,14 @@ private fun ModeInjectionEditSheet(
                     }
                 }
 
-                OutlinedTextField(
+                ExpandableTextField(
                     value = injection.content,
                     onValueChange = { onEdit(injection.copy(content = it)) },
-                    label = { Text(stringResource(R.string.prompt_page_injection_content)) },
+                    label = stringResource(R.string.prompt_page_injection_content),
+                    minLines = 5,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp),
-                    minLines = 5
                 )
             }
 
@@ -815,7 +828,7 @@ private fun LorebookTab(
             onUpdate(currentLorebooks + imported)
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
-            toaster.show(importFailedMsg.format(error.message))
+            toaster.show(importFailedMsg.format(explainErrorText(error.message)))
         }
     }
 
