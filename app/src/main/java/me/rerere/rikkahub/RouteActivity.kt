@@ -686,12 +686,15 @@ sealed interface Screen : NavKey {
     @Serializable
     data object GroupDiscussionList : Screen
 
+    /** 群主页。id = groupId（群组本身，含 config） */
     @Serializable
     data class GroupDetail(val id: String) : Screen
 
+    /** 群组编辑页。id = groupId（注意与 GroupDiscussion 的 id 语义不同，勿混用） */
     @Serializable
     data class GroupDiscussionEdit(val id: String) : Screen
 
+    /** 群组讨论页。id = conversationId（群组内单场会话）；群组配置经 conversation.groupId 读取 */
     @Serializable
     data class GroupDiscussion(val id: String) : Screen
     @Serializable

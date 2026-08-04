@@ -31,6 +31,10 @@ enum class DiscussionMode {
 val GROUP_DISCUSSION_ASSISTANT_ID: Uuid =
     Uuid.parse("00000000-0000-0000-0000-0000000000dd")
 
+/** 收束主持人哨兵 speakerId：标记"主持人总结"消息，供 UI 渲染折叠卡片（非真实助手，不在成员列表） */
+val DISCUSSION_MODERATOR_ID: Uuid =
+    Uuid.parse("00000000-0000-0000-0000-0000000000de")
+
 @Serializable
 data class DiscussionConfig(
     /** 成员列表，按 order 排序即发言顺序 */

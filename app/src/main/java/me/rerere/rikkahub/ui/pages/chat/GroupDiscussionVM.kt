@@ -4,11 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.data.ai.discussion.DiscussionState
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Conversation
@@ -35,6 +37,11 @@ class GroupDiscussionVM(
 
     /** 所属群组（配置来源）。会话尚未初始化 groupId 时为 null */
     val group: StateFlow<Group?> = conversation
+        // 关键修复：conversation 在流式生成期间每个 chunk 更新一次，若直接 flatMapLatest，
+        // 每个 chunk 都会重启 getGroupFlow（其 stateIn 初始值 null），group 在 null↔Group 间
+        // 高频跳变，顶栏标题在「群名↔会话标题」、头像区在「空↔全量」间闪烁。
+        // 按 groupId 去重后，流式期间 groupId 恒定 → 内层流只订阅一次。
+        .distinctUntilChangedBy { it.groupId }
         .flatMapLatest { conv ->
             conv.groupId?.let { gid -> chatService.getGroupFlow(gid) } ?: flowOf(null)
         }
@@ -52,13 +59,16 @@ class GroupDiscussionVM(
         chatService.removeConversationReference(_conversationId)
     }
 
-    /** 发送主题/插话（走 sendMessage 讨论分支：开题启动，插话续跑） */
-    fun send(text: String) {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+    /** 发送主题/插话（走 sendMessage 讨论分支：开题启动，插话续跑）。支持文本+附件 parts。
+     *  @param nextSpeakerId 指定下一位发言人（"@成员名"流程：设 hint，runDiscussion 时该成员先发言） */
+    fun send(parts: List<UIMessagePart>, nextSpeakerId: Uuid? = null) {
+        if (parts.isEmptyInputMessage()) return
         // 会话初始化完成前（groupId 未就绪）不发，防止走普通聊天路径存成孤儿
         if (!conversation.value.isGroupDiscussion) return
-        chatService.sendMessage(_conversationId, listOf(UIMessagePart.Text(trimmed)), answer = true)
+        if (nextSpeakerId != null) {
+            chatService.setNextSpeakerHintOnly(_conversationId, nextSpeakerId)
+        }
+        chatService.sendMessage(_conversationId, parts, answer = true)
     }
 
     /** 暂停当前发言 */

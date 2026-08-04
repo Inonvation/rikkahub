@@ -5,7 +5,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.DiscussionConfig
@@ -51,21 +54,39 @@ class GroupDiscussionEditVM(
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
 
+    /** 初始数据是否已就绪（成员/名称来自 Room 异步流，就绪前显示加载态，避免"突然跳出"） */
+    private val _loading = MutableStateFlow(true)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    /** 群组不存在（groupId 传错 / 群已被删除）：加载超时兜底置 true，页面显示"不存在"而非无限转圈 */
+    private val _notFound = MutableStateFlow(false)
+    val notFound: StateFlow<Boolean> = _notFound.asStateFlow()
+
     var onSaved: (() -> Unit)? = null
 
     init {
         viewModelScope.launch {
             _allAssistants.value = settingsStore.settingsFlow.value.assistants
-            // 首次拿到 Group 后快照配置进可编辑状态
-            val g = chatService.getGroupFlow(_groupId).value
-            val config = g?.config
-            if (g != null && config != null) {
-                _name.value = g.name
-                _mode.value = config.mode
-                _rounds.value = config.rounds
-                _summaryPrompt.value = config.summaryPrompt ?: ""
-                _members.value = config.members.sortedBy { it.order }
+        }
+        // 等 Room 真实数据（丢弃 StateFlow 初始 null，first() 会立即拿到 null 而非等发射），
+        // 拿到首个非 null 的 Group 后快照进可编辑状态，然后停止收集，避免覆盖编辑中的值。
+        // groupId 传错/群已被删除时 group 流恒为 null，first() 永不返回 → 用超时兜底，
+        // 避免页面永远停在加载态。
+        viewModelScope.launch {
+            val g = withTimeoutOrNull(8_000) { group.dropWhile { it == null }.first() }
+            if (g != null) {
+                val config = g.config
+                if (config != null) {
+                    _name.value = g.name
+                    _mode.value = config.mode
+                    _rounds.value = config.rounds
+                    _summaryPrompt.value = config.summaryPrompt ?: ""
+                    _members.value = config.members.sortedBy { it.order }
+                }
+            } else {
+                _notFound.value = true
             }
+            _loading.value = false
         }
     }
 

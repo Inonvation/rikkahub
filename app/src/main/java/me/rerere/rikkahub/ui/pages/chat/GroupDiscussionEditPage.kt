@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +73,8 @@ fun GroupDiscussionEditPage(
     val members by vm.members.collectAsStateWithLifecycle()
     val allAssistants by vm.allAssistants.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
+    val loading by vm.loading.collectAsStateWithLifecycle()
+    val notFound by vm.notFound.collectAsStateWithLifecycle()
 
     var showAddSheet by remember { mutableStateOf(false) }
     var editingMemberIndex by remember { mutableStateOf<Int?>(null) }
@@ -95,6 +99,33 @@ fun GroupDiscussionEditPage(
             }
         },
     ) { innerPadding ->
+        // 群组不存在（groupId 传错 / 群已被删除）：超时兜底，显示提示而非永远转圈
+        if (notFound) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("群组不存在或已被删除", style = MaterialTheme.typography.bodyLarge)
+                TextButton(onClick = { navController.popBackStack() }) {
+                    Text("返回")
+                }
+            }
+            return@Scaffold
+        }
+        if (loading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+            return@Scaffold
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

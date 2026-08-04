@@ -23,6 +23,7 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.DISCUSSION_MODERATOR_ID
 import me.rerere.rikkahub.data.model.DiscussionConfig
 import me.rerere.rikkahub.data.model.DiscussionMember
 import me.rerere.rikkahub.data.model.DiscussionMode
@@ -63,11 +64,20 @@ class GroupDiscussionOrchestrator(
     private val stateHolder = DiscussionStateHolder()
     fun state(conversationId: Uuid): StateFlow<DiscussionState> = stateHolder.state(conversationId)
 
-    /** 用户指定下一位发言者（一次性 hint，生成中则本轮结束后消费），按会话隔离 */
-    private val nextSpeakerHints = ConcurrentHashMap<Uuid, Uuid?>()
+    /**
+     * 用户指定下一位发言者（一次性 hint，生成中则本轮结束后消费），按会话隔离。
+     * 注意：ConcurrentHashMap 不允许 null key / null value——
+     * resumeDiscussion 的默认参数 nextSpeakerId 为 null（表示"不指定，走自然推导"），
+     * 若直接 put null value 会抛 NullPointerException（崩溃根因）。这里统一用 remove 表达"无 hint"。
+     */
+    private val nextSpeakerHints = ConcurrentHashMap<Uuid, Uuid>()
 
     fun setNextSpeakerHint(conversationId: Uuid, memberId: Uuid?) {
-        nextSpeakerHints[conversationId] = memberId
+        if (memberId == null) {
+            nextSpeakerHints.remove(conversationId)
+        } else {
+            nextSpeakerHints[conversationId] = memberId
+        }
     }
 
     fun resetState(conversationId: Uuid) = stateHolder.reset(conversationId)
@@ -92,10 +102,9 @@ class GroupDiscussionOrchestrator(
             return
         }
 
-        // 从 transcript 初始化已发言轮数：暂停→继续后轮数连续，不重复计数
-        var totalTurnCount = conversation.messageNodes.count {
-            it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId != null
-        }
+        // 从 transcript 初始化已发言轮数：暂停→继续后轮数连续，不重复计数。
+        // 只统计锚点（最新用户消息）之后的发言——用户发新消息 = 新一轮，历史轮次不占用本轮配额。
+        var totalTurnCount = turnCount(conversation)
         stateHolder.update(conversationId) {
             it.copy(
                 phase = DiscussionPhase.SCHEDULING,
@@ -107,11 +116,14 @@ class GroupDiscussionOrchestrator(
         }
 
         try {
+            // 本轮内因不可用被跳过的成员（助手被删/模型缺失等）。跳过消息无 speakerId，
+            // 不计入 countTurns，若不排除会无限选中同一坏成员 → 死循环。
+            val skippedMembers = mutableSetOf<Uuid>()
             while (true) {
                 val current = read(conversationId) ?: break
                 val hint = nextSpeakerHints[conversationId]
-                nextSpeakerHints[conversationId] = null
-                val speaker = pickNextSpeaker(current, config, hint) ?: break
+                nextSpeakerHints.remove(conversationId)
+                val speaker = pickNextSpeaker(current, config, hint, skippedMembers) ?: break
                 totalTurnCount++
 
                 stateHolder.update(conversationId) {
@@ -124,7 +136,8 @@ class GroupDiscussionOrchestrator(
                     )
                 }
 
-                generateMemberTurn(conversationId, speaker, config, groupName)
+                val skipped = generateMemberTurn(conversationId, speaker, config, groupName)
+                if (skipped) skippedMembers.add(speaker.assistantId)
                 val after = read(conversationId) ?: break
                 if (shouldTerminate(after, config, totalTurnCount)) break
             }
@@ -162,6 +175,7 @@ class GroupDiscussionOrchestrator(
         conversation: Conversation,
         config: DiscussionConfig,
         hint: Uuid?,
+        skippedMembers: Set<Uuid>,
     ): DiscussionMember? {
         val enabled = config.enabledMembers
         if (hint != null) {
@@ -170,51 +184,84 @@ class GroupDiscussionOrchestrator(
 
         return when (config.mode) {
             DiscussionMode.ROUND_ROBIN, DiscussionMode.ROUND_ROBIN_THEN_SUMMARY -> {
-                if (enabled.all { countTurns(conversation, it.assistantId) >= config.rounds }) return null
-                nextRoundRobin(enabled, lastSpeakerId(conversation), conversation, config)
+                // 其余成员都已发言满轮（或已被跳过）→ 结束本轮
+                if (enabled.all { skippedMembers.contains(it.assistantId) || countTurns(conversation, it.assistantId) >= config.rounds }) {
+                    return null
+                }
+                nextRoundRobin(enabled, lastSpeakerId(conversation), conversation, config, skippedMembers)
             }
 
             DiscussionMode.SELECTOR -> {
-                if (turnCount(conversation) >= config.maxTurns) return null
+                // maxTurns 是全局硬上限，防止锚点前移（用户发新消息开新一轮）后失效
+                if (globalTurnCount(conversation) >= config.maxTurns) return null
                 // 只有主持人模型明确返回 action=="end" 才结束；
                 // 模型不可用/解析失败/名字无效 → 降级轮流，绝不终止（防"主持人选不了"）
                 val decision = runCatching { callSelector(conversation, config) }.getOrNull()
                 if (decision?.action == "end") return null
                 val member = decision?.speaker?.let { resolveMemberByNameOrId(enabled, it) }
-                member ?: nextRoundRobin(enabled, lastSpeakerId(conversation), conversation, config)
+                    ?.takeIf { !skippedMembers.contains(it.assistantId) }
+                member ?: nextRoundRobin(enabled, lastSpeakerId(conversation), conversation, config, skippedMembers)
             }
         }
     }
 
-    private fun countTurns(conversation: Conversation, memberId: Uuid): Int =
-        conversation.messageNodes.count {
-            it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId == memberId
+    /**
+     * 本轮锚点：最新一条 USER 消息在 nodes 中的下标。
+     * 用户每次发消息（开题/插话）都前移锚点 → 讨论完成后再发消息即开启新一轮，
+     * 成员发言计数从锚点之后重新累计，而不是把历史轮次也计入导致"只触发总结"。
+     * 无 USER 消息时为 -1（全部历史计入）。
+     */
+    private fun roundAnchorIndex(conversation: Conversation): Int =
+        conversation.messageNodes.indexOfLast { it.role == MessageRole.USER }
+
+    /** 统计锚点（最新用户消息）之后的成员发言数——新一轮开始时历史轮次不计入 */
+    private fun countTurns(conversation: Conversation, memberId: Uuid): Int {
+        val anchor = roundAnchorIndex(conversation)
+        return conversation.messageNodes.withIndex().count { (index, it) ->
+            index > anchor && it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId == memberId
         }
+    }
 
-    private fun lastSpeakerId(conversation: Conversation): Uuid? =
-        conversation.messageNodes.lastOrNull { it.role == MessageRole.ASSISTANT }
-            ?.currentMessage?.speakerId
+    /** 锚点之后的最后一位发言人（决定轮转起点） */
+    private fun lastSpeakerId(conversation: Conversation): Uuid? {
+        val anchor = roundAnchorIndex(conversation)
+        return conversation.messageNodes.withIndex()
+            .filter { it.index > anchor && it.value.role == MessageRole.ASSISTANT }
+            .lastOrNull()?.value?.currentMessage?.speakerId
+    }
 
-    private fun turnCount(conversation: Conversation): Int =
-        conversation.messageNodes.count { it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId != null }
+    /** 锚点之后的总成员发言数 */
+    private fun turnCount(conversation: Conversation): Int {
+        val anchor = roundAnchorIndex(conversation)
+        return conversation.messageNodes.withIndex()
+            .count { it.index > anchor && it.value.role == MessageRole.ASSISTANT && it.value.currentMessage.speakerId != null }
+    }
 
     private fun nextRoundRobin(
         enabled: List<DiscussionMember>,
         last: Uuid?,
         conversation: Conversation,
         config: DiscussionConfig,
+        skippedMembers: Set<Uuid>,
     ): DiscussionMember? {
         val lastIndex = enabled.indexOfFirst { it.assistantId == last }
         val start = if (lastIndex >= 0) lastIndex + 1 else 0
         for (i in 0 until enabled.size) {
             val member = enabled[(start + i) % enabled.size]
+            if (skippedMembers.contains(member.assistantId)) continue
             if (countTurns(conversation, member.assistantId) < config.rounds) return member
         }
         return null
     }
 
+    /** 全局成员发言总数（含历史，maxTurns 硬上限用，防止锚点前移后硬上限失效） */
+    private fun globalTurnCount(conversation: Conversation): Int =
+        conversation.messageNodes.count { it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId != null }
+
     private fun shouldTerminate(conversation: Conversation, config: DiscussionConfig, totalTurnCount: Int): Boolean {
-        if (totalTurnCount >= config.maxTurns) return true
+        // maxTurns 是全局硬上限（防死循环），必须基于含历史的全局发言数；
+        // 轮次达标基于锚点后的 countTurns（新一轮从零累计）。
+        if (globalTurnCount(conversation) >= config.maxTurns) return true
         if (config.mode != DiscussionMode.SELECTOR) {
             return config.enabledMembers.all { countTurns(conversation, it.assistantId) >= config.rounds }
         }
@@ -238,7 +285,7 @@ class GroupDiscussionOrchestrator(
         val system = UIMessage.system(DiscussionPrompts.selectorSystemPrompt(config))
         val opening = conversation.messageNodes.firstOrNull { it.role == MessageRole.USER }
         val recent = conversation.messageNodes
-            .filter { it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId != null }
+            .filter { it.role == MessageRole.ASSISTANT && it.currentMessage.speakerId != null && it.currentMessage.speakerId != DISCUSSION_MODERATOR_ID }
             .takeLast(DiscussionPrompts.MAX_TRANSCRIPT_MESSAGES)
         val transcript = buildString {
             opening?.let { appendLine("话题：「${it.currentMessage.toText()}」") }
@@ -287,26 +334,27 @@ class GroupDiscussionOrchestrator(
 
     // ---- 单成员单轮生成 ----
 
+    /** 单成员单轮生成。返回是否因不可用被跳过（true = 本轮未发言，调用方需排除该成员避免死循环） */
     private suspend fun generateMemberTurn(
         conversationId: Uuid,
         member: DiscussionMember,
         config: DiscussionConfig,
         groupName: String,
-    ) {
+    ): Boolean {
         val settings = settingsStore.settingsFlow.first()
-        val conversation = read(conversationId) ?: return
+        val conversation = read(conversationId) ?: return true
         val assistant = settings.getAssistantById(member.assistantId)
         if (assistant == null) {
-            stateHolder.update(conversationId) { it.copy(lastError = "成员「${member.name}」的助手已被删除，跳过") }
-            return
+            writeSkipNotice(conversationId, "成员「${member.name}」的助手已被删除，跳过本轮发言")
+            return true
         }
         val model = resolveMemberModel(settings, assistant) ?: run {
-            stateHolder.update(conversationId) { it.copy(lastError = "成员「${member.name}」的模型不可用，跳过") }
-            return
+            writeSkipNotice(conversationId, "成员「${member.name}」的模型不可用，跳过本轮发言")
+            return true
         }
         val providerSetting = model.findProvider(settings.providers) ?: run {
-            stateHolder.update(conversationId) { it.copy(lastError = "成员「${member.name}」的 provider 不可用，跳过") }
-            return
+            writeSkipNotice(conversationId, "成员「${member.name}」的 provider 不可用，跳过本轮发言")
+            return true
         }
         val provider = providerManager.getProviderByType(providerSetting)
 
@@ -391,6 +439,7 @@ class GroupDiscussionOrchestrator(
         read(conversationId)?.let { c ->
             persist(conversationId, c.copy(updateAt = Instant.now()))
         }
+        return false
     }
 
     /** 收束主持人：总结全部发言为一条 ASSISTANT 消息 */
@@ -418,7 +467,13 @@ class GroupDiscussionOrchestrator(
         update(conversationId) { conv ->
             conv.copy(
                 messageNodes = conv.messageNodes + MessageNode.of(
-                    UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("")))
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(UIMessagePart.Text("")),
+                        // 主持人标识：UI 据此渲染"主持人"折叠卡片（区别于普通成员发言）
+                        speakerId = DISCUSSION_MODERATOR_ID,
+                        speakerName = "主持人",
+                    )
                 )
             )
         }
@@ -435,7 +490,11 @@ class GroupDiscussionOrchestrator(
                 onStep = {},
                 onMessagesUpdate = { msgs ->
                     val last = msgs.lastOrNull { it.role == MessageRole.ASSISTANT }
-                    if (last != null) writeTurnMessage(conversationId, nodeIndex, last)
+                    if (last != null) writeTurnMessage(
+                        conversationId,
+                        nodeIndex,
+                        last.copy(speakerId = DISCUSSION_MODERATOR_ID, speakerName = "主持人"),
+                    )
                 },
             )
         } catch (e: CancellationException) {
@@ -448,6 +507,8 @@ class GroupDiscussionOrchestrator(
                 UIMessage(
                     role = MessageRole.ASSISTANT,
                     parts = listOf(UIMessagePart.Text("（总结生成失败）")),
+                    speakerId = DISCUSSION_MODERATOR_ID,
+                    speakerName = "主持人",
                 )
             )
         }
@@ -457,6 +518,27 @@ class GroupDiscussionOrchestrator(
     }
 
     // ---- 会话写入辅助 ----
+
+    /**
+     * 成员不可用（助手被删/模型/provider 缺失）时，追加一条可见的系统提示消息。
+     * 不带 speakerId——不占用成员轮次，也不被 countTurns 计入，用户能明确看到谁被跳过。
+     */
+    private suspend fun writeSkipNotice(conversationId: Uuid, text: String) {
+        update(conversationId) { conv ->
+            conv.copy(
+                messageNodes = conv.messageNodes + MessageNode.of(
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(UIMessagePart.Text("（$text）")),
+                    )
+                )
+            )
+        }
+        // 提示消息也要落库，否则重启后消失（用户看不到谁被跳过）
+        read(conversationId)?.let { c ->
+            persist(conversationId, c.copy(updateAt = Instant.now()))
+        }
+    }
 
     private fun writeTurnMessage(conversationId: Uuid, nodeIndex: Int, message: UIMessage) {
         update(conversationId) { conv ->

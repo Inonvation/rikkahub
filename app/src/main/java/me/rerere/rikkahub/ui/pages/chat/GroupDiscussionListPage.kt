@@ -125,6 +125,8 @@ fun GroupDiscussionListPage(
             items(groups, key = { it.id.toString() }) { group ->
                 DiscussionGroupCard(
                     group = group,
+                    // 点卡片先进群主页（群信息 + 新建对话 + 历史会话），再进讨论页；
+                    // 不再绕过详情页直入最近会话，层级固定为 群组中心 → 群主页 → 讨论页。
                     onClick = { navController.navigate(Screen.GroupDetail(group.id.toString())) },
                     onEdit = { navController.navigate(Screen.GroupDiscussionEdit(group.id.toString())) },
                     onDelete = { groupToDelete = group },

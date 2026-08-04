@@ -29,8 +29,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -45,7 +48,9 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
+import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
+import me.rerere.rikkahub.data.ai.subagent.SubAgentTask
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_HYDE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MULTIQUERY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_QUERY_REWRITE_PROMPT
@@ -104,6 +109,7 @@ import me.rerere.rikkahub.data.datastore.promptOptimizeThinkingBudgetForScene
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.tool.EmbeddingConfig
@@ -190,7 +196,7 @@ class ChatService(
     private val knowledgeManager: KnowledgeManager,
     private val todoStorage: TodoStorage,
     private val studyTools: StudyTools,
-    private val subAgentRunner: me.rerere.rikkahub.data.ai.subagent.SubAgentRunner,
+    private val subAgentRunner: SubAgentRunner,
     private val discussionToolAssembler: me.rerere.rikkahub.data.ai.discussion.DiscussionToolAssembler,
     private val groupRepository: GroupRepository,
     private val json: kotlinx.serialization.json.Json,
@@ -287,6 +293,14 @@ class ChatService(
     }
 
     /**
+     * 仅设置下一位发言人 hint，不触发启动（供"@成员名 发送"流程用：
+     * 先设 hint，随后 sendMessage 追加用户消息并 runDiscussion 时消费该 hint，指定成员先发言）。
+     */
+    fun setNextSpeakerHintOnly(conversationId: Uuid, memberId: kotlin.uuid.Uuid?) {
+        discussionOrchestrator.setNextSpeakerHint(conversationId, memberId)
+    }
+
+    /**
      * 新建群组：写 Group + 首个空会话，**不自动开始**。
      * 进入讨论页后输入主题发送才启动。返回 groupId（== 首个会话 id，供导航/编辑复用）。
      */
@@ -353,10 +367,17 @@ class ChatService(
         )
     }
 
+    /** 群组流缓存：同一 groupId 复用同一 StateFlow。避免每次调用新建 stateIn(appScope)
+     *  泄漏一条常驻 Room 收集协程（流式生成期间 getGroupFlow 被高频调用时尤其严重），
+     *  并让讨论页/详情页/编辑页共享同一份数据。 */
+    private val groupFlowCache = ConcurrentHashMap<Uuid, kotlinx.coroutines.flow.StateFlow<me.rerere.rikkahub.data.model.Group?>>()
+
     /** 群组流（Room 驱动，自动刷新） */
     fun getGroupFlow(groupId: Uuid): kotlinx.coroutines.flow.StateFlow<me.rerere.rikkahub.data.model.Group?> {
-        return groupRepository.getGroupFlow(groupId)
-            .stateIn(appScope, SharingStarted.Eagerly, null)
+        return groupFlowCache.getOrPut(groupId) {
+            groupRepository.getGroupFlow(groupId)
+                .stateIn(appScope, SharingStarted.Eagerly, null)
+        }
     }
 
     /** 停掉群组下所有正在进行的生成 */
@@ -374,6 +395,8 @@ class ChatService(
             conversationRepo.deleteConversation(conv)
         }
         groupRepository.deleteGroup(groupId)
+        // 清掉缓存的群组流，防止已删群组的 id 复用时拿到旧流
+        groupFlowCache.remove(groupId)
     }
 
     fun clearAllErrors() {
@@ -440,7 +463,7 @@ class ChatService(
      */
     private suspend fun insertSubAgentCompletionPart(
         conversationId: Uuid,
-        task: me.rerere.rikkahub.data.ai.subagent.SubAgentTask,
+        task: SubAgentTask,
     ) {
         val conversation = getConversationFlow(conversationId).value
         var changed = false
@@ -453,7 +476,9 @@ class ChatService(
                     val alreadyInserted = msg.parts.any {
                         it is UIMessagePart.Tool &&
                             it.toolName == "spawn_subagent_completed" &&
-                            it.toolCallId == task.taskId
+                            // 新格式：input 里带 taskId；旧格式：toolCallId == taskId（兼容历史数据）
+                            (it.inputAsJson().jsonObject["taskId"]?.jsonPrimitive?.contentOrNull == task.taskId ||
+                                it.toolCallId == task.taskId)
                     }
                     if (hasSpawn && !alreadyInserted) {
                         changed = true
@@ -461,11 +486,15 @@ class ChatService(
                         // 气泡排在消息后部，AI 收到结果后的续答文本自然继续跟在它后面，
                         // 阅读顺序即执行顺序（派发 → AI 继续输出 → 子代理完成 → 续答）。
                         // 注意：续答流式合并发生在落库之后，会追加在气泡后方，不影响本顺序。
+                        // toolCallId 用独立随机 id：spawn 工具的 toolCallId 已被模型占用，
+                        // 复用会导致同一条消息里两个工具共享同一 tool_call_id，OpenAI 兼容 API
+                        // 校验重复报 "Duplicate value for 'tool_call_id'"。跳详情页改从 input.taskId 读取。
                         msg.copy(
                             parts = msg.parts + UIMessagePart.Tool(
-                                toolCallId = task.taskId,
+                                toolCallId = Uuid.random().toString(),
                                 toolName = "spawn_subagent_completed",
                                 input = buildJsonObject {
+                                    put("taskId", JsonPrimitive(task.taskId))
                                     put("agentId", task.agentId)
                                     put("status", task.status.name.lowercase())
                                     put("summary", task.resultSummary.orEmpty())
@@ -519,7 +548,7 @@ class ChatService(
      * 5. 注入唤醒提示（作为生成上下文，不落库、用户不可见）→ 调 handleMessageComplete 续答。
      * 6. 标记已消费 + 释放串行锁。
      */
-    private suspend fun resumeAfterSubAgent(task: me.rerere.rikkahub.data.ai.subagent.SubAgentTask) {
+    private suspend fun resumeAfterSubAgent(task: SubAgentTask) {
         val conversationId = task.parentConversationId
         Log.i(TAG, "resume enter: task=${task.taskId} status=${task.status} conv=$conversationId")
 
@@ -565,8 +594,6 @@ class ChatService(
                 return
             }
 
-            Log.i(TAG, "resumeAfterSubAgent: task=${task.taskId} status=${task.status} conversation=$conversationId")
-
             // 关键：先生成前回填该子代理的 spawn 占位为终态结果——否则 resume 生成读到的
             // 还是 "dispatched" 占位，模型看不到真实结果，只能瞎编/重复旧答（onSuccess 才回填就晚了）。
             // backfillSubAgentPlaceholders 幂等：已回填的跳过。
@@ -575,25 +602,51 @@ class ChatService(
             // 子代理完成气泡：往派发它的 assistant 消息里追加 spawn_subagent_completed 气泡 part。
             // 必须在 handleMessageComplete 读会话快照**之前**落库，续答流式才不会把它覆盖掉；
             // 渲染走现有工具气泡管线，续答文本（BUG3 已合并进同一消息）自然在其之后。
+            // 气泡对**任意轮次**的子代理都插入（UI 展示完整）；下面的轮次锚点只拦截"注入 AI 上下文"。
             insertSubAgentCompletionPart(conversationId, task)
+
+            // 轮次锚点：只对"最新用户消息之后派发"的子代理唤醒续答。
+            // 旧轮次（最新用户消息之前派发）的子代理结果不该注入新轮次——否则用户发起
+            // 第二轮对话后，第一轮子代理完成时这里会取消第二轮的生成 job 强行注入旧结果，
+            // 导致返回信息重复、AI 反复读取同一批结果。完成气泡/占位回填已在上方完成，
+            // 这里 return 前任务已被 resumedTaskIds 标记消费，兜底补唤醒也不会再触发它。
+            if (!isSpawnInCurrentRound(conversation, task.taskId)) {
+                Log.w(TAG, "resume SKIPPED: task from previous round (task=${task.taskId})")
+                return
+            }
+
+            Log.i(TAG, "resumeAfterSubAgent: task=${task.taskId} status=${task.status} conversation=$conversationId")
 
             // 唤醒指令：作为 resume 上下文注入，handleMessageComplete 会把 resumeContext
             // 拼进 system prompt 末尾（BUG3 修复），模型据此续答、并入同一条 assistant 消息。
             // 摘要直接内联在指令里，不依赖 spawn tool result 的可见性——长对话被 limitContext
             // 截断或模型忽略工具输出时，结果仍能送达模型，杜绝"结果接了模型却没看到"。
-            val agentName = me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog.byId(task.agentId)?.name ?: task.agentId
-            val resumePrompt = buildString {
-                appendLine("## Sub-agent result arrived")
-                appendLine("The sub-agent \"$agentName\" (${task.agentId}) has completed with status \"${task.status.name.lowercase()}\".")
-                task.resultSummary?.takeIf { it.isNotBlank() }?.let { summary ->
-                    appendLine("Its result summary:")
-                    appendLine("```")
-                    appendLine(summary.take(3000))
-                    appendLine("```")
+            val agentName = SubAgentCatalog.byId(task.agentId)?.name ?: task.agentId
+            val resumePrompt = if (task.status == SubAgentStatus.CANCELLED) {
+                // 手动取消：告诉母代理"用户取消了该子代理"，让它知悉并决定如何继续。
+                // 取消任务通常没有结果摘要，不内联 summary（避免误导模型以为有产出）。
+                buildString {
+                    appendLine("## Sub-agent cancelled by user")
+                    appendLine("The sub-agent \"$agentName\" (${task.agentId}) was manually cancelled by the user before it finished.")
+                    appendLine("- Acknowledge this cancellation in your reply; do NOT pretend it succeeded.")
+                    appendLine("- If the cancelled sub-agent was providing partial value, state what is still missing.")
+                    appendLine("- Decide how to continue: answer with what you already have, or tell the user the task was stopped.")
+                    appendLine("- Do NOT re-answer from scratch; build on your existing answer.")
                 }
-                appendLine("- If your previous answer is already complete, supplement or refine it with this new information.")
-                appendLine("- If you were waiting for other sub-agents, you may continue waiting, or answer based on what you have now.")
-                appendLine("- Do NOT re-answer from scratch; build on your existing answer.")
+            } else {
+                buildString {
+                    appendLine("## Sub-agent result arrived")
+                    appendLine("The sub-agent \"$agentName\" (${task.agentId}) has completed with status \"${task.status.name.lowercase()}\".")
+                    task.resultSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                        appendLine("Its result summary:")
+                        appendLine("```")
+                        appendLine(summary.take(3000))
+                        appendLine("```")
+                    }
+                    appendLine("- If your previous answer is already complete, supplement or refine it with this new information.")
+                    appendLine("- If you were waiting for other sub-agents, you may continue waiting, or answer based on what you have now.")
+                    appendLine("- Do NOT re-answer from scratch; build on your existing answer.")
+                }
             }
 
             // 与 sendMessage/regenerate/approval 一致：注册标准生成 job，让 resume 期间
@@ -628,6 +681,25 @@ class ChatService(
         } finally {
             resumingConversations.remove(conversationId)
         }
+    }
+
+    /**
+     * 判断子代理（taskId == 派发它的 spawn 气泡的 toolCallId）是否派发于"最新用户消息之后"，
+     * 即是否属于**当前轮次**。用于 resume 只唤醒本轮派发的子代理：
+     * 用户发起新一轮对话后，上一轮派发的子代理完成时不应打断/污染新一轮生成。
+     * spawn 气泡所在 node 若在最新用户消息 node 之后 → 当前轮次。
+     */
+    private fun isSpawnInCurrentRound(conversation: Conversation, taskId: String): Boolean {
+        val lastUserIndex = conversation.messageNodes.indexOfLast { it.role == MessageRole.USER }
+        if (lastUserIndex < 0) return false
+        val spawnIndex = conversation.messageNodes.indexOfFirst { node ->
+            node.messages.any { msg ->
+                msg.parts.any {
+                    it is UIMessagePart.Tool && it.toolName == "spawn_subagent" && it.toolCallId == taskId
+                }
+            }
+        }
+        return spawnIndex > lastUserIndex
     }
 
     // ---- Session 管理 ----
@@ -761,11 +833,14 @@ class ChatService(
 
                 // 群组讨论：跳过助手正则预处理，直接追加用户消息，交给调度器继续讨论
                 if (currentConversation.isGroupDiscussion) {
-                    // 首次话题：会话标题为空时用首条文本截断做标题（历史列表可读）
+                    // 首次话题：会话标题为空时用首条文本截断做标题（历史列表可读）；
+                    // 纯附件（无文字）时用占位标题，避免群组历史列表显示"尚未开始"。
                     val firstText = content.filterIsInstance<UIMessagePart.Text>()
                         .firstOrNull()?.text.orEmpty().trim()
                     val title = if (currentConversation.title.isBlank() && firstText.isNotEmpty()) {
                         firstText.take(30)
+                    } else if (currentConversation.title.isBlank() && firstText.isEmpty()) {
+                        "[图片/附件]"
                     } else {
                         currentConversation.title
                     }
@@ -838,6 +913,137 @@ class ChatService(
             }
         }
         session.setJob(job)
+    }
+
+    // ---- 引导消息 ----
+
+    /**
+     * 向主 AI 发送引导消息：不新增独立用户消息，而是把引导文本以可见工具气泡合并进
+     * 最后一条 assistant 消息，并注入 AI 上下文让它按引导继续生成（并入同一个气泡）。
+     *
+     * 实现复用 [handleMessageComplete] 的 resumeContext 续答机制：resumeContext 追加为
+     * provider 看到的最后一条 USER 消息、不落持久化列表，handleMessageChunk 仍并入上一条
+     * assistant 消息——正好满足"引导合并进 AI 气泡、不单独成条、继续生成"。
+     *
+     * 运行中子代理的引导走 [me.rerere.rikkahub.data.ai.subagent.SubAgentRunner.submitGuidance]
+     * （详情页入口，每步注入子代理思维链），与本方法互不干扰。
+     */
+    fun sendGuidance(conversationId: Uuid, text: String) {
+        if (text.isBlank()) return
+        val session = getOrCreateSession(conversationId)
+        if (session.state.value.isGroupDiscussion) return
+
+        val guidanceInstruction = buildString {
+            appendLine("## User guidance")
+            appendLine("The user has sent you the following guidance. Continue your existing response according to it:")
+            appendLine("```")
+            appendLine(text.take(1000))
+            appendLine("```")
+            appendLine("- Follow the guidance in your ongoing reply. Do NOT re-answer from scratch; build on your existing answer.")
+            appendLine("- If you were waiting for a running sub-agent, you may incorporate this guidance now and continue when results arrive.")
+        }
+
+        val runningJob = session.getJob()
+        // AI 正在生成：不强行取消当前流式请求——打断流会触发 OkHttp 的
+        // "stream was reset: CANCEL"，且被迫从头重新生成导致反应慢。
+        // 对齐子代理引导的"下个步骤边界注入"语义：等当前回合自然结束后再注入续答。
+        if (runningJob != null && runningJob.isActive) {
+            appScope.launch {
+                try {
+                    runCatching { runningJob.join() }
+                    // 等当前回合彻底结束（generationJob 置 null）。等待期间若有新回合接管
+                    // （如子代理完成触发的 resume），继续等到会话空闲，避免与新回合并发写入。
+                    session.generationJob.first { it == null }
+                    appendGuidancePart(conversationId, text)
+                    // 旧回合已结束：此时 setJob 续答 job 安全（不会 cancel 活跃的旧 job），
+                    // 且续答可被停止按钮中断。
+                    val resumeJob = appScope.launch {
+                        handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
+                    }
+                    session.setJob(resumeJob)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    e.printStackTrace()
+                    addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+                }
+            }
+            return
+        }
+
+        // AI 空闲：直接注入续答（setJob 让续答可被停止按钮中断）
+        val job = appScope.launch {
+            try {
+                appendGuidancePart(conversationId, text)
+                handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                e.printStackTrace()
+                addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+            }
+        }
+        session.setJob(job)
+    }
+
+    /**
+     * 把引导文本以可见工具气泡追加到会话最后一条 assistant 消息（无 assistant 消息则新建）。
+     * toolName = "user_guidance"，渲染走 [GuidanceToolUI]（注册在 ToolUIRegistry）。
+     */
+    private suspend fun appendGuidancePart(conversationId: Uuid, text: String) {
+        val conversation = getConversationFlow(conversationId).value
+        val guidancePart = UIMessagePart.Tool(
+            toolCallId = Uuid.random().toString(),
+            toolName = "user_guidance",
+            input = "{}",
+            // 输出为 JSON（含 text 字段）：渲染器把 content 解析成 JSON 读取 text；
+            // 模型侧以工具结果形式读到引导文本。文本含引号/换行时经 buildJsonObject 正确转义。
+            output = listOf(
+                UIMessagePart.Text(
+                    buildJsonObject {
+                        put("text", JsonPrimitive(text))
+                    }.toString()
+                )
+            ),
+            approvalState = ToolApprovalState.Approved,
+        )
+        if (conversation.messageNodes.isEmpty()) {
+            // 空会话：新建仅含引导气泡的 assistant 消息，生成会往里续
+            updateConversationState(conversationId) { conv ->
+                conv.copy(
+                    messageNodes = conv.messageNodes + UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(guidancePart),
+                    ).toMessageNode(),
+                )
+            }
+        } else {
+            // 追加到最后一条消息的 parts 末尾。若最后一条是 USER（无 AI 气泡可合并），
+            // 也新建一条 assistant 消息承载引导。
+            val lastNode = conversation.messageNodes.last()
+            val lastMsg = lastNode.currentMessage
+            if (lastMsg.role == MessageRole.ASSISTANT) {
+                updateConversationState(conversationId) { conv ->
+                    val nodes = conv.messageNodes.toMutableList()
+                    val tailIndex = nodes.lastIndex
+                    val tail = nodes[tailIndex]
+                    nodes[tailIndex] = tail.copy(
+                        messages = tail.messages.map { m ->
+                            if (m.id == lastMsg.id) m.copy(parts = m.parts + guidancePart) else m
+                        },
+                    )
+                    conv.copy(messageNodes = nodes)
+                }
+            } else {
+                updateConversationState(conversationId) { conv ->
+                    conv.copy(
+                        messageNodes = conv.messageNodes + UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = listOf(guidancePart),
+                        ).toMessageNode(),
+                    )
+                }
+            }
+        }
+        saveConversation(conversationId, getConversationFlow(conversationId).value)
     }
 
     private fun preprocessUserInputParts(parts: List<UIMessagePart>, assistant: Assistant): List<UIMessagePart> {
@@ -1020,6 +1226,14 @@ class ChatService(
             // start generating
             val session = getOrCreateSession(conversationId)
             var hasEmittedGenerationStarted = false
+            // 生成用消息（重生成时是 messageRange 子序列）
+            val messagesToGenerate = conversation.currentMessages.let { msgs ->
+                if (messageRange != null) {
+                    msgs.subList(messageRange.start, messageRange.endInclusive + 1)
+                } else {
+                    msgs
+                }
+            }
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -1027,13 +1241,7 @@ class ChatService(
                 // 唤醒指令作为 provider 看到的最后一条 USER 消息注入（GenerationHandler 内部
                 // 追加到发送列表末尾），不写 system、不进持久化消息列表：system 前缀稳定 → 缓存命中；
                 // 持久化尾部保持上一条 ASSISTANT → 续答并入同一条消息（BUG3 修复 + 缓存优化）。
-                messages = conversation.currentMessages.let { msgs ->
-                    if (messageRange != null) {
-                        msgs.subList(messageRange.start, messageRange.endInclusive + 1)
-                    } else {
-                        msgs
-                    }
-                },
+                messages = messagesToGenerate,
                 assistant = assistant,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 conversationModeInjectionIds = conversation.modeInjectionIds,
@@ -1041,11 +1249,10 @@ class ChatService(
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversation.id.toString(),
                 resumeContext = resumeContext,
-                memories = if (assistant.useGlobalMemory) {
-                    memoryRepository.getGlobalMemories()
-                } else {
-                    memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
-                },
+                memories = loadMemoriesForGeneration(
+                    assistant = assistant,
+                    messages = messagesToGenerate,
+                ),
                 inputTransformers = buildList {
                     addAll(inputTransformers)
                     add(templateTransformer)
@@ -1204,6 +1411,51 @@ class ChatService(
 
             // 母代理回合正常结束：补唤醒该会话已完成但未消费的子代理
             scheduleRoundEndResume(conversationId)
+        }
+    }
+
+    /**
+     * 生成时的记忆注入：全量 → 话题相关 top-K + 最近兜底。
+     * 检索失败时回退全量注入，绝不崩。
+     */
+    private suspend fun loadMemoriesForGeneration(
+        assistant: Assistant,
+        messages: List<UIMessage>,
+    ): List<AssistantMemory> {
+        val memoryAssistantId = if (assistant.useGlobalMemory) {
+            MemoryRepository.GLOBAL_MEMORY_ID
+        } else {
+            assistant.id.toString()
+        }
+        return runCatching {
+            memoryRepository.getRelevantMemories(
+                assistantId = memoryAssistantId,
+                query = extractMemoryQuery(messages),
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "memory retrieval failed, fall back to full memories", e)
+            if (assistant.useGlobalMemory) memoryRepository.getGlobalMemories()
+            else memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
+        }
+    }
+
+    /**
+     * 记忆检索词提取：默认取最近一条 USER 消息文本（最新话题，最贴当前意图）；
+     * 太短/无实质词（如「那这个呢？」）则回退拼接最近 3 条 USER 消息给 FTS 更多检索面。
+     * 返回 null → 无可用检索词，注入侧仅走「最近记忆」兜底。
+     */
+    private fun extractMemoryQuery(messages: List<UIMessage>): String? {
+        val userMessages = messages.filter { it.role == MessageRole.USER }
+        if (userMessages.isEmpty()) return null
+        val latest = userMessages.last().toText().trim()
+        if (latest.isBlank()) return null
+        return if (latest.length < 4 || latest.none { it.isLetterOrDigit() }) {
+            userMessages.takeLast(3)
+                .joinToString("\n") { it.toText().trim() }
+                .trim()
+                .takeIf { it.isNotBlank() }
+        } else {
+            latest.take(MemoryRepository.MEMORY_QUERY_MAX_CHARS)
         }
     }
 

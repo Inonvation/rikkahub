@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.discussion
 
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.DISCUSSION_MODERATOR_ID
 import me.rerere.rikkahub.data.model.DiscussionConfig
 import me.rerere.rikkahub.data.model.DiscussionMember
 import me.rerere.rikkahub.data.model.DiscussionMode
@@ -79,10 +80,13 @@ object DiscussionPrompts {
 
         val topicIndex = conversation.messageNodes.indexOfFirst { it.role == me.rerere.ai.core.MessageRole.USER }
         val turns = conversation.messageNodes.filterIndexed { index, node ->
-            // 开题消息保留在最前；其余取成员发言（带 speakerId 的 ASSISTANT）
-            // 以及开题之后的用户插话（让成员能看到用户中途提出的补充/质疑）
+            // 开题消息保留在最前；其余取成员发言（带 speakerId 的 ASSISTANT，排除主持人总结）
+            // 以及开题之后的用户插话（让成员能看到用户中途提出的补充/质疑）。
+            // 主持人总结（DISCUSSION_MODERATOR_ID）不进成员上下文——避免成员复述/参考总结而非继续讨论。
             index == topicIndex ||
-                (node.role == me.rerere.ai.core.MessageRole.ASSISTANT && node.currentMessage.speakerId != null) ||
+                (node.role == me.rerere.ai.core.MessageRole.ASSISTANT &&
+                    node.currentMessage.speakerId != null &&
+                    node.currentMessage.speakerId != DISCUSSION_MODERATOR_ID) ||
                 (node.role == me.rerere.ai.core.MessageRole.USER && index > topicIndex && topicIndex >= 0)
         }
 

@@ -49,9 +49,12 @@ fun GroupDiscussionCreatePage(
     val name by vm.name.collectAsStateWithLifecycle()
     val creating by vm.creating.collectAsStateWithLifecycle()
 
-    // 创建成功后跳转到独立讨论页（不自动开始，进页输入主题才启动）
+    // 创建成功后跳转到独立讨论页（不自动开始，进页输入主题才启动）。
+    // 创建表单用完即弃：从讨论页返回时直接回群组中心，不退回创建表单。
     vm.onCreated = { conversationId ->
-        navController.navigate(Screen.GroupDiscussion(conversationId.toString()))
+        navController.navigate(Screen.GroupDiscussion(conversationId.toString())) {
+            popUpTo(Screen.GroupDiscussionCreate) { inclusive = true }
+        }
     }
 
     Scaffold(
