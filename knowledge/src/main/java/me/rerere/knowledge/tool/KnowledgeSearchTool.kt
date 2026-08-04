@@ -17,6 +17,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
 import me.rerere.knowledge.retrieval.Reranker
+import me.rerere.knowledge.retrieval.ScoreSource
 import me.rerere.knowledge.vector.toFloatArray
 import me.rerere.ai.core.InputSchema
 
@@ -229,8 +230,10 @@ class KnowledgeSearchTool(
             }
         }
 
-        // 多查询结果合并：按 score 降序，去重
-        allResults.sortByDescending { it.score }
+        // 多查询结果合并：按 normalizedScore（0~1 统一分数）降序，去重
+        // KEYWORD 的 score 是 matchCount、HYBRID 的 score 是 RRF 分，跨来源不可比；
+        // normalizedScore 已统一为 0~1，可跨来源排序。
+        allResults.sortByDescending { it.normalizedScore }
         val seenIds = mutableSetOf<String>()
         val deduped = allResults.filter { seenIds.add(it.chunk.id) }
 
@@ -291,9 +294,10 @@ class KnowledgeSearchTool(
             appendLine("Found ${results.size} relevant chunks from the knowledge base:\n")
             expandedResults.forEachIndexed { index, result ->
                 val source = docNames[result.chunk.id]
-                val scoreText = when (result.scoreKind) {
-                    "relevance" -> "相关度 ${"%.0f".format(result.score * 100)}%"
-                    else -> "RRF ${"%.3f".format(result.score)}"
+                val scoreText = when (result.scoreSource) {
+                    // 关键词结果显示真实匹配次数，不伪装成"相关度 %"
+                    ScoreSource.KEYWORD -> "关键词命中 ${result.matchCount} 处"
+                    else -> "相关度 ${"%.0f".format(result.normalizedScore * 100)}%"
                 }
                 appendLine("---")
                 appendLine("[${index + 1}] 来源: ${source ?: "未知文档"} (${scoreText})")
@@ -342,33 +346,39 @@ class KnowledgeSearchTool(
         results: List<me.rerere.knowledge.retrieval.RetrievalResult>,
         targetIds: List<String>,
     ): List<me.rerere.knowledge.retrieval.RetrievalResult> {
-        // 从第一个知识库读取 context_window 配置（所有知识库共享同一配置）
-        val contextWindow = targetIds.firstNotNullOfOrNull { id ->
-            knowledgeManager.baseRepository.getById(id)
-        }?.contextWindow ?: 0
-        if (contextWindow <= 0) return results
+        if (results.isEmpty()) return results
+
+        // 预取各知识库的 context_window 配置（按库取，而非取第一个库）
+        val windowByBase = targetIds.associateWith { id ->
+            knowledgeManager.baseRepository.getById(id)?.contextWindow ?: 0
+        }
 
         val expanded = mutableListOf<me.rerere.knowledge.retrieval.RetrievalResult>()
         val seenIds = mutableSetOf<String>()
 
         for (result in results) {
-            // 添加相邻 chunk
-            val adjacentChunks = knowledgeManager.chunkDao.getAdjacentChunks(
-                documentId = result.chunk.documentId,
-                minIndex = result.chunk.chunkIndex - contextWindow,
-                maxIndex = result.chunk.chunkIndex + contextWindow,
-            )
-            for (chunk in adjacentChunks) {
-                if (seenIds.add(chunk.id)) {
-                    expanded.add(
-                        me.rerere.knowledge.retrieval.RetrievalResult(
-                            chunk = chunk,
-                            score = result.score,
-                            rank = 0,
-                            scoreKind = "context",
-                            snippet = null,
+            val contextWindow = windowByBase[result.chunk.knowledgeBaseId] ?: 0
+            // 添加相邻 chunk（contextWindow = 0 时仅原始命中）
+            if (contextWindow > 0) {
+                val adjacentChunks = knowledgeManager.chunkDao.getAdjacentChunks(
+                    documentId = result.chunk.documentId,
+                    minIndex = result.chunk.chunkIndex - contextWindow,
+                    maxIndex = result.chunk.chunkIndex + contextWindow,
+                )
+                for (chunk in adjacentChunks) {
+                    if (seenIds.add(chunk.id)) {
+                        expanded.add(
+                            me.rerere.knowledge.retrieval.RetrievalResult(
+                                chunk = chunk,
+                                score = result.score,
+                                normalizedScore = result.normalizedScore,
+                                scoreSource = result.scoreSource,
+                                rank = 0,
+                                snippet = null,
+                                matchCount = result.matchCount,
+                            )
                         )
-                    )
+                    }
                 }
             }
 

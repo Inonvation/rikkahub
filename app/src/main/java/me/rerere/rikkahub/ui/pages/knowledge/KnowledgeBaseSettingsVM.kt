@@ -57,6 +57,10 @@ class KnowledgeBaseSettingsVM(
     var reprocessing by mutableStateOf(false)
         private set
 
+    // 重处理时各文档的进度（documentId -> 0..1），用于设置页进度显示
+    var reprocessProgress by mutableStateOf<Map<String, Float>>(emptyMap())
+        private set
+
     // 分块设置已改、索引尚未重建的提示（会话级内存态，不落库）
     var hasPendingReprocess by mutableStateOf(false)
         private set
@@ -170,11 +174,19 @@ class KnowledgeBaseSettingsVM(
         reprocessJob?.cancel()
         reprocessJob = viewModelScope.launch {
             reprocessing = true
+            reprocessProgress = emptyMap()
             try {
-                documentProcessor.reprocessAll()
+                documentProcessor.reprocessAll { docId, progress ->
+                    reprocessProgress = if (progress >= 1f) {
+                        reprocessProgress - docId
+                    } else {
+                        reprocessProgress + (docId to progress)
+                    }
+                }
                 hasPendingReprocess = false
             } finally {
                 reprocessing = false
+                reprocessProgress = emptyMap()
             }
         }
     }

@@ -273,8 +273,8 @@ class DocumentProcessor(
             knowledgeManager.documentRepository.updateChunkCount(documentId, chunks.size, "completed")
             // 文档索引变更后，清除该知识库的向量缓存，避免检索命中旧数据
             knowledgeManager.invalidateVectorCache(baseId)
-            // 强制重建 FTS 索引，确保新增/更新内容立即可检索
-            rebuildFtsIndex()
+            // 强制重建 FTS 索引，确保新增/更新内容立即可检索（只重建该文档）
+            rebuildFtsIndex(documentId)
         } catch (e: OutOfMemoryError) {
             // OOM 是 Error 不是 Exception，需单独捕获：标记失败而非崩溃
             Log.e(TAG, "processDocument OOM: $documentId", e)
@@ -487,10 +487,14 @@ class DocumentProcessor(
         }
     }
 
-    private suspend fun rebuildFtsIndex() {
+    /**
+     * 重建单个文档的 FTS 索引（文档处理完成后调用，避免整库全量重建）。
+     * @param documentId 刚处理完的文档
+     */
+    private suspend fun rebuildFtsIndex(documentId: String) {
         if (ftsManager.ensureIndex()) {
-            val chunks = knowledgeManager.chunkDao.getByKnowledgeBaseId(baseId)
-            ftsManager.rebuildBase(baseId, chunks)
+            val chunks = knowledgeManager.chunkDao.getByDocumentId(documentId)
+            ftsManager.rebuildDocument(baseId, documentId, chunks)
         }
     }
 }

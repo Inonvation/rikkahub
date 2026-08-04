@@ -4,17 +4,19 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RewriteQueriesToDropUnusedColumns
 import kotlinx.coroutines.flow.Flow
 import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
 import me.rerere.knowledge.data.entity.KnowledgeBaseWithDocumentCount
 
 @Dao
 interface KnowledgeBaseDao {
+    @RewriteQueriesToDropUnusedColumns
     @Query("""
-        SELECT kb.*, COUNT(kd.id) as document_count
+        SELECT kb.*,
+               (SELECT COUNT(*) FROM knowledge_document kd WHERE kd.knowledge_base_id = kb.id) as document_count,
+               (SELECT COUNT(*) FROM knowledge_chunk kc WHERE kc.knowledge_base_id = kb.id) as chunk_count
         FROM knowledge_base kb
-        LEFT JOIN knowledge_document kd ON kd.knowledge_base_id = kb.id
-        GROUP BY kb.id
         ORDER BY kb.updated_at DESC
     """)
     fun getAllWithDocumentCount(): Flow<List<KnowledgeBaseWithDocumentCount>>

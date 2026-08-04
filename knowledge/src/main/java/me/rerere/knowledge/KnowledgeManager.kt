@@ -5,7 +5,6 @@ import me.rerere.knowledge.data.dao.KnowledgeChunkDao
 import me.rerere.knowledge.data.dao.KnowledgeDocumentDao
 import me.rerere.knowledge.data.repository.KnowledgeBaseRepository
 import me.rerere.knowledge.data.repository.KnowledgeDocumentRepository
-import me.rerere.knowledge.retrieval.Bm25Searcher
 import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.knowledge.retrieval.Reranker
 import me.rerere.knowledge.retrieval.RetrievalPipeline
@@ -16,17 +15,15 @@ class KnowledgeManager(
     private val knowledgeBaseDao: KnowledgeBaseDao,
     private val knowledgeDocumentDao: KnowledgeDocumentDao,
     val chunkDao: KnowledgeChunkDao,
-    private val keywordSearcher: KeywordSearcher? = null,
+    private val keywordSearcher: KeywordSearcher,
 ) {
     val baseRepository = KnowledgeBaseRepository(knowledgeBaseDao)
     val documentRepository = KnowledgeDocumentRepository(knowledgeDocumentDao)
 
     private val vectorStore = VectorStore(chunkDao)
-    private val bm25Searcher = Bm25Searcher(chunkDao)
     private val retrievalPipeline = RetrievalPipeline(
         chunkDao = chunkDao,
         vectorStore = vectorStore,
-        bm25Searcher = bm25Searcher,
         keywordSearcher = keywordSearcher,
     )
 

@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.pages.knowledge
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -71,6 +73,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Search01
@@ -99,6 +103,8 @@ fun KnowledgeBaseDetailPage(baseId: String) {
     val searchRerankEnabled by vm.searchRerankEnabled.collectAsState()
     val searchKeywordWeight by vm.searchKeywordWeight.collectAsState()
     val searchDurationMs by vm.searchDurationMs.collectAsState()
+    val searchError by vm.searchError.collectAsState()
+    val semanticAvailable by vm.semanticAvailable.collectAsState()
     val documentNames by vm.documentNames.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
@@ -107,6 +113,7 @@ fun KnowledgeBaseDetailPage(baseId: String) {
 
     var searchQuery by remember { mutableStateOf("") }
     var showSearchSheet by remember { mutableStateOf(false) }
+    var showSearchParams by remember { mutableStateOf(false) }
     var showReprocessDialog by remember { mutableStateOf(false) }
 
     // 导入被拒绝等一次性通知
@@ -115,6 +122,23 @@ fun KnowledgeBaseDetailPage(baseId: String) {
             if (notice != null) {
                 toaster.show(notice, type = ToastType.Error)
                 vm.consumeNotice()
+            }
+        }
+    }
+
+    // 文档导入处理结果 toast
+    LaunchedEffect(Unit) {
+        vm.importResult.collect { result ->
+            if (result != null) {
+                if (result.success) {
+                    toaster.show("已导入「${result.fileName}」", type = ToastType.Success)
+                } else {
+                    toaster.show(
+                        "「${result.fileName}」导入失败：${result.message ?: "未知错误"}",
+                        type = ToastType.Error,
+                    )
+                }
+                vm.consumeImportResult()
             }
         }
     }
@@ -223,6 +247,7 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                                 Spacer(Modifier.height(4.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Tag { Text(doc.fileType.uppercase()) }
+                                    Tag { Text(formatFileSize(doc.fileSize)) }
                                     Tag { Text(
                                         when (doc.status) {
                                             "completed" -> "嵌入完成"
@@ -236,6 +261,12 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                                         Tag { Text("${doc.chunkCount} chunks") }
                                     }
                                 }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "导入于 ${formatImportTime(doc.createdAt)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                                 if (doc.status == "failed") {
                                     val errorMsg = doc.error
                                     if (errorMsg != null) {
@@ -372,108 +403,141 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                     }
                 }
 
-                // 检索参数面板
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    // TopK
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                "TopK: ${searchTopK}",
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.width(64.dp),
-                            )
-                            Slider(
-                                value = searchTopK.toFloat(),
-                                onValueChange = { vm.updateSearchTopK(it.roundToInt()) },
-                                valueRange = 1f..50f,
-                                steps = 8,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
+                // 检索参数面板（默认折叠，普通用户不关心）
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSearchParams = !showSearchParams }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            "最多返回几条结果，越大越全但可能混入不相关的",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
+                            "高级参数",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            if (showSearchParams) HugeIcons.ArrowUp02 else HugeIcons.ArrowDown01,
+                            contentDescription = if (showSearchParams) "收起" else "展开",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    // 阈值
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    AnimatedVisibility(visible = showSearchParams) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(
-                                "阈值: ${(searchThreshold * 100).roundToInt()}%",
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.width(64.dp),
-                            )
-                            Slider(
-                                value = searchThreshold,
-                                onValueChange = { vm.updateSearchThreshold(it) },
-                                valueRange = 0f..1f,
-                                modifier = Modifier.weight(1f),
-                            )
+                            // TopK
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        "TopK: ${searchTopK}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.width(64.dp),
+                                    )
+                                    Slider(
+                                        value = searchTopK.toFloat(),
+                                        onValueChange = { vm.updateSearchTopK(it.roundToInt()) },
+                                        valueRange = 1f..50f,
+                                        steps = 8,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Text(
+                                    "最多返回几条结果，越大越全但可能混入不相关的",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
+                            // 阈值：仅配置了 embedding 模型（语义检索可用）时显示
+                            if (semanticAvailable) {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(
+                                            "阈值: ${(searchThreshold * 100).roundToInt()}%",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            modifier = Modifier.width(64.dp),
+                                        )
+                                        Slider(
+                                            value = searchThreshold,
+                                            onValueChange = { vm.updateSearchThreshold(it) },
+                                            valueRange = 0f..1f,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Text(
+                                        "只对语义结果生效，低于该相似度的段落不显示（0% = 不过滤）",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 4.dp),
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    "未配置 Embedding 模型，检索为纯关键词匹配，不支持相似度阈值过滤",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
+                            // Rerank
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text("Rerank", style = MaterialTheme.typography.labelMedium)
+                                    Switch(
+                                        checked = searchRerankEnabled,
+                                        onCheckedChange = { vm.updateSearchRerankEnabled(it) },
+                                        modifier = Modifier.scale(0.8f),
+                                    )
+                                }
+                                Text(
+                                    "用模型二次精排，结果更准但每次检索更慢更耗",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
+                            // 关键词权重
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        "关键词: ${"%.1f".format(searchKeywordWeight)}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.width(64.dp),
+                                    )
+                                    Slider(
+                                        value = searchKeywordWeight,
+                                        onValueChange = { vm.updateSearchKeywordWeight(it) },
+                                        valueRange = 0f..2f,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Text(
+                                    "关键词匹配的话语权：越大越偏向找包含输入词的段落（1 = 与语义平分，0 = 纯语义）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
                         }
-                        Text(
-                            "只对语义结果生效，低于该相似度的段落不显示（0% = 不过滤）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    }
-                    // Rerank
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text("Rerank", style = MaterialTheme.typography.labelMedium)
-                            Switch(
-                                checked = searchRerankEnabled,
-                                onCheckedChange = { vm.updateSearchRerankEnabled(it) },
-                                modifier = Modifier.scale(0.8f),
-                            )
-                        }
-                        Text(
-                            "用模型二次精排，结果更准但每次检索更慢更耗",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    }
-                    // 关键词权重
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                "关键词: ${"%.1f".format(searchKeywordWeight)}",
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.width(64.dp),
-                            )
-                            Slider(
-                                value = searchKeywordWeight,
-                                onValueChange = { vm.updateSearchKeywordWeight(it) },
-                                valueRange = 0f..2f,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        Text(
-                            "关键词匹配的话语权：越大越偏向找包含输入词的段落（1 = 与语义平分，0 = 纯语义）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
                     }
                 }
 
@@ -488,7 +552,14 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                     Spacer(Modifier.height(4.dp))
                 }
 
-                if (searchResults.isEmpty() && !searchLoading) {
+                if (searchError != null && !searchLoading) {
+                    Text(
+                        "检索失败：$searchError",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                } else if (searchResults.isEmpty() && !searchLoading) {
                     Text(
                         "输入关键词后自动搜索",
                         style = MaterialTheme.typography.bodyMedium,
@@ -528,17 +599,22 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                                     }
                                     Tag { Text("Rank: ${result.rank}") }
                                     Tag {
+                                        // KEYWORD 结果显示真实匹配次数，不伪装成"相关度 %"
                                         Text(
-                                            if (result.scoreKind == "relevance")
-                                                "相关度: ${"%.1f".format(result.score * 100)}%"
+                                            if (result.scoreSource == me.rerere.knowledge.retrieval.ScoreSource.KEYWORD)
+                                                "匹配 ${result.matchCount} 处"
                                             else
-                                                "RRF: ${"%.4f".format(result.score)}"
+                                                "相关度: ${"%.0f".format(result.normalizedScore * 100)}%"
                                         )
                                     }
                                 }
 
-                                // 相似度进度条（颜色分级：高>0.7 绿 / 中0.3-0.7 黄 / 低<0.3 红）
-                                val scoreForBar = result.score.coerceIn(0f, 1f)
+                                // KEYWORD 结果进度条用匹配次数反映强度，其余用归一化相似度
+                                val scoreForBar = if (result.scoreSource == me.rerere.knowledge.retrieval.ScoreSource.KEYWORD) {
+                                    result.matchCount.toFloat() / 5f
+                                } else {
+                                    result.normalizedScore
+                                }.coerceIn(0f, 1f)
                                 val barColor = when {
                                     scoreForBar >= 0.7f -> Color(0xFF4CAF50)
                                     scoreForBar >= 0.3f -> Color(0xFFFFC107)
@@ -553,13 +629,9 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                                 )
 
                                 Spacer(Modifier.height(6.dp))
-                                val snippet = result.snippet
+                                // 统一展示完整 chunk + 高亮所有关键词出现处，避免 simple_snippet 只截一段 + "..."
                                 Text(
-                                    text = if (snippet != null) {
-                                        buildAnnotatedString { highlightSnippet(snippet) }
-                                    } else {
-                                        buildAnnotatedString { highlightQuery(result.chunk.content, searchQuery) }
-                                    },
+                                    text = buildAnnotatedString { highlightQuery(result.chunk.content, searchQuery) },
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 10,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -648,4 +720,26 @@ private fun AnnotatedString.Builder.highlightSnippet(snippet: String) {
         }
         index = end + 1
     }
+}
+
+/** 文件大小格式化：<1KB 显示 B，否则 KB/MB（1 位小数）。 */
+private fun formatFileSize(bytes: Long): String {
+    if (bytes < 1024) return "${bytes} B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "${"%.1f".format(kb)} KB"
+    return "${"%.1f".format(kb / 1024)} MB"
+}
+
+/** 导入时间格式化：MM-DD HH:mm（当天显示 HH:mm）。 */
+private fun formatImportTime(timestamp: Long): String {
+    val cal = java.util.Calendar.getInstance()
+    cal.timeInMillis = timestamp
+    val now = java.util.Calendar.getInstance()
+    val mm = "%02d".format(cal.get(java.util.Calendar.MONTH) + 1)
+    val dd = "%02d".format(cal.get(java.util.Calendar.DAY_OF_MONTH))
+    val hh = "%02d".format(cal.get(java.util.Calendar.HOUR_OF_DAY))
+    val mi = "%02d".format(cal.get(java.util.Calendar.MINUTE))
+    val sameDay = cal.get(java.util.Calendar.YEAR) == now.get(java.util.Calendar.YEAR) &&
+        cal.get(java.util.Calendar.DAY_OF_YEAR) == now.get(java.util.Calendar.DAY_OF_YEAR)
+    return if (sameDay) "$hh:$mi" else "$mm-$dd $hh:$mi"
 }

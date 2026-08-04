@@ -84,6 +84,14 @@ class KnowledgeBaseDetailVM(
     private val _searchDurationMs = MutableStateFlow<Long?>(null)
     val searchDurationMs = _searchDurationMs.asStateFlow()
 
+    // 检索错误信息（embedding 失败 / 检索异常等），UI 展示失败原因而非静默空列表
+    private val _searchError = MutableStateFlow<String?>(null)
+    val searchError = _searchError.asStateFlow()
+
+    // 是否配置了 embedding 模型（决定检索是否含语义成分，纯关键词模式无阈值）
+    private val _semanticAvailable = MutableStateFlow(false)
+    val semanticAvailable = _semanticAvailable.asStateFlow()
+
     // chunkId -> 文档文件名，用于结果来源展示
     private val _documentNames = MutableStateFlow<Map<String, String>>(emptyMap())
     val documentNames = _documentNames.asStateFlow()
@@ -91,6 +99,11 @@ class KnowledgeBaseDetailVM(
     // 一次性消息通知（导入被拒绝等），由 UI 层 toast 展示
     private val _notices = MutableStateFlow<String?>(null)
     val notices = _notices.asStateFlow()
+
+    // 文档导入处理结果（成功/失败），UI 层弹 toast
+    data class ImportResult(val fileName: String, val success: Boolean, val message: String?)
+    private val _importResult = MutableStateFlow<ImportResult?>(null)
+    val importResult = _importResult.asStateFlow()
 
     private var searchParamsInitialized = false
 
@@ -100,10 +113,13 @@ class KnowledgeBaseDetailVM(
     fun updateSearchKeywordWeight(v: Float) { _searchKeywordWeight.value = v }
 
     fun consumeNotice() { _notices.value = null }
+    fun consumeSearchError() { _searchError.value = null }
+    fun consumeImportResult() { _importResult.value = null }
 
     fun addDocument(uri: Uri, context: Context) {
         viewModelScope.launch {
-            val fileName = uri.lastPathSegment ?: "unknown"
+            // 优先用 contentResolver 查真实文件名（云盘/相册的 lastPathSegment 常是数字 ID）
+            val fileName = queryDisplayName(uri, context)
             val fileType = fileName.substringAfterLast('.', "").lowercase()
 
             // 白名单校验：不支持的类型直接拒绝，不拷贝、不创建记录
@@ -132,6 +148,14 @@ class KnowledgeBaseDetailVM(
             // Auto-process
             documentProcessor.processDocument(doc.id, filePath, fileType) { progress ->
                 updateProgress(doc.id, progress)
+            }
+
+            // 处理后查最终状态，弹导入结果 toast
+            val finalDoc = knowledgeManager.documentRepository.getById(doc.id)
+            _importResult.value = when (finalDoc?.status) {
+                "completed" -> ImportResult(fileName, success = true, message = null)
+                "failed" -> ImportResult(fileName, success = false, message = finalDoc.error ?: "处理失败")
+                else -> ImportResult(fileName, success = true, message = "已加入处理队列")
             }
         }
     }
@@ -194,6 +218,7 @@ class KnowledgeBaseDetailVM(
 
                 // Resolve embedding model
                 val embModelId = base.embeddingModelId?.let { Uuid.parse(it) } ?: settings.embeddingModelId
+                _semanticAvailable.value = embModelId != null
                 val queryEmbedding: FloatArray? = if (embModelId != null) {
                     val model = settings.findModelById(embModelId)
                     val providerSetting = model?.findProvider(settings.providers)
@@ -244,8 +269,10 @@ class KnowledgeBaseDetailVM(
                 }
 
                 _searchDurationMs.value = (System.nanoTime() - startTime) / 1_000_000
+                _searchError.value = null
             } catch (e: Exception) {
                 _searchResults.value = emptyList()
+                _searchError.value = e.message ?: e.javaClass.simpleName
             } finally {
                 _searchLoading.value = false
             }
@@ -257,4 +284,28 @@ class KnowledgeBaseDetailVM(
             knowledgeManager.documentRepository.delete(id)
         }
     }
+}
+
+/**
+ * 从 contentResolver 查询文档真实文件名（OpenableColumns.DISPLAY_NAME）。
+ * 云盘 / 相册的 uri.lastPathSegment 常是数字 ID，不是真实文件名。
+ * 查询失败或名字为空时回退到 lastPathSegment。
+ */
+private fun queryDisplayName(uri: Uri, context: Context): String {
+    var name: String? = null
+    runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+            null, null, null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) name = cursor.getString(idx)
+            }
+        }
+    }
+    val raw = name ?: uri.lastPathSegment ?: "unknown"
+    // 去掉可能混入的路径前缀（部分 provider 返回带目录的名字）
+    return raw.substringAfterLast('/').takeIf { it.isNotBlank() } ?: raw
 }

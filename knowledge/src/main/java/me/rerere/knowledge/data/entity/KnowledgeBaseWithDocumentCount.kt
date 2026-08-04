@@ -18,4 +18,5 @@ data class KnowledgeBaseWithDocumentCount(
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     @ColumnInfo(name = "document_count") val documentCount: Int,
+    @ColumnInfo(name = "chunk_count") val chunkCount: Int = 0,
 )

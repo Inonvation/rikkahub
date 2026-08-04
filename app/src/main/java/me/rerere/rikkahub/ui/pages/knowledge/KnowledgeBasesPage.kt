@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
@@ -63,6 +64,7 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -77,6 +79,7 @@ fun KnowledgeBasesPage() {
     val bases = vm.bases
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val scope = rememberCoroutineScope()
+    val toaster = LocalToaster.current
     var showCreateDialog by remember { mutableStateOf(false) }
 
     // 批量选择
@@ -162,7 +165,7 @@ fun KnowledgeBasesPage() {
                     Spacer(Modifier.height(16.dp))
                     TextButton(onClick = { showCreateDialog = true }) {
                         Icon(HugeIcons.Add01, contentDescription = null)
-                        Text(stringResource(R.string.setting_page_knowledge_bases))
+                        Text(stringResource(R.string.knowledge_page_create_base))
                     }
                 }
             } else {
@@ -285,13 +288,13 @@ fun KnowledgeBasesPage() {
 
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text(stringResource(R.string.setting_page_knowledge_bases)) },
+            title = { Text(stringResource(R.string.knowledge_page_create_base)) },
             text = {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    placeholder = { Text(stringResource(R.string.setting_page_knowledge_bases)) },
+                    placeholder = { Text(stringResource(R.string.knowledge_page_create_base_name_hint)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -301,13 +304,17 @@ fun KnowledgeBasesPage() {
                         if (name.isNotBlank()) {
                             scope.launch {
                                 val id = vm.createBase(name.trim())
-                                navController.navigate(Screen.KnowledgeBaseDetail(id))
+                                if (id != null) {
+                                    navController.navigate(Screen.KnowledgeBaseDetail(id))
+                                    showCreateDialog = false
+                                } else {
+                                    toaster.show("已存在同名知识库", type = ToastType.Error)
+                                }
                             }
-                            showCreateDialog = false
                         }
                     },
                     enabled = name.isNotBlank(),
-                ) { Text(stringResource(R.string.setting_page_knowledge_bases)) }
+                ) { Text(stringResource(R.string.knowledge_page_create)) }
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) { Text(stringResource(R.string.cancel)) }
@@ -345,7 +352,7 @@ private fun KnowledgeBaseCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 14.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -362,8 +369,8 @@ private fun KnowledgeBaseCard(
                 Tag {
                     Text("${base.documentCount} 文档")
                 }
-                if (base.embeddingModelId != null) {
-                    Tag { Text("Vector") }
+                if (base.chunkCount > 0) {
+                    Tag { Text("${base.chunkCount} chunks") }
                 }
             }
             if (base.description.isNotBlank()) {
@@ -393,7 +400,7 @@ private fun KnowledgeBaseSelectableCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 4.dp, top = 8.dp, bottom = 8.dp, end = 12.dp),
+                .padding(start = 4.dp, top = 14.dp, bottom = 14.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(
@@ -415,8 +422,8 @@ private fun KnowledgeBaseSelectableCard(
                     Tag {
                         Text("${base.documentCount} 文档")
                     }
-                    if (base.embeddingModelId != null) {
-                        Tag { Text("Vector") }
+                    if (base.chunkCount > 0) {
+                        Tag { Text("${base.chunkCount} chunks") }
                     }
                 }
                 if (base.description.isNotBlank()) {

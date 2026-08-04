@@ -14,11 +14,31 @@ interface KnowledgeChunkDao {
     @Query("SELECT * FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId ORDER BY document_id, chunk_index")
     suspend fun getByKnowledgeBaseId(knowledgeBaseId: String): List<KnowledgeChunkEntity>
 
+    /**
+     * 轻量投影：只取 id / embedding / 定位字段，不取 content 全文。
+     * 供向量缓存加载使用——检索只算余弦相似度，内容在命中后回表取。
+     */
+    @Query(
+        "SELECT id, document_id, knowledge_base_id, chunk_index, embedding " +
+            "FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId"
+    )
+    suspend fun getVectorsByKnowledgeBaseId(knowledgeBaseId: String): List<ChunkVectorRow>
+
     @Query("SELECT * FROM knowledge_chunk WHERE id IN (:chunkIds)")
     suspend fun getByChunkIds(chunkIds: List<String>): List<KnowledgeChunkEntity>
 
     @Query("SELECT * FROM knowledge_chunk WHERE document_id = :documentId ORDER BY chunk_index")
     suspend fun getByDocumentId(documentId: String): List<KnowledgeChunkEntity>
+
+    /**
+     * 子串精确匹配：content 含检索词原样的 chunk 必然命中。
+     * 兜底 FTS 召回不全时使用（救援模式），LIMIT 约束常见词的全表扫描成本。
+     */
+    @Query(
+        "SELECT * FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId " +
+            "AND content LIKE '%' || :query || '%' LIMIT :limit"
+    )
+    suspend fun searchBySubstring(knowledgeBaseId: String, query: String, limit: Int): List<KnowledgeChunkEntity>
 
     @Query("DELETE FROM knowledge_chunk WHERE document_id = :documentId")
     suspend fun deleteByDocumentId(documentId: String)
@@ -28,6 +48,10 @@ interface KnowledgeChunkDao {
 
     @Query("SELECT COUNT(*) FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId")
     suspend fun countByKnowledgeBaseId(knowledgeBaseId: String): Int
+
+    /** 获取某知识库下所有文档 ID（含无 chunk 的文档），用于 FTS 增量对账。 */
+    @Query("SELECT DISTINCT document_id FROM knowledge_chunk WHERE knowledge_base_id = :knowledgeBaseId")
+    suspend fun getDocumentIdsByKnowledgeBaseId(knowledgeBaseId: String): List<String>
 
     /**
      * 根据 chunk 列表查询所属文档文件名，返回 chunkId -> fileName 映射。
@@ -69,3 +93,14 @@ interface KnowledgeChunkDao {
     @Query("SELECT * FROM knowledge_chunk ORDER BY RANDOM() LIMIT 5")
     suspend fun getRandomChunksFallback(): List<KnowledgeChunkEntity>
 }
+
+/**
+ * 向量缓存用的轻量投影行：只含 id / embedding / 定位字段，不含 content 全文。
+ */
+data class ChunkVectorRow(
+    @androidx.room.ColumnInfo(name = "id") val id: String,
+    @androidx.room.ColumnInfo(name = "document_id") val documentId: String,
+    @androidx.room.ColumnInfo(name = "knowledge_base_id") val knowledgeBaseId: String,
+    @androidx.room.ColumnInfo(name = "chunk_index") val chunkIndex: Int,
+    @androidx.room.ColumnInfo(name = "embedding") val embedding: ByteArray?,
+)

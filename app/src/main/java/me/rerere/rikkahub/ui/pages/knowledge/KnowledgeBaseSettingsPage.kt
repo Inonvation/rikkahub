@@ -18,6 +18,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -37,6 +38,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.roundToInt
 import me.rerere.ai.provider.ModelType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
@@ -53,7 +55,8 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
-private val CHUNK_STRATEGIES = listOf("fixed_size", "paragraph", "sentence", "semantic")
+// semantic 分块算法不成熟（chunkSize 较大时话题边界几乎不触发，与固定大小无差异），暂从 UI 隐藏
+private val CHUNK_STRATEGIES = listOf("fixed_size", "paragraph", "sentence")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -172,6 +175,16 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 )
             }
 
+            if (effectiveEmbeddingModelId == null) {
+                // 未配置 embedding 模型：检索会退化成纯关键词，需明确告知
+                Text(
+                    "⚠ 未配置 Embedding 模型，检索仅支持关键词精确匹配，无法做语义相关检索。请在上方选择 Embedding 模型（或设置全局默认）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                )
+            }
+
             CardGroup(
                 title = { Text("分块设置") },
                 modifier = Modifier.fillMaxWidth(),
@@ -275,6 +288,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                                 idleText = "立即重新处理全部文档",
                                 onClick = { showReprocessDialog = true },
                                 modifier = Modifier.fillMaxWidth(),
+                                progressFraction = vm.reprocessProgress.values.averageOrNull(),
                             )
                         }
                     }
@@ -305,6 +319,46 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                         }
                     }
                 )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("相似度阈值") },
+                            description = { Text("只对语义/重排结果生效，低于该相似度的段落不返回；0 = 不过滤。当前 ${"%.0f".format(vm.similarityThreshold * 100)}%") },
+                        ) {
+                            Slider(
+                                value = vm.similarityThreshold,
+                                onValueChange = { vm.updateSimilarityThreshold(it) },
+                                valueRange = 0f..1f,
+                                steps = 9,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                )
+                item(
+                    headlineContent = {
+                        FormItem(
+                            label = { Text("上下文窗口") },
+                            description = { Text("检索结果附带前后各 N 个 chunk，补充上下文。当前 ${vm.contextWindow}（0=关闭）") },
+                        ) {
+                            Slider(
+                                value = vm.contextWindow.toFloat(),
+                                onValueChange = { vm.updateContextWindow(it.toInt()) },
+                                valueRange = 0f..3f,
+                                steps = 2,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                )
+            }
+
+            // 高级检索设置：默认折叠。这些参数影响检索策略，但绝大多数用户不需要调，
+            // 交由系统按是否配置 embedding 模型自动推导（有 embedding → 混合检索，无 → 纯关键词）。
+            CardGroup(
+                title = { Text("高级检索设置") },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 item(
                     headlineContent = {
                         FormItem(
@@ -350,22 +404,6 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 item(
                     headlineContent = {
                         FormItem(
-                            label = { Text("上下文窗口") },
-                            description = { Text("检索结果附带前后各 N 个 chunk，补充上下文。当前 ${vm.contextWindow}（0=关闭）") },
-                        ) {
-                            Slider(
-                                value = vm.contextWindow.toFloat(),
-                                onValueChange = { vm.updateContextWindow(it.toInt()) },
-                                valueRange = 0f..3f,
-                                steps = 2,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                )
-                item(
-                    headlineContent = {
-                        FormItem(
                             label = { Text("MMR 多样性") },
                             description = { Text("检索结果的多样性控制：1=纯相关性，0=最大多样性。当前 ${"%.1f".format(vm.mmrLambda)}") },
                         ) {
@@ -387,6 +425,7 @@ fun KnowledgeBaseSettingsPage(baseId: String) {
                 idleText = "重新处理全部文档",
                 onClick = { showReprocessDialog = true },
                 modifier = Modifier.fillMaxWidth(),
+                progressFraction = vm.reprocessProgress.values.averageOrNull(),
             )
 
             TextButton(
@@ -448,25 +487,45 @@ private fun String.applyDefaultableInt(defaultValue: Int, onValue: (Int) -> Unit
     }
 }
 
-/** 重新处理按钮：reprocessing 时显示转圈 + "正在重新处理..."，空闲时显示图标 + idleText。 */
+/** 重新处理按钮：reprocessing 时显示转圈 + "正在重新处理 x/y..."，空闲时显示图标 + idleText。 */
 @Composable
 private fun ReprocessButton(
     reprocessing: Boolean,
     idleText: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    progressFraction: Float? = null,
 ) {
-    Button(
-        onClick = onClick,
-        enabled = !reprocessing,
-        modifier = modifier,
-    ) {
-        if (reprocessing) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-        } else {
-            Icon(HugeIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+    Column(modifier = modifier) {
+        Button(
+            onClick = onClick,
+            enabled = !reprocessing,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (reprocessing) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(HugeIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            val text = if (reprocessing) {
+                val pct = progressFraction?.let { " ${(it * 100).roundToInt()}%" } ?: ""
+                "正在重新处理$pct..."
+            } else {
+                idleText
+            }
+            Text(text)
         }
-        Spacer(Modifier.width(8.dp))
-        Text(if (reprocessing) "正在重新处理..." else idleText)
+        if (reprocessing && progressFraction != null) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { progressFraction },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
+
+/** 空集合返回 null（对应无进度），否则返回平均值（0..1）。 */
+private fun Collection<Float>.averageOrNull(): Float? =
+    if (isEmpty()) null else this.average().toFloat()

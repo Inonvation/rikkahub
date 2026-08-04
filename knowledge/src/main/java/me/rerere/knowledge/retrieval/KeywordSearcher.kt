@@ -6,6 +6,7 @@ data class KeywordSearchResult(
     val chunk: KnowledgeChunkEntity,
     val rank: Int,               // 1-based 排序位（用于展示）
     val snippet: String? = null, // 命中片段（simple_snippet 高亮，带 [..] 标记）
+    val matchCount: Int = 0,     // 检索词在该 chunk 内出现的次数（真实相关度依据）
 )
 
 /**

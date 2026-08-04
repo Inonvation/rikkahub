@@ -34,8 +34,16 @@ class KnowledgeBasesVM(
         }
     }
 
-    suspend fun createBase(name: String): String {
-        val base = knowledgeManager.baseRepository.create(name = name)
+    /**
+     * 创建知识库。同名已存在时返回 null（由调用方提示），不重复创建。
+     */
+    suspend fun createBase(name: String): String? {
+        val trimmed = name.trim()
+        // 查重：同名（忽略大小写）已存在则不创建
+        if (bases.any { it.name.trim().equals(trimmed, ignoreCase = true) }) {
+            return null
+        }
+        val base = knowledgeManager.baseRepository.create(name = trimmed)
         return base.id
     }
 
