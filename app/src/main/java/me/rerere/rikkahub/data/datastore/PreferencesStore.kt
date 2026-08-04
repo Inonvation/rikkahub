@@ -569,6 +569,17 @@ class SettingsStore(
         update(fn(settingsFlow.value))
     }
 
+    /**
+     * 仅更新 providers 列表（自动保存场景使用），避免整库重写所有 key。
+     */
+    suspend fun updateProviders(providers: List<ProviderSetting>) {
+        if (settingsFlow.value.init) return
+        settingsFlow.value = settingsFlow.value.copy(providers = providers)
+        dataStore.edit { preferences ->
+            preferences[PROVIDERS] = JsonInstant.encodeToString(providers)
+        }
+    }
+
     suspend fun updateAssistant(assistantId: Uuid) {
         dataStore.edit { preferences ->
             preferences[SELECT_ASSISTANT] = assistantId.toString()

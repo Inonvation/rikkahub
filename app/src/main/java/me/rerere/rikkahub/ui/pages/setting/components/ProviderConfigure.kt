@@ -2,6 +2,11 @@ package me.rerere.rikkahub.ui.pages.setting.components
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -33,7 +39,10 @@ import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -51,6 +60,7 @@ fun ProviderConfigure(
     modifier: Modifier = Modifier,
     onEdit: (provider: ProviderSetting) -> Unit,
 ) {
+    val hapticController = rememberHaptic()
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier
@@ -65,7 +75,10 @@ fun ProviderConfigure(
                         ),
                         label = { Text(type.simpleName ?: "") },
                         selected = provider::class == type,
-                        onClick = { onEdit(provider.convertTo(type)) }
+                        onClick = {
+                            hapticController.lightTap()
+                            onEdit(provider.convertTo(type))
+                        }
                     )
                 }
             }
@@ -157,6 +170,18 @@ internal fun ProviderSetting.isUsingDefaultBaseUrl(): Boolean {
     return baseUrl == defaultBaseUrlForReset()
 }
 
+/** 名称留空时回退到默认名称（按类型）。 */
+internal fun ProviderSetting.defaultProviderName(): String = when (this) {
+    is ProviderSetting.OpenAI -> "OpenAI"
+    is ProviderSetting.Google -> "Google"
+    is ProviderSetting.Claude -> "Claude"
+}
+
+/** 名称为空时补默认名称。 */
+internal fun ProviderSetting.withDefaultNameIfBlank(): ProviderSetting = copyProvider(
+    name = name.ifBlank { defaultProviderName() }
+)
+
 private fun String.convertToTargetBaseUrl(targetDefaultBaseUrl: String): String {
     val sourceUrl = this.toHttpUrlOrNull() ?: return this
     val sourceHost = sourceUrl.host.lowercase()
@@ -204,6 +229,7 @@ private fun ProviderConfigureOpenAI(
     onEdit: (provider: ProviderSetting.OpenAI) -> Unit,
 ) {
     val toaster = LocalToaster.current
+    val hapticController = rememberHaptic()
 
     provider.description()
 
@@ -211,6 +237,7 @@ private fun ProviderConfigureOpenAI(
         value = provider.name,
         onValueChange = { onEdit(provider.copy(name = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_name)) },
+        placeholder = { Text(stringResource(R.string.setting_provider_page_name_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
     )
 
@@ -223,7 +250,12 @@ private fun ProviderConfigureOpenAI(
         maxLines = 3,
         visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
-            IconButton(onClick = { keyVisible = !keyVisible }) {
+            IconButton(
+                onClick = {
+                    hapticController.lightTap()
+                    keyVisible = !keyVisible
+                }
+            ) {
                 Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
             }
         },
@@ -244,19 +276,53 @@ private fun ProviderConfigureOpenAI(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    OutlinedTextField(
-        value = provider.embeddingsPath,
-        onValueChange = { onEdit(provider.copy(embeddingsPath = it.trim())) },
-        label = { Text("Embedding 路径") },
+    // Embedding / Rerank 路径属于进阶项，默认折叠
+    var expandAdvanced by remember { mutableStateOf(false) }
+    Row(
         modifier = Modifier.fillMaxWidth(),
-    )
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.setting_provider_page_more_settings),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = {
+                hapticController.lightTap()
+                expandAdvanced = !expandAdvanced
+            }
+        ) {
+            Icon(
+                imageVector = if (expandAdvanced) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                contentDescription = stringResource(R.string.setting_provider_page_more_settings),
+            )
+        }
+    }
+    AnimatedVisibility(
+        visible = expandAdvanced,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = provider.embeddingsPath,
+                onValueChange = { onEdit(provider.copy(embeddingsPath = it.trim())) },
+                label = { Text("Embedding 路径") },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-    OutlinedTextField(
-        value = provider.rerankPath,
-        onValueChange = { onEdit(provider.copy(rerankPath = it.trim())) },
-        label = { Text("Rerank 路径") },
-        modifier = Modifier.fillMaxWidth(),
-    )
+            OutlinedTextField(
+                value = provider.rerankPath,
+                onValueChange = { onEdit(provider.copy(rerankPath = it.trim())) },
+                label = { Text("Rerank 路径") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -266,7 +332,10 @@ private fun ProviderConfigureOpenAI(
         Text(stringResource(R.string.setting_provider_page_enable))
         Switch(
             checked = provider.enabled,
-            onCheckedChange = { onEdit(provider.copy(enabled = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(enabled = it))
+            }
         )
     }
 
@@ -280,6 +349,7 @@ private fun ProviderConfigureOpenAI(
         Switch(
             checked = provider.useResponseApi,
             onCheckedChange = {
+                hapticController.tap()
                 onEdit(provider.copy(useResponseApi = it))
                 if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
                     toaster.show(message = responseAPIWarning, type = ToastType.Warning)
@@ -296,7 +366,10 @@ private fun ProviderConfigureOpenAI(
         Text(stringResource(R.string.setting_provider_page_include_history_reasoning))
         Switch(
             checked = provider.includeHistoryReasoning,
-            onCheckedChange = { onEdit(provider.copy(includeHistoryReasoning = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(includeHistoryReasoning = it))
+            }
         )
     }
 }
@@ -307,12 +380,14 @@ private fun ProviderConfigureClaude(
     onEdit: (provider: ProviderSetting.Claude) -> Unit,
 ) {
 
+    val hapticController = rememberHaptic()
     provider.description()
 
     OutlinedTextField(
         value = provider.name,
         onValueChange = { onEdit(provider.copy(name = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_name)) },
+        placeholder = { Text(stringResource(R.string.setting_provider_page_name_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         maxLines = 3,
     )
@@ -326,7 +401,12 @@ private fun ProviderConfigureClaude(
         maxLines = 3,
         visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
-            IconButton(onClick = { keyVisible = !keyVisible }) {
+            IconButton(
+                onClick = {
+                    hapticController.lightTap()
+                    keyVisible = !keyVisible
+                }
+            ) {
                 Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
             }
         },
@@ -348,7 +428,10 @@ private fun ProviderConfigureClaude(
         Text(stringResource(R.string.setting_provider_page_enable))
         Switch(
             checked = provider.enabled,
-            onCheckedChange = { onEdit(provider.copy(enabled = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(enabled = it))
+            }
         )
     }
 
@@ -360,7 +443,10 @@ private fun ProviderConfigureClaude(
         Text(stringResource(R.string.setting_provider_page_claude_prompt_caching))
         Switch(
             checked = provider.promptCaching,
-            onCheckedChange = { onEdit(provider.copy(promptCaching = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(promptCaching = it))
+            }
         )
     }
 
@@ -382,7 +468,10 @@ private fun ProviderConfigureClaude(
                         )
                     },
                     selected = provider.promptCacheTtl == ttl,
-                    onClick = { onEdit(provider.copy(promptCacheTtl = ttl)) }
+                    onClick = {
+                        hapticController.lightTap()
+                        onEdit(provider.copy(promptCacheTtl = ttl))
+                    }
                 )
             }
         }
@@ -396,6 +485,7 @@ private fun ProviderConfigureGoogle(
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val hapticController = rememberHaptic()
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -425,6 +515,7 @@ private fun ProviderConfigureGoogle(
         value = provider.name,
         onValueChange = { onEdit(provider.copy(name = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_name)) },
+        placeholder = { Text(stringResource(R.string.setting_provider_page_name_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
     )
 
@@ -438,7 +529,12 @@ private fun ProviderConfigureGoogle(
             maxLines = 3,
             visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { keyVisible = !keyVisible }) {
+                IconButton(
+                    onClick = {
+                        hapticController.lightTap()
+                        keyVisible = !keyVisible
+                    }
+                ) {
                     Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
                 }
             },
@@ -468,7 +564,10 @@ private fun ProviderConfigureGoogle(
         Text(stringResource(R.string.setting_provider_page_enable))
         Switch(
             checked = provider.enabled,
-            onCheckedChange = { onEdit(provider.copy(enabled = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(enabled = it))
+            }
         )
     }
 
@@ -480,7 +579,10 @@ private fun ProviderConfigureGoogle(
         Text(stringResource(R.string.setting_provider_page_vertex_ai))
         Switch(
             checked = provider.vertexAI,
-            onCheckedChange = { onEdit(provider.copy(vertexAI = it)) }
+            onCheckedChange = {
+                hapticController.tap()
+                onEdit(provider.copy(vertexAI = it))
+            }
         )
     }
 
@@ -493,14 +595,20 @@ private fun ProviderConfigureGoogle(
             Text(stringResource(R.string.setting_provider_page_use_service_account))
             Switch(
                 checked = provider.useServiceAccount,
-                onCheckedChange = { onEdit(provider.copy(useServiceAccount = it)) }
+                onCheckedChange = {
+                    hapticController.tap()
+                    onEdit(provider.copy(useServiceAccount = it))
+                }
             )
         }
     }
 
     if (provider.vertexAI && provider.useServiceAccount) {
         OutlinedButton(
-            onClick = { serviceAccountJsonLauncher.launch(arrayOf("application/json", "*/*")) },
+            onClick = {
+                hapticController.tap()
+                serviceAccountJsonLauncher.launch(arrayOf("application/json", "*/*"))
+            },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(stringResource(R.string.setting_provider_page_import_service_account_json))
@@ -524,7 +632,12 @@ private fun ProviderConfigureGoogle(
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
             visualTransformation = if (privateKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { privateKeyVisible = !privateKeyVisible }) {
+                IconButton(
+                    onClick = {
+                        hapticController.lightTap()
+                        privateKeyVisible = !privateKeyVisible
+                    }
+                ) {
                     Icon(if (privateKeyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
                 }
             },

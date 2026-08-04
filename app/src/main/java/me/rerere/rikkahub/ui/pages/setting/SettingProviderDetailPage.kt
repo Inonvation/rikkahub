@@ -5,7 +5,6 @@ import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
@@ -81,15 +80,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
@@ -116,15 +116,13 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
 import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
-import me.rerere.rikkahub.ui.pages.setting.components.isUsingDefaultBaseUrl
-import me.rerere.rikkahub.ui.pages.setting.components.resetBaseUrlToDefault
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
@@ -142,22 +140,30 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val provider = settings.providers.find { it.id == id } ?: return
     val pager = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
-    val toaster = LocalToaster.current
-    val context = LocalContext.current
+    val hapticController = rememberHaptic()
+
+    // 编辑会话内的局部状态，配合防抖自动保存
+    var internalProvider by remember(provider.id) { mutableStateOf(provider) }
+    val saveJob = remember(provider.id) { mutableStateOf<Job?>(null) }
+
+    fun scheduleAutoSave() {
+        saveJob.value?.cancel()
+        saveJob.value = scope.launch {
+            delay(AUTO_SAVE_DEBOUNCE_MS)
+            vm.updateProviders(
+                settings.providers.map {
+                    if (it.id == provider.id) internalProvider else it
+                }
+            )
+        }
+    }
 
     val onEdit = { newProvider: ProviderSetting ->
-        val newSettings = settings.copy(
-            providers = settings.providers.map {
-                if (newProvider.id == it.id) {
-                    newProvider
-                } else {
-                    it
-                }
-            }
-        )
-        vm.updateSettings(newSettings)
+        internalProvider = newProvider
+        scheduleAutoSave()
     }
     val onDelete = {
+        saveJob.value?.cancel()
         val newSettings = settings.copy(
             providers = settings.providers - provider
         )
@@ -187,10 +193,57 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     ShareSheet(shareSheetState)
                     IconButton(
                         onClick = {
+                            hapticController.lightTap()
                             shareSheetState.show(provider)
                         }
                     ) {
                         Icon(HugeIcons.Share01, null)
+                    }
+                    ProviderConnectionTester(
+                        internalProvider = internalProvider,
+                    )
+                    if (!internalProvider.builtIn) {
+                        var showDeleteDialog by remember { mutableStateOf(false) }
+                        IconButton(
+                            onClick = {
+                                hapticController.heavyTap()
+                                showDeleteDialog = true
+                            },
+                        ) {
+                            Icon(HugeIcons.Delete01, contentDescription = stringResource(R.string.delete))
+                        }
+                        if (showDeleteDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteDialog = false },
+                                title = {
+                                    Text(stringResource(R.string.confirm_delete))
+                                },
+                                text = {
+                                    Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
+                                },
+                                dismissButton = {
+                                    TextButton(
+                                        onClick = {
+                                            hapticController.lightTap()
+                                            showDeleteDialog = false
+                                        }
+                                    ) {
+                                        Text(stringResource(R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            hapticController.heavyTap()
+                                            showDeleteDialog = false
+                                            onDelete()
+                                        }
+                                    ) {
+                                        Text(stringResource(R.string.delete))
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -204,6 +257,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     label = { Text(stringResource(id = R.string.setting_provider_page_configuration)) },
                     icon = { Icon(HugeIcons.Tools, null) },
                     onClick = {
+                        hapticController.lightTap()
                         scope.launch {
                             pager.animateScrollToPage(0)
                         }
@@ -214,6 +268,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                     label = { Text(stringResource(id = R.string.setting_provider_page_models)) },
                     icon = { Icon(HugeIcons.Package01, null) },
                     onClick = {
+                        hapticController.lightTap()
                         scope.launch {
                             pager.animateScrollToPage(1)
                         }
@@ -239,17 +294,8 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             when (page) {
                 0 -> {
                     SettingProviderConfigPage(
-                        provider = provider,
-                        onEdit = {
-                            onEdit(it)
-                            toaster.show(
-                                context.getString(R.string.setting_provider_page_save_success),
-                                type = ToastType.Success
-                            )
-                        },
-                        onDelete = {
-                            onDelete()
-                        },
+                        internalProvider = internalProvider,
+                        onEdit = onEdit,
                     )
                 }
 
@@ -264,15 +310,13 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     }
 }
 
+private const val AUTO_SAVE_DEBOUNCE_MS = 400L
+
 @Composable
 private fun SettingProviderConfigPage(
-    provider: ProviderSetting,
+    internalProvider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
-    onDelete: () -> Unit,
 ) {
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -283,98 +327,28 @@ private fun SettingProviderConfigPage(
     ) {
         ProviderConfigure(
             provider = internalProvider,
-            onEdit = {
-                internalProvider = it
-            },
+            onEdit = onEdit,
         )
 
         if (internalProvider is ProviderSetting.OpenAI) {
             SettingProviderBalanceOption(
                 provider = internalProvider,
                 balanceOption = internalProvider.balanceOption,
-                onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
-            )
-            ProviderBalanceText(providerSetting = provider, style = MaterialTheme.typography.labelSmall)
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ProviderConnectionTester(
-                internalProvider = internalProvider,
-            )
-
-            Spacer(Modifier.weight(1f))
-
-            if (!internalProvider.builtIn) {
-                IconButton(
-                    onClick = {
-                        showDeleteDialog = true
-                    },
-                ) {
-                    Icon(HugeIcons.Delete01, null)
+                onEdit = {
+                    onEdit(internalProvider.copyProvider(balanceOption = it))
                 }
-            }
-
-            IconButton(
-                onClick = {
-                    internalProvider = internalProvider.resetBaseUrlToDefault()
-                },
-                enabled = !internalProvider.isUsingDefaultBaseUrl(),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Refresh03,
-                    contentDescription = stringResource(R.string.setting_model_page_reset_to_default)
-                )
-            }
-
-            Button(
-                onClick = {
-                    onEdit(internalProvider)
-                }
-            ) {
-                Text(stringResource(R.string.setting_provider_page_save))
-            }
+            )
+            ProviderBalanceText(providerSetting = internalProvider, style = MaterialTheme.typography.labelSmall)
         }
 
         // 硅基流动图标
-        if (provider is ProviderSetting.OpenAI && provider.baseUrl.contains("siliconflow.cn")) {
+        if (internalProvider is ProviderSetting.OpenAI && internalProvider.baseUrl.contains("siliconflow.cn")) {
             SiliconFlowPowerByIcon(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .padding(vertical = 16.dp)
             )
         }
-    }
-
-    // Delete confirmation dialog
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = {
-                Text(stringResource(R.string.confirm_delete))
-            },
-            text = {
-                Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete()
-                    }
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
-            }
-        )
     }
 }
 
@@ -511,6 +485,7 @@ private fun ModelSettingsForm(
 ) {
     val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
 
     fun setModelId(id: String) {
         val inputModality = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id)
@@ -535,6 +510,7 @@ private fun ModelSettingsForm(
             Tab(
                 selected = pagerState.currentPage == 0,
                 onClick = {
+                    hapticController.lightTap()
                     scope.launch {
                         pagerState.animateScrollToPage(0)
                     }
@@ -544,6 +520,7 @@ private fun ModelSettingsForm(
             Tab(
                 selected = pagerState.currentPage == 1,
                 onClick = {
+                    hapticController.lightTap()
                     scope.launch {
                         pagerState.animateScrollToPage(1)
                     }
@@ -553,6 +530,7 @@ private fun ModelSettingsForm(
             Tab(
                 selected = pagerState.currentPage == 2,
                 onClick = {
+                    hapticController.lightTap()
                     scope.launch {
                         pagerState.animateScrollToPage(2)
                     }
@@ -695,6 +673,7 @@ private fun AddModelButton(
 ) {
     val dialogState = useEditState<Model> { onAddModel(it) }
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -746,6 +725,7 @@ private fun AddModelButton(
 
         Button(
             onClick = {
+                hapticController.tap()
                 dialogState.open(Model())
             }
         ) {
@@ -781,6 +761,7 @@ private fun AddModelButton(
                 dragHandle = {
                     IconButton(
                         onClick = {
+                            hapticController.lightTap()
                             scope.launch {
                                 sheetState.hide()
                                 dialogState.dismiss()
@@ -823,6 +804,7 @@ private fun AddModelButton(
                     ) {
                         TextButton(
                             onClick = {
+                                hapticController.lightTap()
                                 dialogState.dismiss()
                             },
                         ) {
@@ -830,6 +812,7 @@ private fun AddModelButton(
                         }
                         TextButton(
                             onClick = {
+                                hapticController.tap()
                                 if (modelState.modelId.isNotBlank() && modelState.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
@@ -854,6 +837,7 @@ private fun ModelPicker(
     onAllModelDeselected: (List<Model>) -> Unit
 ) {
     var showModal by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
     if (showModal) {
         ModalBottomSheet(
             onDismissRequest = { showModal = false },
@@ -898,6 +882,7 @@ private fun ModelPicker(
 
                     TextButton(
                         onClick = {
+                            hapticController.tap()
                             if (unselectedCount > 0) {
                                 onAllModelSelected(filteredModels)
                             } else {
@@ -968,6 +953,7 @@ private fun ModelPicker(
                                 }
                                 IconButton(
                                     onClick = {
+                                        hapticController.tap()
                                         if (selectedModels.any { model -> model.modelId == it.modelId }) {
                                             // 从selectedModels中计算出要删除的model，因为删除需要id匹配，而不是ModelId
                                             onModelDeselected(selectedModels.firstOrNull { model -> model.modelId == it.modelId }
@@ -1012,6 +998,7 @@ private fun ModelPicker(
     ) {
         IconButton(
             onClick = {
+                hapticController.lightTap()
                 showModal = true
             }
         ) {
@@ -1025,6 +1012,7 @@ private fun ModelTypeSelector(
     selectedType: ModelType,
     onTypeSelected: (ModelType) -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Text(
         stringResource(R.string.setting_provider_page_model_type),
         style = MaterialTheme.typography.titleSmall
@@ -1048,7 +1036,10 @@ private fun ModelTypeSelector(
                     )
                 },
                 selected = selectedType == type,
-                onClick = { onTypeSelected(type) }
+                onClick = {
+                    hapticController.lightTap()
+                    onTypeSelected(type)
+                }
             )
         }
     }
@@ -1062,6 +1053,7 @@ private fun ModelModalitySelector(
     outputModalities: List<Modality>,
     onUpdateOutputModalities: (List<Modality>) -> Unit
 ) {
+    val hapticController = rememberHaptic()
     if (model.type == ModelType.CHAT) {
         Text(
             stringResource(R.string.setting_provider_page_input_modality),
@@ -1075,6 +1067,7 @@ private fun ModelModalitySelector(
                     checked = modality in inputModalities,
                     shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
                     onCheckedChange = {
+                        hapticController.lightTap()
                         if (it) {
                             onUpdateInputModalities(inputModalities + modality)
                         } else {
@@ -1106,6 +1099,7 @@ private fun ModelModalitySelector(
                     checked = modality in outputModalities,
                     shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
                     onCheckedChange = {
+                        hapticController.lightTap()
                         if (it) {
                             onUpdateOutputModalities(outputModalities + modality)
                         } else {
@@ -1132,6 +1126,7 @@ fun ModalAbilitySelector(
     abilities: List<ModelAbility>,
     onUpdateAbilities: (List<ModelAbility>) -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Text(
         stringResource(R.string.setting_provider_page_abilities),
         style = MaterialTheme.typography.titleSmall
@@ -1144,6 +1139,7 @@ fun ModalAbilitySelector(
                 checked = ability in abilities,
                 shape = SegmentedButtonDefaults.itemShape(index, ModelAbility.entries.size),
                 onCheckedChange = {
+                    hapticController.lightTap()
                     if (it) {
                         onUpdateAbilities(abilities + ability)
                     } else {
@@ -1178,6 +1174,7 @@ private fun ModelCard(
     }
     val swipeToDismissBoxState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
 
 
     if (dialogState.isEditing) {
@@ -1204,6 +1201,7 @@ private fun ModelCard(
                     ) {
                         IconButton(
                             onClick = {
+                                hapticController.lightTap()
                                 scope.launch {
                                     sheetState.hide()
                                     dialogState.dismiss()
@@ -1239,6 +1237,7 @@ private fun ModelCard(
                     ) {
                         TextButton(
                             onClick = {
+                                hapticController.lightTap()
                                 dialogState.dismiss()
                             },
                         ) {
@@ -1246,6 +1245,7 @@ private fun ModelCard(
                         }
                         TextButton(
                             onClick = {
+                                hapticController.tap()
                                 if (editingModel.displayName.isNotBlank()) {
                                     dialogState.confirm()
                                 }
@@ -1271,6 +1271,7 @@ private fun ModelCard(
             ) {
                 IconButton(
                     onClick = {
+                        hapticController.lightTap()
                         scope.launch {
                             swipeToDismissBoxState.reset()
                         }
@@ -1280,6 +1281,7 @@ private fun ModelCard(
                 }
                 FilledIconButton(
                     onClick = {
+                        hapticController.heavyTap()
                         scope.launch {
                             onDelete()
                             swipeToDismissBoxState.reset()
@@ -1345,6 +1347,7 @@ private fun ModelCard(
                 // Edit button
                 IconButton(
                     onClick = {
+                        hapticController.lightTap()
                         dialogState.open(model.copy())
                     }
                 ) {
@@ -1360,6 +1363,7 @@ private fun BuiltInToolsSettings(
     tools: Set<BuiltInTools>,
     onUpdateTools: (Set<BuiltInTools>) -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1422,6 +1426,7 @@ private fun BuiltInToolsSettings(
                     Switch(
                         checked = tool in tools,
                         onCheckedChange = { checked ->
+                            hapticController.tap()
                             if (checked) {
                                 onUpdateTools(tools + tool)
                             } else {
@@ -1443,6 +1448,7 @@ private fun ProviderOverrideSettings(
 ) {
     var showProviderConfig by remember { mutableStateOf(false) }
     var editingProvider by remember { mutableStateOf<ProviderSetting?>(null) }
+    val hapticController = rememberHaptic()
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1483,6 +1489,7 @@ private fun ProviderOverrideSettings(
                         )
                         IconButton(
                             onClick = {
+                                hapticController.lightTap()
                                 editingProvider = providerOverride
                                 showProviderConfig = true
                             }
@@ -1491,6 +1498,7 @@ private fun ProviderOverrideSettings(
                         }
                         IconButton(
                             onClick = {
+                                hapticController.heavyTap()
                                 onUpdateProviderOverride(null)
                             }
                         ) {
@@ -1502,6 +1510,7 @@ private fun ProviderOverrideSettings(
         } else {
             Button(
                 onClick = {
+                    hapticController.tap()
                     editingProvider = parentProvider?.copyProvider(
                         id = Uuid.random(),
                         builtIn = false,
@@ -1559,6 +1568,7 @@ private fun ProviderOverrideSettings(
                     ) {
                         TextButton(
                             onClick = {
+                                hapticController.lightTap()
                                 showProviderConfig = false
                                 editingProvider = null
                             },
@@ -1567,6 +1577,7 @@ private fun ProviderOverrideSettings(
                         }
                         TextButton(
                             onClick = {
+                                hapticController.tap()
                                 onUpdateProviderOverride(internalProvider)
                                 showProviderConfig = false
                                 editingProvider = null

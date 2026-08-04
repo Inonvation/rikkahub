@@ -27,6 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +47,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.Select
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
 import org.koin.compose.koinInject
@@ -57,8 +59,12 @@ fun ProviderConnectionTester(
     var showSheet by remember { mutableStateOf(false) }
     val providerManager = koinInject<ProviderManager>()
     val scope = rememberCoroutineScope()
+    val hapticController = rememberHaptic()
 
-    IconButton(onClick = { showSheet = true }) {
+    IconButton(onClick = {
+        hapticController.lightTap()
+        showSheet = true
+    }) {
         Icon(HugeIcons.Connect, null)
     }
 
@@ -142,6 +148,7 @@ fun ProviderConnectionTester(
 
                     TextButton(
                         onClick = {
+                            hapticController.heavyTap()
                             resetStates()
                             scope.launch {
                                 val provider = providerManager.getProviderByType(internalProvider)
@@ -244,6 +251,7 @@ private fun TestResultItem(
     resultText: String,
 ) {
     var showErrorSheet by remember { mutableStateOf(false) }
+    val hapticController = rememberHaptic()
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -289,7 +297,10 @@ private fun TestResultItem(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { showErrorSheet = true }
+                    .clickable {
+                        hapticController.lightTap()
+                        showErrorSheet = true
+                    }
             )
         }
     }

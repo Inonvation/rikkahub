@@ -77,6 +77,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.withDefaultNameIfBlank
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.plus
@@ -219,11 +220,15 @@ private fun RecommendProviderButton(
     onAdd: (ProviderSetting) -> Unit
 ) {
     val toaster = LocalToaster.current
+    val hapticController = rememberHaptic()
     var showSheet by remember { mutableStateOf(false) }
     val importSuccessMessage = stringResource(R.string.setting_provider_page_import_success)
 
     IconButton(
-        onClick = { showSheet = true }
+        onClick = {
+            hapticController.lightTap()
+            showSheet = true
+        }
     ) {
         Icon(HugeIcons.Sparkles, contentDescription = stringResource(R.string.setting_provider_page_recommend))
     }
@@ -270,6 +275,7 @@ private fun RecommendProviderItem(
     provider: ProviderSetting,
     onAdd: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Card(
         colors = CardDefaults.cardColors(
             containerColor = CustomColors.listItemColors.containerColor
@@ -302,7 +308,10 @@ private fun RecommendProviderItem(
                     }
                 }
             }
-            IconButton(onClick = onAdd) {
+            IconButton(onClick = {
+                hapticController.tap()
+                onAdd()
+            }) {
                 Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.setting_provider_page_add))
             }
         }
@@ -315,6 +324,7 @@ private fun ImportProviderButton(
 ) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val hapticController = rememberHaptic()
     var showImportDialog by remember { mutableStateOf(false) }
 
     val scanQrCodeLauncher = rememberLauncherForActivityResult(ScanQRCode()) { result ->
@@ -331,6 +341,7 @@ private fun ImportProviderButton(
 
     IconButton(
         onClick = {
+            hapticController.lightTap()
             showImportDialog = true
         }
     ) {
@@ -363,6 +374,7 @@ private fun ImportProviderButton(
                         // 主要操作：扫描二维码
                         Button(
                             onClick = {
+                                hapticController.tap()
                                 showImportDialog = false
                                 scanQrCodeLauncher.launch(null)
                             },
@@ -392,6 +404,7 @@ private fun ImportProviderButton(
                         // 次要操作：从相册选择
                         OutlinedButton(
                             onClick = {
+                                hapticController.tap()
                                 showImportDialog = false
                                 pickImageLauncher.launch(
                                     androidx.activity.result.PickVisualMediaRequest(
@@ -427,7 +440,10 @@ private fun ImportProviderButton(
             confirmButton = {},
             dismissButton = {
                 TextButton(
-                    onClick = { showImportDialog = false },
+                    onClick = {
+                        hapticController.lightTap()
+                        showImportDialog = false
+                    },
                     shape = MaterialTheme.shapes.large
                 ) {
                     Text(
@@ -521,10 +537,12 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
     val dialogState = useEditState<ProviderSetting> {
         onAdd(it)
     }
+    val hapticController = rememberHaptic()
 
     IconButton(
         onClick = {
-            dialogState.open(ProviderSetting.OpenAI())
+            hapticController.lightTap()
+            dialogState.open(ProviderSetting.OpenAI().copyProvider(name = ""))
         }
     ) {
         Icon(HugeIcons.Add01, "Add")
@@ -548,6 +566,8 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
             confirmButton = {
                 TextButton(
                     onClick = {
+                        hapticController.tap()
+                        dialogState.currentState = dialogState.currentState?.withDefaultNameIfBlank()
                         dialogState.confirm()
                     }
                 ) {
@@ -557,6 +577,7 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
             dismissButton = {
                 TextButton(
                     onClick = {
+                        hapticController.lightTap()
                         dialogState.dismiss()
                     }
                 ) {
@@ -574,6 +595,7 @@ private fun ProviderItem(
     dragHandle: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
+    val hapticController = rememberHaptic()
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -582,6 +604,7 @@ private fun ProviderItem(
             } else MaterialTheme.colorScheme.errorContainer,
         ),
         onClick = {
+            hapticController.tap()
             onClick()
         }
     ) {

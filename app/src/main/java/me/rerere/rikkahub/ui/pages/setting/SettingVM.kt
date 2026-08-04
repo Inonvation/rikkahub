@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.mcp.McpManager
@@ -21,6 +22,15 @@ class SettingVM(
     fun updateSettings(settings: Settings) {
         viewModelScope.launch {
             settingsStore.update(settings)
+        }
+    }
+
+    /**
+     * 仅更新 providers 列表，供供应商详情页自动保存使用。
+     */
+    fun updateProviders(providers: List<ProviderSetting>) {
+        viewModelScope.launch {
+            settingsStore.updateProviders(providers)
         }
     }
 }
