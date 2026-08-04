@@ -22,6 +22,10 @@ import me.rerere.workspace.WorkspaceStorageArea
 class WorkspaceDetailVM(
     private val id: String,
     private val repository: WorkspaceRepository,
+    /** 初始存储区（从聊天跳转到文件所在目录时传入），null=默认 FILES */
+    private val initialArea: WorkspaceStorageArea? = null,
+    /** 初始目录路径（相对存储区根，""=根目录），用于定位到文件所在目录 */
+    private val initialPath: String = "",
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
@@ -37,7 +41,20 @@ class WorkspaceDetailVM(
 
     init {
         loadWorkspace()
-        refresh()
+        // 从聊天跳转定位：直接进入文件所在目录并加载该目录内容
+        if (initialPath.isNotBlank() || initialArea != null) {
+            _state.update {
+                it.copy(
+                    area = initialArea ?: WorkspaceStorageArea.FILES,
+                    path = initialPath,
+                    entries = emptyList(),
+                    error = null,
+                )
+            }
+            refresh()
+        } else {
+            refresh()
+        }
     }
 
     fun selectArea(area: WorkspaceStorageArea) {

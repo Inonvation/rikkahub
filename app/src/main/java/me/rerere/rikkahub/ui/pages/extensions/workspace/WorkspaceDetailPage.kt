@@ -95,9 +95,19 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 @Composable
-fun WorkspaceDetailPage(id: String) {
+fun WorkspaceDetailPage(
+    id: String,
+    initialArea: String? = null,
+    initialPath: String? = null,
+) {
     val navController = LocalNavController.current
-    val vm: WorkspaceDetailVM = koinViewModel(parameters = { parametersOf(id) })
+    val vm: WorkspaceDetailVM = koinViewModel(parameters = {
+        parametersOf(
+            id,
+            initialArea?.let { runCatching { WorkspaceStorageArea.valueOf(it) }.getOrNull() },
+            initialPath.orEmpty(),
+        )
+    })
     val state by vm.state.collectAsStateWithLifecycle()
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()

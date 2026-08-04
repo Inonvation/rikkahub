@@ -540,7 +540,11 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.WorkspaceDetail> { key ->
-                                WorkspaceDetailPage(key.id)
+                                WorkspaceDetailPage(
+                                    id = key.id,
+                                    initialArea = key.area,
+                                    initialPath = key.path,
+                                )
                             }
 
                             entry<Screen.WorkspaceTerminal> { key ->
@@ -812,7 +816,13 @@ sealed interface Screen : NavKey {
     data object Workspaces : Screen
 
     @Serializable
-    data class WorkspaceDetail(val id: String) : Screen
+    data class WorkspaceDetail(
+        val id: String,
+        /** 初始存储区（"FILES"/"LINUX"），用于从聊天跳转到文件所在目录；为空则用默认 FILES */
+        val area: String? = null,
+        /** 初始目录路径（相对存储区根，空串=根目录），用于定位到文件所在目录 */
+        val path: String? = null,
+    ) : Screen
 
     @Serializable
     data class WorkspaceTerminal(val id: String) : Screen

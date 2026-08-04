@@ -3,6 +3,12 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -33,6 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -52,12 +59,16 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Archive02
 import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Bulb
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FileAdd
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.FileMinus
 import me.rerere.hugeicons.stroke.FileView
+import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.Share08
 import me.rerere.knowledge.KnowledgeManager
@@ -65,8 +76,11 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.ui.components.richtext.DiffAddedColor
+import me.rerere.rikkahub.ui.components.richtext.DiffRemovedColor
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.WorkspaceStorageArea
@@ -80,6 +94,7 @@ private const val DEFAULT_VISIBLE_COUNT = 3
 private enum class FileChangeStatus {
     ADDED,
     EDITED,
+    REMOVED,
 }
 
 private data class FileChange(
@@ -110,6 +125,7 @@ internal fun EditedFilesList(
 
     val addedFiles = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
     val editedFileList = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
+    val removedFiles = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.REMOVED }.map { it.path } }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*"),
@@ -127,25 +143,122 @@ internal fun EditedFilesList(
         }
     }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    var expanded by remember { mutableStateOf(false) }
+    val haptic = rememberHaptic()
+
+    // 删除文件已不存在，点击直接提示，不弹操作菜单
+    val deletedSet = remember(removedFiles) { removedFiles.toSet() }
+    val deletedMessage = stringResource(R.string.workspace_file_change_deleted)
+    val onChipClick: (String) -> Unit = { path ->
+        if (path in deletedSet) {
+            toaster.show(deletedMessage)
+        } else {
+            selectedPath = path
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        FileChangeChipGroup(
-            title = stringResource(R.string.workspace_file_change_added),
-            paths = addedFiles,
-            icon = HugeIcons.FileAdd,
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            onSelect = { selectedPath = it },
-        )
-        FileChangeChipGroup(
-            title = stringResource(R.string.workspace_file_change_edited),
-            paths = editedFileList,
-            icon = HugeIcons.Edit01,
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            onSelect = { selectedPath = it },
-        )
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        haptic.lightTap()
+                        expanded = !expanded
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Edit01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.secondary,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.workspace_file_changes,
+                        addedFiles.size + editedFileList.size + removedFiles.size
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (addedFiles.isNotEmpty()) {
+                        Text(
+                            text = "+${addedFiles.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DiffAddedColor,
+                        )
+                    }
+                    if (editedFileList.isNotEmpty()) {
+                        Text(
+                            text = "~${editedFileList.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (removedFiles.isNotEmpty()) {
+                        Text(
+                            text = "-${removedFiles.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DiffRemovedColor,
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FileChangeChipGroup(
+                        title = stringResource(R.string.workspace_file_change_added),
+                        paths = addedFiles,
+                        icon = HugeIcons.FileAdd,
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        onSelect = onChipClick,
+                    )
+                    FileChangeChipGroup(
+                        title = stringResource(R.string.workspace_file_change_edited),
+                        paths = editedFileList,
+                        icon = HugeIcons.Edit01,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onSelect = onChipClick,
+                    )
+                    FileChangeChipGroup(
+                        title = stringResource(R.string.workspace_file_change_removed),
+                        paths = removedFiles,
+                        icon = HugeIcons.FileMinus,
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        onSelect = onChipClick,
+                    )
+                }
+            }
+        }
     }
 
     if (selectedPath != null) {
@@ -216,6 +329,38 @@ internal fun EditedFilesList(
                             modifier = Modifier.padding(4.dp),
                         )
                         Text(stringResource(R.string.common_export), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Card(
+                    onClick = {
+                        val p = selectedPath ?: return@Card
+                        selectedPath = null
+                        // 跳到文件所在目录：解析出存储区 + 相对路径，去掉文件名取父目录
+                        val (area, relativePath) = resolveWorkspacePath(p)
+                        val dir = relativePath.substringBeforeLast('/', missingDelimiterValue = "")
+                        navController.navigate(
+                            Screen.WorkspaceDetail(
+                                id = workspaceId,
+                                area = area.name,
+                                path = dir,
+                            )
+                        )
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Folder01,
+                            contentDescription = null,
+                            modifier = Modifier.padding(4.dp),
+                        )
+                        Text(stringResource(R.string.workspace_file_change_locate), style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Card(
@@ -457,6 +602,11 @@ private fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                     output["modifiedFiles"]?.jsonArray?.forEach { element ->
                         element.jsonPrimitive.contentOrNull?.let { path ->
                             changes.add(FileChange(path, FileChangeStatus.EDITED))
+                        }
+                    }
+                    output["removedFiles"]?.jsonArray?.forEach { element ->
+                        element.jsonPrimitive.contentOrNull?.let { path ->
+                            changes.add(FileChange(path, FileChangeStatus.REMOVED))
                         }
                     }
                 }

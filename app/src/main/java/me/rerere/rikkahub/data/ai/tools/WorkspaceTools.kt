@@ -299,7 +299,7 @@ private fun createShellTool(
         val afterSnapshot = runCatching {
             workspaceRepository.listAllFiles(workspaceId, WorkspaceStorageArea.FILES)
         }.getOrDefault(emptyList())
-        val (addedFiles, modifiedFiles) = computeWorkspaceFileDiff(
+        val (addedFiles, modifiedFiles, removedFiles) = computeWorkspaceFileDiff(
             before = beforeSnapshot,
             after = afterSnapshot,
         )
@@ -316,6 +316,9 @@ private fun createShellTool(
                     }
                     if (modifiedFiles.isNotEmpty()) putJsonArray("modifiedFiles") {
                         modifiedFiles.forEach { add(JsonPrimitive(it)) }
+                    }
+                    if (removedFiles.isNotEmpty()) putJsonArray("removedFiles") {
+                        removedFiles.forEach { add(JsonPrimitive(it)) }
                     }
                 }.toString()
             )
@@ -668,7 +671,7 @@ private fun WorkspaceFileEntry.toJson() = buildJsonObject {
 private fun computeWorkspaceFileDiff(
     before: List<WorkspaceFileEntry>,
     after: List<WorkspaceFileEntry>,
-): Pair<List<String>, List<String>> {
+): Triple<List<String>, List<String>, List<String>> {
     val beforeMap = before.associateBy { it.path }
     val afterMap = after.associateBy { it.path }
     val added = afterMap.keys
@@ -682,5 +685,9 @@ private fun computeWorkspaceFileDiff(
         }
         .map { "/workspace/${it.key}" }
         .sorted()
-    return added to modified
+    val removed = beforeMap.keys
+        .filter { it !in afterMap }
+        .sorted()
+        .map { "/workspace/$it" }
+    return Triple(added, modified, removed)
 }

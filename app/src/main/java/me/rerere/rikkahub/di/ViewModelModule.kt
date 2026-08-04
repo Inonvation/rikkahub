@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.di
 
+import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.assistant.AssistantVM
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailVM
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
@@ -112,9 +113,17 @@ val viewModelModule = module {
     viewModelOf(::WorkspaceVM)
     viewModelOf(::RecycleBinVM)
     viewModel<WorkspaceDetailVM> {
+        // 从聊天跳转定位时，parametersOf 传入 (areaName: String?, path: String)；
+        // 旧调用只传 id，此时参数数量不足，get 会抛 NoSuchElementException → runCatching 回落默认值
+        val initialAreaName = runCatching { it.get<String>(1) }.getOrNull()
+        val initialPath = runCatching { it.get<String>(2) }.getOrNull() ?: ""
         WorkspaceDetailVM(
             id = it.get(),
             repository = get(),
+            initialArea = initialAreaName?.let { name ->
+                runCatching { WorkspaceStorageArea.valueOf(name) }.getOrNull()
+            },
+            initialPath = initialPath,
         )
     }
     viewModelOf(::FavoriteVM)
