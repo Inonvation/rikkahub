@@ -51,8 +51,10 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import java.time.Instant
 
 @Composable
 fun AssistantMemoryPage(id: String) {
@@ -325,6 +327,11 @@ private fun MemoryItem(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(
+                    text = memoryTimeLabel(memory),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                )
             }
             IconButton(
                 onClick = { onEditMemory(memory) }
@@ -340,5 +347,20 @@ private fun MemoryItem(
                 )
             }
         }
+    }
+}
+
+/** 记忆时间标签：创建/更新时间，旧数据（0）显示「时间未知」。 */
+private fun memoryTimeLabel(memory: AssistantMemory): String {
+    val created = memory.createdAt?.takeIf { it > 0 }
+        ?.let { Instant.ofEpochMilli(it).toLocalDateTime() }
+    val updated = memory.updatedAt?.takeIf { it > 0 }
+        ?.let { Instant.ofEpochMilli(it).toLocalDateTime() }
+    return when {
+        created != null && updated != null && updated != created ->
+            "创建于 $created · 更新于 $updated"
+        created != null -> "创建于 $created"
+        updated != null -> "更新于 $updated"
+        else -> "时间未知"
     }
 }

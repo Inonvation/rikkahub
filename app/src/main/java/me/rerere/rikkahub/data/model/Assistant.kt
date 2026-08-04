@@ -69,6 +69,10 @@ data class QuickMessage(
 data class AssistantMemory(
     val id: Int,
     val content: String = "",
+    /** 创建时间戳（epoch ms），旧数据为 null */
+    val createdAt: Long? = null,
+    /** 最后更新时间戳（epoch ms），旧数据为 null */
+    val updatedAt: Long? = null,
 )
 
 @Serializable

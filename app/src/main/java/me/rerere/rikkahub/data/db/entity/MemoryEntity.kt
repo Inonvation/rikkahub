@@ -12,4 +12,8 @@ data class MemoryEntity(
     val assistantId: String,
     @ColumnInfo("content")
     val content: String = "",
+    @ColumnInfo("created_at", defaultValue = "0")
+    val createdAt: Long = 0,
+    @ColumnInfo("updated_at", defaultValue = "0")
+    val updatedAt: Long = 0,
 )
