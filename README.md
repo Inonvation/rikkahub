@@ -3,8 +3,6 @@
   <h1>RikkaHub</h1>
 
   <p>原生 Android LLM 聊天客户端，支持在多个 AI 服务商之间自由切换。</p>
-
-[简体中文](README_ZH_CN.md) | [繁體中文](README_ZH_TW.md)
 </div>
 
 <div align="center">
