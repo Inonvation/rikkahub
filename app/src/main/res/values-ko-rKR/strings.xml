@@ -227,6 +227,7 @@
   <string name="chain_of_thought_collapse">접기</string>
   <string name="chain_of_thought_show_more_steps">%d단계 더 보기</string>
   <string name="chat_input_placeholder">AI와 채팅하기</string>
+  <string name="chat_input_placeholder_guidance">하위 에이전트 실행 중 — 보낸 메시지는 가이드로 처리됩니다</string>
   <string name="chat_input_unsupported_file_type">지원되지 않는 파일 형식: %s</string>
   <string name="chat_input_file_read_failed">파일 읽기 실패: %s</string>
   <string name="chat_message_add_favorite">즐겨찌기 추가</string>
@@ -1225,6 +1226,9 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="tool_ui_speaking">말하는 중: %s</string>
   <string name="tool_ui_replay">재생</string>
   <string name="tool_ui_delete_memory">메모리 삭제</string>
+  <string name="tool_ui_memory_memory_content">메모리 내용</string>
+  <string name="tool_ui_memory_deleted_hint">이 메모리가 삭제되었습니다.</string>
+  <string name="tool_ui_memory_no_content">내용 없음</string>
   <string name="tool_ui_file">파일</string>
   <string name="backup_page_s3_path_style">경로 스타일</string>
   <string name="backup_page_s3_path_style_desc">endpoint/bucket/object를 사용합니다. 끄면 bucket.endpoint/object를 사용합니다.</string>

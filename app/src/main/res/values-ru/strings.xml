@@ -227,6 +227,7 @@
   <string name="chain_of_thought_collapse">Свернуть</string>
   <string name="chain_of_thought_show_more_steps">Показать ещё %d шагов</string>
   <string name="chat_input_placeholder">Общайтесь с ИИ</string>
+  <string name="chat_input_placeholder_guidance">Суб-агенты работают — отправленное сообщение будет директивой</string>
   <string name="chat_input_unsupported_file_type">Неподдерживаемый тип файла: %s</string>
   <string name="chat_input_file_read_failed">Не удалось прочитать файл: %s</string>
   <string name="chat_message_add_favorite">Добавить в избранное</string>
@@ -1225,6 +1226,9 @@
   <string name="tool_ui_speaking">Говорит: %s</string>
   <string name="tool_ui_replay">Повторить</string>
   <string name="tool_ui_delete_memory">Удалить память</string>
+  <string name="tool_ui_memory_memory_content">Содержимое памяти</string>
+  <string name="tool_ui_memory_deleted_hint">Эта память была удалена.</string>
+  <string name="tool_ui_memory_no_content">Нет содержимого</string>
   <string name="tool_ui_file">файл</string>
   <string name="backup_page_s3_path_style">Стиль пути</string>
   <string name="backup_page_s3_path_style_desc">Используйте endpoint/bucket/object. Отключите, чтобы использовать bucket.endpoint/object.</string>

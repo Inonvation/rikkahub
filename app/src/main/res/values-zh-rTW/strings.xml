@@ -227,6 +227,7 @@
   <string name="chain_of_thought_collapse">收合</string>
   <string name="chain_of_thought_show_more_steps">顯示更多 %d 個步驟</string>
   <string name="chat_input_placeholder">輸入訊息與AI聊天</string>
+  <string name="chat_input_placeholder_guidance">子代理執行中——發送的訊息將作為引導</string>
   <string name="chat_input_unsupported_file_type">不支援的檔案類型：%s</string>
   <string name="chat_input_file_read_failed">檔案讀取失敗：%s</string>
   <string name="chat_message_add_favorite">加入最愛</string>
@@ -1223,6 +1224,9 @@
   <string name="tool_ui_speaking">說話：%s</string>
   <string name="tool_ui_replay">重播</string>
   <string name="tool_ui_delete_memory">刪除記憶</string>
+  <string name="tool_ui_memory_memory_content">記憶內容</string>
+  <string name="tool_ui_memory_deleted_hint">該記憶已被刪除。</string>
+  <string name="tool_ui_memory_no_content">無內容</string>
   <string name="tool_ui_file">文件</string>
   <string name="backup_page_s3_path_style">路徑樣式</string>
   <string name="backup_page_s3_path_style_desc">使用 endpoint/bucket/object。關閉後使用 bucket.endpoint/object。</string>

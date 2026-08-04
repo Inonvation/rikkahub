@@ -147,6 +147,7 @@ import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
+import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
@@ -577,15 +578,20 @@ private fun ChatPageContent(
     }
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
-        assistant.workspaceId?.let { workspaceId ->
-            listOf(
-                WorkspaceCompletionProvider(
-                    workspaceId = workspaceId.toString(),
-                    repository = workspaceRepository,
-                    currentCwd = conversation.workspaceCwd,
+        buildList {
+            // 斜杠命令补全(/init + 子代理命令), 始终可用
+            add(CommandCompletionProvider())
+            // 工作区路径补全(@), 绑定工作区时可用
+            assistant.workspaceId?.let { workspaceId ->
+                add(
+                    WorkspaceCompletionProvider(
+                        workspaceId = workspaceId.toString(),
+                        repository = workspaceRepository,
+                        currentCwd = conversation.workspaceCwd,
+                    )
                 )
-            )
-        }.orEmpty()
+            }
+        }
     }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)

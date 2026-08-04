@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.ai
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -70,6 +71,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -78,9 +80,12 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.blurEffect
@@ -563,6 +568,8 @@ private fun TextInputRow(
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         var completionList by remember { mutableStateOf<ChatCompletionList?>(null) }
+        // 输入框当前高度(px): 用于把补全弹窗上移到输入框顶边, 避免盖住正在输入的文字
+        var textFieldHeightPx by remember { mutableStateOf(0) }
         val receiveContentListener = remember(
             settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold
         ) {
@@ -639,14 +646,34 @@ private fun TextInputRow(
             }
         }
 
+        // 补全弹窗悬浮覆盖(独立 Popup 窗口, 不参与 Column 布局不推挤输入框)。
+        // alignment = BottomStart: 弹窗底边先对齐锚点底边(输入框底边), offset 再上移
+        // 一个输入框高度, 使弹窗底边贴住输入框顶边、从输入框边缘向上展开, 不盖住输入文字。
+        // 非常驻: 随 completionList 出现/销毁, 收进即移除窗口, 不留常驻窗口截取焦点
+        // (此前 focusable=false 的常驻 Popup 在部分 ROM 上会僵死输入法键盘)。
         completionList?.takeIf { it.items.isNotEmpty() }?.let { list ->
-            CompletionPopup(
-                completionList = list,
-                onItemClick = { item ->
-                    state.applyCompletion(list.replacementRange, item)
-                    completionList = null
-                },
-            )
+            Popup(
+                alignment = Alignment.BottomStart,
+                offset = IntOffset(0, -textFieldHeightPx),
+                properties = PopupProperties(focusable = false),
+            ) {
+                // 淡入: 首次组合播一次 fadeIn 柔和出现; 无 exit 动画(条件渲染销毁即移除)
+                val transitionState = remember {
+                    MutableTransitionState(initialState = false).apply { targetState = true }
+                }
+                AnimatedVisibility(
+                    visibleState = transitionState,
+                    enter = fadeIn(tween(150, easing = FastOutSlowInEasing)),
+                ) {
+                    CompletionPopup(
+                        completionList = list,
+                        onItemClick = { item ->
+                            state.applyCompletion(list.replacementRange, item)
+                            completionList = null
+                        },
+                    )
+                }
+            }
         }
 
         TextField(
@@ -657,6 +684,10 @@ private fun TextInputRow(
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused
+                }
+                .onSizeChanged {
+                    // 输入框高度变化(换行/全屏)时更新, 保持弹窗贴住顶边
+                    textFieldHeightPx = it.height
                 },
             shape = MaterialTheme.shapes.largeIncreased,
             placeholder = {
@@ -716,6 +747,10 @@ private fun TextInputRow(
     }
 }
 
+// 注: 曾用常驻 Popup + AnimatedVisibility 的 scale/slide/fade 组合优化进出动画,
+// 但在部分 ROM(如 MIUI) 上收回后输入法键盘僵死(焦点被 focusable=false 的常驻 Popup 截走),
+// 且 scale+slide 在独立窗口上观感是乱层缩放而非从下往上展开。已改为非常驻 Popup:
+// 随列表出现/销毁, BottomStart 从输入框向上展开, 首次组合 fadeIn 柔和出现, 无残留窗口。
 @Composable
 private fun CompletionPopup(
     completionList: ChatCompletionList,
