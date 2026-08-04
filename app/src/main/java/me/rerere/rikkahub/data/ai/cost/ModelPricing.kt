@@ -116,12 +116,20 @@ object CostCalculator {
         return usd * pricing.multiplier
     }
 
-    /** 缓存命中率 0..1；无输入 token 时返回 null（UI 显示 `-`）。 */
+    /**
+     * 缓存命中率 0..1；无输入 token 时返回 null（UI 显示 `-`）。
+     *
+     * 口径：命中「读缓存」的 token ÷ 全部输入中参与读取的部分。
+     * 分母剔除 cacheWriteTokens（写缓存那次天然全 miss，如 Anthropic 首次写入 cache_creation，
+     * 计入分母会把「读」的命中率系统性拉低）；OpenAI/Gemini 无写缓存字段，行为不变。
+     */
     fun cacheHitRate(usages: List<TokenUsage?>): Double? {
         val cached = usages.sumOf { it?.cachedTokens ?: 0 }.toDouble()
         val input = usages.sumOf { it?.promptTokens ?: 0 }.toDouble()
-        if (input <= 0) return null
-        return (cached / input).coerceIn(0.0, 1.0)
+        val write = usages.sumOf { it?.cacheWriteTokens ?: 0 }.toDouble()
+        val readInput = input - write
+        if (readInput <= 0) return null
+        return (cached / readInput).coerceIn(0.0, 1.0)
     }
 
     /**

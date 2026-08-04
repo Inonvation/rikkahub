@@ -8,6 +8,12 @@ data class TokenUsage(
     val completionTokens: Int = 0,
     val cachedTokens: Int = 0,
     val totalTokens: Int = 0,
+    /**
+     * 本次写入缓存的 token 数（cache write，如 Anthropic 的 cache_creation_input_tokens）。
+     * 写缓存那次天然全 miss，命中率统计时应从分母剔除，否则会把「读」的命中率系统性拉低。
+     * 仅缓存按 token 计数的 provider 会有此值，其余为 0。
+     */
+    val cacheWriteTokens: Int = 0,
 )
 
 fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
@@ -27,11 +33,17 @@ fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
     } else {
         this?.cachedTokens ?: 0
     }
+    val cacheWriteTokens = if (other.cacheWriteTokens > 0) {
+        other.cacheWriteTokens
+    } else {
+        this?.cacheWriteTokens ?: 0
+    }
     return TokenUsage(
         promptTokens = promptTokens,
         completionTokens = completionTokens,
         totalTokens = totalTokens,
-        cachedTokens = cachedTokens
+        cachedTokens = cachedTokens,
+        cacheWriteTokens = cacheWriteTokens,
     )
 }
 
@@ -42,6 +54,7 @@ fun TokenUsage?.sum(other: TokenUsage): TokenUsage {
         promptTokens = promptTokens,
         completionTokens = completionTokens,
         cachedTokens = (this?.cachedTokens ?: 0) + other.cachedTokens,
+        cacheWriteTokens = (this?.cacheWriteTokens ?: 0) + other.cacheWriteTokens,
         totalTokens = promptTokens + completionTokens,
     )
 }

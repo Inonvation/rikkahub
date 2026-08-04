@@ -604,6 +604,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             completionTokens = completionTokens,
             totalTokens = promptTokens + completionTokens,
             cachedTokens = cachedInputTokens,
+            // 写缓存（cache_creation）单独记账：命中率分母应剔除这部分，否则写缓存那次全 miss 会把命中率拉低
+            cacheWriteTokens = cachedCreationTokens,
         )
     }
 }
