@@ -1,9 +1,26 @@
 package me.rerere.rikkahub.ui.components.message.tools
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bot
+import me.rerere.hugeicons.stroke.Clock02
+import me.rerere.hugeicons.stroke.Download04
+import me.rerere.hugeicons.stroke.Upload02
+import me.rerere.rikkahub.ui.components.message.StatsItem
+import me.rerere.rikkahub.utils.formatNumber
 
 /**
  * 子代理工具渲染器（spawn_subagent）——极简折叠行，点击打开 JSON 入参/输出窗口。
@@ -63,5 +80,93 @@ object SubAgentCompletedToolUI : ToolUIRenderer {
         } else {
             "子代理已完成"
         }
+    }
+
+    /**
+     * 完成气泡下方的一行统计：token 用量（输入/输出/缓存）+ 执行时长。
+     * 复用主聊天区 NerdLine 的 [StatsItem]（矢量图标 + labelSmall），视觉统一；
+     * 数据在 insertSubAgentCompletionPart 落库时随气泡持久化（重启后仍在）；
+     * 旧气泡无这些字段则返回 null，不显示空统计行。
+     */
+    @Composable
+    override fun subtitle(context: ToolUIContext): (@Composable () -> Unit)? {
+        val args = context.arguments
+        val prompt = args.getJsonInt("promptTokens")
+        val completion = args.getJsonInt("completionTokens")
+        val cached = args.getJsonInt("cachedTokens")
+        val durationMs = args.getJsonLong("durationMs")
+
+        val hasUsage = (prompt ?: 0) > 0 || (completion ?: 0) > 0 || (cached ?: 0) > 0
+        val hasDuration = durationMs != null && durationMs > 0
+        if (!hasUsage && !hasDuration) return null
+
+        val promptText = (prompt ?: 0).formatNumber()
+        val completionText = (completion ?: 0).formatNumber()
+        val cachedText = (cached ?: 0).formatNumber()
+        val durationText = durationMs?.let { formatSubAgentDuration(it) }
+
+        return {
+            val color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)
+            ProvideTextStyle(MaterialTheme.typography.labelSmall.copy(color = color)) {
+                CompositionLocalProvider(LocalContentColor provides color) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (hasUsage) {
+                            StatsItem(
+                                icon = {
+                                    Icon(
+                                        imageVector = HugeIcons.Upload02,
+                                        contentDescription = "输入 tokens",
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                },
+                                content = {
+                                    Text("$promptText tokens")
+                                    if ((cached ?: 0) > 0) {
+                                        Text("($cachedText cached)")
+                                    }
+                                },
+                            )
+                            StatsItem(
+                                icon = {
+                                    Icon(
+                                        imageVector = HugeIcons.Download04,
+                                        contentDescription = "输出 tokens",
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                },
+                                content = {
+                                    Text("$completionText tokens")
+                                },
+                            )
+                        }
+                        if (hasDuration) {
+                            StatsItem(
+                                icon = {
+                                    Icon(
+                                        imageVector = HugeIcons.Clock02,
+                                        contentDescription = "执行时长",
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                },
+                                content = { Text(durationText.orEmpty()) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 子代理执行时长格式化：<60s 显示秒，<1h 显示分+秒，其余小时+分 */
+private fun formatSubAgentDuration(ms: Long): String {
+    val totalSec = ms / 1000
+    return when {
+        totalSec < 60 -> "${totalSec}s"
+        totalSec < 3600 -> "${totalSec / 60}m ${totalSec % 60}s"
+        else -> "${totalSec / 3600}h ${(totalSec % 3600) / 60}m"
     }
 }

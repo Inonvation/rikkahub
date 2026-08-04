@@ -146,14 +146,31 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             }
         },
         label = {
-            Text(
-                text = renderer.title(context),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = rendererLoading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val titleText = renderer.title(context)
+            val subtitle = renderer.subtitle(context)
+            if (subtitle != null) {
+                // 标题下方辅助信息行（如子代理完成气泡的 token 用量 + 耗时），始终可见
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = titleText,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.shimmer(isLoading = rendererLoading),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    subtitle()
+                }
+            } else {
+                Text(
+                    text = titleText,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.shimmer(isLoading = rendererLoading),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         },
         extra = if (isPending && onToolApproval != null) {
             {

@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
@@ -75,6 +77,14 @@ interface ToolUIRenderer {
 
     /** 步骤展开时是否显示内联摘要 */
     fun hasSummary(context: ToolUIContext): Boolean = false
+
+    /**
+     * 折叠行标题下方的一行辅助信息（始终可见，折叠/展开都显示）。
+     * 返回 null 则不渲染该行。默认不渲染；子代理完成气泡用它展示 token 用量与耗时，
+     * 以 composable 形式返回，可直接复用矢量图标（对齐主聊天区的 NerdLine 风格）。
+     */
+    @Composable
+    fun subtitle(context: ToolUIContext): (@Composable () -> Unit)? = null
 
     /** 即使工具未执行（output 为空，如子代理执行中）也允许点击打开详情。 */
     val alwaysOpenPreview: Boolean
@@ -148,6 +158,14 @@ object ToolUIRegistry {
 
 internal fun JsonElement?.getStringContent(key: String): String? =
     this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.contentOrNull
+
+/** 工具入参里读取整数字段（缺省/非数字返回 null） */
+internal fun JsonElement?.getJsonInt(key: String): Int? =
+    this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.intOrNull
+
+/** 工具入参里读取长整数字段（缺省/非数字返回 null） */
+internal fun JsonElement?.getJsonLong(key: String): Long? =
+    this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.longOrNull
 
 /**
  * 默认工具详情: 入参与输出的 JSON 高亮展示
