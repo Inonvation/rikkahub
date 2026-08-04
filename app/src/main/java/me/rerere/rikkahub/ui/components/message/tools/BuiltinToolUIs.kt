@@ -920,7 +920,7 @@ object TodoWriteToolUI : ToolUIRenderer {
     override fun title(context: ToolUIContext): String {
         val message = context.arguments.getStringContent("message")
             ?: context.content.getStringContent("message")
-        return message ?: "任务计划已更新"
+        return message ?: stringResource(R.string.chat_message_tool_todo_write_updated)
     }
 
     override fun hasSummary(context: ToolUIContext): Boolean = true
@@ -934,7 +934,7 @@ object TodoWriteToolUI : ToolUIRenderer {
             (item as? JsonObject)?.get("status")?.jsonPrimitive?.content in listOf("completed", "cancelled")
         }
         Text(
-            text = "$completed/$total 已完成",
+            text = stringResource(R.string.chat_message_tool_todo_write_summary, completed, total),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
         )

@@ -32,6 +32,16 @@ data class TodoList(
     val items: List<TodoItem>,
 )
 
+/** 任务集指纹：由条目的 id 与 content 稳定计算，用于"任务完成后用户关闭卡片"的持久化标记。
+ *  任务集不变则指纹不变；AI 新增/更换任务后指纹变化。忽略 status（全部完成时全部是终态）。 */
+fun TodoList.fingerprint(): String {
+    val content = items
+        .map { "${it.id}:${it.content}" }
+        .sorted()
+        .joinToString("|")
+    return Integer.toHexString(content.hashCode())
+}
+
 /**
  * 将 todo 列表渲染成给子代理的只读参考（英文，跟随子代理 prompt 语言）。
  * 子代理只读此计划对齐输出，不拥有 todo 工具——计划所有权在父代理。

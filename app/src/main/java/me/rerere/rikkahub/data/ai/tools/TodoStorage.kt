@@ -39,13 +39,32 @@ class TodoStorage(private val context: Context) {
         }.getOrNull()
     }
 
-    /** 订阅某个会话的 todo 状态；写入时推送新值，无 todo 时推 null。 */
+    /** 订阅某个会话的 todo 状态；写入时推送新值，无 todo 时推 null。
+     *  若该会话存在"全部完成后用户手动关闭"的已持久化指纹，且与当前任务集一致，则推 null（不再展示）。 */
     fun loadAsFlow(conversationId: String): Flow<TodoList?> =
-        versions.map { _ -> load(conversationId) }
+        versions.map { _ ->
+            load(conversationId)?.let { list ->
+                if (list.fingerprint() == loadDismissedFingerprint(conversationId)) null else list
+            }
+        }
+
+    /** 记录"用户已手动关闭"的 todo 列表指纹（仅全部完成时触发，见 ChatPage 的 TodolistBanner）。
+     *  任务集不变则保持隐藏；AI 新增/更换任务后指纹变化，banner 自动重新出现。 */
+    fun saveDismissedFingerprint(conversationId: String, fingerprint: String) {
+        getDismissedFile(conversationId).writeText(fingerprint)
+        versions.update { it + (conversationId to (it[conversationId] ?: 0L) + 1) }
+    }
+
+    private fun loadDismissedFingerprint(conversationId: String): String? {
+        val file = getDismissedFile(conversationId)
+        if (!file.exists()) return null
+        return runCatching { file.readText() }.getOrNull()
+    }
 
     fun delete(conversationId: String) {
         getFile(conversationId).delete()
         getReminderFile(conversationId).delete()
+        getDismissedFile(conversationId).delete()
         versions.update { it - conversationId }
     }
 
@@ -67,6 +86,10 @@ class TodoStorage(private val context: Context) {
 
     private fun getReminderFile(conversationId: String): File {
         return File(todoDir, "$conversationId.reminder")
+    }
+
+    private fun getDismissedFile(conversationId: String): File {
+        return File(todoDir, "$conversationId.dismissed")
     }
 
     /** 清理 30 天未修改的孤儿文件 */

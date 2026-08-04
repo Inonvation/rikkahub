@@ -133,6 +133,7 @@ import me.rerere.rikkahub.data.ai.tools.TodoItem
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
+import me.rerere.rikkahub.data.ai.tools.fingerprint
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
 import me.rerere.rikkahub.data.event.AppEvent
@@ -630,9 +631,11 @@ private fun ChatPageContent(
             bottomBar = {
                 Column {
                     // TodolistBanner - 显示在聊天输入框上方（订阅 TodoStorage 实时刷新）
-                    if (todolist != null) {
+                    // 空列表不展示（模型可能传空 items，渲染 0/0 空卡无意义）
+                    if (todolist != null && todolist!!.items.isNotEmpty()) {
                         TodolistBanner(
                             todolist = todolist!!,
+                            onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -1360,6 +1363,7 @@ private fun TopBar(
 @Composable
 private fun TodolistBanner(
     todolist: TodoList,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val inProgressItems = todolist.items.filter { it.status == TodoStatus.in_progress }
@@ -1441,10 +1445,10 @@ private fun TodolistBanner(
                         Spacer(Modifier.width(6.dp))
                         if (!expanded) {
                             val collapsedText = when {
-                                allDone -> "全部完成"
+                                allDone -> stringResource(R.string.chat_message_tool_todo_all_done)
                                 inProgressItems.isNotEmpty() -> inProgressItems.first().content
-                                pendingCount > 0 -> "$pendingCount 项待处理"
-                                else -> "TodoList"
+                                pendingCount > 0 -> stringResource(R.string.chat_message_tool_todo_pending_count, pendingCount)
+                                else -> stringResource(R.string.chat_message_tool_todo_title)
                             }
                             Text(
                                 text = collapsedText,
@@ -1456,14 +1460,15 @@ private fun TodolistBanner(
                             )
                         } else {
                             Text(
-                                text = "TodoList",
+                                text = stringResource(R.string.chat_message_tool_todo_title),
                                 style = MaterialTheme.typography.titleSmall,
                             )
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = if (allDone) "完成" else "$completed/$total",
+                            text = if (allDone) stringResource(R.string.chat_message_tool_todo_done_label)
+                                else "$completed/$total",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (allDone) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1471,20 +1476,29 @@ private fun TodolistBanner(
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                            contentDescription = if (expanded) "折叠" else "展开",
+                            contentDescription = stringResource(
+                                if (expanded) R.string.chat_message_tool_todo_collapse
+                                else R.string.chat_message_tool_todo_expand
+                            ),
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             imageVector = HugeIcons.Cancel01,
-                            contentDescription = "关闭",
+                            contentDescription = stringResource(R.string.chat_message_tool_todo_close),
                             modifier = Modifier
                                 .size(16.dp)
                                 .clickable(
                                     indication = null,
                                     interactionSource = remember { MutableInteractionSource() },
-                                ) { dismissed = true },
+                                ) {
+                                    dismissed = true
+                                    // 全部完成后关闭 = 彻底隐藏这个任务集：持久化指纹，
+                                    // 切换界面 / 重启进程都不再显示；AI 换新任务后自动重新出现。
+                                    // 任务未完成时关闭仍只是本次折叠（下轮提醒/更新后重新显示）。
+                                    if (allDone) onDismiss()
+                                },
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
