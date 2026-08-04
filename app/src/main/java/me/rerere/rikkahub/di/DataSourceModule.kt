@@ -56,7 +56,9 @@ import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
+import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -291,8 +293,17 @@ val dataSourceModule = module {
         SponsorAPI.create(get())
     }
 
+    // AI 流式专用 client：仅 AI 请求（主对话 + 子代理）强制 HTTP/1.1，规避 HTTP/2
+    // 的 RST_STREAM(CANCEL)（"stream was reset: CANCEL"）导致流式输出被掐断。
+    // 基于主 client 派生，继承其拦截器配置；搜索/同步等其他请求仍走主 client 的默认 HTTP/2。
+    single(named("aiClient")) {
+        get<OkHttpClient>().newBuilder()
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .build()
+    }
+
     single {
-        ProviderManager(client = get(), context = get())
+        ProviderManager(client = get<OkHttpClient>(named("aiClient")), context = get())
     }
 
     single {
