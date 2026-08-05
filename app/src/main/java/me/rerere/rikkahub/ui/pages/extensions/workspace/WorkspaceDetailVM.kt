@@ -322,6 +322,27 @@ class WorkspaceDetailVM(
         }
     }
 
+    /** 把 files 区打包为 zip 备份导出 */
+    fun backupTo(outputStream: OutputStream) {
+        viewModelScope.launch {
+            runCatching { repository.backupFiles(id, outputStream) }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "备份失败") }
+                }
+        }
+    }
+
+    /** 从备份 zip 恢复 files 区 (覆盖现有内容) */
+    fun restoreFrom(inputStream: InputStream) {
+        viewModelScope.launch {
+            runCatching { repository.restoreFiles(id, inputStream) }
+                .onSuccess { refresh() }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "恢复失败") }
+                }
+        }
+    }
+
     /** 从回收站恢复到原路径 */
     fun restoreFromTrash(trashRelativePath: String) {
         viewModelScope.launch {

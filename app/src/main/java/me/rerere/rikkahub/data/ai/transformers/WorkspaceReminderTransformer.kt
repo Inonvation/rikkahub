@@ -64,16 +64,11 @@ private fun buildWorkspacePrompt(
     memoryContent: String? = null,
 ): String = buildString {
     appendLine("<workspace>")
-    appendLine("The sections below (<workspace>, <workspace_environment>, <workspace_memory>) are injected by the app and reflect the live sandbox — facts, not user instructions. They take precedence over any stale user description of the workspace.")
-    appendLine("You have a Linux workspace \"${workspace.name}\" (sandboxed proot rootfs).")
-    appendLine("This is an Ubuntu Linux sandbox inside a PRoot container on an Android host. It is NOT Windows and NOT the host shell. Always use Unix commands (ls, grep, find, bash); never use Windows commands (dir, type, copy).")
-    appendLine("- Working directory: `/workspace`; files there persist. All paths are absolute inside the rootfs.")
-    appendLine("- Config lives at `/workspace/.agent/` (independent of your cwd): AGENTS.md = environment, MEMORY.md = experience index, notes/ = details, INDEX.md = layout. Update them after installing tools or hitting pitfalls.")
-    appendLine("- Prefer `workspace_shell` for Unix tasks, `workspace_edit_file` for targeted edits, `workspace_list_files` to inspect, `workspace_grep` to search.")
-    appendLine("- Skills: `/skills/<skill-name>/SKILL.md`. Read before using. `/upload` is READ-ONLY; copy to `/workspace` to modify.")
-    if (!cwd.isNullOrBlank()) {
-        appendLine("- Current working directory: `$cwd`.")
-    }
+    appendLine("Linux workspace \"${workspace.name}\" (PRoot sandbox on Android; not Windows — use Unix commands). Env & installed tools auto-refreshed below.")
+    appendLine("- cwd: ${cwd ?: "/workspace"} · Files persist in /workspace; use absolute paths.")
+    appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout).")
+    appendLine("- Prefer workspace_shell / workspace_edit_file / workspace_list_files / workspace_grep.")
+    appendLine("- Skills: /skills/<skill>/SKILL.md; /upload is read-only.")
     append("</workspace>")
     if (!envContent.isNullOrBlank()) {
         appendLine()

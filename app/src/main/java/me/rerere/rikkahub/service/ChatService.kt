@@ -145,11 +145,11 @@ private const val RESUME_JOB_TIMEOUT_MS = 60_000L
 /** /init 指令改写后的基础指令：让母代理探索工作区, 在 AGENTS.md 自动生成区(AUTOGEN 区)之后补充项目概况, 并更新 .agent 索引 */
 private const val WORKSPACE_INIT_INSTRUCTION =
     "Please initialize the current workspace:\n" +
-        "1. Explore /workspace with workspace_list_files to understand the directory structure and each directory's purpose.\n" +
-        "2. Read /workspace/.agent/AGENTS.md. The auto-generated section between <!-- AUTOGEN-BEGIN --> and <!-- AUTOGEN-END --> is refreshed by the app for this session — do NOT edit it. " +
-        "Append or update a short 'Workspace Overview' section AFTER <!-- AUTOGEN-END -->: what this workspace is for, what each top-level directory holds, and toolchain notes relevant here (based on the refreshed environment above).\n" +
-        "3. Create or update /workspace/.agent/INDEX.md as a quick layout index.\n" +
-        "4. Update the Project section of /workspace/.agent/MEMORY.md with a brief summary of what this workspace is working on."
+        "- Explore /workspace with workspace_list_files; note each directory's purpose.\n" +
+        "- Read /workspace/.agent/AGENTS.md. Must not edit its auto-generated section (between <!-- AUTOGEN-BEGIN --> and <!-- AUTOGEN-END -->) — it's app-refreshed.\n" +
+        "- Append/update a short 'Workspace Overview' AFTER <!-- AUTOGEN-END -->: workspace purpose, top-level directory roles, relevant toolchain.\n" +
+        "- Create/update /workspace/.agent/INDEX.md as a quick layout index.\n" +
+        "- Update the Project section of /workspace/.agent/MEMORY.md with a one-line summary."
 
 /** /init 指令改写后的最终消息: 基础指令 + 用户 /init 后的可选说明 */
 private fun workspaceInitInstruction(task: String): String = buildString {

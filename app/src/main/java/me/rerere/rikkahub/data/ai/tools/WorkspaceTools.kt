@@ -244,15 +244,13 @@ private fun createShellTool(
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
-        append("Run a shell command in the assistant's bound workspace Rootfs. The sandbox is a Linux (Ubuntu) environment running bash — not Windows; use Unix commands. pip is configured with break-system-packages, so 'pip install' works directly. ")
-        append("The workspace files area is mounted at /workspace. ")
-        append("Each call is a fresh process: cd/export do not persist between calls. Use absolute paths or 'cd /path && cmd'. ")
-        append("Use cwd for a path relative to the workspace files root. ")
+        append("Run a shell command in the workspace's Linux rootfs (bash — not Windows; use Unix commands). /workspace = persistent files. ")
+        append("Each call is a fresh process: cd/export don't persist; use absolute paths or 'cd /path && cmd'. ")
+        append("cwd is relative to the workspace root. ")
         if (!defaultCwd.isNullOrBlank()) {
             append("Defaults to '$defaultCwd'. ")
         }
-        append("Output is capped at 128KB and truncated with a marker. Timeout defaults to 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. ")
-        append("Added/modified files under /workspace are reported after the command. Requires Rootfs to be installed and ready.")
+        append("Output capped at 128KB. Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported.")
     },
     parameters = {
         InputSchema.Obj(

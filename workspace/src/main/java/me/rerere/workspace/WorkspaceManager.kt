@@ -1,10 +1,15 @@
 package me.rerere.workspace
 
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class WorkspaceManager(
     private val baseDir: File,
@@ -79,6 +84,55 @@ class WorkspaceManager(
         path: String,
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): WorkspaceFileEntry = fileSystem.mkdir(areaDir(root, area), path)
+
+    /**
+     * 把 files 区打包为 zip, 供用户备份导出 (排除 .trash 回收站)。
+     */
+    fun backupFiles(root: String, outputStream: OutputStream) {
+        val filesRoot = filesDir(root)
+        ZipOutputStream(BufferedOutputStream(outputStream)).use { zip ->
+            filesRoot.walkTopDown()
+                .filter { it.isFile }
+                .filterNot { it.relativeTo(filesRoot).invariantSeparatorsPath.startsWith(".trash/") }
+                .forEach { file ->
+                    val rel = file.relativeTo(filesRoot).invariantSeparatorsPath
+                    zip.putNextEntry(ZipEntry(rel))
+                    file.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+        }
+    }
+
+    /**
+     * 从备份 zip 恢复到 files 区 (覆盖现有内容)。含路径穿越防护:
+     * 拒绝绝对路径、..、以及解析后逃出 files 根目录的条目。
+     */
+    fun restoreFiles(root: String, inputStream: InputStream) {
+        val filesRoot = filesDir(root)
+        val rootCanonical = filesRoot.canonicalFile
+        filesRoot.listFiles()?.forEach { it.deleteRecursively() }
+        ZipInputStream(BufferedInputStream(inputStream)).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val name = entry.name.replace('\\', '/')
+                require(name != ".." && !name.startsWith("../") && !name.startsWith("/")) {
+                    "Unsafe path in backup: $name"
+                }
+                val target = File(filesRoot, name).canonicalFile
+                require(target.path == rootCanonical.path || target.path.startsWith(rootCanonical.path + File.separator)) {
+                    "Backup entry escapes workspace root: $name"
+                }
+                if (entry.isDirectory) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile?.mkdirs()
+                    target.outputStream().use { zip.copyTo(it) }
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+    }
 
     fun importFile(
         root: String,
