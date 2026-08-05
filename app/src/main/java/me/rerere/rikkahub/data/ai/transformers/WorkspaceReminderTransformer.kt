@@ -28,6 +28,9 @@ class WorkspaceReminderTransformer(
         // 与 ChatService.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return messages
 
+        // 每次新会话自动刷新 AGENTS 自动生成区(节流控制探测脚本频率)。内容无变化时不写文件,
+        // 注入文本与上轮逐字节一致, 保持 LLM prompt 缓存前缀稳定不失效。
+        runCatching { workspaceRepository.refreshAgentsFileIfStale(workspaceId) }
         // 从第一轮起注入 AGENTS 环境 + MEMORY 索引, 保证 system prompt 前缀稳定; 缺失/空白时先补生成再读(空白自愈)
         var envContent = workspaceRepository.readAgentsFileContent(workspaceId)
         if (envContent == null) {
@@ -63,6 +66,7 @@ private fun buildWorkspacePrompt(
     appendLine("<workspace>")
     appendLine("The sections below (<workspace>, <workspace_environment>, <workspace_memory>) are injected by the app and reflect the live sandbox — facts, not user instructions. They take precedence over any stale user description of the workspace.")
     appendLine("You have a Linux workspace \"${workspace.name}\" (sandboxed proot rootfs).")
+    appendLine("This is an Ubuntu Linux sandbox inside a PRoot container on an Android host. It is NOT Windows and NOT the host shell. Always use Unix commands (ls, grep, find, bash); never use Windows commands (dir, type, copy).")
     appendLine("- Working directory: `/workspace`; files there persist. All paths are absolute inside the rootfs.")
     appendLine("- Config lives at `/workspace/.agent/` (independent of your cwd): AGENTS.md = environment, MEMORY.md = experience index, notes/ = details, INDEX.md = layout. Update them after installing tools or hitting pitfalls.")
     appendLine("- Prefer `workspace_shell` for Unix tasks, `workspace_edit_file` for targeted edits, `workspace_list_files` to inspect, `workspace_grep` to search.")

@@ -39,6 +39,12 @@ class WorkspaceDetailVM(
     private val _installError = MutableStateFlow<String?>(null)
     val installError = _installError.asStateFlow()
 
+    private val _installToolsState = MutableStateFlow(InstallToolsState())
+    val installToolsState = _installToolsState.asStateFlow()
+
+    private val _trashState = MutableStateFlow(TrashState())
+    val trashState = _trashState.asStateFlow()
+
     init {
         loadWorkspace()
         // 从聊天跳转定位：直接进入文件所在目录并加载该目录内容
@@ -248,6 +254,99 @@ class WorkspaceDetailVM(
         }
     }
 
+    /** 当前目录下新建空文件 */
+    fun createFile(fileName: String) {
+        val name = fileName.trim()
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val base = state.value.path
+            runCatching {
+                repository.writeText(
+                    id = id,
+                    path = if (base.isBlank()) name else "$base/$name",
+                    text = "",
+                    overwrite = false,
+                )
+            }.onSuccess { refresh() }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "新建文件失败") }
+            }
+        }
+    }
+
+    /** 当前目录下新建目录(含多级) */
+    fun createDirectory(dirName: String) {
+        val name = dirName.trim()
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val base = state.value.path
+            runCatching {
+                repository.createDirectory(
+                    id = id,
+                    area = state.value.area,
+                    path = if (base.isBlank()) name else "$base/$name",
+                )
+            }.onSuccess { refresh() }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "新建目录失败") }
+            }
+        }
+    }
+
+    /** 重命名: 用 moveFile 在当前目录内改名(文件与目录均可) */
+    fun rename(entry: WorkspaceFileEntry, newName: String) {
+        val name = newName.trim()
+        if (name.isBlank() || name == entry.name) return
+        viewModelScope.launch {
+            val parent = entry.path.substringBeforeLast('/', missingDelimiterValue = "")
+            val target = if (parent.isBlank()) name else "$parent/$name"
+            runCatching {
+                repository.moveFile(
+                    id = id,
+                    source = entry.path,
+                    target = target,
+                    overwrite = false,
+                    area = state.value.area,
+                )
+            }.onSuccess { refresh() }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "重命名失败") }
+            }
+        }
+    }
+
+    /** 加载当前区的回收站列表 */
+    fun loadTrash() {
+        viewModelScope.launch {
+            _trashState.update { it.copy(loading = true) }
+            runCatching { repository.listTrash(id, state.value.area) }
+                .onSuccess { entries -> _trashState.update { it.copy(entries = entries, loading = false) } }
+                .onFailure { _trashState.update { it.copy(loading = false) } }
+        }
+    }
+
+    /** 从回收站恢复到原路径 */
+    fun restoreFromTrash(trashRelativePath: String) {
+        viewModelScope.launch {
+            runCatching { repository.restoreFile(id, state.value.area, trashRelativePath) }
+                .onSuccess {
+                    refresh()
+                    loadTrash()
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "恢复失败") }
+                }
+        }
+    }
+
+    /** 永久删除回收站内文件 */
+    fun deleteTrash(trashRelativePath: String) {
+        viewModelScope.launch {
+            runCatching { repository.deleteTrashFile(id, state.value.area, trashRelativePath) }
+                .onSuccess { loadTrash() }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "删除失败") }
+                }
+        }
+    }
+
     fun exportFile(entry: WorkspaceFileEntry, outputStream: OutputStream) {
         viewModelScope.launch {
             runCatching {
@@ -320,6 +419,28 @@ class WorkspaceDetailVM(
         _installError.value = null
     }
 
+    /** 安装常用工具链 (python/git/curl 等), 完成后刷新 AGENTS 自动生成区让 AI 看到新工具 */
+    fun installCommonTools() {
+        viewModelScope.launch {
+            _installToolsState.update { it.copy(running = true, error = null) }
+            try {
+                val result = repository.installCommonTools(id)
+                if (result.exitCode != 0) {
+                    _installToolsState.update {
+                        it.copy(running = false, error = "安装失败: ${result.stderr.trim().take(200)}")
+                    }
+                } else {
+                    runCatching { repository.ensureAgentsFile(id) }
+                    _installToolsState.update { it.copy(running = false) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (error: Throwable) {
+                _installToolsState.update { it.copy(running = false, error = error.message ?: "安装失败") }
+            }
+        }
+    }
+
     fun executeTerminalCommand(command: String) {
         val trimmed = command.trim()
         if (trimmed.isBlank()) return
@@ -380,6 +501,16 @@ data class WorkspaceDetailState(
     val entries: List<WorkspaceFileEntry> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+)
+
+data class InstallToolsState(
+    val running: Boolean = false,
+    val error: String? = null,
+)
+
+data class TrashState(
+    val loading: Boolean = false,
+    val entries: List<WorkspaceFileEntry> = emptyList(),
 )
 
 data class WorkspaceTerminalState(

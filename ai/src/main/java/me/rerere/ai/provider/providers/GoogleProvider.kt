@@ -56,6 +56,8 @@ import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.jsonArrayOrNull
+import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -792,11 +794,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val cachedTokens = jsonObject["cachedContentTokenCount"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
         val candidatesTokens = jsonObject["candidatesTokenCount"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
         val totalTokens = jsonObject["totalTokenCount"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
+        // Gemini 新版 usageMetadata 的 cacheTokensDetails 里 read/write 分开：
+        // cachedContentTokenCount 是「prompt 中命中缓存的部分」（read），写缓存部分在
+        // cacheTokensDetails[].write。命中率分母按「全部输入 - 写缓存」剔除写缓存，
+        // 缺了 write 会把命中率系统性拉低；旧版 API 无此字段时保持 0。
+        var cacheWriteTokens = 0
+        jsonObject["cacheTokensDetails"]?.jsonArrayOrNull?.forEach { detail ->
+            val write = detail.jsonObjectOrNull?.get("write")?.jsonPrimitiveOrNull?.intOrNull ?: 0
+            cacheWriteTokens += write
+        }
         return TokenUsage(
             promptTokens = promptTokens,
             completionTokens = candidatesTokens + thoughtTokens,
             totalTokens = totalTokens,
-            cachedTokens = cachedTokens
+            cachedTokens = cachedTokens,
+            cacheWriteTokens = cacheWriteTokens,
         )
     }
 }

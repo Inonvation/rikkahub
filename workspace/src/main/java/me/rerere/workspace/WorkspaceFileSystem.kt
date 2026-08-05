@@ -74,6 +74,14 @@ class WorkspaceFileSystem(
         return file.toEntry(root)
     }
 
+    /** 新建目录(含多级), 路径已安全校验; 已存在则抛错 */
+    fun mkdir(root: File, path: String): WorkspaceFileEntry {
+        val dir = resolvePath(root, path)
+        require(!dir.exists()) { "Path already exists: $path" }
+        require(dir.mkdirs()) { "Failed to create directory: $path" }
+        return dir.toEntry(root)
+    }
+
     fun importBytes(root: File, path: String, inputStream: InputStream): WorkspaceFileEntry {
         val file = resolvePath(root, path)
         file.parentFile?.mkdirs()

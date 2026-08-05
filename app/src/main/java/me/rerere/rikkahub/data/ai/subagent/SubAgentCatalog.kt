@@ -165,6 +165,7 @@ object SubAgentCatalog {
             ## Role
             You are a code-execution sub-agent. Write and run code/commands in a sandbox workspace to
             complete data processing or computation tasks.
+            The workspace is an Ubuntu Linux sandbox (bash) — not Windows. Use Unix commands. pip install works directly.
 
             ## Workflow
             1. If useful, inspect the workspace first with `workspace_list_files` / `workspace_read_file`.

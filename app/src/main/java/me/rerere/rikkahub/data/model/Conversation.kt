@@ -49,10 +49,18 @@ data class Conversation(
 
     /**
      *  当前选中的 message
+     *  用 mapNotNull 跳过 selectIndex 越界的异常节点（数据损坏时避免整屏崩溃，
+     *  与 MessageNode.currentMessage 的防御性兜底一致）。
      */
     val currentMessages
         get(): List<UIMessage> {
-            return messageNodes.map { node -> node.messages[node.selectIndex] }
+            return messageNodes.mapNotNull { node ->
+                if (node.selectIndex in node.messages.indices) {
+                    node.messages[node.selectIndex]
+                } else {
+                    null
+                }
+            }
         }
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
@@ -67,13 +75,24 @@ data class Conversation(
         val newNodes = this.messageNodes.toMutableList()
 
         messages.forEachIndexed { index, message ->
-            val node = newNodes
-                .getOrElse(index) { message.toMessageNode() }
+            if (index > newNodes.lastIndex) {
+                // 新消息：直接追加新 node（原逻辑等价于 toMessageNode().copy(...)）
+                newNodes.add(message.toMessageNode())
+                return@forEachIndexed
+            }
+            val node = newNodes[index]
+            val existingIndex = node.messages.indexOfFirst { it.id == message.id }
+            // 流式输出每 chunk 都带全量消息：目标消息与现有引用相同且选中未变时复用原 node，
+            // 否则每次 chunk 都重建整列表，LazyColumn 中所有可见 item 的 node 引用变化而全部重组，
+            // 长对话后期可见消息多时即掉帧主因。内容实际变化的最后一条消息会走下方正常更新路径。
+            if (existingIndex >= 0 && node.messages[existingIndex] === message && node.selectIndex == existingIndex) {
+                return@forEachIndexed
+            }
 
             val newMessages = node.messages.toMutableList()
             var newMessageIndex = node.selectIndex
-            if (newMessages.any { it.id == message.id }) {
-                newMessages[newMessages.indexOfFirst { it.id == message.id }] = message
+            if (existingIndex >= 0) {
+                newMessages[existingIndex] = message
             } else {
                 newMessages.add(message)
                 newMessageIndex = newMessages.lastIndex
@@ -83,13 +102,7 @@ data class Conversation(
                 messages = newMessages,
                 selectIndex = newMessageIndex
             )
-
-            // 更新newNodes
-            if (index > newNodes.lastIndex) {
-                newNodes.add(newNode)
-            } else {
-                newNodes[index] = newNode
-            }
+            newNodes[index] = newNode
         }
 
         return this.copy(

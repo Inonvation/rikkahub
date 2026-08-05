@@ -925,6 +925,9 @@ object TodoWriteToolUI : ToolUIRenderer {
 
     override fun hasSummary(context: ToolUIContext): Boolean = true
 
+    /** 摘要"x/n 已完成"整块可点击查看 JSON 详情，不显示"查看完整详情"链接 */
+    override val summaryClickable: Boolean = true
+
     @Composable
     override fun Summary(context: ToolUIContext) {
         val items = (context.arguments.jsonObjectOrNull

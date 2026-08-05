@@ -459,6 +459,7 @@ class SubAgentRunner(
                     promptTokens = usage.promptTokens.toLong(),
                     completionTokens = usage.completionTokens.toLong(),
                     cachedTokens = usage.cachedTokens.toLong(),
+                    cacheWriteTokens = usage.cacheWriteTokens.toLong(),
                     createdAt = task.createdAt.toEpochMilliseconds(),
                 )
             )

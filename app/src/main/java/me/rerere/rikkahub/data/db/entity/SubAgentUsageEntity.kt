@@ -27,6 +27,10 @@ data class SubAgentUsageEntity(
     val completionTokens: Long,
     @ColumnInfo("cached_tokens")
     val cachedTokens: Long,
+    /** 本次任务写入缓存的 token 数（cache write，如 Anthropic 的 cache_creation_input_tokens）。
+     *  缓存命中率分母需剔除这部分；旧数据无该列时为 0。 */
+    @ColumnInfo("cache_write_tokens")
+    val cacheWriteTokens: Long = 0,
     @ColumnInfo("created_at")
     val createdAt: Long,
 )

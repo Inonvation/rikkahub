@@ -142,13 +142,14 @@ private const val RESUME_WAIT_MS = 10_000L
 /** resume 续答 job 的最大时长（毫秒）：超过视为续答生成挂起，取消以释放串行锁、避免锁死后继子代理 */
 private const val RESUME_JOB_TIMEOUT_MS = 60_000L
 
-/** /init 指令改写后的基础指令：让母代理探索工作区并生成/更新 .agent 下的结构索引与项目概况 */
+/** /init 指令改写后的基础指令：让母代理探索工作区, 在 AGENTS.md 自动生成区(AUTOGEN 区)之后补充项目概况, 并更新 .agent 索引 */
 private const val WORKSPACE_INIT_INSTRUCTION =
     "Please initialize the current workspace:\n" +
         "1. Explore /workspace with workspace_list_files to understand the directory structure and each directory's purpose.\n" +
-        "2. Create or update /workspace/.agent/INDEX.md describing the workspace layout and directory purposes.\n" +
-        "3. Update the Project section of /workspace/.agent/MEMORY.md with a brief summary of what this workspace is working on.\n" +
-        "The environment config (/workspace/.agent/AGENTS.md, MEMORY.md, notes/) is already initialized by the app; recreate it if missing."
+        "2. Read /workspace/.agent/AGENTS.md. The auto-generated section between <!-- AUTOGEN-BEGIN --> and <!-- AUTOGEN-END --> is refreshed by the app for this session — do NOT edit it. " +
+        "Append or update a short 'Workspace Overview' section AFTER <!-- AUTOGEN-END -->: what this workspace is for, what each top-level directory holds, and toolchain notes relevant here (based on the refreshed environment above).\n" +
+        "3. Create or update /workspace/.agent/INDEX.md as a quick layout index.\n" +
+        "4. Update the Project section of /workspace/.agent/MEMORY.md with a brief summary of what this workspace is working on."
 
 /** /init 指令改写后的最终消息: 基础指令 + 用户 /init 后的可选说明 */
 private fun workspaceInitInstruction(task: String): String = buildString {
@@ -1414,7 +1415,9 @@ class ChatService(
                         }
                         val updatedConversation = getConversationFlow(conversationId).value
                             .updateCurrentMessages(chunk.messages)
-                        updateConversation(conversationId, updatedConversation)
+                        // 流式 chunk 只追加/更新消息内容，不会移除消息或附件，
+                        // 跳过 checkFilesDelete 的全表文件扫描（每 chunk O(n)→O(1)）。
+                        updateConversation(conversationId, updatedConversation, checkFiles = false)
 
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
                         // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链
@@ -2072,10 +2075,12 @@ class ChatService(
 
     // ---- 对话状态更新 ----
 
-    private fun updateConversation(conversationId: Uuid, conversation: Conversation) {
+    private fun updateConversation(conversationId: Uuid, conversation: Conversation, checkFiles: Boolean = true) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
-        checkFilesDelete(conversation, session.state.value)
+        if (checkFiles) {
+            checkFilesDelete(conversation, session.state.value)
+        }
         session.state.value = conversation
     }
 

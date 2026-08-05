@@ -59,21 +59,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.hugeicons.stroke.Recycle01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share08
+import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
@@ -83,6 +88,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberAppLifecycleState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.fileSizeToString
 import me.rerere.rikkahub.utils.plus
@@ -111,6 +117,7 @@ fun WorkspaceDetailPage(
     val state by vm.state.collectAsStateWithLifecycle()
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
+    val installToolsState by vm.installToolsState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
@@ -124,6 +131,9 @@ fun WorkspaceDetailPage(
     var moveSources by remember { mutableStateOf<List<WorkspaceFileEntry>>(emptyList()) }
     var showMoveTargetPicker by remember { mutableStateOf(false) }
     var showInstallDialog by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var showTrashDialog by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
@@ -186,6 +196,13 @@ fun WorkspaceDetailPage(
         exitSelect()
     }
 
+    // 从编辑器等覆盖页面返回时自动刷新文件列表(保存后大小/时间变化即时可见)。
+    // 首次组合也会触发一次 refresh, 与 VM.init 幂等, 无副作用。
+    val lifecycleState = rememberAppLifecycleState()
+    LaunchedEffect(lifecycleState.value) {
+        if (lifecycleState.value == Lifecycle.State.RESUMED) vm.refresh()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -206,6 +223,21 @@ fun WorkspaceDetailPage(
                         } else {
                             TextButton(onClick = { selecting = true }) {
                                 Text("多选")
+                            }
+                            IconButton(onClick = { showCreateDialog = true }) {
+                                Icon(
+                                    HugeIcons.Add01,
+                                    contentDescription = stringResource(R.string.workspace_detail_create),
+                                )
+                            }
+                            IconButton(onClick = {
+                                showTrashDialog = true
+                                vm.loadTrash()
+                            }) {
+                                Icon(
+                                    HugeIcons.Recycle01,
+                                    contentDescription = stringResource(R.string.workspace_detail_trash),
+                                )
                             }
                         }
                         IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) {
@@ -280,6 +312,15 @@ fun WorkspaceDetailPage(
                         moveSources = listOf(entry)
                         showMoveTargetPicker = true
                     },
+                    onEdit = if (state.area == WorkspaceStorageArea.FILES) {
+                        { entry ->
+                            if (!entry.isDirectory) {
+                                navController.navigate(
+                                    Screen.WorkspaceFileEditor(id, state.area.name, entry.path)
+                                )
+                            }
+                        }
+                    } else null,
                     onOpen = { entry ->
                         when {
                             entry.isDirectory -> vm.open(entry)
@@ -342,6 +383,8 @@ fun WorkspaceDetailPage(
                     workspace = state.workspace,
                     installProgress = installProgress,
                     onInstallRootfs = { showInstallDialog = true },
+                    installToolsState = installToolsState,
+                    onInstallTools = vm::installCommonTools,
                     onToolApprovalChange = vm::setToolApproval,
                 )
             }
@@ -467,6 +510,8 @@ private fun WorkspaceBasicPage(
     workspace: WorkspaceEntity?,
     installProgress: RootfsInstallProgress?,
     onInstallRootfs: () -> Unit,
+    installToolsState: InstallToolsState,
+    onInstallTools: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
@@ -535,6 +580,32 @@ private fun WorkspaceBasicPage(
                             text = installButtonText,
                             modifier = Modifier.padding(start = 8.dp),
                         )
+                    }
+
+                    // rootfs 就绪后可一键安装常用工具链, 省去 AI 每次开场 apt install
+                    if (rootfsReady) {
+                        FilledTonalButton(
+                            onClick = onInstallTools,
+                            enabled = !installToolsState.running,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(HugeIcons.Tools, contentDescription = null)
+                            Text(
+                                text = if (installToolsState.running) {
+                                    "安装常用工具中…"
+                                } else {
+                                    "安装常用工具 (python/git/curl)"
+                                },
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                        installToolsState.error?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
 
                     installProgress?.let { progress ->
@@ -745,6 +816,7 @@ private fun WorkspaceFilesPage(
     onLongPressSelect: (WorkspaceFileEntry) -> Unit,
     onMove: (WorkspaceFileEntry) -> Unit,
     onOpen: (WorkspaceFileEntry) -> Unit,
+    onEdit: ((WorkspaceFileEntry) -> Unit)? = null,
     onDelete: (WorkspaceFileEntry) -> Unit,
     onDeletePermanently: (WorkspaceFileEntry) -> Unit,
     onExport: (WorkspaceFileEntry) -> Unit,
@@ -790,6 +862,7 @@ private fun WorkspaceFilesPage(
                 onToggleSelect = { onToggleSelect(entry) },
                 onLongPressSelect = { onLongPressSelect(entry) },
                 onOpen = { onOpen(entry) },
+                onEdit = onEdit?.let { callback -> { callback(entry) } },
                 onDelete = { onDelete(entry) },
                 onDeletePermanently = { onDeletePermanently(entry) },
                 onExport = { onExport(entry) },
@@ -858,6 +931,7 @@ private fun WorkspaceFileCard(
     onToggleSelect: () -> Unit,
     onLongPressSelect: () -> Unit,
     onOpen: () -> Unit,
+    onEdit: (() -> Unit)? = null,
     onDelete: () -> Unit,
     onDeletePermanently: () -> Unit,
     onExport: () -> Unit,
@@ -928,6 +1002,21 @@ private fun WorkspaceFileCard(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     if (!entry.isDirectory) {
+                        if (onEdit != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = HugeIcons.Edit01,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onEdit()
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.common_export)) },
                             leadingIcon = {

@@ -75,19 +75,28 @@ fun WorkspaceFooterBar(
     val conversationRepository: ConversationRepository = koinInject()
     val subAgentUsages by conversationRepository.observeSubAgentUsage(conversation.id.toString())
         .collectAsState(initial = emptyList())
-    val messages = conversation.currentMessages
-    val cacheHitRate = remember(messages, subAgentUsages) {
-        val usages = messages.map { it.usage } + subAgentUsages.map {
+    // remember 的 key 用 conversation 而非 currentMessages（后者每次 get 返回新 List，
+    // 用作 key 会让缓存每帧失效、命中率与费用重复计算）。
+    // 子代理 usage 补上 cacheWriteTokens：命中率分母按「全部输入 - 写缓存」剔除写缓存，
+    // 缺了它，子代理写缓存那部分会留在分母里把命中率系统性拉低。
+    val cacheHitRate = remember(conversation, subAgentUsages) {
+        val usages = conversation.currentMessages.map { it.usage } + subAgentUsages.map {
             TokenUsage(
                 promptTokens = it.promptTokens.toInt(),
                 completionTokens = it.completionTokens.toInt(),
                 cachedTokens = it.cachedTokens.toInt(),
+                cacheWriteTokens = it.cacheWriteTokens.toInt(),
             )
         }
         CostCalculator.cacheHitRate(usages)
     }
-    // 按显示货币计价：USD 走美元官方价，RMB 走人民币官方价（无则按汇率换算）
-    val totalCost = remember(messages, subAgentUsages, settings.costCurrency, settings.costUsdCnyRate) {
+    // 按显示货币计价：USD 走美元官方价，RMB 走人民币官方价（无则按汇率换算）。
+    // remember 依赖补 modelPricingOverrides：费用配置窗改单价/倍率后这里才能刷新。
+    val totalCost = remember(
+        conversation, subAgentUsages,
+        settings.costCurrency, settings.costUsdCnyRate, settings.modelPricingOverrides,
+    ) {
+        val messages = conversation.currentMessages
         fun costFor(modelId: Uuid?, usage: TokenUsage?): Double {
             val resolved = modelId?.let { settings.findModelById(it) } ?: settings.getCurrentChatModel()
             return when (settings.costCurrency) {
@@ -98,7 +107,15 @@ fun WorkspaceFooterBar(
         val mainCost = messages.sumOf { costFor(it.modelId, it.usage) }
         val subCost = subAgentUsages.sumOf { u ->
             val uuid = u.modelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
-            costFor(uuid, TokenUsage(u.promptTokens.toInt(), u.completionTokens.toInt(), u.cachedTokens.toInt()))
+            costFor(
+                uuid,
+                TokenUsage(
+                    promptTokens = u.promptTokens.toInt(),
+                    completionTokens = u.completionTokens.toInt(),
+                    cachedTokens = u.cachedTokens.toInt(),
+                    cacheWriteTokens = u.cacheWriteTokens.toInt(),
+                )
+            )
         }
         mainCost + subCost
     }

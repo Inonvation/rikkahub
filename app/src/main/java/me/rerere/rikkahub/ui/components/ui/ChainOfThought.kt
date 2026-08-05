@@ -53,10 +53,8 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.message.ChainOfThoughtIntent
-import me.rerere.rikkahub.ui.components.message.LocalConversationId
-import me.rerere.rikkahub.ui.components.message.getChainOfThoughtIntent
-import me.rerere.rikkahub.ui.components.message.setChainOfThoughtIntent
+import me.rerere.rikkahub.ui.components.message.getSectionExpanded
+import me.rerere.rikkahub.ui.components.message.setSectionExpanded
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 private val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
@@ -74,6 +72,8 @@ private val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
  * @param steps 需要渲染的步骤数据列表
  * @param collapsedVisibleCount 折叠时保留可见的尾部步骤数
  * @param collapsedAdaptiveWidth 是否在折叠态下使用内容自适应宽度
+ * @param stateKey 可选的展开折叠状态记忆 key（会话隔离）。非 null 时切换窗口后仍保持
+ *                 用户手动展开/折叠，且各 key 独立不联动；null 时走默认折叠逻辑。
  * @param content 每个步骤的具体 UI，由 [ChainOfThoughtScope] 提供步骤构建能力
  */
 @Composable
@@ -85,17 +85,13 @@ fun <T> ChainOfThought(
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
+    stateKey: String? = null,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
-    val conversationId = LocalConversationId.current
-    val intent = getChainOfThoughtIntent(conversationId)
-    var expanded by remember(steps, intent) {
-        mutableStateOf(
-            when (intent) {
-                ChainOfThoughtIntent.ExpandAll -> true
-                ChainOfThoughtIntent.CollapseAll, ChainOfThoughtIntent.Default -> false
-            }
-        )
+    // 容器控制条展开态：stateKey 非空时从进程级存储恢复用户记忆（切换窗口不丢）。
+    // steps 不作为 remember key，避免流式追加步骤时重置展开态（"点开抽搐"问题）。
+    var expanded by remember {
+        mutableStateOf(stateKey?.let { getSectionExpanded(it) } ?: false)
     }
     val hapticController = rememberHaptic()
     val canCollapse = steps.size > collapsedVisibleCount
@@ -137,14 +133,8 @@ fun <T> ChainOfThought(
                             .clickable {
                                 hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 expanded = !expanded
-                                // 思考/工具分组的折叠控制条：记录会话级意图，后续思考链沿用。
-                                // （展开 = 想看全，收起 = 不打扰；生成中的 preview 状态不受此影响）
-                                if (conversationId != null) {
-                                    setChainOfThoughtIntent(
-                                        conversationId,
-                                        if (expanded) ChainOfThoughtIntent.ExpandAll else ChainOfThoughtIntent.CollapseAll
-                                    )
-                                }
+                                // 用户手动操作才记录；key 为 null（无会话上下文）不记录
+                                if (stateKey != null) setSectionExpanded(stateKey, expanded)
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,

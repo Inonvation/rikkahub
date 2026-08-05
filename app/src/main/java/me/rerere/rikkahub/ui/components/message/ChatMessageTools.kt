@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -70,13 +71,12 @@ import me.rerere.rikkahub.utils.JsonInstant
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
-/** 默认折叠的工具：内容重、标题已表达意图的工作区文件类工具，以及高频更新的 todo 计划 */
+/** 默认折叠的工具：内容重、标题已表达意图的工作区文件类工具 */
 private val COLLAPSED_BY_DEFAULT_TOOLS = setOf(
     "workspace_read_file",
     "workspace_write_file",
     "workspace_edit_file",
     "workspace_shell",
-    "todo_write",
 )
 
 private fun isCollapsedByDefaultTool(toolName: String): Boolean =
@@ -223,32 +223,56 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         } else {
             null
         },
-        // 点击：折叠类工具走默认展开/收起（点击切换内联摘要），完整详情走预览内的"查看完整详情"入口；
-        // 子代理（alwaysOpenPreview）直接进全屏详情页；其余情况打开 BottomSheet 详情
-        onClick = if (context.content != null || isPending || images.isNotEmpty() || renderer.alwaysOpenPreview) {
-            if (renderer.alwaysOpenPreview) {
-                {
-                    // spawn_subagent_completed 详情页导航：taskId 在 input 里（完成气泡 toolCallId 是随机 id，
-                    // 不能再用 toolCallId 定位任务）。兼容旧数据：input 无 taskId 时回退 toolCallId（旧格式 taskId==toolCallId）。
-                    val taskIdFromInput = (tool.inputAsJson() as? JsonObject)
-                        ?.get("taskId")?.jsonPrimitive?.contentOrNull
-                    val subAgentTaskId = taskIdFromInput?.takeIf { it.isNotBlank() } ?: tool.toolCallId
-                    if (!subAgentTaskId.isNullOrBlank()) {
-                        navController.navigate(
-                            Screen.SubAgentDetail(subAgentTaskId, null)
-                        )
-                    }
+        // 点击：折叠类工具（内容重、标题已表达意图）不设置 onClick，header 点击落到
+        // 展开/收起内联摘要，完整详情走内容区内的"查看完整详情"入口；
+        // 子代理（alwaysOpenPreview）直接进全屏详情页；其余工具点击打开 BottomSheet 详情
+        onClick = if (renderer.alwaysOpenPreview) {
+            {
+                // spawn_subagent_completed 详情页导航：taskId 在 input 里（完成气泡 toolCallId 是随机 id，
+                // 不能再用 toolCallId 定位任务）。兼容旧数据：input 无 taskId 时回退 toolCallId（旧格式 taskId==toolCallId）。
+                val taskIdFromInput = (tool.inputAsJson() as? JsonObject)
+                    ?.get("taskId")?.jsonPrimitive?.contentOrNull
+                val subAgentTaskId = taskIdFromInput?.takeIf { it.isNotBlank() } ?: tool.toolCallId
+                if (!subAgentTaskId.isNullOrBlank()) {
+                    navController.navigate(
+                        Screen.SubAgentDetail(subAgentTaskId, null)
+                    )
                 }
-            } else {
-                { showResult = true }
             }
+        } else if (collapsedByDefault) {
+            // 折叠类工具（内容重、标题已表达意图）：不设置 onClick，header 点击落到
+            // 展开/收起内联摘要，完整详情走内容区内的"查看完整详情"入口。
+            null
+        } else if (context.content != null || isPending || images.isNotEmpty()) {
+            { showResult = true }
         } else {
             null
         },
         content = if (hasExtraContent) {
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    renderer.Summary(context)
+                    // 摘要：summaryClickable 工具（如 todo 进度"x/n 已完成"）整块可点击查看 JSON 详情，
+                    // 不再额外提供"查看完整详情"链接
+                    val summaryClickable = renderer.summaryClickable &&
+                        renderer.hasSummary(context) && !isPending
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (summaryClickable) {
+                                    Modifier
+                                        .clip(MaterialTheme.shapes.small)
+                                        .clickable {
+                                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                            showResult = true
+                                        }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                    ) {
+                        renderer.Summary(context)
+                    }
                     if (images.isNotEmpty()) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -275,7 +299,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         )
                     }
                     // 折叠类工具的摘要下方提供"查看完整详情"入口，展开后仍需弹窗看全量内容
-                    if (collapsedByDefault && renderer.hasSummary(context) && !isPending) {
+                    // （summaryClickable 工具点摘要即可看详情，不重复提供）
+                    if (collapsedByDefault && renderer.hasSummary(context) && !isPending && !renderer.summaryClickable) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

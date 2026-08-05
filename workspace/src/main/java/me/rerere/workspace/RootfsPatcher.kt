@@ -16,7 +16,22 @@ class RootfsPatcher {
         ensureHostname(etcDir, options.hostname)
         ensureLocale(etcDir, options.locale)
         ensureGroupNames(etcDir, options.groupIds.ifEmpty { currentSupplementaryGroupIds() })
+        ensurePipConfig(etcDir)
         ensureTempDirs(linuxDir)
+    }
+
+    /**
+     * 解除 Ubuntu 22.04+/Debian 12 的 PEP 668 externally-managed-environment 保护：
+     * 写 /etc/pip.conf 全局放行 pip 装包。该保护防 pip 覆盖 apt 管理的系统 Python 包，
+     * 但沙箱 rootfs 是自用隔离环境、坏了重装即可，保护只会挡 AI 装包，故解除。
+     *
+     * 幂等：内容一致则跳过；patch() 每次 shell 执行都会跑，天然自愈（即便 apt 升级
+     * 重新生成 EXTERNALLY-MANAGED 标记，pip 读配置仍放行，无需删标记文件）。
+     */
+    private fun ensurePipConfig(etcDir: File) {
+        val pipConf = File(etcDir, "pip.conf")
+        if (pipConf.isFile && pipConf.readText() == PIP_CONF_CONTENT) return
+        pipConf.writeText(PIP_CONF_CONTENT)
     }
 
     private fun ensureRootfsDns(
@@ -179,6 +194,7 @@ class RootfsPatcher {
             "8.8.8.8",
             "223.5.5.5",
         )
+        private const val PIP_CONF_CONTENT = "[global]\nbreak-system-packages = true\n"
     }
 }
 

@@ -152,6 +152,8 @@ import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
+import me.rerere.rikkahub.ui.components.message.getSectionExpanded
+import me.rerere.rikkahub.ui.components.message.setSectionExpanded
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -636,6 +638,7 @@ private fun ChatPageContent(
                         TodolistBanner(
                             todolist = todolist!!,
                             onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
+                            stateKey = "todo:${conversation.id}",
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -1364,6 +1367,7 @@ private fun TopBar(
 private fun TodolistBanner(
     todolist: TodoList,
     onDismiss: () -> Unit,
+    stateKey: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val inProgressItems = todolist.items.filter { it.status == TodoStatus.in_progress }
@@ -1373,8 +1377,10 @@ private fun TodolistBanner(
     val allDone = completed == total
     val hasActive = inProgressItems.isNotEmpty() || pendingCount > 0
 
-    // 有活跃任务时默认展开，全部完成时默认折叠
-    var expanded by remember(hasActive) { mutableStateOf(hasActive) }
+    // 有活跃任务时默认展开，全部完成时默认折叠；用户手动展开/折叠过则优先恢复记忆
+    var expanded by remember(hasActive) {
+        mutableStateOf(stateKey?.let { getSectionExpanded(it) } ?: hasActive)
+    }
 
     // todo 列表条目增删时自动重新显示（仅 ID 集合变化，内容变更不触发）
     val itemsFingerprint = todolist.items.map { it.id }.toSet().hashCode()
@@ -1423,7 +1429,11 @@ private fun TodolistBanner(
         Card(
             modifier = modifier.animateContentSize(),
             shape = RoundedCornerShape(12.dp),
-            onClick = { expanded = !expanded },
+            onClick = {
+                expanded = !expanded
+                // 记录用户手动展开/折叠，切换窗口回来保持
+                if (stateKey != null) setSectionExpanded(stateKey, expanded)
+            },
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // 标题行

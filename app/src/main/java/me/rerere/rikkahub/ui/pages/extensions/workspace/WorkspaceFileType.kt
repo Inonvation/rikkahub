@@ -4,7 +4,7 @@ import me.rerere.workspace.WorkspaceFileEntry
 
 /**
  * 工作区文件的粗略分类, 用于决定点击文件时的行为:
- * - TEXT: 应用内文本编辑/预览
+ * - TEXT: 应用内文本编辑/预览 (含无扩展名文件, 如 Makefile/Dockerfile/LICENSE)
  * - IMAGE: 应用内可缩放图片预览
  * - OTHER: 交给系统应用 (视频/音频/文档等) 打开
  */
@@ -26,9 +26,8 @@ private val TEXT_EXTENSIONS = setOf(
 fun WorkspaceFileEntry.detectFileType(): WorkspaceFileType {
     val ext = name.substringAfterLast('.', "").lowercase()
     return when {
-        ext.isEmpty() -> WorkspaceFileType.OTHER
         ext in IMAGE_EXTENSIONS -> WorkspaceFileType.IMAGE
-        ext in TEXT_EXTENSIONS -> WorkspaceFileType.TEXT
+        ext.isEmpty() || ext in TEXT_EXTENSIONS -> WorkspaceFileType.TEXT
         else -> WorkspaceFileType.OTHER
     }
 }

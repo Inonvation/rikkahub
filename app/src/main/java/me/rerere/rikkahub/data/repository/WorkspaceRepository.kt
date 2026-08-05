@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 class WorkspaceRepository(
@@ -222,6 +223,17 @@ class WorkspaceRepository(
         manager.writeText(workspace.root, path, text, overwrite)
     }
 
+    /** 新建目录(含多级), 已存在则抛错 */
+    suspend fun createDirectory(
+        id: String,
+        area: WorkspaceStorageArea,
+        path: String,
+    ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        manager.ensureWorkspace(workspace.root)
+        manager.createDirectory(workspace.root, path, area)
+    }
+
     /**
      * 读取文本用于应用内预览/编辑, 支持两个存储区.
      * FILES 区走 [WorkspaceManager.readText] (自带大小保护); LINUX 区通过 exportFile 读入内存,
@@ -382,6 +394,20 @@ class WorkspaceRepository(
         }
     }
 
+    /**
+     * 安装常用工具链 (python3/pip/git/curl 等), 供 AI 工作区直接使用。
+     * 走 rootfs 内 apt, 耗时可能数分钟; 装完由调用方按需触发 AGENTS 刷新, 让 AI 看到新工具列表。
+     */
+    suspend fun installCommonTools(id: String): WorkspaceCommandResult = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        manager.ensureWorkspace(workspace.root)
+        manager.executeCommand(
+            root = workspace.root,
+            command = COMMON_TOOLS_INSTALL_SCRIPT,
+            timeoutMillis = COMMON_TOOLS_INSTALL_TIMEOUT_MS,
+        )
+    }
+
     /** 读取 .agent 下注入型配置(AGENTS/MEMORY)内容; 不存在或过大返回 null */
     private suspend fun readAgentConfigFile(id: String, relativePath: String): String? =
         withContext(Dispatchers.IO) {
@@ -424,21 +450,28 @@ class WorkspaceRepository(
         }
     }
 
-    /** 确保 /workspace/.agent/AGENTS.md 存在: 有效内容保留, 旧版根文件一次性迁移, 缺失/空白时探测生成 */
+    /** 每工作区上次 AGENTS 探测时间, 控制探测脚本执行频率; WorkspaceRepository 是单例, 跨消息可靠 */
+    private val agentsRefreshThrottle = ConcurrentHashMap<String, Long>()
+
+    /**
+     * 探测并更新 /workspace/.agent/AGENTS.md 的自动生成区(AUTOGEN 区):
+     * 重新执行探测脚本, 合并替换 AUTOGEN 区, 保留标记之外的内容(AI 自由编辑区)。
+     * 合并结果与现有文件逐字节一致时跳过写文件——注入 system prompt 的文本不变,
+     * LLM prompt 缓存前缀稳定不失效; 只有真实变化(装/删工具、版本变化)才落盘。
+     */
     suspend fun ensureAgentsFile(id: String): Boolean = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: return@withContext false
         manager.ensureWorkspace(workspace.root)
         val filesDir = manager.filesDir(workspace.root)
         val agentsFile = File(filesDir, AGENTS_FILE)
-        // 已生成且非空白(空白视为被清空的损坏文件)则跳过, 绝不覆盖 AI 维护的有效版本
-        if (agentsFile.isFile && agentsFile.readPrefixIsNotBlank()) return@withContext true
 
-        // 一次性迁移: 旧版本在 files 区根生成 AGENTS.md, 移到 .agent/ (空白目标先删, 避免 rename 失败)
+        // 一次性迁移: 旧版本在 files 区根生成 AGENTS.md, 移到 .agent/ (空白目标先删, 避免 rename 失败)。
+        // 迁移后不返回, 继续探测刷新给老文件补上 AUTOGEN 区。
         val legacyFile = File(filesDir, LEGACY_AGENTS_FILE)
-        if (legacyFile.isFile) {
+        if (legacyFile.isFile && !agentsFile.isFile) {
             agentsFile.parentFile?.mkdirs()
             if (agentsFile.exists()) agentsFile.delete()
-            if (legacyFile.renameTo(agentsFile)) return@withContext true
+            legacyFile.renameTo(agentsFile)
         }
 
         val result = manager.executeCommand(
@@ -454,8 +487,32 @@ class WorkspaceRepository(
             )
             return@withContext false
         }
-        manager.writeText(workspace.root, AGENTS_FILE, result.stdout.trimEnd() + "\n")
+        val generated = result.stdout.trimEnd() + "\n"
+        val existing = if (agentsFile.isFile) {
+            runCatching { agentsFile.readText(Charsets.UTF_8) }.getOrNull()
+        } else {
+            null
+        }
+        val merged = mergeAgentsContent(existing, generated)
+        if (existing != null && existing == merged) return@withContext true
+        agentsFile.parentFile?.mkdirs()
+        agentsFile.writeText(merged)
         true
+    }
+
+    /**
+     * 按节流刷新 AGENTS.md 自动生成区: 距上次探测不足 [AGENTS_REFRESH_INTERVAL_MS] 则跳过。
+     * 节流只控制探测脚本的执行频率(防每条消息都跑 proot), 不决定是否写文件——
+     * 写不写由 [ensureAgentsFile] 内部的内容比较决定。失败移除时间戳, 下次调用重试。
+     */
+    suspend fun refreshAgentsFileIfStale(id: String): Boolean = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val last = agentsRefreshThrottle[id]
+        if (last != null && now - last < AGENTS_REFRESH_INTERVAL_MS) return@withContext false
+        agentsRefreshThrottle[id] = now
+        val ok = runCatching { ensureAgentsFile(id) }.getOrDefault(false)
+        if (!ok) agentsRefreshThrottle.remove(id)
+        ok
     }
 
     suspend fun delete(id: String): Boolean {
@@ -518,6 +575,15 @@ class WorkspaceRepository(
         /** 旧版本在 files 区根生成 AGENTS.md, 用于一次性迁移 */
         private const val LEGACY_AGENTS_FILE = "AGENTS.md"
         private const val AGENTS_SCRIPT_TIMEOUT_MS = 60_000L
+        /** AGENTS 自动生成区刷新节流: 只控制探测脚本执行频率, 是否写文件由内容比较决定 */
+        private const val AGENTS_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
+
+        /** 常用工具链安装命令 (rootfs 内 apt); 装完触发 AGENTS 刷新可见工具列表 */
+        private const val COMMON_TOOLS_INSTALL_SCRIPT =
+            "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
+                "python3 python3-pip git curl wget unzip zip ca-certificates sqlite3 jq"
+        /** 常用工具安装最长耗时: apt update + install 可能数分钟 */
+        private const val COMMON_TOOLS_INSTALL_TIMEOUT_MS = 600_000L
 
         /** 经验索引文件名(注入 system prompt), 位于 .agent 目录; 细节放在 notes/ 按需读 */
         private const val MEMORY_FILE = ".agent/MEMORY.md"
@@ -541,32 +607,39 @@ class WorkspaceRepository(
 
         /**
          * 探测脚本: 在 PRoot 内执行, 直接输出 Markdown 内容, app 端不做解析。
-         * 仅列出已安装的关键工具, 控制 AGENTS.md 体积。
+         * 输出会作为 AUTOGEN 区由 mergeAgentsContent 包裹, 注入 system prompt。
+         * 输出必须确定性(不写时间戳等每次变化的字段), 保证内容稳定时文本逐字节一致, 不破坏 prompt 缓存。
          */
         private val AGENTS_FILE_SCRIPT = """
             {
             echo "# Workspace Environment (auto-generated by RikkaHub, keep updated)"
             echo ""
-            echo "Read this first. It describes the Linux sandbox. After installing new tools, update the Installed list with workspace_edit_file."
+            echo "This is a Linux sandbox running under PRoot on an Android host device."
+            echo "It is Ubuntu (Debian-family) unless you changed the rootfs. It is NOT Windows and NOT the host shell."
+            echo "Always use Unix commands (ls, grep, find, bash); never use Windows commands (dir, type, copy)."
             echo ""
             . /etc/os-release 2>/dev/null
             echo "Distro: ${'$'}{PRETTY_NAME:-unknown}"
+            echo "Arch: ${'$'}(uname -m 2>/dev/null)"
+            echo "Disk free: ${'$'}(df -h / 2>/dev/null | awk 'NR==2{print $4}')"
             if command -v apt >/dev/null 2>&1; then echo "Package manager: apt"
             elif command -v apk >/dev/null 2>&1; then echo "Package manager: apk"
             elif command -v pacman >/dev/null 2>&1; then echo "Package manager: pacman"
             elif command -v dnf >/dev/null 2>&1; then echo "Package manager: dnf"
             elif command -v yum >/dev/null 2>&1; then echo "Package manager: yum"
             fi
-            for t in python3 node npm yarn git gcc g++ make cmake curl wget jq tar zip unzip openssl sqlite3 perl ruby ffmpeg; do
+            if command -v python3 >/dev/null 2>&1; then echo "Python: ${'$'}(python3 --version 2>&1)"; fi
+            if command -v pip3 >/dev/null 2>&1; then echo "pip: ${'$'}(pip3 --version 2>&1)"; echo "pip install works directly (break-system-packages enabled)."; fi
+            for t in node npm yarn git gcc g++ make cmake curl wget jq tar zip unzip openssl sqlite3 perl ruby ffmpeg; do
                 command -v "${'$'}{t}" >/dev/null 2>&1 && printf 'Installed: %s\n' "${'$'}{t}"
             done
-            if timeout 3 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null; then echo "Network: yes"; else echo "Network: no"; fi
+            if timeout 1 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null; then echo "Network: yes"; else echo "Network: no"; fi
             echo "Mounts: /workspace (persistent files), /skills, /upload (convention read-only), /tool_outputs"
             echo ""
             echo "Rules:"
             echo "- Use absolute paths. /workspace is the persistent files area."
             echo "- Each workspace_shell call is a fresh process; cd/export do not persist. Use absolute paths or 'cd /path && cmd'."
-            echo "- Keep this file updated: after installing a tool, add it to Installed."
+            echo "- The environment section above is auto-refreshed each session; do not edit it. Keep your own notes below."
             }
         """.trimIndent()
     }
@@ -581,3 +654,24 @@ private fun File.readPrefixIsNotBlank(): Boolean = runCatching {
         read > 0 && String(buf, 0, read, Charsets.UTF_8).trim().isNotEmpty()
     }
 }.getOrDefault(false)
+
+/** AGENTS.md 自动生成区标记: BEGIN..END 之间由 app 每次会话探测刷新, 之外为 AI 自由编辑区 */
+private const val AUTOGEN_BEGIN = "<!-- AUTOGEN-BEGIN -->"
+private const val AUTOGEN_END = "<!-- AUTOGEN-END -->"
+
+/**
+ * 合并 AGENTS.md 自动生成区: 替换 [AUTOGEN_BEGIN] 到 [AUTOGEN_END] 之间的内容,
+ * 保留标记之外的内容(AI 自由编辑区)。老文件无标记/标记异常时把 AUTOGEN 块插到最前并保留原内容(下次刷新自愈)。
+ * internal: 供本模块单元测试验证。
+ */
+internal fun mergeAgentsContent(existing: String?, generated: String): String {
+    val block = "$AUTOGEN_BEGIN\n$generated$AUTOGEN_END"
+    if (existing.isNullOrBlank()) return block
+    val begin = existing.indexOf(AUTOGEN_BEGIN)
+    val end = existing.indexOf(AUTOGEN_END)
+    return if (begin >= 0 && end > begin) {
+        existing.substring(0, begin) + block + existing.substring(end + AUTOGEN_END.length)
+    } else {
+        "$block\n\n$existing"
+    }
+}

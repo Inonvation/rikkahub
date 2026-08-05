@@ -184,6 +184,26 @@ class ExampleUnitTest {
         assertTrue(File(linuxDir, "tmp").canWrite())
         assertTrue(File(linuxDir, "var/tmp").canWrite())
         assertTrue(File(linuxDir, "root").isDirectory)
+        assertEquals("[global]\nbreak-system-packages = true\n", File(linuxDir, "etc/pip.conf").readText())
+    }
+
+    @Test
+    fun pipConfigIsIdempotentAndOverwritesStaleContent() {
+        val linuxDir = Files.createTempDirectory("rootfs-pip-test").toFile()
+        File(linuxDir, "etc").mkdirs()
+
+        RootfsPatcher().patch(linuxDir)
+        val expected = "[global]\nbreak-system-packages = true\n"
+        assertEquals(expected, File(linuxDir, "etc/pip.conf").readText())
+
+        // 重复 patch 不重复追加, 内容一致即跳过
+        RootfsPatcher().patch(linuxDir)
+        assertEquals(expected, File(linuxDir, "etc/pip.conf").readText())
+
+        // 内容被改坏时自愈覆盖
+        File(linuxDir, "etc/pip.conf").writeText("junk\n")
+        RootfsPatcher().patch(linuxDir)
+        assertEquals(expected, File(linuxDir, "etc/pip.conf").readText())
     }
 
     private fun tarGz(vararg entries: TarTestEntry): ByteArray {

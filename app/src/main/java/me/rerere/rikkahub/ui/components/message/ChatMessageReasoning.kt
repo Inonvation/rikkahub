@@ -82,30 +82,32 @@ private class ReasoningState(
 }
 
 @Composable
-private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<ReasoningState, Boolean> {
+private fun rememberReasoningState(
+    reasoning: UIMessagePart.Reasoning,
+    stateKey: String?,
+): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
     val loading = reasoning.finishedAt == null
-    // 会话级展开/收起意图：用户展开过思考后，本会话后续思考保持展开（反之收起）
-    val intent = getChainOfThoughtIntent(LocalConversationId.current)
 
-    val state = remember(reasoning.createdAt, intent) {
+    val state = remember(reasoning.createdAt) {
         ReasoningState(
             scrollState = ScrollState(0),
             initialDuration = reasoning.finishedAt?.let { it - reasoning.createdAt }
                 ?: (Clock.System.now() - reasoning.createdAt)
         ).also { s ->
-            // 已完成的思考，用户偏好展开时直接展开（无需逐条点开）
-            if (!loading && intent == ChainOfThoughtIntent.ExpandAll) {
-                s.expandState = ReasoningCardState.Expanded
+            // 恢复用户手动记忆的展开/折叠（仅用户操作过才记录，生成中自动预览不干扰）
+            if (stateKey != null) {
+                val remembered = getSectionExpanded(stateKey)
+                if (remembered != null) {
+                    s.expandState = if (remembered) ReasoningCardState.Expanded else ReasoningCardState.Collapsed
+                }
             }
         }
     }
 
     LaunchedEffect(reasoning.reasoning, loading) {
         if (loading) {
-            if (!state.expandState.expanded && settings.displaySetting.showThinkingContent &&
-                intent != ChainOfThoughtIntent.CollapseAll
-            ) {
+            if (!state.expandState.expanded && settings.displaySetting.showThinkingContent) {
                 state.expandState = ReasoningCardState.Preview
             }
             // 让位一帧，避免滚动动画抢占正文渲染与自动滚动，减少流式时的滚动卡顿
@@ -113,11 +115,10 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
             state.scrollState.animateScrollTo(state.scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
-                state.expandState = when {
-                    // 用户明确要展开思考 → 生成完成后不自动折叠（用户意图优先于 autoCloseThinking）
-                    intent == ChainOfThoughtIntent.ExpandAll -> ReasoningCardState.Expanded
-                    settings.displaySetting.autoCloseThinking -> ReasoningCardState.Collapsed
-                    else -> ReasoningCardState.Expanded
+                state.expandState = if (settings.displaySetting.autoCloseThinking) {
+                    ReasoningCardState.Collapsed
+                } else {
+                    ReasoningCardState.Expanded
                 }
             }
         }
@@ -153,7 +154,6 @@ private fun ReasoningContent(
         fontFamily = LocalTextStyle.current.fontFamily,
     )
     val collapseOnDoubleTap = LocalSettings.current.displaySetting.doubleTapCollapseThinking
-    val conversationId = LocalConversationId.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -165,9 +165,6 @@ private fun ReasoningContent(
                     Modifier.pointerInput(collapseOnDoubleTap) {
                         detectTapGestures(onDoubleTap = {
                             onCollapse()
-                            if (conversationId != null) {
-                                setChainOfThoughtIntent(conversationId, ChainOfThoughtIntent.CollapseAll)
-                            }
                         })
                     }
                 } else {
@@ -236,24 +233,21 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
 ) {
-    val (state, loading) = rememberReasoningState(reasoning)
+    val conversationId = LocalConversationId.current
+    val stateKey = remember(reasoning.createdAt, conversationId) {
+        conversationId?.let { "reasoning:$it:${reasoning.createdAt}" }
+    }
+    val (state, loading) = rememberReasoningState(reasoning, stateKey)
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
     val chatFontFamily = LocalTextStyle.current.fontFamily
-    val conversationId = LocalConversationId.current
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { next ->
             state.onExpandedChange(next, loading)
-            // 用户手动展开/收起思考：记录会话级意图，本会话后续思考链沿用。
-            // 生成中（loading）的 preview/auto-close 状态迁移不经过此回调，不受影响。
-            if (conversationId != null) {
-                setChainOfThoughtIntent(
-                    conversationId,
-                    if (next) ChainOfThoughtIntent.ExpandAll else ChainOfThoughtIntent.CollapseAll
-                )
-            }
+            // 用户手动操作才记录；生成中自动 preview/autoClose 不经过此回调，不影响记忆
+            if (stateKey != null) setSectionExpanded(stateKey, next)
         },
         icon = {
             Icon(

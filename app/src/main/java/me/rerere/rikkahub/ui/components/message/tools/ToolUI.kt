@@ -79,6 +79,13 @@ interface ToolUIRenderer {
     fun hasSummary(context: ToolUIContext): Boolean = false
 
     /**
+     * 展开后的内联摘要是否可直接点击查看详情（BottomSheet JSON）。
+     * 为 true 时摘要区整块可点，且不再显示"查看完整详情"链接（如 todo 进度"x/n 已完成"）。
+     */
+    val summaryClickable: Boolean
+        get() = false
+
+    /**
      * 折叠行标题下方的一行辅助信息（始终可见，折叠/展开都显示）。
      * 返回 null 则不渲染该行。默认不渲染；子代理完成气泡用它展示 token 用量与耗时，
      * 以 composable 形式返回，可直接复用矢量图标（对齐主聊天区的 NerdLine 风格）。

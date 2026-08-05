@@ -69,7 +69,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         SubAgentTaskEntity::class,
         GroupEntity::class,
     ],
-    version = 39,
+    version = 40,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

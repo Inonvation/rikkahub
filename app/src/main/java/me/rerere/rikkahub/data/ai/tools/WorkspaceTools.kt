@@ -244,7 +244,8 @@ private fun createShellTool(
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
-        append("Run a shell command in the assistant's bound workspace Rootfs. The workspace files area is mounted at /workspace. ")
+        append("Run a shell command in the assistant's bound workspace Rootfs. The sandbox is a Linux (Ubuntu) environment running bash — not Windows; use Unix commands. pip is configured with break-system-packages, so 'pip install' works directly. ")
+        append("The workspace files area is mounted at /workspace. ")
         append("Each call is a fresh process: cd/export do not persist between calls. Use absolute paths or 'cd /path && cmd'. ")
         append("Use cwd for a path relative to the workspace files root. ")
         if (!defaultCwd.isNullOrBlank()) {
