@@ -139,6 +139,10 @@ import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelPage
 import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelPage
 import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderDetailPage
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderFileEditorPage
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderSettingsPage
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFoldersPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
@@ -610,6 +614,22 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.KnowledgeCardPanel> {
                                 KnowledgeCardPanelPage()
                             }
+
+                            entry<Screen.TrustedFolders> {
+                                TrustedFoldersPage()
+                            }
+
+                            entry<Screen.TrustedFolderDetail> { key ->
+                                TrustedFolderDetailPage(projectId = key.projectId, initialPath = key.path)
+                            }
+
+                            entry<Screen.TrustedFolderEditor> { key ->
+                                TrustedFolderFileEditorPage(projectId = key.projectId, path = key.path)
+                            }
+
+                            entry<Screen.TrustedFolderSettings> { key ->
+                                TrustedFolderSettingsPage(projectId = key.projectId)
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -865,4 +885,28 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object KnowledgeCardPanel : Screen
+
+    @Serializable
+    data object TrustedFolders : Screen
+
+    @Serializable
+    data class TrustedFolderDetail(
+        val projectId: String,
+        /** 初始目录路径（相对项目根，空串=根目录），用于从入口跳转定位 */
+        val path: String = "",
+    ) : Screen
+
+    @Serializable
+    data class TrustedFolderEditor(
+        /** 所属项目 id（编辑器按项目操作，与激活项目无关） */
+        val projectId: String,
+        /** 相对项目根的完整文件路径 */
+        val path: String,
+    ) : Screen
+
+    @Serializable
+    data class TrustedFolderSettings(
+        /** 目标项目 id，设置只对该项目生效 */
+        val projectId: String,
+    ) : Screen
 }

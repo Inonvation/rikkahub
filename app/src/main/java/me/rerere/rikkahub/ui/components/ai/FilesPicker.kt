@@ -58,6 +58,7 @@ import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
@@ -71,6 +72,8 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
@@ -174,6 +177,41 @@ internal fun FilesPicker(
                 .clickable {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onShowInjectionSheetChange(true)
+                },
+        )
+
+        // Trusted Folder
+        val trustedFolderRepository: TrustedFolderRepository = koinInject()
+        val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
+        val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+        ListItem(
+            leadingContent = {
+                Icon(
+                    imageVector = HugeIcons.FolderLocked,
+                    contentDescription = "信任文件夹",
+                )
+            },
+            headlineContent = {
+                Text("信任文件夹")
+            },
+            trailingContent = {
+                Text(
+                    text = activeTrustedProject?.name ?: "未激活",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            ),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onDismiss()
+                    navController.navigate(Screen.TrustedFolders)
                 },
         )
 

@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
+import android.util.LruCache
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -32,7 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,8 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -78,6 +84,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.richtext.DiffAddedColor
 import me.rerere.rikkahub.ui.components.richtext.DiffRemovedColor
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -91,25 +98,36 @@ import kotlin.uuid.Uuid
 
 private const val DEFAULT_VISIBLE_COUNT = 3
 
-private enum class FileChangeStatus {
+internal enum class FileChangeStatus {
     ADDED,
     EDITED,
     REMOVED,
 }
 
-private data class FileChange(
+internal data class FileChange(
     val path: String,
     val status: FileChangeStatus,
 )
+
+/**
+ * 文件变更卡片展开状态的进程级存储（key = messageId，UUID 全局唯一，天然隔离不同会话/消息）。
+ * LazyColumn item 划出视口后组合被回收、remember 状态丢失，滚动经过后再次进入会重置为折叠；
+ * 存进程级单例让滚动后仍保持用户展开/折叠意图（与工具气泡 toolBubbleExpanded 同模式）。
+ */
+private val editedFilesExpanded = mutableStateMapOf<String, Boolean>()
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalUuidApi::class)
 @Composable
 internal fun EditedFilesList(
     parts: List<UIMessagePart>,
     assistant: Assistant?,
+    messageId: String,
 ) {
     val workspaceId = assistant?.workspaceId?.toString() ?: return
-    val fileChanges = remember(parts) { extractFileChanges(parts) }
+    // 同步计算（含轻量预筛 + workspace_shell 流式字段提取）：卡片首帧即正确渲染，
+    // 不会出现异步补全导致的"卡片迟到出现、item 高度突变"跳动
+    // 进程级缓存（key = messageId + parts 引用锚点）：item 划出视口再回来不再重复解析大 JSON
+    val fileChanges = remember(messageId, parts) { extractFileChangesCached(messageId, parts) }
     if (fileChanges.isEmpty()) return
 
     val context = LocalContext.current
@@ -143,7 +161,7 @@ internal fun EditedFilesList(
         }
     }
 
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember(messageId) { mutableStateOf(editedFilesExpanded[messageId] ?: false) }
     val haptic = rememberHaptic()
 
     // 删除文件已不存在，点击直接提示，不弹操作菜单
@@ -169,6 +187,7 @@ internal fun EditedFilesList(
                     .clickable {
                         haptic.lightTap()
                         expanded = !expanded
+                        editedFilesExpanded[messageId] = expanded
                     }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -556,7 +575,66 @@ private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, Strin
     }
 }
 
-private fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
+/** workspace_shell 输出中我们关心的字段；其余大字段（stdout/stderr）由 ignoreUnknownKeys 流式跳过 */
+@Serializable
+private data class ShellOutput(
+    val addedFiles: List<String> = emptyList(),
+    val modifiedFiles: List<String> = emptyList(),
+    val removedFiles: List<String> = emptyList(),
+)
+
+/**
+ * 文件变更提取结果的进程级缓存（复用 Markdown.markdownParseCache 的 LRU 模式）。
+ * key = 提取类型前缀 + messageId（UIMessage.id，流式全程稳定）；陈旧性靠 value 内的 parts 引用锚点：
+ * 流式每 chunk 换新 parts 引用 → stale 重提取；消息定型后引用跨视口稳定 → 命中。
+ * LazyColumn item 划出视口后 remember 失效、再划回重新组合；本缓存让"每次滑过都重新解析
+ * 大 JSON"变为 O(1) 命中，配合 ChatList 滚动预取（warmMessageExtractions）消除首帧同步解析。
+ */
+private data class FileChangesCacheEntry(
+    val partsRef: List<UIMessagePart>,
+    val changes: List<FileChange>,
+    val sizeKb: Int,
+)
+
+private val fileChangesCache = object : LruCache<String, FileChangesCacheEntry>(4 * 1024) {
+    override fun sizeOf(key: String, value: FileChangesCacheEntry): Int = value.sizeKb
+}
+
+private fun estimatePartsSizeKb(parts: List<UIMessagePart>): Int {
+    var chars = 0
+    parts.filterIsInstance<UIMessagePart.Tool>().forEach { tool ->
+        tool.output.filterIsInstance<UIMessagePart.Text>().forEach { chars += it.text.length }
+    }
+    return chars / 1024 + 1
+}
+
+private fun cachedExtract(
+    key: String,
+    parts: List<UIMessagePart>,
+    extract: (List<UIMessagePart>) -> List<FileChange>,
+): List<FileChange> {
+    fileChangesCache.get(key)?.let { e -> if (e.partsRef === parts) return e.changes }
+    val result = extract(parts)
+    fileChangesCache.put(key, FileChangesCacheEntry(parts, result, estimatePartsSizeKb(parts)))
+    return result
+}
+
+/** 工作区文件变更提取的缓存入口（组合/预取共用） */
+internal fun extractFileChangesCached(messageId: String, parts: List<UIMessagePart>): List<FileChange> =
+    cachedExtract("workspace:$messageId", parts, ::extractFileChanges)
+
+/** 信任文件夹文件变更提取的缓存入口（组合/预取共用） */
+internal fun extractTrustedFolderChangesCached(messageId: String, parts: List<UIMessagePart>): List<FileChange> =
+    cachedExtract("trusted:$messageId", parts, ::extractTrustedFolderChanges)
+
+/** 供 ChatList 滚动预取：把消息的工具提取结果写入进程级缓存（返回值仅供调用，缓存副作用在内部） */
+internal fun warmMessageExtractions(messageId: String, parts: List<UIMessagePart>) {
+    if (parts.none { it is UIMessagePart.Tool }) return
+    extractFileChangesCached(messageId, parts)
+    extractTrustedFolderChangesCached(messageId, parts)
+}
+
+internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
     val changes = mutableListOf<FileChange>()
     parts.filterIsInstance<UIMessagePart.Tool>()
         .filter { it.isExecuted }
@@ -568,7 +646,9 @@ private fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                     val status = tool.output.filterIsInstance<UIMessagePart.Text>()
                         .firstOrNull()?.text
                         ?.let { text ->
-                            runCatching {
+                            // 预筛：output 不含 changeStatus 键时跳过解析（默认按 ADDED，与既有逻辑等价）
+                            if (text.indexOf("changeStatus") < 0) null
+                            else runCatching {
                                 JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
                                     ?.jsonPrimitive?.contentOrNull
                             }.getOrNull()
@@ -588,26 +668,28 @@ private fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                 }
 
                 "workspace_shell" -> {
-                    val output = tool.output.filterIsInstance<UIMessagePart.Text>()
+                    val text = tool.output.filterIsInstance<UIMessagePart.Text>()
                         .firstOrNull()?.text
-                        ?.let { text ->
-                            runCatching { JsonInstant.parseToJsonElement(text).jsonObject }.getOrNull()
-                        }
                         ?: return@forEach
-                    output["addedFiles"]?.jsonArray?.forEach { element ->
-                        element.jsonPrimitive.contentOrNull?.let { path ->
-                            changes.add(FileChange(path, FileChangeStatus.ADDED))
-                        }
+                    // 轻量预筛：output 不含任一变更键时直接跳过，避免对超大 stdout 做解析
+                    if (text.indexOf("addedFiles") < 0 &&
+                        text.indexOf("modifiedFiles") < 0 &&
+                        text.indexOf("removedFiles") < 0
+                    ) return@forEach
+                    // 反序列化到只含三个数组字段的 data class，而非完整 JSON 树：
+                    // stdout/stderr 等大字段被 ignoreUnknownKeys 流式跳过、不构建大对象，
+                    // 避免滚动到该卡片时在主线程整树解析造成掉帧
+                    val output = runCatching {
+                        JsonInstant.decodeFromString<ShellOutput>(text)
+                    }.getOrNull() ?: return@forEach
+                    output.addedFiles.forEach { path ->
+                        changes.add(FileChange(path, FileChangeStatus.ADDED))
                     }
-                    output["modifiedFiles"]?.jsonArray?.forEach { element ->
-                        element.jsonPrimitive.contentOrNull?.let { path ->
-                            changes.add(FileChange(path, FileChangeStatus.EDITED))
-                        }
+                    output.modifiedFiles.forEach { path ->
+                        changes.add(FileChange(path, FileChangeStatus.EDITED))
                     }
-                    output["removedFiles"]?.jsonArray?.forEach { element ->
-                        element.jsonPrimitive.contentOrNull?.let { path ->
-                            changes.add(FileChange(path, FileChangeStatus.REMOVED))
-                        }
+                    output.removedFiles.forEach { path ->
+                        changes.add(FileChange(path, FileChangeStatus.REMOVED))
                     }
                 }
             }
@@ -784,4 +866,169 @@ internal fun StudyItemsList(parts: List<UIMessagePart>) {
             }
         }
     }
+}
+
+/**
+ * 信任文件夹工具的「文件变更」卡片：复用工作区文件变更的展示逻辑（新增/编辑/删除分类 chip），
+ * 在聊天气泡下方展示 AI 对信任文件夹的真实文件改动。点击 chip 打开对应文件预览。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId: String) {
+    val changes = remember(messageId, parts) { extractTrustedFolderChangesCached(messageId, parts) }
+    if (changes.isEmpty()) return
+
+    val navController = LocalNavController.current
+    val toaster = LocalToaster.current
+    // 信任文件夹编辑文件跳转按「当前激活项目」打开（工具编辑的是激活项目的文件）
+    val trustedFolderRepository: TrustedFolderRepository = koinInject()
+    val trustedActiveProjectId by trustedFolderRepository.settingsFlow
+        .map { it.activeProjectId }
+        .collectAsState(initial = null)
+    var expanded by remember(messageId) { mutableStateOf(editedFilesExpanded[messageId] ?: false) }
+    val haptic = rememberHaptic()
+
+    val addedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
+    val editedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
+    val removedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.REMOVED }.map { it.path } }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        haptic.lightTap()
+                        expanded = !expanded
+                        editedFilesExpanded[messageId] = expanded
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Edit01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.secondary,
+                )
+                Text(
+                    text = "信任文件夹文件变更 ${changes.size} 项",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (addedFiles.isNotEmpty()) {
+                        Text("+${addedFiles.size}", style = MaterialTheme.typography.labelSmall, color = DiffAddedColor)
+                    }
+                    if (editedFiles.isNotEmpty()) {
+                        Text("~${editedFiles.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (removedFiles.isNotEmpty()) {
+                        Text("-${removedFiles.size}", style = MaterialTheme.typography.labelSmall, color = DiffRemovedColor)
+                    }
+                }
+                Icon(
+                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FileChangeChipGroup(
+                        title = "新增",
+                        paths = addedFiles,
+                        icon = HugeIcons.FileAdd,
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        onSelect = { path ->
+                            val pid = trustedActiveProjectId
+                            if (pid != null) navController.navigate(Screen.TrustedFolderEditor(pid, path))
+                            else toaster.show("未激活信任文件夹，无法打开编辑的文件")
+                        },
+                    )
+                    FileChangeChipGroup(
+                        title = "编辑",
+                        paths = editedFiles,
+                        icon = HugeIcons.Edit01,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onSelect = { path ->
+                            val pid = trustedActiveProjectId
+                            if (pid != null) navController.navigate(Screen.TrustedFolderEditor(pid, path))
+                            else toaster.show("未激活信任文件夹，无法打开编辑的文件")
+                        },
+                    )
+                    FileChangeChipGroup(
+                        title = "删除",
+                        paths = removedFiles,
+                        icon = HugeIcons.FileMinus,
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        onSelect = { toaster.show("该文件已被删除") },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 从已执行的 trusted_folder 工具提取文件变更（新增/编辑/删除）。重命名/移动路径变化复杂，暂不计入。 */
+internal fun extractTrustedFolderChanges(parts: List<UIMessagePart>): List<FileChange> {
+    val changes = mutableListOf<FileChange>()
+    parts.filterIsInstance<UIMessagePart.Tool>()
+        .filter { it.isExecuted }
+        .forEach { tool ->
+            when (tool.toolName) {
+                "trusted_folder_write", "trusted_folder_create_folder" -> {
+                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        ?: return@forEach
+                    val status = if (tool.toolName == "trusted_folder_create_folder") {
+                        FileChangeStatus.ADDED
+                    } else {
+                        val changeStatus = tool.output.filterIsInstance<UIMessagePart.Text>()
+                            .firstOrNull()?.text
+                            ?.let { text ->
+                                if (text.indexOf("changeStatus") < 0) null
+                                else runCatching {
+                                    JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
+                                        ?.jsonPrimitive?.contentOrNull
+                                }.getOrNull()
+                            }
+                        if (changeStatus == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
+                    }
+                    changes.add(FileChange(path, status))
+                }
+
+                "trusted_folder_edit" -> {
+                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        ?: return@forEach
+                    changes.add(FileChange(path, FileChangeStatus.EDITED))
+                }
+
+                "trusted_folder_delete" -> {
+                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        ?: return@forEach
+                    changes.add(FileChange(path, FileChangeStatus.REMOVED))
+                }
+            }
+        }
+    // 同一消息内同一路径可能多次出现，保留最后一次状态
+    return changes.reversed().distinctBy { it.path }.reversed()
 }

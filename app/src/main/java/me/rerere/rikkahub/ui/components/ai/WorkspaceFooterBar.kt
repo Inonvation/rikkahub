@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -14,8 +15,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,10 +29,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import me.rerere.ai.core.TokenUsage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
 import me.rerere.rikkahub.data.ai.cost.CostCurrency
@@ -40,10 +45,14 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderSelectSheet
 import me.rerere.workspace.WorkspaceShellStatus
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /**
@@ -63,6 +72,18 @@ fun WorkspaceFooterBar(
 ) {
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
+    val trustedFolderRepository: TrustedFolderRepository = koinInject()
+    val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
+    val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+    // 激活项目授权状态（失效时 chip 变红警示）；进入页面/回到前台时检查，
+    // 这样在信任文件夹页重新授权后返回聊天页能及时恢复，不会一直显示失效
+    var trustedAuthorized by remember(activeTrustedProject?.id) { mutableStateOf(true) }
+    var showTrustedSelect by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LifecycleResumeEffect(activeTrustedProject?.id) {
+        scope.launch { trustedAuthorized = trustedFolderRepository.isActiveAuthorized() }
+        onPauseOrDispose { }
+    }
     val navController = LocalNavController.current
     val hapticController = rememberHaptic()
     val boundWorkspace = remember(workspaces, assistant.workspaceId) {
@@ -131,6 +152,51 @@ fun WorkspaceFooterBar(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 信任文件夹状态：激活项目时显示。点击 = 直达该项目文件浏览器（授权失效则去重新信任）；
+            // 长按 = 弹项目切换。未激活不渲染，保持原布局。
+            if (activeTrustedProject != null) {
+                val tint = if (trustedAuthorized) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .combinedClickable(
+                            onClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                if (trustedAuthorized) {
+                                    navController.navigate(Screen.TrustedFolderDetail(activeTrustedProject.id, ""))
+                                } else {
+                                    navController.navigate(Screen.TrustedFolders)
+                                }
+                            },
+                            onLongClick = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                showTrustedSelect = true
+                            },
+                        )
+                        .padding(vertical = 4.dp, horizontal = 6.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.FolderLocked,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = tint,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (trustedAuthorized) activeTrustedProject.name else "${activeTrustedProject.name} · 授权失效",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
             if (ready) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -246,6 +312,22 @@ fun WorkspaceFooterBar(
             settings = settings,
             currentModelId = currentModelStr,
             onDismiss = { showCostSheet = false },
+        )
+    }
+
+    if (showTrustedSelect) {
+        TrustedFolderSelectSheet(
+            projects = trustedSettings.projects,
+            activeProjectId = trustedSettings.activeProjectId,
+            onSelect = { id ->
+                showTrustedSelect = false
+                scope.launch { trustedFolderRepository.setActiveProject(id) }
+            },
+            onManage = {
+                showTrustedSelect = false
+                navController.navigate(Screen.TrustedFolders)
+            },
+            onDismiss = { showTrustedSelect = false },
         )
     }
 }

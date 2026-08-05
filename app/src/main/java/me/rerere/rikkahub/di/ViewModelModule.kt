@@ -36,6 +36,9 @@ import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelVM
 import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelVM
 import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelVM
 import me.rerere.rikkahub.ui.pages.study.stats.StudyStatsVM
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderDetailVM
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderSettingsVM
+import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFoldersVM
 import me.rerere.rikkahub.data.DocumentProcessor
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -51,6 +54,7 @@ val viewModelModule = module {
             chatService = get(),
             filesManager = get(),
             favoriteRepository = get(),
+            chatDraftStore = get(),
         )
     }
     viewModelOf(::ChatDrawerVM)
@@ -165,4 +169,18 @@ val viewModelModule = module {
     viewModelOf(::WrongQuestionPanelVM)
     viewModelOf(::KnowledgeCardPanelVM)
     viewModelOf(::StudyStatsVM)
+    viewModelOf(::TrustedFoldersVM)
+    viewModel<TrustedFolderDetailVM> { params ->
+        TrustedFolderDetailVM(
+            repository = get(),
+            projectId = runCatching { params.get<String>(0) }.getOrNull() ?: "",
+            initialPath = runCatching { params.get<String>(1) }.getOrNull() ?: "",
+        )
+    }
+    viewModel<TrustedFolderSettingsVM> { params ->
+        TrustedFolderSettingsVM(
+            repository = get(),
+            projectId = runCatching { params.get<String>(0) }.getOrNull() ?: "",
+        )
+    }
 }
