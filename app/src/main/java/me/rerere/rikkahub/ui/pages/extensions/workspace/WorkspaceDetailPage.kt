@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,7 +26,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -78,7 +76,6 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Recycle01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share08
@@ -122,7 +119,6 @@ fun WorkspaceDetailPage(
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
     val installToolsState by vm.installToolsState.collectAsStateWithLifecycle()
-    val trashState by vm.trashState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
@@ -137,7 +133,8 @@ fun WorkspaceDetailPage(
     var showMoveTargetPicker by remember { mutableStateOf(false) }
     var showInstallDialog by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
-    var showTrashDialog by remember { mutableStateOf(false) }
+    var createDialogDirectory by remember { mutableStateOf(false) }
+    var showCreateMenu by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
@@ -244,27 +241,51 @@ fun WorkspaceDetailPage(
                             TextButton(onClick = { selecting = true }) {
                                 Text("多选")
                             }
-                            IconButton(onClick = { showCreateDialog = true }) {
-                                Icon(
-                                    HugeIcons.Add01,
-                                    contentDescription = "新建",
-                                )
+                            Box {
+                                IconButton(onClick = { showCreateMenu = true }) {
+                                    Icon(
+                                        HugeIcons.Add01,
+                                        contentDescription = "新建",
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showCreateMenu,
+                                    onDismissRequest = { showCreateMenu = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("新建文件") },
+                                        leadingIcon = {
+                                            Icon(HugeIcons.File02, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showCreateMenu = false
+                                            createDialogDirectory = false
+                                            showCreateDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("新建目录") },
+                                        leadingIcon = {
+                                            Icon(HugeIcons.Folder01, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showCreateMenu = false
+                                            createDialogDirectory = true
+                                            showCreateDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("导入手机文件") },
+                                        leadingIcon = {
+                                            Icon(HugeIcons.FileImport, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showCreateMenu = false
+                                            filePicker.launch(arrayOf("*/*"))
+                                        },
+                                    )
+                                }
                             }
-                            IconButton(onClick = {
-                                showTrashDialog = true
-                                vm.loadTrash()
-                            }) {
-                                Icon(
-                                    HugeIcons.Recycle01,
-                                    contentDescription = "回收站",
-                                )
-                            }
-                        }
-                        IconButton(onClick = { filePicker.launch(arrayOf("*/*")) }) {
-                            Icon(
-                                HugeIcons.FileImport,
-                                contentDescription = stringResource(R.string.workspace_detail_import_file),
-                            )
                         }
                     }
                     IconButton(onClick = { vm.refresh() }) {
@@ -332,15 +353,6 @@ fun WorkspaceDetailPage(
                         moveSources = listOf(entry)
                         showMoveTargetPicker = true
                     },
-                    onEdit = if (state.area == WorkspaceStorageArea.FILES) {
-                        { entry ->
-                            if (!entry.isDirectory) {
-                                navController.navigate(
-                                    Screen.WorkspaceFileEditor(id, state.area.name, entry.path)
-                                )
-                            }
-                        }
-                    } else null,
                     onRename = if (state.area == WorkspaceStorageArea.FILES) {
                         { entry -> renameTarget = entry }
                     } else null,
@@ -444,20 +456,12 @@ fun WorkspaceDetailPage(
 
     if (showCreateDialog) {
         CreateEntryDialog(
+            initialDirectory = createDialogDirectory,
             onDismiss = { showCreateDialog = false },
             onConfirm = { name, isDirectory ->
                 if (isDirectory) vm.createDirectory(name) else vm.createFile(name)
                 showCreateDialog = false
             },
-        )
-    }
-
-    if (showTrashDialog) {
-        TrashDialog(
-            state = trashState,
-            onDismiss = { showTrashDialog = false },
-            onRestore = vm::restoreFromTrash,
-            onDelete = vm::deleteTrash,
         )
     }
 
@@ -932,7 +936,6 @@ private fun WorkspaceFilesPage(
     onLongPressSelect: (WorkspaceFileEntry) -> Unit,
     onMove: (WorkspaceFileEntry) -> Unit,
     onOpen: (WorkspaceFileEntry) -> Unit,
-    onEdit: ((WorkspaceFileEntry) -> Unit)? = null,
     onRename: ((WorkspaceFileEntry) -> Unit)? = null,
     onDelete: (WorkspaceFileEntry) -> Unit,
     onDeletePermanently: (WorkspaceFileEntry) -> Unit,
@@ -979,7 +982,6 @@ private fun WorkspaceFilesPage(
                 onToggleSelect = { onToggleSelect(entry) },
                 onLongPressSelect = { onLongPressSelect(entry) },
                 onOpen = { onOpen(entry) },
-                onEdit = onEdit?.let { callback -> { callback(entry) } },
                 onRename = onRename?.let { callback -> { callback(entry) } },
                 onDelete = { onDelete(entry) },
                 onDeletePermanently = { onDeletePermanently(entry) },
@@ -1043,11 +1045,12 @@ private fun WorkspacePathBar(
 
 @Composable
 private fun CreateEntryDialog(
+    initialDirectory: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (name: String, isDirectory: Boolean) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
-    var isDirectory by remember { mutableStateOf(false) }
+    var isDirectory by remember { mutableStateOf(initialDirectory) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("新建") },
@@ -1082,71 +1085,6 @@ private fun CreateEntryDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
-        },
-    )
-}
-
-@Composable
-private fun TrashDialog(
-    state: TrashState,
-    onDismiss: () -> Unit,
-    onRestore: (String) -> Unit,
-    onDelete: (String) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("回收站") },
-        text = {
-            when {
-                state.loading -> Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
-
-                state.entries.isEmpty() -> Text(
-                    text = "回收站为空",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                else -> LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                    items(state.entries, key = { it.path }) { entry ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = if (entry.isDirectory) HugeIcons.Folder01 else HugeIcons.File02,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = entry.name,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 8.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            IconButton(onClick = { onRestore(entry.path) }) {
-                                Icon(HugeIcons.ArrowTurnBackward, contentDescription = "恢复")
-                            }
-                            IconButton(onClick = { onDelete(entry.path) }) {
-                                Icon(
-                                    HugeIcons.Delete01,
-                                    contentDescription = "删除",
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_confirm)) }
         },
     )
 }
@@ -1190,7 +1128,6 @@ private fun WorkspaceFileCard(
     onToggleSelect: () -> Unit,
     onLongPressSelect: () -> Unit,
     onOpen: () -> Unit,
-    onEdit: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
     onDelete: () -> Unit,
     onDeletePermanently: () -> Unit,
@@ -1262,21 +1199,6 @@ private fun WorkspaceFileCard(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     if (!entry.isDirectory) {
-                        if (onEdit != null) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit)) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = HugeIcons.Edit01,
-                                        contentDescription = null,
-                                    )
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    onEdit()
-                                },
-                            )
-                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.common_export)) },
                             leadingIcon = {

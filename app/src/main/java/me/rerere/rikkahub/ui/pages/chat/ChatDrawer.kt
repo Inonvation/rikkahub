@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -363,11 +364,6 @@ fun ChatDrawerContent(
                 )
             }
 
-            DrawerAction(
-                icon = { Icon(HugeIcons.Recycle01, null) },
-                label = { Text("回收站") },
-                onClick = { navController.navigate(Screen.RecycleBin) },
-            )
             DrawerAction(
                 icon = { Icon(HugeIcons.Image02, null) },
                 label = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
@@ -766,9 +762,9 @@ private fun DrawerAction(
             onClick()
         },
         modifier = modifier,
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = Color.Transparent,
         shape = CircleShape,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Tooltip(
             tooltip = {

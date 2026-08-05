@@ -42,9 +42,6 @@ class WorkspaceDetailVM(
     private val _installToolsState = MutableStateFlow(InstallToolsState())
     val installToolsState = _installToolsState.asStateFlow()
 
-    private val _trashState = MutableStateFlow(TrashState())
-    val trashState = _trashState.asStateFlow()
-
     init {
         loadWorkspace()
         // 从聊天跳转定位：直接进入文件所在目录并加载该目录内容
@@ -312,16 +309,6 @@ class WorkspaceDetailVM(
         }
     }
 
-    /** 加载当前区的回收站列表 */
-    fun loadTrash() {
-        viewModelScope.launch {
-            _trashState.update { it.copy(loading = true) }
-            runCatching { repository.listTrash(id, state.value.area) }
-                .onSuccess { entries -> _trashState.update { it.copy(entries = entries, loading = false) } }
-                .onFailure { _trashState.update { it.copy(loading = false) } }
-        }
-    }
-
     /** 把 files 区打包为 zip 备份导出 */
     fun backupTo(outputStream: OutputStream) {
         viewModelScope.launch {
@@ -339,31 +326,6 @@ class WorkspaceDetailVM(
                 .onSuccess { refresh() }
                 .onFailure { error ->
                     _state.update { it.copy(error = error.message ?: "恢复失败") }
-                }
-        }
-    }
-
-    /** 从回收站恢复到原路径 */
-    fun restoreFromTrash(trashRelativePath: String) {
-        viewModelScope.launch {
-            runCatching { repository.restoreFile(id, state.value.area, trashRelativePath) }
-                .onSuccess {
-                    refresh()
-                    loadTrash()
-                }
-                .onFailure { error ->
-                    _state.update { it.copy(error = error.message ?: "恢复失败") }
-                }
-        }
-    }
-
-    /** 永久删除回收站内文件 */
-    fun deleteTrash(trashRelativePath: String) {
-        viewModelScope.launch {
-            runCatching { repository.deleteTrashFile(id, state.value.area, trashRelativePath) }
-                .onSuccess { loadTrash() }
-                .onFailure { error ->
-                    _state.update { it.copy(error = error.message ?: "删除失败") }
                 }
         }
     }
@@ -527,11 +489,6 @@ data class WorkspaceDetailState(
 data class InstallToolsState(
     val running: Boolean = false,
     val error: String? = null,
-)
-
-data class TrashState(
-    val loading: Boolean = false,
-    val entries: List<WorkspaceFileEntry> = emptyList(),
 )
 
 data class WorkspaceTerminalState(
