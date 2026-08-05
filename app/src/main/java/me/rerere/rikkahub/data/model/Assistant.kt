@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.model
 
+import android.util.LruCache
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
@@ -131,6 +132,29 @@ fun String.replaceRegexes(
             acc
         }
     }
+}
+
+/** 与 [replaceRegexes] 语义一致的进程级缓存版本，供消息渲染与滚动预取共用：
+ * 预取侧与渲染侧用同一缓存 key 产出同一结果，保证滚动时新进入视口的消息首帧命中缓存。
+ * key 用正则 pattern 指纹而非 Regex.hashCode()（后者语义不稳定）；按 key/value 长度计 LRU 大小。 */
+private val regexResultCache = object : LruCache<String, String>(4 * 1024) {
+    override fun sizeOf(key: String, value: String): Int = (key.length + value.length) / 1024 + 1
+}
+
+fun String.replaceRegexesCached(
+    assistant: Assistant?,
+    scope: AssistantAffectScope,
+    visual: Boolean = false
+): String {
+    if (assistant == null || assistant.regexes.isEmpty()) return this
+    val patternFingerprint = assistant.regexes.joinToString("|") {
+        "${it.id}:${it.findRegex}:${it.replaceString}:${it.enabled}:${it.visualOnly}:${it.affectingScope}"
+    }
+    val key = "${assistant.id}|$patternFingerprint|$scope|$visual|$this"
+    regexResultCache.get(key)?.let { return it }
+    val result = replaceRegexes(assistant, scope, visual)
+    regexResultCache.put(key, result)
+    return result
 }
 
 /**

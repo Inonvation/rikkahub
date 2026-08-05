@@ -1,5 +1,6 @@
 package me.rerere.ai.ui
 
+import androidx.compose.runtime.Immutable
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -86,9 +87,8 @@ data class UIMessage(
                                     reasoning = lastPart.reasoning + deltaPart.reasoning,
                                     createdAt = lastPart.createdAt,
                                     finishedAt = null,
-                                ).also {
-                                    it.metadata = deltaPart.metadata ?: lastPart.metadata
-                                }
+                                    metadata = deltaPart.metadata ?: lastPart.metadata,
+                                )
                             } else {
                                 // Create new Reasoning part
                                 acc + deltaPart
@@ -395,66 +395,74 @@ sealed class UIMessagePart {
 
     @Serializable
     @SerialName("text")
+    @Immutable
     data class Text(
         val text: String,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("image")
+    @Immutable
     data class Image(
         val url: String,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("video")
+    @Immutable
     data class Video(
         val url: String,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("audio")
+    @Immutable
     data class Audio(
         val url: String,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("document")
+    @Immutable
     data class Document(
         val url: String,
         val fileName: String,
         val mime: String = "text/*",
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("reasoning")
+    @Immutable
     data class Reasoning(
         val reasoning: String,
         val createdAt: Instant = Clock.System.now(),
         val finishedAt: Instant? = Clock.System.now(),
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Deprecated("Deprecated")
     @Serializable
     @SerialName("search")
+    @Immutable
     data object Search : UIMessagePart() {
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     }
 
     @Deprecated("Use UIMessagePart.Tool instead")
     @Serializable
     @SerialName("tool_call")
+    @Immutable
     data class ToolCall(
         val toolCallId: String,
         val toolName: String,
         val arguments: String,
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart() {
         fun merge(other: ToolCall): ToolCall {
             return ToolCall(
@@ -470,23 +478,25 @@ sealed class UIMessagePart {
     @Deprecated("Use UIMessagePart.Tool instead")
     @Serializable
     @SerialName("tool_result")
+    @Immutable
     data class ToolResult(
         val toolCallId: String,
         val toolName: String,
         val content: JsonElement,
         val arguments: JsonElement,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart()
 
     @Serializable
     @SerialName("tool")
+    @Immutable
     data class Tool(
         val toolCallId: String,
         val toolName: String,
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
-        override var metadata: JsonObject? = null
+        override val metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
         val isExecuted: Boolean get() = output.isNotEmpty()
@@ -553,23 +563,26 @@ fun List<UIMessagePart>.toSortedMessageParts(): List<UIMessagePart> {
 }
 
 fun UIMessage.finishReasoning(): UIMessage {
-    return copy(
-        parts = parts.map { part ->
-            when (part) {
-                is UIMessagePart.Reasoning -> {
-                    if (part.finishedAt == null) {
-                        part.copy(
-                            finishedAt = Clock.System.now()
-                        )
-                    } else {
-                        part
-                    }
+    // 无未完成 Reasoning 的消息返回 this（引用不变），避免生成结束时对历史消息
+    // 全量 copy → 引用全变 → 整屏重组
+    var changed = false
+    val newParts = parts.map { part ->
+        when (part) {
+            is UIMessagePart.Reasoning -> {
+                if (part.finishedAt == null) {
+                    changed = true
+                    part.copy(
+                        finishedAt = Clock.System.now()
+                    )
+                } else {
+                    part
                 }
-
-                else -> part
             }
+
+            else -> part
         }
-    )
+    }
+    return if (changed) copy(parts = newParts) else this
 }
 
 fun UIMessage.finishPendingTools(

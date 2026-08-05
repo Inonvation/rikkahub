@@ -78,7 +78,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
@@ -221,12 +221,20 @@ fun ChatMessage(
             }
         }
 
-        EditedFilesList(
-            parts = message.parts,
-            assistant = assistant,
-        )
+        // 仅当消息含工具调用时才组合文件变更/学习卡片：
+        // 普通文本消息不创建这两个空卡片组件，减少流式重组时的组合开销
+        if (message.parts.any { it is UIMessagePart.Tool }) {
+            val messageId = message.id.toString()
+            EditedFilesList(
+                parts = message.parts,
+                assistant = assistant,
+                messageId = messageId,
+            )
 
-        StudyItemsList(parts = message.parts)
+            TrustedFolderEditedFilesList(parts = message.parts, messageId = messageId)
+
+            StudyItemsList(parts = message.parts)
+        }
 
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
@@ -337,7 +345,6 @@ private fun MessagePartsBlock(
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     ChainOfThought(
-                        modifier = Modifier.animateContentSize(),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                         cardColors = CardDefaults.cardColors(
@@ -372,38 +379,39 @@ private fun MessagePartsBlock(
                 }
             }
 
-            is MessagePartBlock.ContentBlock -> key(block.index) {
+            is MessagePartBlock.ContentBlock -> {
+                key(block.index) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         val textContent = @Composable {
                             if (role == MessageRole.USER) {
                                 Surface(
-                                    modifier = Modifier.animateContentSize(),
+                                    modifier = if (!loading) Modifier.animateContentSize() else Modifier,
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     onClick = { onUserMessageClick?.invoke() },
                                 ) {
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         MarkdownBlock(
-                                            content = part.text.replaceRegexes(
+                                            content = part.text.replaceRegexesCached(
                                                 assistant = assistant,
                                                 scope = AssistantAffectScope.USER,
                                                 visual = true,
                                             ),
-                                            onClickCitation = handleClickCitation
+                                            onClickCitation = handleClickCitation,
                                         )
                                     }
                                 }
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
                                     Surface(
-                                        modifier = Modifier.animateContentSize(),
+                                        modifier = if (!loading) Modifier.animateContentSize() else Modifier,
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp)) {
                                             MarkdownBlock(
-                                                content = part.text.replaceRegexes(
+                                                content = part.text.replaceRegexesCached(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
                                                     visual = true,
@@ -414,14 +422,13 @@ private fun MessagePartsBlock(
                                     }
                                 } else {
                                     MarkdownBlock(
-                                        content = part.text.replaceRegexes(
+                                        content = part.text.replaceRegexesCached(
                                             assistant = assistant,
                                             scope = AssistantAffectScope.ASSISTANT,
                                             visual = true,
                                         ),
                                         onClickCitation = handleClickCitation,
-                                        modifier = Modifier
-                                            .animateContentSize()
+                                        modifier = if (!loading) Modifier.animateContentSize() else Modifier
                                     )
                                 }
                             }
@@ -584,6 +591,7 @@ private fun MessagePartsBlock(
                         // Skip unknown part types (e.g., deprecated ToolCall, ToolResult, Search)
                     }
                 }
+            }
             }
         }
     }

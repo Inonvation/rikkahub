@@ -2,12 +2,14 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.ClipData
 import android.content.Intent
+import android.util.LruCache
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -234,13 +237,54 @@ private fun parseMarkdown(content: String): MarkdownParseResult {
     return MarkdownParseResult(preprocessed, astTree, astTree.containsHtml())
 }
 
+/**
+ * 进程级 markdown 解析结果缓存（LRU，线程安全）。
+ * 快速滚动时多条消息同时首次进入视口、在主线程同步解析 AST（IntelliJ 解析器单次 3-26ms）
+ * 是掉帧的直接原因。此缓存配合 [warmMarkdownCache]（ChatList 滚动时预取即将进入视口的消息）
+ * 让消息真正进入视口时命中缓存、不再阻塞主线程，且无渲染变化。
+ * sizeOf 以文本长度近似 AST 占用（与内容长度正相关），maxSize 单位 KB。
+ */
+private val markdownParseCache = object : LruCache<String, MarkdownParseResult>(4 * 1024) {
+    override fun sizeOf(key: String, value: MarkdownParseResult): Int {
+        return (key.length + value.preprocessed.length) / 1024 + 1
+    }
+}
+
+/** markdown / LaTeX 语法起始字符：含任一字符的文本需走 AST 解析；纯文本跳过解析以省固定开销 */
+private val MARKDOWN_SYNTAX_CHARS = "`*_#[]()!|~\\\$<>+-=:"
+
+/** 是否含 markdown/LaTeX 语法起始符（决定是否需要 AST 解析） */
+private fun String.containsMarkdownSyntax(): Boolean = any { it in MARKDOWN_SYNTAX_CHARS }
+
+/** 预解析指定文本并写入缓存（供聊天列表滚动时预取即将进入视口的消息 markdown）；
+ * 返回 true 表示该文本含 HTML（调用方可据此继续预热 MarkdownNew 的 HTML 生成缓存） */
+internal fun warmMarkdownCache(content: String): Boolean {
+    if (content.length > MARKDOWN_PARSE_MAX_CHARS) return false
+    val result = markdownParseCache.get(content) ?: parseMarkdown(content).also { markdownParseCache.put(content, it) }
+    return result.hasHtml
+}
+
+/**
+ * 内部笔记链接前缀：双链/内部链接预处理成 `rikkahub-note/目标` 的相对路径形式（不是 `note:` 协议），
+ * 因为 Markdown 解析器开 `useSafeLinks` 会过滤非标准协议链接。由 [LinkClickHandler] 接管跳转。
+ */
+private const val NOTE_LINK_PREFIX = "rikkahub-note/"
+
+/** 链接点击处理器；返回 true 表示已处理（拦截默认的系统浏览器打开） */
+fun interface LinkClickHandler {
+    fun onLinkClick(dest: String): Boolean
+}
+
+private val LocalLinkClick = staticCompositionLocalOf<LinkClickHandler?> { null }
+
 @OptIn(FlowPreview::class)
 @Composable
 fun MarkdownBlock(
     content: String,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
-    onClickCitation: (String) -> Unit = {}
+    onClickCitation: (String) -> Unit = {},
+    onLinkClick: LinkClickHandler? = null,
 ) {
     // 超大文本降级为纯文本：流式期间每 chunk 都全量重解析成本过高，极端长文本不做实时解析。
     // 阈值以下保留正常 Markdown 渲染。
@@ -253,7 +297,23 @@ fun MarkdownBlock(
         return
     }
 
-    var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
+    // 纯文本快速路径：不含 markdown/LaTeX 语法起始符则直接渲染文本，
+    // 跳过 AST 解析（IntelliJ parser 有固定 3-5ms 开销，纯文本消息无需解析，
+    // 避免快速滚动时每条纯文本消息首显都带一次固定卡顿）
+    if (!content.containsMarkdownSyntax()) {
+        ProvideTextStyle(style) {
+            Text(
+                text = content,
+                modifier = modifier.padding(horizontal = 4.dp),
+            )
+        }
+        return
+    }
+
+    // 首帧优先用进程级缓存（滚动预取已写入则直接命中，不阻塞主线程）；未命中时同步解析并缓存
+    var (data, setData) = remember {
+        mutableStateOf(markdownParseCache.get(content) ?: parseMarkdown(content).also { markdownParseCache.put(content, it) })
+    }
 
     // 监听内容变化，重新解析AST树
     // 后台线程解析AST树防掉帧。流式输出每 chunk 都变一次 content，去掉 debounce：
@@ -268,22 +328,26 @@ fun MarkdownBlock(
             .collect { setData(it) }
     }
 
-    if (data.hasHtml) {
-        MarkdownNew(
-            content = content,
-            modifier = modifier,
-            style = style,
-            onClickCitation = onClickCitation,
-        )
-    } else {
-        ProvideTextStyle(style) {
-            Column(
-                modifier = modifier.padding(horizontal = 4.dp)
-            ) {
-                data.astTree.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
-                    )
+    CompositionLocalProvider(LocalLinkClick provides onLinkClick) {
+        // 需要内部笔记链接跳转（onLinkClick 非空）时强制走 MarkdownNode 路径：
+        // MarkdownNew 走 LinkAnnotation，不支持 note 链接回调；HTML 内容降级用 MarkdownNode 渲染。
+        if (data.hasHtml && onLinkClick == null) {
+            MarkdownNew(
+                content = content,
+                modifier = modifier,
+                style = style,
+                onClickCitation = onClickCitation,
+            )
+        } else {
+            ProvideTextStyle(style) {
+                Column(
+                    modifier = modifier.padding(horizontal = 4.dp)
+                ) {
+                    data.astTree.children.fastForEach { child ->
+                        MarkdownNode(
+                            node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                        )
+                    }
                 }
             }
         }
@@ -482,11 +546,27 @@ private fun MarkdownNode(
             val linkDest =
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
             val context = LocalContext.current
+            // 在组合上下文读取链接处理器，供点击回调使用（clickable 的 onClick 非组合上下文）
+            val handler = LocalLinkClick.current
+            // workspace 链接：组合时解析 + 捕获预览入口（clickable 回调非组合上下文）
+            val wsResolved = resolveWorkspaceImage(linkDest)
+            val openWsPreview = LocalOpenWorkspaceImagePreview.current
             Text(
                 text = linkText,
                 color = MaterialTheme.colorScheme.primary,
                 textDecoration = TextDecoration.Underline,
                 modifier = modifier.clickable {
+                    // workspace 链接：应用内打开图片预览
+                    val wsUrl = wsResolved
+                    if (wsUrl != null) {
+                        openWsPreview(wsUrl)
+                        return@clickable
+                    }
+                    // note: 前缀的内部笔记链接（双链/内部路径预处理产物）交给回调接管，而非系统浏览器
+                    val internal = linkDest.removePrefix(NOTE_LINK_PREFIX).takeIf { it != linkDest }
+                    if (internal != null && handler != null && handler.onLinkClick(internal)) {
+                        return@clickable
+                    }
                     val intent = Intent(Intent.ACTION_VIEW, linkDest.toUri())
                     context.startActivity(intent)
                 })
@@ -535,8 +615,11 @@ private fun MarkdownNode(
         // 图片
         MarkdownElementTypes.IMAGE -> {
             val altText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content) ?: ""
-            val imageUrl =
+            val rawUrl =
                 node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
+            // 工作区图片约定：AI 正文写 ![描述](/workspace/相对路径)，解析成沙箱内实际文件显示；
+            // 非工作区路径或解析失败保持原样（走 Coil 默认加载逻辑）
+            val imageUrl = resolveWorkspaceImage(rawUrl) ?: rawUrl
             Column(
                 modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -808,41 +891,77 @@ private fun Paragraph(
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
     val latexColorArgb = LocalContentColor.current.toArgb()
-    FlowRow(
+    // 链接点击处理器（MarkdownBlock 注入）：双链/内部笔记链接跳转等；
+    // workspace 链接（/workspace/ 或 workspace://）应用内打开图片预览（链接分支通过 onLinkClick 回调进来）。
+    // CompositionLocal 需在组合上下文读取，remember 只缓存闭包
+    val wsResolver = LocalWorkspaceImageResolver.current
+    val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val noteHandler = LocalLinkClick.current
+    val linkHandler: ((String) -> Boolean)? = remember(wsResolver, openWsPreview, noteHandler) {
+        { dest: String ->
+            val wsUrl = resolveWorkspaceImage(dest, wsResolver)
+            if (wsUrl != null) {
+                openWsPreview(wsUrl)
+                true
+            } else {
+                noteHandler?.onLinkClick(dest) ?: false
+            }
+        }
+    }
+    // 段落是否含可点击链接：决定是否给整段 Text 挂 clickable，
+    // 否则 AnnotatedString 里的 LinkAnnotation 不响应点击（链接点了没反应）。
+    val hasClickableLink = remember(node) {
+        node.findChildOfTypeRecursive(
+            MarkdownElementTypes.INLINE_LINK,
+            MarkdownElementTypes.AUTOLINK,
+            GFMTokenTypes.GFM_AUTOLINK,
+        ) != null
+    }
+    val annotatedString = remember(content, enableLatexRendering, latexColorArgb, linkHandler) {
+        buildAnnotatedString {
+            node.children.fastForEach { child ->
+                appendMarkdownNodeContent(
+                    node = child,
+                    content = content,
+                    inlineContents = inlineContents,
+                    colorScheme = colorScheme,
+                    onClickCitation = onClickCitation,
+                    style = textStyle,
+                    density = density,
+                    trim = trim,
+                    enableLatexRendering = enableLatexRendering,
+                    latexColorArgb = latexColorArgb,
+                    onLinkClick = linkHandler,
+                )
+            }
+        }
+    }
+    // 普通段落（无图片/块级数学）直接渲染单 Text：FlowRow 对单个 child 是多于的布局开销
+    // （FlowRow 的测量是 O(n²) 换行计算），长 markdown 消息会渲染大量段落、测量成本累加是滚动掉帧主因。
+    Text(
+        text = annotatedString,
+        // 段落含链接时挂 clickable（无波纹）：让 LinkAnnotation 可点击。
+        // URL 链接自动打开浏览器，note 链接走上面 Clickable 的回调 onLinkClick 跳转。
         modifier = modifier.then(
             if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
             else Modifier
-        )
-    ) {
-        val annotatedString = remember(content, enableLatexRendering, latexColorArgb) {
-            buildAnnotatedString {
-                node.children.fastForEach { child ->
-                    appendMarkdownNodeContent(
-                        node = child,
-                        content = content,
-                        inlineContents = inlineContents,
-                        colorScheme = colorScheme,
-                        onClickCitation = onClickCitation,
-                        style = textStyle,
-                        density = density,
-                        trim = trim,
-                        enableLatexRendering = enableLatexRendering,
-                        latexColorArgb = latexColorArgb,
-                    )
-                }
+        ).then(
+            if (hasClickableLink) {
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { }
+            } else {
+                Modifier
             }
-        }
-        Text(
-            text = annotatedString,
-            modifier = Modifier,
-            inlineContent = inlineContents,
-            softWrap = true,
-            overflow = TextOverflow.Visible,
-            style = LocalTextStyle.current.copy(
-                lineHeight = if (hasInlineMath && enableLatexRendering) TextUnit.Unspecified else LocalTextStyle.current.lineHeight
-            )
+        ),
+        inlineContent = inlineContents,
+        softWrap = true,
+        overflow = TextOverflow.Visible,
+        style = LocalTextStyle.current.copy(
+            lineHeight = if (hasInlineMath && enableLatexRendering) TextUnit.Unspecified else LocalTextStyle.current.lineHeight
         )
-    }
+    )
 }
 
 @Composable
@@ -872,6 +991,8 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
         @Composable {
             MarkdownBlock(
                 content = if (columnIndex < headerCells.size) headerCells[columnIndex] else "",
+                // 透传链接处理器：否则内层 MarkdownBlock 用 LocalLinkClick=null 覆盖外层，单元格链接点不动
+                onLinkClick = LocalLinkClick.current,
             )
         }
     }
@@ -882,6 +1003,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             @Composable {
                 MarkdownBlock(
                     content = if (columnIndex < rowData.size) rowData[columnIndex] else "",
+                    onLinkClick = LocalLinkClick.current,
                 )
             }
         }
@@ -1013,6 +1135,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     enableLatexRendering: Boolean = true,
     latexColorArgb: Int = 0,
     onClickCitation: (String) -> Unit = {},
+    onLinkClick: ((String) -> Boolean)? = null,
 ) {
     when {
         node.type == MarkdownTokenTypes.BLOCK_QUOTE -> {}
@@ -1051,7 +1174,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onLinkClick = onLinkClick
                     )
                 }
             }
@@ -1069,7 +1193,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onLinkClick = onLinkClick
                     )
                 }
             }
@@ -1087,7 +1212,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
-                        onClickCitation = onClickCitation
+                        onClickCitation = onClickCitation,
+                        onLinkClick = onLinkClick
                     )
                 }
             }
@@ -1134,6 +1260,42 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                             })
                     )
                     appendInlineContent("citation:$linkDest")
+                }
+            } else if (linkDest.startsWith(NOTE_LINK_PREFIX) && onLinkClick != null) {
+                // 内部笔记链接（双链/内部路径预处理产物）：用 Clickable 链接回调 onLinkClick 跳转。
+                // 需配合段落 Text 的 clickable modifier，否则 LinkAnnotation 不响应点击。
+                val target = linkDest.removePrefix(NOTE_LINK_PREFIX)
+                withLink(
+                    LinkAnnotation.Clickable(
+                        tag = "note:$target",
+                        linkInteractionListener = { onLinkClick(target) },
+                    )
+                ) {
+                    withStyle(
+                        SpanStyle(
+                            color = colorScheme.primary, textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append(linkText)
+                    }
+                }
+            } else if (isWorkspaceLink(linkDest) && onLinkClick != null) {
+                // workspace 链接（/workspace/ 或 workspace://）：用 Clickable 链接回调 onLinkClick，
+                // 由 Paragraph 注入的处理器解析成 file:// 后应用内预览。
+                // 需配合段落 Text 的 clickable modifier，否则 LinkAnnotation 不响应点击。
+                withLink(
+                    LinkAnnotation.Clickable(
+                        tag = "ws:$linkDest",
+                        linkInteractionListener = { onLinkClick(linkDest) },
+                    )
+                ) {
+                    withStyle(
+                        SpanStyle(
+                            color = colorScheme.primary, textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append(linkText)
+                    }
                 }
             } else {
                 withLink(LinkAnnotation.Url(linkDest)) {
@@ -1253,7 +1415,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     style = style,
                     enableLatexRendering = enableLatexRendering,
                     latexColorArgb = latexColorArgb,
-                    onClickCitation = onClickCitation
+                    onClickCitation = onClickCitation,
+                    onLinkClick = onLinkClick
                 )
             }
         }

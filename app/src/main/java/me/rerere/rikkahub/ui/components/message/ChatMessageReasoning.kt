@@ -47,7 +47,7 @@ import me.rerere.hugeicons.stroke.Idea01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
-import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -204,7 +204,7 @@ private fun ReasoningContent(
     ) {
         val reasoningContent = @Composable {
             MarkdownBlock(
-                content = reasoning.reasoning.replaceRegexes(
+                content = reasoning.reasoning.replaceRegexesCached(
                     assistant = assistant,
                     scope = AssistantAffectScope.ASSISTANT,
                     visual = true,
@@ -292,7 +292,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 scrollState = state.scrollState,
                 fadeHeight = fadeHeight,
                 loading = loading,
-                onCollapse = { state.onExpandedChange(false, loading) },
+                onCollapse = {
+                    state.onExpandedChange(false, loading)
+                    // 双击折叠与点击 label 折叠语义一致：写入进程级记忆，切换界面后保持折叠
+                    if (stateKey != null) setSectionExpanded(stateKey, false)
+                },
             )
         },
     )

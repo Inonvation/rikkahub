@@ -539,11 +539,9 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         val reasoning = UIMessagePart.Reasoning(
                             reasoning = thinking,
                             createdAt = Clock.System.now(),
-                            finishedAt = null
+                            finishedAt = null,
+                            metadata = signature?.let { ClaudeReasoningMetadata(signature = it).toMetadata() }
                         )
-                        if (signature != null) {
-                            reasoning.metadata = ClaudeReasoningMetadata(signature = signature).toMetadata()
-                        }
                         parts.add(reasoning)
                     }
                 }

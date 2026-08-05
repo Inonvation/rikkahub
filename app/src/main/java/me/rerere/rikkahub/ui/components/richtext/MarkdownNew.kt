@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.ui.components.richtext
 
+import android.util.LruCache
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -119,6 +121,19 @@ private fun generateMarkdownHtml(content: String): String {
     return HtmlGenerator(preprocessed, tree, flavour).generateHtml()
 }
 
+/** 进程级 HTML 生成缓存：MarkdownNew 首帧同步生成 HTML（IntelliJ 解析 + HtmlGenerator）是掉帧源，
+ * 配合 [warmMarkdownNewCache] 让滚动时新进入视口的 HTML 消息首帧命中缓存、不阻塞主线程 */
+private val markdownNewHtmlCache = object : LruCache<String, String>(2 * 1024) {
+    override fun sizeOf(key: String, value: String): Int = (key.length + value.length) / 1024 + 1
+}
+
+/** 预生成指定文本的 HTML 并写入缓存（供聊天列表滚动预取调用） */
+internal fun warmMarkdownNewCache(content: String) {
+    if (markdownNewHtmlCache.get(content) == null) {
+        markdownNewHtmlCache.put(content, generateMarkdownHtml(content))
+    }
+}
+
 // ---- Main composable ----
 
 @OptIn(FlowPreview::class)
@@ -131,7 +146,7 @@ fun MarkdownNew(
 ) {
     var html by remember {
         mutableStateOf(
-            value = generateMarkdownHtml(content),
+            value = markdownNewHtmlCache.get(content) ?: generateMarkdownHtml(content).also { markdownNewHtmlCache.put(content, it) },
         )
     }
 
@@ -252,7 +267,8 @@ private fun HtmlBlockElement(
             if (src.isNotEmpty()) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     ZoomableAsyncImage(
-                        model = src,
+                        // workspace 图片：/workspace/ 或 workspace:// 解析成沙箱内 file:// 再交给 Coil
+                        model = resolveWorkspaceImage(src) ?: src,
                         contentDescription = alt.takeIf { it.isNotEmpty() },
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -346,6 +362,15 @@ private fun HtmlParagraphContent(
 
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
+    // 段落是否含 <a>：决定是否给段落 Text 挂 clickable，让 AnnotatedString 里的链接可点
+    val hasLinks = remember(element) { element.select("a").isNotEmpty() }
+    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览入口，传给链接构建（非组合）使用
+    val wsResolver = LocalWorkspaceImageResolver.current
+    val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val onWsLinkClick: (String) -> Unit = { dest ->
+        val url = resolveWorkspaceImage(dest, wsResolver)
+        if (url != null) openWsPreview(url)
+    }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
 
@@ -368,6 +393,7 @@ private fun HtmlParagraphContent(
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    onWsLinkClick = onWsLinkClick,
                 )
             }
         }
@@ -379,7 +405,18 @@ private fun HtmlParagraphContent(
         inlineContent = inlineContents,
         softWrap = true,
         overflow = TextOverflow.Visible,
-        modifier = modifier.fillMaxWidth(),
+        // 段落含链接时挂 clickable（无波纹）：让 AnnotatedString 里的 LinkAnnotation 响应点击
+        // （与 Markdown.kt AST 路径一致，否则链接点了没反应）
+        modifier = modifier.fillMaxWidth().then(
+            if (hasLinks) {
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { }
+            } else {
+                Modifier
+            }
+        ),
         style = textStyle.copy(
             lineHeight = if (hasInlineMath && enableLatexRendering)
                 TextUnit.Unspecified
@@ -703,6 +740,13 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
+    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览入口，传给链接构建（非组合）使用
+    val wsResolver = LocalWorkspaceImageResolver.current
+    val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val onWsLinkClick: (String) -> Unit = { dest ->
+        val url = resolveWorkspaceImage(dest, wsResolver)
+        if (url != null) openWsPreview(url)
+    }
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
     val (annotatedString, inlineContents) = remember(
@@ -724,6 +768,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    onWsLinkClick = onWsLinkClick,
                 )
             }
         }
@@ -757,7 +802,8 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val alt = node.attr("alt")
                     if (src.isNotEmpty()) {
                         ZoomableAsyncImage(
-                            model = src,
+                            // workspace 图片：/workspace/ 或 workspace:// 解析成沙箱内 file:// 再交给 Coil
+                            model = resolveWorkspaceImage(src) ?: src,
                             contentDescription = alt.takeIf { it.isNotEmpty() },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -820,6 +866,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    onWsLinkClick: ((String) -> Unit)? = null,
 ) {
     when (node) {
         is TextNode -> append(node.text())
@@ -831,6 +878,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             style = style,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            onWsLinkClick = onWsLinkClick,
         )
     }
 }
@@ -843,6 +891,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    onWsLinkClick: ((String) -> Unit)? = null,
 ) {
     val cssStyle = element.attr("style").takeIf { it.isNotBlank() }?.let {
         parseInlineSpanStyle(
@@ -861,6 +910,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             style = inheritedStyle,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            onWsLinkClick = onWsLinkClick,
         )
     }
 
@@ -948,9 +998,23 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                         color = colorScheme.primary,
                         textDecoration = TextDecoration.Underline,
                     ).merge(cssStyle ?: SpanStyle())
-                    withLink(LinkAnnotation.Url(href)) {
-                        withStyle(linkStyle) {
-                            recurseChildren(element, style.merge(linkStyle.asTextStyle()))
+                    if (isWorkspaceLink(href) && onWsLinkClick != null) {
+                        // workspace 链接：点击在应用内预览（组合上下文注入的处理器）
+                        withLink(
+                            LinkAnnotation.Clickable(
+                                tag = "ws:$href",
+                                linkInteractionListener = { onWsLinkClick(href) },
+                            )
+                        ) {
+                            withStyle(linkStyle) {
+                                recurseChildren(element, style.merge(linkStyle.asTextStyle()))
+                            }
+                        }
+                    } else {
+                        withLink(LinkAnnotation.Url(href)) {
+                            withStyle(linkStyle) {
+                                recurseChildren(element, style.merge(linkStyle.asTextStyle()))
+                            }
                         }
                     }
                 }

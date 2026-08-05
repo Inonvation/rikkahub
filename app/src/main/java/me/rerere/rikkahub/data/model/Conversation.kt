@@ -14,6 +14,11 @@ import kotlin.uuid.Uuid
 
 @Serializable
 data class Conversation(
+    // 内存态版本号，置于构造器首位：让 MutableStateFlow 的 equals 先比较 version O(1) 短路，
+    // 避免流式每 chunk 在主线程深比较 messageNodes→parts→全量文本字符串（长对话掉帧源）。
+    // @Transient 不进 JSON/DB，重启归 0；仅内存中随每次 updateConversation 递增。
+    @Transient
+    val version: Long = 0L,
     val id: Uuid = Uuid.random(),
     val assistantId: Uuid,
     val title: String = "",

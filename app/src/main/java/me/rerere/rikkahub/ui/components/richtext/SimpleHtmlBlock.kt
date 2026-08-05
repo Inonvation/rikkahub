@@ -306,7 +306,8 @@ private fun RenderImage(
             contentAlignment = Alignment.Center
         ) {
             ZoomableAsyncImage(
-                model = src,
+                // workspace 图片：/workspace/ 或 workspace:// 解析成沙箱内 file:// 再交给 Coil
+                model = resolveWorkspaceImage(src) ?: src,
                 contentDescription = alt.takeIf { it.isNotEmpty() },
                 modifier = Modifier
                     .fillMaxWidth()

@@ -37,7 +37,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -87,31 +86,53 @@ import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
+import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
+import me.rerere.rikkahub.ui.components.richtext.warmMarkdownNewCache
+import me.rerere.rikkahub.ui.components.richtext.LocalWorkspaceImageResolver
+import me.rerere.rikkahub.ui.components.richtext.LocalOpenWorkspaceImagePreview
+import me.rerere.rikkahub.ui.components.richtext.workspaceImageResolver
 import me.rerere.rikkahub.ui.components.message.LocalConversationId
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
+import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
+import me.rerere.rikkahub.utils.ToolParseCache
 import me.rerere.rikkahub.utils.plus
-import kotlin.math.roundToInt
+import me.rerere.workspace.WorkspaceManager
+import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
+
+// 滚动预取窗口：跨过 PREFETCH_WINDOW 条索引才触发一次；前向预取 PREFETCH_AHEAD
+// （对齐/超出 LazyColumn 的 WindowAwarePrefetchStrategy 组合预取，保证解析先于组合完成），后向 PREFETCH_BEHIND
+const val PREFETCH_WINDOW = 8
+const val PREFETCH_AHEAD = 20
+const val PREFETCH_BEHIND = 8
 
 @Composable
 fun ChatList(
@@ -245,19 +266,12 @@ private fun ChatListNormal(
         }
     }
 
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        // println("lastPos = $lastPos, inputPos = $inputPos  | ${lastPos <= inputPos - 8}")
-        return lastPos <= inputPos - 8
-    }
-
     // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
+    // workspace 图片/链接点击 → 应用内预览（ImagePreviewDialog）
+    var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
 
     // 自动跟随键盘滚动
     ImeLazyListAutoScroller(lazyListState = state)
@@ -275,12 +289,34 @@ private fun ChatListNormal(
     val assistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
+    // 工作区图片解析器：AI 正文用 ![描述](/workspace/路径) 引用工作区图片时，
+    // 结合当前会话绑定的 workspace 解析成沙箱内实际文件 Uri（createWorkspace 时 root = id）
+    val workspaceManager = koinInject<WorkspaceManager>()
+    val workspaceImgResolver = remember(assistant) {
+        workspaceImageResolver(workspaceManager, assistant?.workspaceId?.toString())
+    }
     val modelById = remember(settings.providers) {
         settings.providers
             .flatMap { it.models }
             .associateBy { it.id }
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
+
+    // 回调引用通过 rememberUpdatedState 捕获：item 层用 remember(node) 缓存稳定闭包，
+    // 使 ChatMessage 全部参数在 node 不变时保持稳定引用，LazyColumn 可见 item 可被 Compose 跳过重组
+    // （静态滚动时避免 250-350 节点/条的整棵子树重跑）。闭包内部通过 State 读最新引用，避免过期值 bug。
+    val currentOnRegenerate = rememberUpdatedState(onRegenerate)
+    val currentOnEdit = rememberUpdatedState(onEdit)
+    val currentOnForkMessage = rememberUpdatedState(onForkMessage)
+    val currentOnDelete = rememberUpdatedState(onDelete)
+    val currentOnUpdateMessage = rememberUpdatedState(onUpdateMessage)
+    val currentOnTranslate = rememberUpdatedState(onTranslate)
+    val currentOnClearTranslation = rememberUpdatedState(onClearTranslation)
+    val currentOnToolApproval = rememberUpdatedState(onToolApproval)
+    val currentOnToolAnswer = rememberUpdatedState(onToolAnswer)
+    val currentOnToggleFavorite = rememberUpdatedState(onToggleFavorite)
+    val currentOnAssistantNameClick = rememberUpdatedState(onAssistantNameClick)
+    val currentConversation = rememberUpdatedState(conversation)
 
     Box(
         modifier = Modifier
@@ -297,17 +333,77 @@ private fun ChatListNormal(
         var wasAtBottom by remember { mutableStateOf(initialWasAtBottom) }
         val autoScrollEnabled = settings.displaySetting.enableAutoScroll
         LaunchedEffect(state) {
-            snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+            // 只发射"最后可见项 index + 总项数"这一最小信号并去重，
+            // 避免每帧/每次布局变化重建整个 visibleItemsInfo 列表（滚动时掉帧来源）
+            snapshotFlow {
+                val info = state.layoutInfo
+                info.visibleItemsInfo.lastOrNull()?.index to info.totalItemsCount
+            }.distinctUntilChanged().collect { (lastVisible, totalCount) ->
                 val currentCount = conversationUpdated.messageNodes.size
                 val countChanged = currentCount != lastMessageCount
                 if (countChanged) lastMessageCount = currentCount
+                // 首次布局前 lastVisible 为 null，此时不置 wasAtBottom，避免误判
+                if (lastVisible != null) {
+                    wasAtBottom = lastVisible >= totalCount - 2
+                }
                 if (!state.isScrollInProgress && wasAtBottom &&
                     ((countChanged && autoScrollEnabled) || loadingState)
                 ) {
-                    state.requestScrollToItem(state.layoutInfo.totalItemsCount - 1)
+                    state.requestScrollToItem(totalCount - 1)
                 }
-                wasAtBottom = visibleItemsInfo.isAtBottom()
             }
+        }
+
+        // 滚动预取：提前在后台解析视口附近消息的 markdown/HTML/LaTeX 并写入进程级缓存，
+        // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
+        // 按"每跨过 PREFETCH_WINDOW 条才触发一次 + 取消上一次未完成任务"合并快速滚动时的并发任务，
+        // 避免每个 firstVisibleItemIndex 变化都启动一个重任务挤占主线程/GC。
+        LaunchedEffect(state) {
+            var prefetchJob: Job? = null
+            snapshotFlow { state.firstVisibleItemIndex / PREFETCH_WINDOW }
+                .distinctUntilChanged()
+                .collect {
+                    val firstVisible = state.firstVisibleItemIndex
+                    val size = conversationUpdated.messageNodes.size
+                    val lo = (firstVisible - PREFETCH_BEHIND).coerceAtLeast(0)
+                    val hi = (firstVisible + PREFETCH_AHEAD).coerceAtMost(size)
+                    if (lo >= hi) return@collect
+                    val nodes = conversationUpdated.messageNodes.subList(lo, hi)
+                    val prefetchAssistant = assistant
+                    prefetchJob?.cancel()
+                    prefetchJob = scope.launch(Dispatchers.Default) {
+                        nodes.forEach { node ->
+                            val msg = node.currentMessage
+                            val affectScope = if (msg.role == MessageRole.USER) {
+                                AssistantAffectScope.USER
+                            } else {
+                                AssistantAffectScope.ASSISTANT
+                            }
+                            // 预热正文 markdown：渲染侧与预取侧都用 replaceRegexesCached 且 key 一致 → 首帧命中缓存；
+                            // hasHtml 的结果继续预热 MarkdownNew 的 HTML 生成缓存
+                            msg.parts.filterIsInstance<UIMessagePart.Text>().forEach { part ->
+                                val rendered = part.text.replaceRegexesCached(prefetchAssistant, affectScope, visual = true)
+                            if (warmMarkdownCache(rendered)) warmMarkdownNewCache(rendered)
+                            }
+                            // 预热推理块 markdown（ChatMessageReasoningStep 渲染用，key 与渲染侧一致）
+                            msg.parts.filterIsInstance<UIMessagePart.Reasoning>().forEach { part ->
+                                warmMarkdownCache(
+                                    part.reasoning.replaceRegexesCached(prefetchAssistant, affectScope, visual = true)
+                                )
+                            }
+                            // 预热工具 output 解析 + 文件变更提取（写 ToolParseCache / 提取缓存）：
+                            // 含工具的消息进入视口时命中缓存，不再主线程同步解析大 JSON（首帧掉帧根因）
+                            val toolParts = msg.parts.filterIsInstance<UIMessagePart.Tool>()
+                            if (toolParts.isNotEmpty()) {
+                                val messageId = msg.id.toString()
+                                toolParts.forEach { tool ->
+                                    if (tool.isExecuted) ToolParseCache.toolOutputContent(tool)
+                                }
+                                warmMessageExtractions(messageId, msg.parts)
+                            }
+                        }
+                    }
+                }
         }
 
         // 判断最近是否滚动：滚动开始即显示；滚动结束后才延时隐藏。
@@ -324,7 +420,14 @@ private fun ChatListNormal(
         }
 
         ChatFontProvider(displaySetting = settings.displaySetting) {
-            CompositionLocalProvider(LocalConversationId provides conversation.id.toString()) {
+            // preview lambda 用 remember 缓存为稳定引用：若每次重组新建，Markdown 段落 linkHandler
+            // 会随引用变化而重建，破坏 annotatedString 的 remember 缓存（滚动性能）
+            val openWsPreview = remember { { url: String -> workspacePreviewImage = url } }
+            CompositionLocalProvider(
+                LocalConversationId provides conversation.id.toString(),
+                LocalWorkspaceImageResolver provides workspaceImgResolver,
+                LocalOpenWorkspaceImagePreview provides openWsPreview,
+            ) {
             LazyColumn(
                 state = state,
                 contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
@@ -332,15 +435,27 @@ private fun ChatListNormal(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .hazeSource(state = hazeState)
+                    // hazeSource 仅在开启模糊效果时挂载：未开启时是空转采样，滚动时白白增加截取开销
+                    .then(
+                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeSource(state = hazeState) else Modifier
+                    )
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
+                // 按消息形态分类，让 LazyColumn 槽位按形态复用组合/布局缓存
+                // （含工具消息重子树：工具气泡 + 文件变更卡片，与纯文本消息形态差异大）
+                contentType = { _, node ->
+                    val parts = node.currentMessage.parts
+                    when {
+                        parts.any { it is UIMessagePart.Tool } -> "with_tool"
+                        parts.isEmpty() -> "empty"
+                        else -> "text"
+                    }
+                },
             ) { index, node ->
-                Column {
-                    ListSelectableItem(
+                ListSelectableItem(
                         key = node.id,
                         onSelectChange = {
                             if (!selectedItems.contains(node.id)) {
@@ -352,45 +467,58 @@ private fun ChatListNormal(
                         selectedKeys = selectedItems,
                         enabled = selecting,
                     ) {
+                        // 用 remember(node) 缓存稳定闭包，回调内部通过 rememberUpdatedState 读最新引用，
+                        // 避免 item 每次重组都新建 lambda 击穿 Compose 跳过链（node 不变时 ChatMessage 整体跳过）
+                        val regenCb = remember(node) { { currentOnRegenerate.value(node.currentMessage) } }
+                        val editCb = remember(node) { { currentOnEdit.value(node.currentMessage) } }
+                        val forkCb = remember(node) { { currentOnForkMessage.value(node.currentMessage) } }
+                        val deleteCb = remember(node) { { currentOnDelete.value(node.currentMessage) } }
+                        val updateCb = remember(node) { { it: MessageNode -> currentOnUpdateMessage.value(it) } }
+                        val shareCb: () -> Unit = remember(node) {
+                            {
+                                selecting = true  // 使用 CoroutineScope 延迟状态更新
+                                selectedItems.clear()
+                                val nodes = currentConversation.value.messageNodes
+                                selectedItems.addAll(nodes.map { it.id }
+                                    .subList(0, nodes.indexOf(node) + 1))
+                            }
+                        }
+                        val toggleFavCb: () -> Unit = remember(node) {
+                            { currentOnToggleFavorite.value?.invoke(node) }
+                        }
+                        val translateCb: (UIMessage, java.util.Locale) -> Unit = remember(node) {
+                            { msg: UIMessage, locale: java.util.Locale -> currentOnTranslate.value?.invoke(msg, locale) }
+                        }
+                        val toolApprovalCb: (String, Boolean, String) -> Unit = remember(node) {
+                            { id: String, approved: Boolean, reason: String -> currentOnToolApproval.value?.invoke(id, approved, reason) }
+                        }
+                        val toolAnswerCb: (String, String) -> Unit = remember(node) {
+                            { id: String, answer: String -> currentOnToolAnswer.value?.invoke(id, answer) }
+                        }
+                        val assistantNameCb: () -> Unit = remember(node) {
+                            { currentOnAssistantNameClick.value?.invoke() }
+                        }
                         ChatMessage(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
                             loading = loading && index == lastMessageIndex,
-                            onRegenerate = {
-                                onRegenerate(node.currentMessage)
-                            },
-                            onEdit = {
-                                onEdit(node.currentMessage)
-                            },
-                            onFork = {
-                                onForkMessage(node.currentMessage)
-                            },
-                            onDelete = {
-                                onDelete(node.currentMessage)
-                            },
-                            onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
-                                selectedItems.clear()
-                                selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                    .subList(0, conversation.messageNodes.indexOf(node) + 1))
-                            },
-                            onUpdate = {
-                                onUpdateMessage(it)
-                            },
+                            onRegenerate = regenCb,
+                            onEdit = editCb,
+                            onFork = forkCb,
+                            onDelete = deleteCb,
+                            onShare = shareCb,
+                            onUpdate = updateCb,
                             isFavorite = node.isFavorite,
-                            onToggleFavorite = {
-                                onToggleFavorite?.invoke(node)
-                            },
-                            onTranslate = onTranslate,
-                            onClearTranslation = onClearTranslation,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
+                            onToggleFavorite = toggleFavCb,
+                            onTranslate = translateCb,
+                            onClearTranslation = remember(node) { { msg: UIMessage -> currentOnClearTranslation.value(msg) } },
+                            onToolApproval = toolApprovalCb,
+                            onToolAnswer = toolAnswerCb,
                             lastMessage = index == lastMessageIndex,
-                            onAssistantNameClick = onAssistantNameClick,
+                            onAssistantNameClick = assistantNameCb,
                         )
                     }
-                }
             }
 
             if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
@@ -549,6 +677,14 @@ private fun ChatListNormal(
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }
+
+            // workspace 图片/链接点击预览（resolveWorkspaceImage 解析成功后由预览入口触发）
+            val previewUrl = workspacePreviewImage
+            if (previewUrl != null) {
+                ImagePreviewDialog(images = listOf(previewUrl)) {
+                    workspacePreviewImage = null
+                }
+            }
         }
     }
 }
@@ -644,7 +780,9 @@ private fun ChatListPreview(
         modifier = Modifier
             .padding(top = innerPadding.calculateTopPadding())
             .fillMaxSize()
-            .hazeSource(state = hazeState),
+            .then(
+                if (settings.displaySetting.enableBlurEffect) Modifier.hazeSource(state = hazeState) else Modifier
+            ),
     ) {
         // 搜索框
         OutlinedTextField(

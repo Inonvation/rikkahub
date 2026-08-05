@@ -82,6 +82,7 @@ import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.StudyToolPermissions
 import me.rerere.rikkahub.data.ai.tools.StudyTools
+import me.rerere.rikkahub.data.ai.tools.createTrustedFolderTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
@@ -94,6 +95,7 @@ import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.TrustedFolderReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -120,6 +122,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.GroupRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
@@ -210,6 +213,7 @@ class ChatService(
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val trustedFolderRepository: TrustedFolderRepository,
     private val folderRepository: FolderRepository,
     private val knowledgeManager: KnowledgeManager,
     private val todoStorage: TodoStorage,
@@ -221,6 +225,7 @@ class ChatService(
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+    private val trustedFolderReminderTransformer = TrustedFolderReminderTransformer(trustedFolderRepository)
 
     // 知识库系统提示注入
     private val knowledgeBaseReminderTransformer = KnowledgeBaseReminderTransformer(knowledgeManager)
@@ -1307,6 +1312,7 @@ class ChatService(
                     addAll(inputTransformers)
                     add(templateTransformer)
                     add(workspaceReminderTransformer)
+                    add(trustedFolderReminderTransformer)
                     add(knowledgeBaseReminderTransformer)
                 },
                 outputTransformers = outputTransformers,
@@ -1334,6 +1340,7 @@ class ChatService(
                         addAll(createConversationTools(conversationRepo, assistant.id))
                     }
                     addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
+                    addAll(createTrustedFolderTools(trustedFolderRepository))
                     if (assistant.enabledSkills.isNotEmpty()) {
                         addAll(
                             createSkillTools(
@@ -1387,9 +1394,14 @@ class ChatService(
                 },
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
-                val updatedConversation = getConversationFlow(conversationId).value.copy(
-                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
-                        node.copy(messages = node.messages.map { it.finishReasoning() })
+                val currentConversation = getConversationFlow(conversationId).value
+                val updatedConversation = currentConversation.copy(
+                    messageNodes = currentConversation.messageNodes.map { node ->
+                        val newMessages = node.messages.map { it.finishReasoning() }
+                        // finishReasoning 对无未完成推理的消息返回原引用 → 节点保持原引用，
+                        // 避免生成结束时全表重建引用导致一次性整屏重组
+                        val nodeChanged = newMessages.indices.any { newMessages[it] !== node.messages[it] }
+                        if (nodeChanged) node.copy(messages = newMessages) else node
                     },
                     updateAt = Instant.now()
                 )
@@ -2081,7 +2093,9 @@ class ChatService(
         if (checkFiles) {
             checkFilesDelete(conversation, session.state.value)
         }
-        session.state.value = conversation
+        // version 递增：让 MutableStateFlow 的 equals 先比 version 字段 O(1) 短路，
+        // 避免流式每 chunk 在主线程深比较 messageNodes→parts→全量文本字符串（长对话掉帧源）
+        session.state.value = conversation.copy(version = conversation.version + 1L)
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {

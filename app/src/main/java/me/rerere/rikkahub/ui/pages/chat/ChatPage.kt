@@ -70,6 +70,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -341,21 +342,28 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     // 跳过首帧：LazyListState 首次组合时 items 未渲染，位置可能被 clamp（如 index 0）。
     // 首帧后 items 已加载，再同步真实的用户滚动，避免把 clamp 值回写 VM。
     var scrollSyncReady by remember { mutableStateOf(false) }
-    LaunchedEffect(chatListState) {
-        snapshotFlow {
-            chatListState.firstVisibleItemIndex to chatListState.firstVisibleItemScrollOffset
-        }.collect { (index, offset) ->
-            if (scrollSyncReady) {
-                vm.chatListFirstVisibleItemIndex = index
-                vm.chatListFirstVisibleItemScrollOffset = offset
-                // 同步"是否在底部"到 VM：导航返回重组合后用它初始化 wasAtBottom，
-                // 避免离开前不在底部、返回却被生成中自动滚动拉回底部
-                vm.chatListWasAtBottom = chatListState.layoutInfo.let { info ->
-                    val last = info.visibleItemsInfo.lastOrNull() ?: return@let true
-                    last.index >= info.totalItemsCount - 2
-                }
-            }
+    // 滚动位置同步降频：只在滚动停止边沿 + 离开页面时写一次 VM，
+    // 避免 fling 期间逐帧写 3 个全局 mutableStateOf（滚动卡顿来源之一）
+    fun syncScrollPositionToVm() {
+        if (!scrollSyncReady) return
+        vm.chatListFirstVisibleItemIndex = chatListState.firstVisibleItemIndex
+        vm.chatListFirstVisibleItemScrollOffset = chatListState.firstVisibleItemScrollOffset
+        // 同步"是否在底部"到 VM：导航返回重组合后用它初始化 wasAtBottom，
+        // 避免离开前不在底部、返回却被生成中自动滚动拉回底部
+        vm.chatListWasAtBottom = chatListState.layoutInfo.let { info ->
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@let true
+            last.index >= info.totalItemsCount - 2
         }
+    }
+    LaunchedEffect(chatListState) {
+        snapshotFlow { chatListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { inProgress ->
+                if (!inProgress) syncScrollPositionToVm()
+            }
+    }
+    DisposableEffect(chatListState) {
+        onDispose { syncScrollPositionToVm() }
     }
     LaunchedEffect(chatListState) {
         scrollSyncReady = true
@@ -565,20 +573,9 @@ private fun ChatPageContent(
         }
     }
 
-    // AI 生成时自动滚动（仅在用户未手动滚离时）。
-    // 目标统一用 layoutInfo.totalItemsCount - 1（与发送后滚动、ChatList 自动跟随一致），
-    // 不用 currentMessages.size + 5 的旧快照估算（会与 ChatList 的 requestScrollToItem 目标打架导致抖动）。
-    LaunchedEffect(conversation.currentMessages.size, loadingJob) {
-        // 生成中自动跟随到底：仅当离开前用户位于底部（vm.chatListWasAtBottom）时，
-        // 避免导航返回重组合后把已恢复的阅读位置拉回底部
-        if (loadingJob != null && !userScrolledUp && vm.chatListWasAtBottom) {
-            // 用 requestScrollToItem（瞬跳）而非 animateScrollToItem：
-            // ChatList 的自动跟随循环（snapshotFlow 监听 layoutInfo）也在用 request 滚到底，
-            // 若此处带动画，动画滚动会被那次 request 打断，目标虽一致但表现为时断时续的抖动。
-            // 统一为 request 后目标一致、无竞争，生成中跟随更平滑。
-            chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
-        }
-    }
+    // AI 生成时自动滚动已统一由 ChatList 的自动跟随循环负责（snapshotFlow 监听布局，
+    // 基于 wasAtBottom + loadingState 驱动 requestScrollToItem）。此处的连续跟随器与之重复，
+    // 叠加 request 到同一目标会造成"强制滚底 + 连续 relayout"，已删除。
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         buildList {
@@ -604,7 +601,13 @@ private fun ChatPageContent(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize()
         ) {
-        AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState))
+        AssistantBackground(
+            setting = setting,
+            // hazeSource 仅在开启模糊效果时挂载（与 ChatInput.hazeEffect 同开关）：未开启时空转采样白耗 GPU
+            modifier = Modifier.then(
+                if (setting.displaySetting.enableBlurEffect) Modifier.hazeSource(hazeState) else Modifier
+            )
+        )
         Scaffold(
             topBar = {
                 TopBar(
@@ -714,6 +717,7 @@ private fun ChatPageContent(
                             pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
+                        vm.clearDraft()
                     },
                     onLongSendClick = {
                         if (inputState.isEditing()) {
@@ -726,6 +730,7 @@ private fun ChatPageContent(
                             pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
+                        vm.clearDraft()
                     },
                     onUpdateChatModel = {
                         vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
@@ -1617,3 +1622,4 @@ private fun TodoItemRow(item: TodoItem) {
         )
     }
 }
+

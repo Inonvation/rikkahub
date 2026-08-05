@@ -641,7 +641,8 @@ class WorkspaceRepository(
             elif command -v dnf >/dev/null 2>&1; then echo "- Package manager: dnf"
             elif command -v yum >/dev/null 2>&1; then echo "- Package manager: yum"
             fi
-            if timeout 1 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null; then echo "- Network: yes"; else echo "- Network: no"; fi
+            # 网络探测多地址尝试：阿里 DNS(国内) / Cloudflare / Google，任一可达即视为有网，避免 1.1.1.1 在国内误报 no
+            if timeout 1 bash -c 'exec 3<>/dev/tcp/223.5.5.5/53' 2>/dev/null || timeout 1 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null || timeout 1 bash -c 'exec 3<>/dev/tcp/8.8.8.8/53' 2>/dev/null; then echo "- Network: yes"; else echo "- Network: no"; fi
             echo "- Mounts: /workspace (persistent), /skills, /upload (read-only), /tool_outputs"
             echo ""
             echo "## Installed"
@@ -652,6 +653,7 @@ class WorkspaceRepository(
                 command -v "${'$'}{t}" >/dev/null 2>&1 && tools="${'$'}{tools} ${'$'}{t}"
             done
             if [ -n "${'$'}{tools}" ]; then echo "- Installed:${'$'}{tools}"; fi
+            echo "- To discover more tools, run: ls /usr/bin (or: which <name>)"
             echo ""
             echo "## Rules"
             echo "- Must use absolute paths — each workspace_shell call is a fresh process; cd/export don't persist."

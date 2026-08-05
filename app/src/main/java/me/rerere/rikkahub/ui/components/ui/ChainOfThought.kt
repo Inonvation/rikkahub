@@ -107,16 +107,17 @@ fun <T> ChainOfThought(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .animateContentSize(
-                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                    ),
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
-                val visibleSteps = if (expanded || !canCollapse) {
-                    steps
-                } else {
-                    steps.takeLast(collapsedVisibleCount)
-                }
+                // 折叠时仅显示尾部 collapsedVisibleCount 步；被折叠的中间步骤用 AnimatedVisibility 平滑收起/展开。
+                // trailingSteps 始终渲染（折叠时可见）；leadingSteps 在展开时出现、折叠时收起。
+                val trailingSteps = steps.takeLast(collapsedVisibleCount)
+                val leadingSteps = if (expanded || !canCollapse) steps.dropLast(collapsedVisibleCount) else emptyList()
+                // 折叠瞬间 AnimatedVisibility 需保留最后可见的中间步骤来播放 exit 动画：
+                // visible 变 false 时若内容已随列表同步变空，exit 会"瞬间消失"、看不到收起动画（概率无动画根因）。
+                // 仅当 leadingSteps 非空时更新快照；折叠态保持最后一次展开内容供 exit 播放。
+                var lastLeadingSteps by remember { mutableStateOf(leadingSteps) }
+                if (leadingSteps.isNotEmpty()) lastLeadingSteps = leadingSteps
 
                 // 显示展开/折叠按钮（统一在顶部）
                 if (canCollapse) {
@@ -184,7 +185,21 @@ fun <T> ChainOfThought(
                     }
                 ) {
                     Column {
-                        visibleSteps.fastForEach { step ->
+                        // 中间被折叠/展开的步骤：AnimatedVisibility 平滑过渡（垂直展开 + 淡入淡出）
+                        AnimatedVisibility(
+                            visible = leadingSteps.isNotEmpty(),
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut(),
+                        ) {
+                            // 用 lastLeadingSteps 快照渲染：折叠时保留最后可见的中间步骤供 exit 动画播放
+                            Column {
+                                lastLeadingSteps.fastForEach { step ->
+                                    scope.content(step)
+                                }
+                            }
+                        }
+                        // 尾部始终可见的步骤
+                        trailingSteps.fastForEach { step ->
                             scope.content(step)
                         }
                     }
