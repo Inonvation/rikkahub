@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.ui.hooks.ChatDraftStore
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
 import me.rerere.rikkahub.utils.JsonInstant
@@ -48,6 +49,11 @@ val appModule = module {
 
     single {
         TodoStorage(get())
+    }
+
+    // 会话级输入草稿缓存：切换会话/助手时保存未发送的输入，重新进入时恢复
+    single {
+        ChatDraftStore()
     }
 
     single {
@@ -132,6 +138,7 @@ val appModule = module {
             filesManager = get(),
             skillManager = get(),
             workspaceRepository = get(),
+            trustedFolderRepository = get(),
             folderRepository = get(),
             knowledgeManager = get(),
             todoStorage = get(),

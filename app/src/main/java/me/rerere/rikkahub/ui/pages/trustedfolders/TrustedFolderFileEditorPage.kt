@@ -214,6 +214,11 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
                         }.getOrNull()
                     }
                 },
+                // 笔记嵌入 ![[Note]]：读取目标笔记内容在预览中内联展开（非图片）
+                noteEmbedResolver = { note ->
+                    val p = runCatching { repository.resolveNotePath(note, projectId) }.getOrNull()
+                    p?.let { runCatching { repository.readText(it, projectId) }.getOrNull() }
+                },
             )
         }
     }

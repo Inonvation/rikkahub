@@ -487,52 +487,75 @@ private fun MarkdownNode(
             )
         }
 
-        // Checkbox
+        // Checkbox（Obsidian 风格：圆角方块，勾选填主色）
         GFMTokenTypes.CHECK_BOX -> {
             val isChecked = node.getTextInNode(content).trim() == "[x]"
-            Surface(
-                shape = RoundedCornerShape(2.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                modifier = modifier,
+            Box(
+                modifier = modifier
+                    .padding(top = 2.dp)
+                    .size(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        if (isChecked) MaterialTheme.colorScheme.primary else Color.Transparent
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isChecked) Color.Transparent else MaterialTheme.colorScheme.outline,
+                        shape = RoundedCornerShape(4.dp),
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .size(LocalTextStyle.current.fontSize.toDp() * 0.8f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isChecked) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                if (isChecked) {
+                    Icon(
+                        imageVector = HugeIcons.Tick01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(10.dp),
+                    )
                 }
             }
         }
 
-        // 引用块
+        // 引用块（含 Obsidian callout）
         MarkdownElementTypes.BLOCK_QUOTE -> {
-            ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
-                val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                Column(
-                    modifier = Modifier
-                        .drawWithContent {
-                            drawContent()
-                            drawRect(
-                                color = bgColor, size = size
-                            )
-                            drawRect(
-                                color = borderColor, size = Size(10f, size.height)
+            val callout = tryParseCallout(node, content)
+            if (callout != null) {
+                CalloutCard(
+                    type = callout.type,
+                    title = callout.title,
+                    collapsed = callout.collapsed,
+                ) {
+                    // IntelliJ GFM 把 `> ` 前缀解析成嵌套节点，内容取整块文本剩余行、去掉 `>` 前缀，
+                    // 用纯文本渲染（callout 内容多数为简单段落/列表）
+                    val remaining = node.getTextInNode(content)
+                        .lineSequence()
+                        .drop(1)
+                        .joinToString("\n") { line -> line.trim().removePrefix(">").trim() }
+                    if (remaining.isNotBlank()) {
+                        Text(remaining, style = LocalTextStyle.current)
+                    }
+                }
+            } else {
+                ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
+                    val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    Column(
+                        modifier = Modifier
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    color = bgColor, size = size
+                                )
+                                drawRect(
+                                    color = borderColor, size = Size(10f, size.height)
+                                )
+                            }
+                            .padding(8.dp)) {
+                        node.children.fastForEach { child ->
+                            MarkdownNode(
+                                node = child, content = content, onClickCitation = onClickCitation
                             )
                         }
-                        .padding(8.dp)) {
-                    node.children.fastForEach { child ->
-                        MarkdownNode(
-                            node = child, content = content, onClickCitation = onClickCitation
-                        )
                     }
                 }
             }
@@ -1157,9 +1180,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     it
                 }.replace(BREAK_LINE_REGEX, "\n")
             }
-            append(
-                text = text,
-            )
+            appendObsidianInline(text, colorScheme)
         }
 
         node.type == MarkdownElementTypes.EMPH -> {
@@ -1216,6 +1237,18 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         onLinkClick = onLinkClick
                     )
                 }
+            }
+        }
+
+        // 短引用链接：`[^id]` 脚注引用渲染成蓝色上标；其它（如 `[!type]`、未定义 `[text]`）原样保留方括号
+        node.type == MarkdownElementTypes.SHORT_REFERENCE_LINK -> {
+            val label = node.getTextInNode(content)
+            if (label.startsWith("[^")) {
+                withStyle(SpanStyle(color = colorScheme.primary, fontSize = 10.sp)) {
+                    append(label)
+                }
+            } else {
+                append(label)
             }
         }
 
@@ -1491,4 +1524,83 @@ private fun List<ASTNode>.trim(type: IElementType, size: Int): List<ASTNode> {
         trimmed++
     }
     return this.subList(start, end)
+}
+
+// ---- Obsidian 行内格式：==高亮== / #tag / [^id] 脚注引用 ----
+
+/** 高亮底色（Obsidian 风格淡黄，半透明） */
+private val HIGHLIGHT_BG = Color(0x66FFEB3B)
+
+/** 行内 Obsidian 格式：`==高亮==`、`#tag`（含层级 `/`，排除 `#1`）、`[^id]` 脚注引用 */
+private val OBSIDIAN_INLINE_REGEX = Regex(
+    """(==.+?==|(?<![\w#])#(?![0-9])[\p{L}\p{N}_][\p{L}\p{N}_/-]*|\[\^[^\]]+\])"""
+)
+
+/** 在纯文本叶子中识别 Obsidian 行内格式并加对应样式（普通段直接追加） */
+private fun AnnotatedString.Builder.appendObsidianInline(
+    text: String,
+    colorScheme: ColorScheme,
+) {
+    var last = 0
+    for (m in OBSIDIAN_INLINE_REGEX.findAll(text)) {
+        append(text, last, m.range.first)
+        val token = m.value
+        when {
+            token.length >= 4 && token.startsWith("==") && token.endsWith("==") -> {
+                // ==高亮==
+                withStyle(SpanStyle(background = HIGHLIGHT_BG)) {
+                    append(token.substring(2, token.length - 2))
+                }
+            }
+            token.startsWith("[^") -> {
+                // 脚注引用 [^id]
+                withStyle(SpanStyle(color = colorScheme.primary, fontSize = 10.sp)) {
+                    append(token)
+                }
+            }
+            token.startsWith("#") -> {
+                // #tag 徽章（底色 + 主题色文字）
+                withStyle(
+                    SpanStyle(
+                        background = colorScheme.primaryContainer,
+                        color = colorScheme.primary,
+                    )
+                ) {
+                    append(token)
+                }
+            }
+            else -> append(token)
+        }
+        last = m.range.last + 1
+    }
+    append(text, last, text.length)
+}
+
+// ---- Obsidian callout 头解析 ----
+
+/** callout 头：`[!type]`、`[!type]-`（默认折叠）、`[!type]+`、`[!type] 标题` */
+private val CALLOUT_HEADER_REGEX = Regex("""\[!([^\]]+)\]\s*([+-]?)\s*(.*)""")
+
+private data class ParsedCallout(
+    val type: String,
+    val title: String,
+    val collapsed: Boolean,
+)
+
+/** 解析引用块首行是否为 Obsidian callout 头（`> [!type]`，可带折叠标记/标题） */
+private fun tryParseCallout(node: ASTNode, content: String): ParsedCallout? {
+    // IntelliJ GFM 把 `> ` 前缀解析成嵌套 BLOCK_QUOTE 节点，实际头行文本是 `> [!type] ...`
+    val firstLine = node.getTextInNode(content).lineSequence().first().trim()
+    val cleaned = firstLine.removePrefix(">").trim()
+    val m = CALLOUT_HEADER_REGEX.matchEntire(cleaned) ?: return null
+    val type = m.groupValues[1].trim()
+    if (type.isEmpty()) return null
+    val title = m.groupValues[3].trim().ifEmpty {
+        type.replaceFirstChar { it.uppercase() }
+    }
+    return ParsedCallout(
+        type = type,
+        title = title,
+        collapsed = m.groupValues[2] == "-",
+    )
 }

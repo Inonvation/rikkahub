@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,8 +67,6 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 
 @Composable
@@ -89,12 +87,8 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
         selectedItems.clear()
     }
 
-    // 拖拽排序
     val lazyListState = rememberLazyListState()
     val hapticController = rememberHaptic()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        vm.reorderWorkspaces(from.index, to.index)
-    }
 
     Scaffold(
         topBar = {
@@ -174,33 +168,20 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                             onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
                         )
                     } else {
-                        ReorderableItem(
-                            state = reorderableState,
-                            key = workspace.id,
-                        ) { isDragging ->
-                            WorkspaceCard(
-                                workspace = workspace,
-                                onRename = { editTarget = workspace },
-                                onDelete = { deleteTarget = workspace },
-                                onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
-                                modifier = Modifier
-                                    .longPressDraggableHandle(
-                                        onDragStarted = {
-                                            hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                        },
-                                        onDragStopped = {
-                                            hapticController.perform(HapticFeedbackType.GestureEnd)
-                                            vm.persistOrder()
-                                        }
-                                    )
-                                    .graphicsLayer {
-                                        if (isDragging) {
-                                            scaleX = 1.05f
-                                            scaleY = 1.05f
-                                        }
-                                    },
-                            )
-                        }
+                        WorkspaceCard(
+                            workspace = workspace,
+                            onRename = { editTarget = workspace },
+                            onDelete = { deleteTarget = workspace },
+                            onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
+                            // 长按卡片进入多选并选中该项
+                            onLongPressSelect = {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                selecting = true
+                                if (!selectedItems.contains(workspace.id)) {
+                                    selectedItems.add(workspace.id)
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -359,6 +340,7 @@ private fun WorkspaceCard(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onOpen: () -> Unit,
+    onLongPressSelect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -366,7 +348,10 @@ private fun WorkspaceCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen),
+            .combinedClickable(
+                onClick = onOpen,
+                onLongClick = onLongPressSelect,
+            ),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(

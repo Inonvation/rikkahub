@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -31,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -88,21 +91,35 @@ fun SearchPickerButton(
                 modifier = Modifier.size(if (compact) 22.dp else 24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (model?.tools?.contains(BuiltInTools.Search) == true) {
-                    Icon(
-                        imageVector = HugeIcons.AiSearch02,
-                        contentDescription = stringResource(R.string.use_web_search),
-                    )
-                } else if (enableSearch && currentService != null) {
-                    AutoAIIcon(
-                        name = currentService.displayName,
-                        color = Color.Transparent
-                    )
-                } else {
-                    Icon(
-                        imageVector = HugeIcons.Search01,
-                        contentDescription = stringResource(R.string.use_web_search),
-                    )
+                // 右上角显示已启用的搜索服务个数，与 MCP 角标样式一致
+                val enabledServiceCount = settings.enabledSearchServiceIds.size
+                BadgedBox(
+                    badge = {
+                        if (enableSearch && enabledServiceCount > 0) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            ) {
+                                Text(text = enabledServiceCount.toString())
+                            }
+                        }
+                    }
+                ) {
+                    if (model?.tools?.contains(BuiltInTools.Search) == true) {
+                        Icon(
+                            imageVector = HugeIcons.AiSearch02,
+                            contentDescription = stringResource(R.string.use_web_search),
+                        )
+                    } else if (enableSearch && currentService != null) {
+                        AutoAIIcon(
+                            name = currentService.displayName,
+                            color = Color.Transparent
+                        )
+                    } else {
+                        Icon(
+                            imageVector = HugeIcons.Search01,
+                            contentDescription = stringResource(R.string.use_web_search),
+                        )
+                    }
                 }
             }
         }
@@ -255,9 +272,11 @@ private fun AppSearchSettings(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
+                    // 主开关关闭时整行变灰，仅作禁用提示，不重置各服务的开关状态
                     modifier = Modifier
                         .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .alpha(if (enableSearch) 1f else 0.45f),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -276,8 +295,10 @@ private fun AppSearchSettings(
                         SearchAbilityTagLine(options = service)
                     }
                     // 右侧开关：控制该服务商是否启用（AI 能否调用其独立工具）
+                    // 主开关关闭时禁用，但保留当前勾选状态
                     Switch(
                         checked = isEnabled,
+                        enabled = enableSearch,
                         onCheckedChange = { checked ->
                             val current = settings.enabledSearchServiceIds
                             val newIds = if (checked) {

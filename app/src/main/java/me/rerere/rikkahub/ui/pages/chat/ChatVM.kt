@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
+import me.rerere.rikkahub.ui.hooks.ChatDraftStore
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import java.util.Locale
 import kotlin.uuid.Uuid
@@ -52,6 +53,7 @@ class ChatVM(
     private val chatService: ChatService,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
+    private val chatDraftStore: ChatDraftStore,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
@@ -95,6 +97,9 @@ class ChatVM(
     // 无需在 VM 层收集。
 
     init {
+        // 恢复上次切换会话/助手离开时保存的输入草稿（仅当文本非空）
+        chatDraftStore.load(_conversationId)?.let { inputState.setMessageText(it) }
+
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
 
@@ -109,8 +114,16 @@ class ChatVM(
 
     override fun onCleared() {
         super.onCleared()
+        // 保存输入草稿：ChatVM 随导航栈清理（cleanupChatPages）被销毁前，
+        // 把未发送的输入暂存到会话级草稿缓存，重新进入该会话时恢复
+        chatDraftStore.save(_conversationId, inputState.textContent.text.toString())
         // 移除对话引用
         chatService.removeConversationReference(_conversationId)
+    }
+
+    /** 清除本会话的输入草稿（发送成功后调用，避免已发送内容在下次进入时被误恢复） */
+    fun clearDraft() {
+        chatDraftStore.remove(_conversationId)
     }
 
     // 用户设置

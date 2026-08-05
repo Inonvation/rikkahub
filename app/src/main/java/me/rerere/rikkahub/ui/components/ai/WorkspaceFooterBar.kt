@@ -203,13 +203,21 @@ fun WorkspaceFooterBar(
                     modifier = Modifier
                         .weight(1f)
                         .clip(MaterialTheme.shapes.small)
-                        .clickable(
+                        .combinedClickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
-                            showCwdSheet = true
-                        }
+                            onClick = {
+                                // 单击：进入工作区文件界面
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                // ready 分支已保证 boundWorkspace 非空
+                                navController.navigate(Screen.WorkspaceDetail(boundWorkspace!!.id))
+                            },
+                            onLongClick = {
+                                // 长按：切换工作目录
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                showCwdSheet = true
+                            },
+                        )
                         .padding(vertical = 4.dp, horizontal = 6.dp),
                 ) {
                     Icon(

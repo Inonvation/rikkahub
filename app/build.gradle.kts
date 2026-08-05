@@ -202,6 +202,9 @@ dependencies {
     // serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // SAF 目录树访问（信任文件夹）
+    implementation(libs.androidx.documentfile)
+
     // zxing
     implementation(libs.zxing.core)
 

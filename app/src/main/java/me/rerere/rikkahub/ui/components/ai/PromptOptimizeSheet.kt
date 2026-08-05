@@ -53,8 +53,9 @@ internal fun PromptOptimizeSheet(
     val uiState by vm.uiState.collectAsStateWithLifecycle()
     var scene by remember { mutableStateOf(PromptOptimizeScene.GENERAL) }
     var tone by remember { mutableStateOf(PromptOptimizeTone.NORMAL) }
-    // 深度默认跟随设置页按场景的记忆值；切换场景时重置为该场景的设置值
-    var depth by remember(scene) { mutableStateOf(settings.promptOptimizeDepthForScene(scene)) }
+    // 深度仅在弹窗首次打开时按当前场景的记忆值初始化，之后与场景切换解耦：
+    // 用户手动改深度后切换场景，不再被重置为场景记忆值（标签相互独立）
+    var depth by remember { mutableStateOf(settings.promptOptimizeDepthForScene(scene)) }
     var extraNote by remember { mutableStateOf("") }
 
     ModalBottomSheet(
@@ -165,7 +166,8 @@ internal fun PromptOptimizeSheet(
                 }
 
                 is UiState.Success -> {
-                    var editable by remember { mutableStateOf(current.data) }
+                    // 以 current.data 为 key：重选后再次优化产生新结果时，结果框跟随刷新
+                    var editable by remember(current.data) { mutableStateOf(current.data) }
                     Text(
                         text = stringResource(R.string.prompt_optimize_result_title),
                         style = MaterialTheme.typography.labelLarge,

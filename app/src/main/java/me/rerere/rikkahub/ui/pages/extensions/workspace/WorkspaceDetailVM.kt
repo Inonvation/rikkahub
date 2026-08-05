@@ -42,65 +42,67 @@ class WorkspaceDetailVM(
     private val _installToolsState = MutableStateFlow(InstallToolsState())
     val installToolsState = _installToolsState.asStateFlow()
 
+    /** 目录缓存：进入过的目录条目快照（key = 存储区/路径），返回上级时秒开、不重复请求 */
+    private val dirCache = mutableMapOf<String, List<WorkspaceFileEntry>>()
+
     init {
         loadWorkspace()
         // 从聊天跳转定位：直接进入文件所在目录并加载该目录内容
-        if (initialPath.isNotBlank() || initialArea != null) {
-            _state.update {
-                it.copy(
-                    area = initialArea ?: WorkspaceStorageArea.FILES,
-                    path = initialPath,
-                    entries = emptyList(),
-                    error = null,
-                )
-            }
-            refresh()
-        } else {
-            refresh()
-        }
+        navigate(initialPath, initialArea ?: WorkspaceStorageArea.FILES)
     }
 
     fun selectArea(area: WorkspaceStorageArea) {
-        _state.update {
-            it.copy(
-                area = area,
-                path = "",
-                entries = emptyList(),
-                error = null,
-            )
-        }
-        refresh()
+        navigate("", area)
     }
 
     fun open(entry: WorkspaceFileEntry) {
         if (!entry.isDirectory) return
-        _state.update { it.copy(path = entry.path, entries = emptyList(), error = null) }
-        refresh()
+        navigate(entry.path)
     }
 
     fun goUp() {
         val path = state.value.path
         if (path.isBlank()) return
-        _state.update {
-            it.copy(
-                path = path.substringBeforeLast('/', missingDelimiterValue = ""),
-                entries = emptyList(),
-                error = null,
-            )
+        navigate(path.substringBeforeLast('/', missingDelimiterValue = ""))
+    }
+
+    /** 导航到目录：缓存命中直接秒开；未命中则加载并写入缓存 */
+    fun navigate(path: String, area: WorkspaceStorageArea? = null) {
+        val targetArea = area ?: state.value.area
+        val cached = dirCache[cacheKey(targetArea, path)]
+        if (cached != null) {
+            _state.update {
+                it.copy(area = targetArea, path = path, entries = cached, loading = false, error = null)
+            }
+        } else {
+            _state.update {
+                it.copy(area = targetArea, path = path, entries = emptyList(), loading = true, error = null)
+            }
+            load(path, targetArea)
         }
+    }
+
+    /** 强制刷新当前目录（顶栏刷新/从编辑器返回）：重新请求并更新缓存 */
+    fun refresh() {
+        load(state.value.path, state.value.area)
+    }
+
+    /** 文件变更后：清空目录缓存保证一致性，再刷新当前目录 */
+    private fun refreshAfterMutation() {
+        dirCache.clear()
         refresh()
     }
 
-    fun refresh() {
+    private fun load(path: String, area: WorkspaceStorageArea) {
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
             runCatching {
                 repository.listFiles(
                     id = id,
-                    area = state.value.area,
-                    path = state.value.path,
+                    area = area,
+                    path = path,
                 )
             }.onSuccess { entries ->
+                dirCache[cacheKey(area, path)] = entries
                 _state.update { it.copy(entries = entries, loading = false) }
             }.onFailure { error ->
                 _state.update {
@@ -114,6 +116,8 @@ class WorkspaceDetailVM(
         }
     }
 
+    private fun cacheKey(area: WorkspaceStorageArea, path: String): String = "${area.name}/$path"
+
     /** 移入回收站(软删除), 可从统一回收站恢复 */
     fun delete(entry: WorkspaceFileEntry) {
         viewModelScope.launch {
@@ -125,7 +129,7 @@ class WorkspaceDetailVM(
                     recursive = entry.isDirectory,
                 )
             }.onSuccess {
-                refresh()
+                refreshAfterMutation()
             }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "移入回收站失败") }
             }
@@ -143,7 +147,7 @@ class WorkspaceDetailVM(
                     recursive = entry.isDirectory,
                 )
             }.onSuccess {
-                refresh()
+                refreshAfterMutation()
             }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "删除失败") }
             }
@@ -166,7 +170,7 @@ class WorkspaceDetailVM(
                 }.onFailure { error -> errors += "${entry.name}：${error.message}" }
             }
             reportBatchErrors(errors)
-            refresh()
+            refreshAfterMutation()
         }
     }
 
@@ -186,7 +190,7 @@ class WorkspaceDetailVM(
                 }.onFailure { error -> errors += "${entry.name}：${error.message}" }
             }
             reportBatchErrors(errors)
-            refresh()
+            refreshAfterMutation()
         }
     }
 
@@ -218,7 +222,7 @@ class WorkspaceDetailVM(
                 }.onFailure { error -> errors += "${entry.name}：${error.message}" }
             }
             reportBatchErrors(errors)
-            refresh()
+            refreshAfterMutation()
         }
     }
 
@@ -244,7 +248,7 @@ class WorkspaceDetailVM(
                     inputStream = inputStream,
                 )
             }.onSuccess {
-                refresh()
+                refreshAfterMutation()
             }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "导入文件失败") }
             }
@@ -264,7 +268,7 @@ class WorkspaceDetailVM(
                     text = "",
                     overwrite = false,
                 )
-            }.onSuccess { refresh() }.onFailure { error ->
+            }.onSuccess { refreshAfterMutation() }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "新建文件失败") }
             }
         }
@@ -282,7 +286,7 @@ class WorkspaceDetailVM(
                     area = state.value.area,
                     path = if (base.isBlank()) name else "$base/$name",
                 )
-            }.onSuccess { refresh() }.onFailure { error ->
+            }.onSuccess { refreshAfterMutation() }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "新建目录失败") }
             }
         }
@@ -303,7 +307,7 @@ class WorkspaceDetailVM(
                     overwrite = false,
                     area = state.value.area,
                 )
-            }.onSuccess { refresh() }.onFailure { error ->
+            }.onSuccess { refreshAfterMutation() }.onFailure { error ->
                 _state.update { it.copy(error = error.message ?: "重命名失败") }
             }
         }
@@ -323,7 +327,7 @@ class WorkspaceDetailVM(
     fun restoreFrom(inputStream: InputStream) {
         viewModelScope.launch {
             runCatching { repository.restoreFiles(id, inputStream) }
-                .onSuccess { refresh() }
+                .onSuccess { refreshAfterMutation() }
                 .onFailure { error ->
                     _state.update { it.copy(error = error.message ?: "恢复失败") }
                 }

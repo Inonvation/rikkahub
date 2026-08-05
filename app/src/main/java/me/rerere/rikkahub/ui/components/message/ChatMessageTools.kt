@@ -68,6 +68,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.ToolParseCache
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
@@ -107,31 +108,32 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     val navController = LocalNavController.current
     val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
-    val context = remember(tool, loading) {
+    // 折叠类工具：点击优先展开/收起内联摘要，而不是直接弹 BottomSheet
+    val collapsedByDefault = isCollapsedByDefaultTool(tool.toolName)
+    // 展开状态存进程级单例 map（toolBubbleExpanded 是 mutableStateMapOf，读写自动触发重组）。
+    // 跨导航保留：Navigation 3 对非栈顶 entry 组合重建，remember/rememberSaveable 恢复不可靠，
+    // 单例 map 只要进程存活就稳定保留。
+    // 默认折叠工作区文件类工具（读取/写入/编辑/shell，输入输出内容大、标题本身已表达意图），
+    // 其余工具保持展开（map 无记录 → 按 isCollapsedByDefault 决定初始值）。
+    val expanded = toolBubbleExpanded[tool.toolCallId] ?: !collapsedByDefault
+    // 折叠类重工具（shell/write/edit/read_file）：折叠态不解析 output（输出大、折叠时用不到），
+    // 展开才解析；非折叠类工具（默认展开、渲染器读 content 决定摘要）始终解析。
+    val needContent = tool.isExecuted && (!collapsedByDefault || expanded)
+    val arguments = remember(tool) { ToolParseCache.toolInput(tool) }
+    val content = remember(tool, needContent) {
+        if (needContent) ToolParseCache.toolOutputContent(tool) else null
+    }
+    val context = remember(tool, loading, content) {
         ToolUIContext(
             tool = tool,
-            arguments = tool.inputAsJson(),
-            content = if (tool.isExecuted) {
-                runCatching {
-                    JsonInstant.parseToJsonElement(
-                        tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                    )
-                }.getOrElse { JsonObject(emptyMap()) }
-            } else {
-                null
-            },
+            arguments = arguments,
+            content = content,
             loading = loading,
         )
     }
 
     var showResult by remember(tool.toolCallId) { mutableStateOf(false) }
     var showDenyDialog by remember(tool.toolCallId) { mutableStateOf(false) }
-    // 展开状态存进程级单例 map（toolBubbleExpanded 是 mutableStateMapOf，读写自动触发重组）。
-    // 跨导航保留：Navigation 3 对非栈顶 entry 组合重建，remember/rememberSaveable 恢复不可靠，
-    // 单例 map 只要进程存活就稳定保留。
-    // 默认折叠工作区文件类工具（读取/写入/编辑/shell，输入输出内容大、标题本身已表达意图），
-    // 其余工具保持展开（map 无记录 → 按 isCollapsedByDefault 决定初始值）。
-    val expanded = toolBubbleExpanded[tool.toolCallId] ?: !isCollapsedByDefaultTool(tool.toolName)
     val onExpandedChange: (Boolean) -> Unit = { value ->
         // 始终写入显式值：初始默认按工具类型推导，用户一旦操作就记录真实意图。
         // 不能 remove 后回落默认——折叠类工具默认 false，remove 会让"展开"操作丢失。
@@ -143,11 +145,14 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
     val rendererLoading = renderer.isLoading(context, loading)
-    // 折叠类工具：点击优先展开/收起内联摘要，而不是直接弹 BottomSheet
-    val collapsedByDefault = isCollapsedByDefaultTool(tool.toolName)
 
-    // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
+    // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用。
+    // 折叠类工具已执行时也始终保留可展开区域：折叠态 output 未解析、摘要为空，
+    // 但必须有非空 content 才能出现展开箭头、可点击展开。否则折叠态 content 与
+    // onClick 都为 null，步骤既无展开按钮也无法交互。展开后 needContent 变 true
+    // 才解析 output 呈现摘要。
     val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty()
+        || (collapsedByDefault && tool.isExecuted)
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
@@ -230,7 +235,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             {
                 // spawn_subagent_completed 详情页导航：taskId 在 input 里（完成气泡 toolCallId 是随机 id，
                 // 不能再用 toolCallId 定位任务）。兼容旧数据：input 无 taskId 时回退 toolCallId（旧格式 taskId==toolCallId）。
-                val taskIdFromInput = (tool.inputAsJson() as? JsonObject)
+                val taskIdFromInput = (ToolParseCache.toolInput(tool) as? JsonObject)
                     ?.get("taskId")?.jsonPrimitive?.contentOrNull
                 val subAgentTaskId = taskIdFromInput?.takeIf { it.isNotBlank() } ?: tool.toolCallId
                 if (!subAgentTaskId.isNullOrBlank()) {

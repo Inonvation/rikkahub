@@ -151,6 +151,16 @@ object ToolUIRegistry {
         SubAgentToolUI,
         SubAgentCompletedToolUI,
         GuidanceToolUI,
+        TrustedFolderListToolUI,
+        TrustedFolderReadToolUI,
+        TrustedFolderSearchToolUI,
+        TrustedFolderWriteToolUI,
+        TrustedFolderCreateFolderToolUI,
+        TrustedFolderEditToolUI,
+        TrustedFolderRenameToolUI,
+        TrustedFolderMoveToolUI,
+        TrustedFolderDeleteToolUI,
+        TrustedFolderCheckLinksToolUI,
     ).associateBy { it.toolName }
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器。

@@ -74,6 +74,7 @@ fun MarkdownPreviewSwitcher(
     previewByDefault: Boolean = false,
     onLinkClick: LinkClickHandler? = null,
     imagePathResolver: (suspend (String) -> String?)? = null,
+    noteEmbedResolver: (suspend (String) -> String?)? = null,
 ) {
     var mode by rememberSaveable {
         mutableStateOf(
@@ -84,6 +85,33 @@ fun MarkdownPreviewSwitcher(
         listOf(MarkdownPreviewMode.SOURCE, MarkdownPreviewMode.RENDER, MarkdownPreviewMode.STRUCTURE)
     } else {
         listOf(MarkdownPreviewMode.SOURCE, MarkdownPreviewMode.RENDER)
+    }
+
+    // 渲染预处理缓存：内容不变则跨模式切换（源码↔渲染↔结构）复用，避免重复解析/编译；
+    // 内容变更时整体重新预处理（Obsidian 前置转换 + 双链/图片解析），全部在后台线程。
+    val needsPreprocess = onLinkClick != null || imagePathResolver != null || noteEmbedResolver != null
+    val raw = state.text.toString()
+    var prepared by remember(raw, needsPreprocess) { mutableStateOf<String?>(null) }
+    LaunchedEffect(raw, needsPreprocess) {
+        if (needsPreprocess) {
+            prepared = withContext(Dispatchers.Default) {
+                // Obsidian 预处理：frontmatter / %%注释%% / 脚注 / ![[笔记嵌入]]，再走双链/图片转换
+                var t = raw
+                t = stripFrontmatter(t)
+                t = stripComments(t)
+                val (noFootnotes, footnotes) = extractFootnotes(t)
+                t = expandNoteEmbeds(noFootnotes, noteEmbedResolver, expanding = emptySet(), depth = 0)
+                if (footnotes.isNotEmpty()) {
+                    t = "$t\n\n---\n**脚注**\n\n$footnotes"
+                }
+                val converted = convertWikilinksToNoteLinks(t)
+                val withImages = replaceImageSrcs(converted, imagePathResolver)
+                warmMarkdownCache(wrapBareLatex(withImages))
+                withImages
+            }
+        } else {
+            prepared = null
+        }
     }
 
     Column(modifier = modifier) {
@@ -125,23 +153,8 @@ fun MarkdownPreviewSwitcher(
             )
 
             MarkdownPreviewMode.RENDER -> {
-                val raw = state.text.toString()
-                // 仅当需要双链/图片预处理（信任文件夹笔记）时才走「后台解析 + 加载动画」路径；
-                // 其它调用方（工作区等）保持原有即时渲染，避免引入多余转圈与后台线程。
-                val needsPreprocess = onLinkClick != null || imagePathResolver != null
                 if (needsPreprocess) {
-                    // 链接跳转前先把 [[双链]] 预处理成内部链接；图片相对路径解析成可加载 URI。
-                    // 全部耗时预处理放后台线程，期间显示加载动画——避免大文本的正则转换/解析
-                    // 卡住主线程、连加载动画都冻结。
-                    var prepared by remember(raw) { mutableStateOf<String?>(null) }
-                    LaunchedEffect(raw) {
-                        prepared = withContext(Dispatchers.Default) {
-                            val converted = convertWikilinksToNoteLinks(raw)
-                            val withImages = replaceImageSrcs(converted, imagePathResolver)
-                            warmMarkdownCache(wrapBareLatex(withImages))
-                            withImages
-                        }
-                    }
+                    // 预处理结果已由顶层缓存（内容不变则跨模式切换复用），此处只消费
                     val content = prepared
                     if (content != null) {
                         if (content.length > LARGE_RENDER_CHARS) {
@@ -322,4 +335,84 @@ private suspend fun replaceImageSrcs(
     }
     out.append(normalized, last, normalized.length)
     return out.toString()
+}
+
+// ---- Obsidian 预处理（仅信任文件夹预览走 needsPreprocess 分支时生效） ----
+
+/** 图片扩展名集合：笔记嵌入中带图片扩展名的目标交给图片解析，不展开 */
+private val EMBED_IMAGE_EXTENSIONS = setOf(
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif", "avif", "ico",
+)
+
+/** Obsidian 笔记嵌入：`![[目标]]`（目标可带 `|别名`、`#章节`、`.md` 后缀） */
+private val NOTE_EMBED_REGEX = Regex("""!\[\[([^\[\]]+?)\]\]""")
+
+/** 删除 YAML frontmatter：仅当内容以 `---` 开头时，删到第二个 `---` 行 */
+internal fun stripFrontmatter(content: String): String {
+    val trimmed = content.trimStart()
+    if (!trimmed.startsWith("---")) return content
+    val lines = trimmed.lineSequence().toList()
+    if (lines.size < 2) return content
+    var end = -1
+    for (i in 1 until lines.size) {
+        if (lines[i].trim() == "---") { end = i; break }
+    }
+    if (end < 0) return content
+    return lines.drop(end + 1).joinToString("\n").trimStart('\n')
+}
+
+/** 删除 `%%注释%%`（可跨行）。注释内可能有其它标记，必须先于其它转换执行 */
+internal fun stripComments(content: String): String =
+    content.replace(Regex("%%[\\s\\S]*?%%"), "")
+
+/**
+ * 提取脚注定义 `[^id]: 内容`：从正文删除定义行，返回 (正文, 定义区文本)。
+ * 正文里的 `[^id]` 引用保留，由渲染层渲染成上标。
+ */
+internal fun extractFootnotes(content: String): Pair<String, String> {
+    val footnoteLine = Regex("""^\[\^([^\]]+)\]:\s*(.*)$""")
+    val definitions = mutableListOf<String>()
+    val kept = mutableListOf<String>()
+    content.lineSequence().forEach { line ->
+        val m = footnoteLine.matchEntire(line.trim())
+        if (m != null) {
+            // `]` 后插空格：避免渲染层把整行当成 LINK_DEFINITION 吞掉；`[^1]` 由渲染层渲染成上标
+            definitions += "[^${m.groupValues[1]}] ：${m.groupValues[2]}"
+        } else {
+            kept += line
+        }
+    }
+    return kept.joinToString("\n") to definitions.joinToString("\n")
+}
+
+/**
+ * 展开 Obsidian 笔记嵌入 `![[Note]]`（非图片）：读取目标笔记内容替换进来。
+ * 递归展开嵌入内容里的再嵌入；[expanding] 防循环（A↔B 互嵌），[depth] 限制嵌套深度。
+ * 展开的笔记内容同样剥 frontmatter / 注释；其双链/图片由后续整体转换统一处理。
+ */
+internal suspend fun expandNoteEmbeds(
+    content: String,
+    resolver: (suspend (String) -> String?)?,
+    expanding: Set<String>,
+    depth: Int,
+): String {
+    if (resolver == null || depth > 2) return content
+    var result = content
+    val matches = NOTE_EMBED_REGEX.findAll(content).toList()
+    for (m in matches.asReversed()) {
+        val inner = m.groupValues[1].trim()
+        val target = inner
+            .substringBefore('|').substringBefore('#').substringBefore('^').trim()
+            .removeSuffix(".md").removeSuffix(".markdown")
+        if (target.isEmpty()) continue
+        // 带图片扩展名的目标是图片嵌入，交给 replaceImageSrcs，不在这里展开
+        val ext = target.substringAfterLast('.', "")
+        if (ext.isNotEmpty() && ext.lowercase() in EMBED_IMAGE_EXTENSIONS) continue
+        if (target in expanding) continue
+        val noteContent = resolver(target) ?: continue
+        val cleaned = stripFrontmatter(stripComments(noteContent))
+        val expanded = expandNoteEmbeds(cleaned, resolver, expanding + target, depth + 1)
+        result = result.replace(m.value, "\n\n$expanded\n\n")
+    }
+    return result
 }
