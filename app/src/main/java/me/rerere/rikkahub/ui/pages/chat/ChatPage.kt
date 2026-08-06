@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -542,16 +543,57 @@ private fun ChatPageContent(
         .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
 
-    // 自动滚动：检测用户是否滚离底部（显示回到底部按钮）。
-    // 首次进入新会话时列表可能还没完成首次布局（visibleItemsInfo 为空），此时
-    // lastVisible 为 null，不能按"不在底部"处理（否则滚动按钮会短暂闪出一次）。
+    // 统一用永久尾项 ScrollBottomKey 判断真实底部。只看最后消息 index 会在长消息
+    // 顶部刚进入视口时错误隐藏 FAB，也无法区分列表中部的 item 间距。
     val density = LocalDensity.current
-    val userScrolledUp by remember(density) {
+    val bottomTolerancePx = with(density) { 1.dp.roundToPx() }
+    val isUserDragging by chatListState.interactionSource.collectIsDraggedAsState()
+    val atRealBottom by remember(chatListState, bottomTolerancePx) {
         derivedStateOf {
-            val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()
-            lastVisible != null && lastVisible.index < chatListState.layoutInfo.totalItemsCount - 2
+            val layoutInfo = chatListState.layoutInfo
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+            isRealListBottom(
+                totalItemsCount = layoutInfo.totalItemsCount,
+                lastVisibleItemIndex = lastVisibleItem?.index,
+                lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
+                viewportEndOffset = layoutInfo.viewportEndOffset,
+                tolerancePx = bottomTolerancePx,
+            )
         }
     }
+
+    // autoFollowArmed 表示用户是否仍把滚动控制权交给自动跟随。
+    // 内容增长把终点推出视口时不能解除它；只有用户 drag/人工跳转才解除，
+    // 等滚动稳定在真实底部后再重新武装。
+    var autoFollowInitialized by remember(conversation.id) { mutableStateOf(false) }
+    var autoFollowArmed by remember(conversation.id) { mutableStateOf(false) }
+    LaunchedEffect(chatListState, conversation.id) {
+        snapshotFlow {
+            Triple(
+                chatListState.layoutInfo.totalItemsCount,
+                chatListState.isScrollInProgress,
+                atRealBottom,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { (totalItemsCount, isScrollInProgress, isAtBottom) ->
+                if (!autoFollowInitialized && totalItemsCount > 0) {
+                    // 首次获得有效布局：按此刻是否在真实底部决定初始武装，
+                    // 进入会话即滚到历史位置/消息时不应自动跟随。
+                    autoFollowArmed = isAtBottom
+                    autoFollowInitialized = true
+                } else if (autoFollowInitialized && !isScrollInProgress && isAtBottom) {
+                    // 用户/程序滚动稳定在底部后重新武装。
+                    autoFollowArmed = true
+                }
+            }
+    }
+    // drag 一开始就解除武装并取消自动跟随；松手后的 fling 仍在滚动，不能趁机回底，
+    // 只有滚动最终稳定在真实底部时才重新武装。
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) autoFollowArmed = false
+    }
+    val userScrolledUp = autoFollowInitialized && !atRealBottom
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         buildList {
@@ -854,9 +896,9 @@ private fun ChatPageContent(
                 },
                 onJumpToMessage = { index ->
                     previewMode = false
+                    autoFollowArmed = false
                     scope.launch {
-                        android.util.Log.w("CHATSCROLL", "JUMP_TO index=$index")
-                        chatListState.requestScrollToItem(index)
+                        chatListState.scrollToItem(index)
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason ->
@@ -875,6 +917,10 @@ private fun ChatPageContent(
                 onAssistantNameClick = {
                     showAssistantPicker = true
                 },
+                autoFollowArmed = autoFollowArmed,
+                isUserDragging = isUserDragging,
+                bottomTolerancePx = bottomTolerancePx,
+                onManualScroll = { autoFollowArmed = false },
             )
             }
 
@@ -907,10 +953,10 @@ private fun ChatPageContent(
                 Surface(
                     onClick = {
                         scope.launch {
-                            android.util.Log.w("CHATSCROLL", "FAB scroll-bottom")
-                            // 目标统一为布局实际总项数 - 1（与自动滚动、MessageJumper 一致）：
-                            // 用 totalItemsCount - 1 安全滚到底（不会越界）。
-                            chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
+                            val targetIndex = chatListState.layoutInfo.totalItemsCount - 1
+                            if (targetIndex >= 0) {
+                                chatListState.animateScrollToItem(targetIndex)
+                            }
                         }
                     },
                     shape = CircleShape,

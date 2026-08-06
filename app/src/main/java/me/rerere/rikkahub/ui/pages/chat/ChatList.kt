@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -91,6 +90,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -124,7 +124,6 @@ import me.rerere.rikkahub.utils.ToolParseCache
 import me.rerere.rikkahub.utils.plus
 import me.rerere.workspace.WorkspaceManager
 import org.koin.compose.koinInject
-import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
@@ -164,6 +163,10 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
+    autoFollowArmed: Boolean = false,
+    isUserDragging: Boolean = false,
+    bottomTolerancePx: Int = 0,
+    onManualScroll: () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -207,6 +210,10 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
                 onAssistantNameClick = onAssistantNameClick,
+                autoFollowArmed = autoFollowArmed,
+                isUserDragging = isUserDragging,
+                bottomTolerancePx = bottomTolerancePx,
+                onManualScroll = onManualScroll,
             )
         }
     }
@@ -239,11 +246,15 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
+    autoFollowArmed: Boolean,
+    isUserDragging: Boolean,
+    bottomTolerancePx: Int,
+    onManualScroll: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val loadingState by rememberUpdatedState(loading)
     var isRecentScroll by remember { mutableStateOf(false) }
     val conversationUpdated by rememberUpdatedState(conversation)
+    val currentOnManualScroll by rememberUpdatedState(onManualScroll)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
 
@@ -255,6 +266,7 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
+                currentOnManualScroll()
                 scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
@@ -263,14 +275,6 @@ private fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
-    }
-
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        return lastPos <= inputPos - 8
     }
 
     // 聊天选择
@@ -329,50 +333,37 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部（复用 upstream 逻辑 + 安全 index）
-        // 触发条件沿用 upstream：布局每变化一次就评估（生成中气泡长高会持续跟随），
-        // 只在用户没在滚动且生成中时跟随。目标用 totalItemsCount - 1（实际最后一项），
-        // 不用 upstream 的 lastIndex + 10 越界钉底：越界 index 会在生成结束（loading 项消失、
-        // total 变少）时被 LazyListState clamp 回实际位置，产生一次明显的跳动。
-        if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            android.util.Log.w("CHATSCROLL", "AUTO_FOLLOW trigger: lastIdx=${visibleItemsInfo.lastOrNull()?.index} total=${state.layoutInfo.totalItemsCount} loading=$loadingState")
-                            state.requestScrollToItem(state.layoutInfo.totalItemsCount - 1)
-                        }
-                    }
-                }
+        // 只在用户此前确实位于真实列表底部时跟随流式内容。
+        // scrollToItem 是可取消的：拖动开始、生成结束或设置关闭都会取消当前 effect，
+        // 不会留下跨过 LoadingIndicator 移除后才在下一次 remeasure 兑现的滚动请求。
+        val autoScrollEnabled = settings.displaySetting.enableAutoScroll
+        LaunchedEffect(
+            state,
+            autoScrollEnabled,
+            loading,
+            autoFollowArmed,
+            isUserDragging,
+            bottomTolerancePx,
+        ) {
+            if (!autoScrollEnabled || !loading || !autoFollowArmed || isUserDragging) {
+                return@LaunchedEffect
             }
-        }
-
-        // AUTO_FOLLOW 判定观测：打印每次评估时的关键输入，确认用户上滑时是否会误触发
-        LaunchedEffect(state) {
             snapshotFlow {
-                val info = state.layoutInfo
-                Triple(
-                    info.visibleItemsInfo.lastOrNull()?.let { it.index to (it.offset + it.size) },
-                    state.isScrollInProgress,
-                    loadingState,
+                val layoutInfo = state.layoutInfo
+                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+                ChatScrollLayoutSnapshot(
+                    totalItemsCount = layoutInfo.totalItemsCount,
+                    lastVisibleItemIndex = lastVisibleItem?.index,
+                    lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
+                    viewportEndOffset = layoutInfo.viewportEndOffset,
                 )
-            }.collect { (last, inProgress, loadingNow) ->
-                val (lastIdx, lastPos) = last ?: (-1 to -1)
-                val inputPos = state.layoutInfo.viewportEndOffset
-                val total = state.layoutInfo.totalItemsCount
-                android.util.Log.w("CHATSCROLL", "EVAL inProgress=$inProgress loading=$loadingNow lastIdx=$lastIdx total=$total lastPos=$lastPos inputPos=$inputPos atBottom=${lastPos != -1 && lastPos <= inputPos - 8}")
             }
-        }
-
-        // 滚动轨迹观测：记录每次 firstVisibleItemIndex 变化（抓"上滑被拉回"瞬间的真实滚动轨迹）
-        LaunchedEffect(state) {
-            var lastIdx = -1
-            snapshotFlow { state.firstVisibleItemIndex to state.isScrollInProgress }
-                .collect { (idx, inProgress) ->
-                    if (lastIdx == -1) { lastIdx = idx; return@collect }
-                    val jump = kotlin.math.abs(idx - lastIdx) > 1
-                    android.util.Log.w("CHATSCROLL", "POS idx=$idx (was $lastIdx) inProgress=$inProgress jump=$jump total=${state.layoutInfo.totalItemsCount} msg=${conversationUpdated.messageNodes.size}")
-                    lastIdx = idx
+                .distinctUntilChanged()
+                .collectLatest { layout ->
+                    if (layout.totalItemsCount <= 0 || layout.isAtBottom(bottomTolerancePx)) {
+                        return@collectLatest
+                    }
+                    state.scrollToItem(layout.totalItemsCount - 1)
                 }
         }
 
@@ -688,7 +679,8 @@ private fun ChatListNormal(
                 show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
-                state = state
+                state = state,
+                onManualScroll = onManualScroll,
             )
 
             // Suggestion
@@ -938,7 +930,8 @@ private fun BoxScope.MessageJumper(
     show: Boolean,
     onLeft: Boolean,
     scope: CoroutineScope,
-    state: LazyListState
+    state: LazyListState,
+    onManualScroll: () -> Unit,
 ) {
     val hapticController = rememberHaptic()
     AnimatedVisibility(
@@ -958,6 +951,7 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onManualScroll()
                     scope.launch {
                         state.scrollToItem(0)
                     }
@@ -978,6 +972,7 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onManualScroll()
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
@@ -1002,6 +997,7 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onManualScroll()
                     scope.launch {
                         state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                     }
@@ -1021,6 +1017,7 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onManualScroll()
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }

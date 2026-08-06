@@ -310,7 +310,9 @@ private fun MessagePartsBlock(
     // MutableTransitionState/布尔标志——正文 Text part 槽位随 thinking 步骤数漂移重建时，
     // AnimatedVisibility 会被移除导致淡入中断或重播闪烁；Animatable 存当前 alpha，重建后
     // LaunchedEffect 从当前值继续淡入到 1，不中断、不重播。
-    val assistantBodyAlpha = remember(nodeId) { Animatable(0f) }
+    // 初始值按 loading 决定：只有生成中的新正文才从 0 淡入；已完成的旧消息（导航返回恢复、
+    // 或滚动回看历史消息）首帧就是 1，避免每条消息进入视口时都重播一次淡入。
+    val assistantBodyAlpha = remember(nodeId) { Animatable(if (loading) 0f else 1f) }
 
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
@@ -471,12 +473,17 @@ private fun MessagePartsBlock(
                             }
                         }
 
-                        // 整条正文淡入：assistant 正文首次出现时平滑淡入一次（300ms），之后流式
-                        // 打字机逐字输出保持；user 消息不淡入。alpha 存消息级 Animatable，流式重建
-                        // 时 LaunchedEffect 从当前 alpha 继续，不中断、不重播。
+                        // 整条正文淡入：只有生成中的 assistant 正文淡入一次（300ms），之后流式
+                        // 打字机逐字输出保持；已完成的旧消息（导航返回/回看历史）不淡入。
+                        // user 消息不淡入。alpha 存消息级 Animatable，流式重建时 LaunchedEffect
+                        // 从当前 alpha 继续，不中断、不重播。
                         if (role == MessageRole.ASSISTANT) {
-                            LaunchedEffect(Unit) {
-                                assistantBodyAlpha.animateTo(1f, animationSpec = tween(300))
+                            LaunchedEffect(loading) {
+                                if (loading) {
+                                    assistantBodyAlpha.animateTo(1f, animationSpec = tween(300))
+                                } else {
+                                    assistantBodyAlpha.snapTo(1f)
+                                }
                             }
                             Box(
                                 Modifier.graphicsLayer { alpha = assistantBodyAlpha.value }
