@@ -623,8 +623,17 @@ class RouteActivity : ComponentActivity() {
                                 TrustedFolderDetailPage(projectId = key.projectId, initialPath = key.path)
                             }
 
-                            entry<Screen.TrustedFolderEditor> { key ->
-                                TrustedFolderFileEditorPage(projectId = key.projectId, path = key.path)
+                            entry<Screen.TrustedFolderEditor>(
+                                // 编辑器页面用轻量 fade 转场：跳转时目标页需加载/渲染笔记，
+                                // 避免 slide+scale 重动画与渲染争抢主线程导致转场卡顿
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                    + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) { key ->
+                                TrustedFolderFileEditorPage(
+                                    projectId = key.projectId,
+                                    path = key.path,
+                                    dest = key.dest,
+                                )
                             }
 
                             entry<Screen.TrustedFolderSettings> { key ->
@@ -902,6 +911,8 @@ sealed interface Screen : NavKey {
         val projectId: String,
         /** 相对项目根的完整文件路径 */
         val path: String,
+        /** 双链目标（笔记名）。非空时进入页面先解析成 path 再加载，避免跳转前等索引构建卡顿 */
+        val dest: String? = null,
     ) : Screen
 
     @Serializable

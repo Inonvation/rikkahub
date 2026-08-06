@@ -48,6 +48,7 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
+import me.rerere.ai.util.HttpException
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
@@ -125,7 +126,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            throw HttpException("Failed to get response: ${response.code} ${response.body?.string()}", code = response.code)
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -248,6 +249,9 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
                     e.printStackTrace()
                 } finally {
+                    if (exception is HttpException) {
+                        exception.code = response?.code
+                    }
                     close(exception)
                 }
             }

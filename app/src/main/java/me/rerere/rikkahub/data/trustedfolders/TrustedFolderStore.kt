@@ -72,6 +72,17 @@ class TrustedFolderStore(private val context: Context) {
         }
     }
 
+    /** 从最近访问移除一条（用户手动叉掉） */
+    suspend fun removeRecentFile(projectId: String, path: String) {
+        context.trustedFolderDataStore.edit { preferences ->
+            val existing = preferences[RECENT_FILES]?.let {
+                runCatching { json.decodeFromString<List<RecentFile>>(it) }.getOrNull()
+            }.orEmpty()
+            val updated = existing.filterNot { it.projectId == projectId && it.path == path }
+            preferences[RECENT_FILES] = json.encodeToString(updated)
+        }
+    }
+
     suspend fun update(settings: TrustedFolderSettings) {
         context.trustedFolderDataStore.edit { preferences ->
             preferences[PROJECTS] = json.encodeToString(settings.projects)

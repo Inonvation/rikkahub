@@ -2,9 +2,12 @@ package me.rerere.rikkahub.data.trustedfolders
 
 import android.content.Context
 import android.net.Uri
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 /**
@@ -29,7 +32,8 @@ class TrustedFolderRepository(
     private val imageIndexBuiltAt = HashMap<String, Long>()
 
     private companion object {
-        const val NOTE_INDEX_TTL = 60_000L
+        /** 笔记/图片索引有效期：重建成本高（SAF 遍历整棵树），10 分钟内复用；写操作会主动失效 */
+        const val NOTE_INDEX_TTL = 600_000L
     }
 
     /** 笔记名匹配键（与 SafeFolderAccess.toFileNameKey 保持一致）：去 md 后缀 + NFC 规范化 + 转小写 */
@@ -124,15 +128,32 @@ class TrustedFolderRepository(
 
     // ---------- 最近访问 ----------
 
+    /** 最近访问展示上限（横向 chips，避免过多） */
+    private val RECENT_SHOW_LIMIT = 6
+
     /** 记录一条最近访问（跨会话持久化），供详情页「最近访问」展示 */
     suspend fun recordRecentFile(projectId: String, path: String) {
         store.recordRecentFile(RecentFile(projectId = projectId, path = path, openedAt = System.currentTimeMillis()))
     }
 
-    /** 某项目的最近访问文件路径（时间倒序，最多 10 条） */
+    /** 从最近访问移除一个文件（用户手动叉掉） */
+    suspend fun removeRecentFile(projectId: String, path: String) {
+        store.removeRecentFile(projectId, path)
+    }
+
+    /** 某项目的最近访问文件路径（时间倒序，最多 [RECENT_SHOW_LIMIT] 条，自动过滤已被删除的文件） */
     fun recentFilesFlow(projectId: String): Flow<List<String>> =
         store.recentFilesFlow
-            .map { list -> list.filter { it.projectId == projectId }.sortedByDescending { it.openedAt }.take(10).map { it.path } }
+            .map { list -> list.filter { it.projectId == projectId }.sortedByDescending { it.openedAt } }
+            .mapLatest { list ->
+                // 先过滤已删除文件（contentUri 为 null = 文件不存在），再截取上限，
+                // 避免最新几条都被删时列表空（IO 线程检查，避免卡 UI）
+                withContext(Dispatchers.IO) {
+                    list.filter { runCatching { contentUri(it.path, projectId) }.getOrNull() != null }
+                        .take(RECENT_SHOW_LIMIT)
+                        .map { it.path }
+                }
+            }
 
     // ---------- 项目管理 ----------
 

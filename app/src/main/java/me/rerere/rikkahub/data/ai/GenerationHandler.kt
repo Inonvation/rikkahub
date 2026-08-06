@@ -8,11 +8,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
@@ -21,6 +25,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -38,6 +44,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.handleMessageChunk
 import me.rerere.ai.ui.limitContext
+import me.rerere.ai.util.HttpException
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
 import me.rerere.rikkahub.data.ai.subagent.boundJson
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -45,6 +52,7 @@ import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
 import java.io.File
+import java.io.IOException
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
@@ -63,6 +71,110 @@ import kotlin.uuid.Uuid
 private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
+
+// ---- 生成重试（429 / 5xx / 网络错误的指数退避）----
+private const val MAX_GENERATION_RETRIES = 2
+private const val RETRY_INITIAL_BACKOFF_MS = 1000L
+
+// ---- 防失控启发式（对齐 NoteGen 的 toolResultEvidence / MAX_IDENTICAL_READ_RESULT_REPEATS）----
+private const val MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS = 2
+private const val MAX_IDENTICAL_READ_RESULT_REPEATS = 2
+private const val AUTO_STOP_NOTICE = "\n\n---\n*模型连续多轮没有新进展，已自动停止。你可以继续发送消息。*"
+
+// ---- 工作区文件工具串行化（并发竞态防护）----
+// 背景：GenerationHandler 一轮内并行执行所有工具；workspace_edit_file / workspace_write_file
+// 是"读-改-写"三步（readTextInRootfs → replaceText → writeTextInRootfs），无原子性保护。
+// 同文件并发两条 edit 会同时读到同一 base，各自计算 updated 后并发 shell cat > 裸写同一 inode，
+// 造成 lost-update + 字节交错（尾部重复行），且两条都报成功。
+// 对策：对 workspace 文件类工具按 (workspaceId, path) 串行化；workspace_shell 无法确定精确 path，
+// 按 workspaceId 串行。非 workspace 工具（trusted_folder_*/study/memory 等）不受影响，保持并行。
+// 锁池条目不删除：Mutex 很轻量，且不同 (workspaceId, path) 的数量对一个个人用户是天然有界的
+// （一个会话内 AI 触碰的不同文件数有限），长期持有内存开销可忽略。
+// 若删除条目需引用计数，且删除与"新等待者 getOrPut"之间有竞态窗口（可能让新协程拿到新 mutex
+// 与旧等待者并发），反而不安全，故保持不删。这是 UI 层堵漏，不锁实现层（见方案）。
+private class WorkspaceToolLockKey {
+    val workspaceId: String
+    val path: String?
+
+    constructor(workspaceId: String, path: String?) {
+        this.workspaceId = workspaceId
+        this.path = path
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is WorkspaceToolLockKey && other.workspaceId == workspaceId && other.path == path
+
+    override fun hashCode(): Int = 31 * workspaceId.hashCode() + (path?.hashCode() ?: 0)
+
+    override fun toString(): String = if (path == null) "ws:$workspaceId" else "ws:$workspaceId:$path"
+}
+
+private val workspaceToolLocks = ConcurrentHashMap<WorkspaceToolLockKey, Mutex>()
+
+/** 解析工具对应的串行化 key：workspace 文件类工具按 (workspaceId, path)，shell 按 workspaceId；非 workspace 工具返回 null（不串行） */
+private fun workspaceLockKeyFor(
+    toolName: String,
+    inputJson: JsonObject?,
+    workspaceId: String?,
+): WorkspaceToolLockKey? {
+    if (workspaceId.isNullOrBlank()) return null
+    return when (toolName) {
+        "workspace_edit_file", "workspace_write_file" -> {
+            val path = inputJson?.get("path")?.jsonPrimitive?.contentOrNull
+            if (path.isNullOrBlank()) return null
+            WorkspaceToolLockKey(workspaceId, path)
+        }
+        "workspace_shell" -> WorkspaceToolLockKey(workspaceId, null)
+        else -> null
+    }
+}
+
+/** 串行执行工具：同一 workspace 文件 / 同一 workspace 的 shell 依次执行，其余并行 */
+private suspend fun executeToolSerialized(
+    tool: UIMessagePart.Tool,
+    toolsInternal: List<Tool>,
+    workspaceId: String?,
+    json: Json,
+    execute: suspend (UIMessagePart.Tool, List<Tool>) -> UIMessagePart.Tool?,
+): UIMessagePart.Tool? {
+    val inputJson = runCatching {
+        json.parseToJsonElement(tool.input.ifBlank { "{}" }) as? JsonObject
+    }.getOrNull()
+    val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId) ?: return execute(tool, toolsInternal)
+    val mutex = workspaceToolLocks.getOrPut(key) { Mutex() }
+    return mutex.withLock {
+        execute(tool, toolsInternal)
+    }
+}
+
+private fun Throwable.isRetryable(): Boolean = when (this) {
+    is HttpException -> code != null && (code == 429 || code in 500..599)
+    is IOException -> true
+    else -> false
+}
+
+/** 指数退避：第 1 次重试前等 1s，第 2 次 2s，第 3 次 4s */
+private fun backoffDelay(attempt: Int): Long = RETRY_INITIAL_BACKOFF_MS * (1L shl (attempt - 1))
+
+/** 工具输出的轻量指纹（toolName + 文本部分），用于检测「重复读 / 无新证据」 */
+private fun UIMessagePart.Tool.signature(): String {
+    val text = output.filterIsInstance<UIMessagePart.Text>().joinToString("\\n") { it.text }
+    return "$toolName:$text"
+}
+
+/**
+ * 构造「用户引导」续答指令（steering / sendGuidance 共用）：
+ * 作为 provider 看到的最后一条 USER 消息注入，提示模型在既有回复上续答而非从头重来。
+ */
+internal fun buildGuidanceInstruction(text: String): String = buildString {
+    appendLine("## User guidance")
+    appendLine("The user has sent you the following guidance. Continue your existing response according to it:")
+    appendLine("```")
+    appendLine(text.take(1000))
+    appendLine("```")
+    appendLine("- Follow the guidance in your ongoing reply. Do NOT re-answer from scratch; build on your existing answer.")
+    appendLine("- If you were waiting for a running sub-agent, you may incorporate this guidance now and continue when results arrive.")
+}
 
 @Serializable
 sealed interface GenerationChunk {
@@ -98,14 +210,55 @@ class GenerationHandler(
          *  "用消息不用 prompt 编辑"的做法）。只进 internalMessages（发送列表），不落持久化列表，
          *  因此不会触发 handleMessageChunk 分段。默认 null 不影响普通生成。 */
         resumeContext: String? = null,
+        /** steering 信号：会话级待注入引导。非空时在下一轮边界（工具调用/输出完成）消费，
+         *  注入为 user_guidance 气泡 + 续答指令，不打断当前流式输出。 */
+        steeringSignal: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
+        /** steering 被消费回调（UI 清「引导已排入」chip） */
+        onSteeringConsumed: (() -> Unit)? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
 
+        // 防失控启发式状态（跨轮累积）：
+        // seenSignatures = 所有轮见过的工具输出指纹；noProgressRounds = 连续无新证据轮数；
+        // lastSignatureByName / identicalRepeatByName = 同一工具连续相同输出计数
+        val seenSignatures = mutableSetOf<String>()
+        var noProgressRounds = 0
+        val lastSignatureByName = mutableMapOf<String, String>()
+        val identicalRepeatByName = mutableMapOf<String, Int>()
+
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
+
+            // steering：本轮边界消费待注入引导（上一个工具调用/输出完成后的自然边界），
+            // 注入可见 user_guidance 气泡并作为本轮续答指令——不打断上一轮已完成的输出，
+            // 因此不用等整个回合结束才进入引导。无待注入引导时沿用外部 resumeContext。
+            val pendingSteering = steeringSignal?.value
+            val effectiveResumeContext = if (!pendingSteering.isNullOrBlank()) {
+                steeringSignal?.value = null
+                onSteeringConsumed?.invoke()
+                val lastMsg = messages.lastOrNull()
+                if (lastMsg != null) {
+                    val guidancePart = UIMessagePart.Tool(
+                        toolCallId = Uuid.random().toString(),
+                        toolName = "user_guidance",
+                        input = "{}",
+                        output = listOf(
+                            UIMessagePart.Text(
+                                buildJsonObject { put("text", JsonPrimitive(pendingSteering)) }.toString()
+                            )
+                        ),
+                        approvalState = ToolApprovalState.Approved,
+                    )
+                    messages = messages.dropLast(1) + lastMsg.copy(parts = lastMsg.parts + guidancePart)
+                    emit(GenerationChunk.Messages(messages))
+                }
+                buildGuidanceInstruction(pendingSteering)
+            } else {
+                resumeContext
+            }
 
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
@@ -178,7 +331,7 @@ class GenerationHandler(
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
                     conversationId = conversationId,
-                    resumeContext = resumeContext,
+                    resumeContext = effectiveResumeContext,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -257,11 +410,14 @@ class GenerationHandler(
             }
 
             // Handle tools (execute approved tools, handle denied tools)
-            // 并行执行：多个工具（含多子代理派发）并发跑，按原始顺序回填结果
+            // 并行执行：多个工具（含多子代理派发）并发跑，按原始顺序回填结果。
+            // workspace 文件类工具经 executeToolSerialized 串行化（同一文件/同一 workspace 的
+            // shell 依次执行），防止同文件并发编辑的"读-改-写"竞态；其余工具仍并行。
+            val workspaceIdForLock = assistant.workspaceId?.toString()
             val executedTools = coroutineScope {
                 toolsToProcess.map { tool ->
                     async {
-                        executeTool(tool, toolsInternal)
+                        executeToolSerialized(tool, toolsInternal, workspaceIdForLock, json, ::executeTool)
                     }
                 }.awaitAll().filterNotNull()
             }
@@ -291,6 +447,51 @@ class GenerationHandler(
                     )
                 )
             )
+
+            // ---- 防失控启发式（对齐 NoteGen runtime.ts 的 toolResultEvidence / MAX_IDENTICAL_READ_RESULT_REPEATS）----
+            // 1) 连续多轮工具输出没有任何新内容（无新证据）→ 自动收尾
+            val currentSignatures = executedTools.map { it.signature() }
+            val hasNewEvidence = currentSignatures.any { it !in seenSignatures }
+            if (hasNewEvidence) {
+                noProgressRounds = 0
+                seenSignatures.addAll(currentSignatures)
+            } else {
+                noProgressRounds++
+            }
+
+            // 2) 同一工具连续多次返回完全相同输出（重复读死循环）→ 自动收尾。
+            //    仅在「本轮无新证据」时才判定——若有新进展（新工具/新输出）说明 AI 在正常推进，
+            //    即使某个稳定输出工具（如 kb_list）返回相同结果也不算死循环，避免误杀。
+            var repeatedRead = false
+            if (!hasNewEvidence) {
+                executedTools.forEach { tool ->
+                    val sig = tool.signature()
+                    val last = lastSignatureByName[tool.toolName]
+                    if (last == sig) {
+                        val count = (identicalRepeatByName[tool.toolName] ?: 1) + 1
+                        identicalRepeatByName[tool.toolName] = count
+                        if (count >= MAX_IDENTICAL_READ_RESULT_REPEATS) repeatedRead = true
+                    } else {
+                        identicalRepeatByName[tool.toolName] = 1
+                    }
+                    lastSignatureByName[tool.toolName] = sig
+                }
+            }
+
+            if (repeatedRead || noProgressRounds >= MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS) {
+                val reason = if (repeatedRead) {
+                    "same tool returned identical result repeatedly"
+                } else {
+                    "no new progress for $MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS rounds"
+                }
+                Log.i(TAG, "generateText: auto-stop ($reason)")
+                val lastMsg = messages.last()
+                messages = messages.dropLast(1) + lastMsg.copy(
+                    parts = lastMsg.parts + UIMessagePart.Text(AUTO_STOP_NOTICE)
+                )
+                emit(GenerationChunk.Messages(messages))
+                break
+            }
         }
 
     }.flowOn(Dispatchers.IO)
@@ -388,61 +589,91 @@ class GenerationHandler(
             }
         )
         if (stream) {
-            try {
-                providerImpl.streamText(
-                    providerSetting = provider,
-                    messages = messagesToSend,
-                    params = params
-                ).collect {
-                    messages = messages.handleMessageChunk(chunk = it, model = model)
-                    it.usage?.let { usage ->
+            // 指数退避重试：只重试「还没收到任何内容」的失败（429/5xx/网络错误）。
+            // 已开始输出后失败不重试，避免重复输出；重试不丢已保留的内容。
+            var attempt = 0
+            var receivedAnyChunk = false
+            while (true) {
+                try {
+                    providerImpl.streamText(
+                        providerSetting = provider,
+                        messages = messagesToSend,
+                        params = params
+                    ).collect {
+                        receivedAnyChunk = true
+                        messages = messages.handleMessageChunk(chunk = it, model = model)
+                        it.usage?.let { usage ->
+                            messages = messages.mapIndexed { index, message ->
+                                if (index == messages.lastIndex) {
+                                    message.copy(usage = message.usage.merge(usage))
+                                } else {
+                                    message
+                                }
+                            }
+                        }
+                        onUpdateMessages(messages)
+                    }
+                    break
+                } catch (e: CancellationException) {
+                    // 取消（用户停止生成/切会话）仍要把已生成的流式内容落盘，最后 emit 一次
+                    onUpdateMessages(messages)
+                    throw e
+                } catch (e: Exception) {
+                    // 生成中途异常（断网/超时/服务端错误/模型不可用/参数错误）：先保留已输出的内容不丢，
+                    // 再重新抛出让上层 onFailure 弹出错误提示——只 Log 不抛会把失败静默吞掉，
+                    // 用户会看到消息发出去了却没回复、也没有任何报错。
+                    Log.e(TAG, "stream error, preserving partial output", e)
+                    onUpdateMessages(messages)
+                    // 协程被取消期间收到的流式异常（如 OkHttp 取消竞态的 "stream was reset: CANCEL"）
+                    // 本质是取消的副作用，应视为取消而非真实错误——否则会冒泡成用户可见报错。
+                    // 取消后当前协程 isActive 立即变 false，此判断可捕获绝大多数取消竞态。
+                    if (!currentCoroutineContext().isActive) {
+                        throw CancellationException("Generation cancelled during stream", e)
+                    }
+                    // 可重试且尚未开始输出：指数退避后重试整轮请求
+                    if (receivedAnyChunk || attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
+                        throw e
+                    }
+                    attempt++
+                    Log.w(TAG, "stream retry #$attempt after ${e.message}")
+                    delay(backoffDelay(attempt))
+                }
+            }
+        } else {
+            var attempt = 0
+            while (true) {
+                try {
+                    val chunk = providerImpl.generateText(
+                        providerSetting = provider,
+                        messages = messagesToSend,
+                        params = params,
+                    )
+                    messages = messages.handleMessageChunk(chunk = chunk, model = model)
+                    chunk.usage?.let { usage ->
                         messages = messages.mapIndexed { index, message ->
                             if (index == messages.lastIndex) {
-                                message.copy(usage = message.usage.merge(usage))
+                                message.copy(
+                                    usage = message.usage.merge(usage)
+                                )
                             } else {
                                 message
                             }
                         }
                     }
                     onUpdateMessages(messages)
-                }
-            } catch (e: CancellationException) {
-                // 取消（用户停止生成/切会话）仍要把已生成的流式内容落盘，最后 emit 一次
-                onUpdateMessages(messages)
-                throw e
-            } catch (e: Exception) {
-                // 生成中途异常（断网/超时/服务端错误/模型不可用/参数错误）：先保留已输出的内容不丢，
-                // 再重新抛出让上层 onFailure 弹出错误提示——只 Log 不抛会把失败静默吞掉，
-                // 用户会看到消息发出去了却没回复、也没有任何报错。
-                Log.e(TAG, "stream error, preserving partial output", e)
-                onUpdateMessages(messages)
-                // 协程被取消期间收到的流式异常（如 OkHttp 取消竞态的 "stream was reset: CANCEL"）
-                // 本质是取消的副作用，应视为取消而非真实错误——否则会冒泡成用户可见报错。
-                // 取消后当前协程 isActive 立即变 false，此判断可捕获绝大多数取消竞态。
-                if (!currentCoroutineContext().isActive) {
-                    throw CancellationException("Generation cancelled during stream", e)
-                }
-                throw e
-            }
-        } else {
-            val chunk = providerImpl.generateText(
-                providerSetting = provider,
-                messages = messagesToSend,
-                params = params,
-            )
-            messages = messages.handleMessageChunk(chunk = chunk, model = model)
-            chunk.usage?.let { usage ->
-                messages = messages.mapIndexed { index, message ->
-                    if (index == messages.lastIndex) {
-                        message.copy(
-                            usage = message.usage.merge(usage)
-                        )
-                    } else {
-                        message
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 非流式无部分输出，失败即可整体重试
+                    if (attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
+                        throw e
                     }
+                    attempt++
+                    Log.w(TAG, "generateText retry #$attempt after ${e.message}")
+                    delay(backoffDelay(attempt))
                 }
             }
-            onUpdateMessages(messages)
         }
     }
 

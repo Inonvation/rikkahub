@@ -7,8 +7,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 
+/**
+ * AI 请求失败异常。
+ * [code] 为 HTTP 状态码（SSE/流式失败时由 provider 的 onFailure 填入，非流式路径已拼进 message）。
+ * 用于上层判断「是否可重试」（429 限流 / 5xx 服务端临时错误 / 网络错误）。
+ */
 class HttpException(
-    message: String
+    message: String,
+    var code: Int? = null,
 ) : RuntimeException(message)
 
 fun JsonElement.parseErrorDetail(): HttpException {

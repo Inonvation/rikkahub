@@ -432,7 +432,10 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             }
 
             // 展开内容（缩进对齐 label）。用 AnimatedVisibility 让展开/收起平滑过渡
-            // （垂直展开 + 淡入淡出，复用 JsonTree/SubAgentRunningBanner 的模式）
+            // （垂直展开 + 淡入淡出，复用 JsonTree/SubAgentRunningBanner 的模式）。
+            // 用 visible 布尔而非 MutableTransitionState：思考内容生成中（Preview）初始即展开，
+            // 若让 AnimatedVisibility 首帧 false→true 播放展开动画，会与流式逐字输出叠加成
+            // "内容像被插进来"的观感。初始展开直接显示，仅点击展开/收起时播放入场/退场动画。
             AnimatedVisibility(
                 visible = contentVisible && hasContent,
                 enter = expandVertically() + fadeIn(),

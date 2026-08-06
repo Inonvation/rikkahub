@@ -148,6 +148,14 @@ private fun createWriteFileTool(
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
+        // 路径落在沙盒可写区（/workspace、/tmp）之外时，直接报错并引导到真实文件工具，
+        // 避免模型把"真实文件"误当沙盒文件写、造成"文件到底改没改"的混乱
+        if (path.isOutsideWritableRoots()) {
+            error(
+                "路径 $path 位于工作区沙盒的可写区之外（沙盒内只能用 /workspace 或 /tmp）。" +
+                    "如果你要操作设备上的真实文件（笔记/错题/信任文件夹等），请改用 trusted_folder_* 工具。"
+            )
+        }
         val text = params.string("text") ?: error("text is required")
         val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
         val existedBefore = runCatching {
@@ -205,6 +213,13 @@ private fun createEditFileTool(
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
+        // 同上：沙盒可写区之外直接引导到真实文件工具
+        if (path.isOutsideWritableRoots()) {
+            error(
+                "路径 $path 位于工作区沙盒的可写区之外（沙盒内只能用 /workspace 或 /tmp）。" +
+                    "如果你要操作设备上的真实文件（笔记/错题/信任文件夹等），请改用 trusted_folder_* 工具。"
+            )
+        }
         val oldText = params.string("old_text") ?: error("old_text is required")
         val newText = params.string("new_text") ?: error("new_text is required")
         val replaceAll = params["replace_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false

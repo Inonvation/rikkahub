@@ -21,6 +21,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +38,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -122,6 +124,7 @@ import me.rerere.rikkahub.utils.ToolParseCache
 import me.rerere.rikkahub.utils.plus
 import me.rerere.workspace.WorkspaceManager
 import org.koin.compose.koinInject
+import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
@@ -145,8 +148,6 @@ fun ChatList(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
-    /** 导航返回重组合时，用离开前"是否在底部"初始化自动滚动判定，避免把恢复位置拉回底部 */
-    initialWasAtBottom: Boolean = true,
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
@@ -190,7 +191,6 @@ fun ChatList(
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
-                initialWasAtBottom = initialWasAtBottom,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = onRegenerate,
@@ -212,6 +212,7 @@ fun ChatList(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatListNormal(
     innerPadding: PaddingValues,
@@ -222,8 +223,6 @@ private fun ChatListNormal(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
-    /** 导航返回重组合时，用离开前"是否在底部"初始化，避免把恢复位置拉回底部 */
-    initialWasAtBottom: Boolean,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     onRegenerate: (UIMessage) -> Unit,
@@ -264,6 +263,14 @@ private fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
+    }
+
+    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        val lastPos = lastItem.offset + lastItem.size
+        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
+        return lastPos <= inputPos - 8
     }
 
     // 聊天选择
@@ -322,36 +329,51 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部
-        // 触发条件从"依赖 loading 状态"改为"依赖消息列表 size 变化"（并保留生成中跟随），
-        // 修复第二条消息在生成间隙发出、或键盘视口变化时不再滚到底的问题。
-        // 仅当用户本就位于底部时才跟随滚动，上滑查看时不打扰。
-        // enableAutoScroll 关闭时，新消息到达不再强制跟随到底（尊重用户设置），
-        // 但生成进行中若用户就在底部仍跟随——这是正常 UX。
-        var lastMessageCount by remember { mutableStateOf(conversationUpdated.messageNodes.size) }
-        // 初值用离开前"是否在底部"（导航返回重组合时，避免离开前不在底部却被拉回底部）
-        var wasAtBottom by remember { mutableStateOf(initialWasAtBottom) }
-        val autoScrollEnabled = settings.displaySetting.enableAutoScroll
-        LaunchedEffect(state) {
-            // 只发射"最后可见项 index + 总项数"这一最小信号并去重，
-            // 避免每帧/每次布局变化重建整个 visibleItemsInfo 列表（滚动时掉帧来源）
-            snapshotFlow {
-                val info = state.layoutInfo
-                info.visibleItemsInfo.lastOrNull()?.index to info.totalItemsCount
-            }.distinctUntilChanged().collect { (lastVisible, totalCount) ->
-                val currentCount = conversationUpdated.messageNodes.size
-                val countChanged = currentCount != lastMessageCount
-                if (countChanged) lastMessageCount = currentCount
-                // 首次布局前 lastVisible 为 null，此时不置 wasAtBottom，避免误判
-                if (lastVisible != null) {
-                    wasAtBottom = lastVisible >= totalCount - 2
-                }
-                if (!state.isScrollInProgress && wasAtBottom &&
-                    ((countChanged && autoScrollEnabled) || loadingState)
-                ) {
-                    state.requestScrollToItem(totalCount - 1)
+        // 自动滚动到底部（复用 upstream 逻辑 + 安全 index）
+        // 触发条件沿用 upstream：布局每变化一次就评估（生成中气泡长高会持续跟随），
+        // 只在用户没在滚动且生成中时跟随。目标用 totalItemsCount - 1（实际最后一项），
+        // 不用 upstream 的 lastIndex + 10 越界钉底：越界 index 会在生成结束（loading 项消失、
+        // total 变少）时被 LazyListState clamp 回实际位置，产生一次明显的跳动。
+        if (settings.displaySetting.enableAutoScroll) {
+            LaunchedEffect(state) {
+                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                    if (!state.isScrollInProgress && loadingState) {
+                        if (visibleItemsInfo.isAtBottom()) {
+                            android.util.Log.w("CHATSCROLL", "AUTO_FOLLOW trigger: lastIdx=${visibleItemsInfo.lastOrNull()?.index} total=${state.layoutInfo.totalItemsCount} loading=$loadingState")
+                            state.requestScrollToItem(state.layoutInfo.totalItemsCount - 1)
+                        }
+                    }
                 }
             }
+        }
+
+        // AUTO_FOLLOW 判定观测：打印每次评估时的关键输入，确认用户上滑时是否会误触发
+        LaunchedEffect(state) {
+            snapshotFlow {
+                val info = state.layoutInfo
+                Triple(
+                    info.visibleItemsInfo.lastOrNull()?.let { it.index to (it.offset + it.size) },
+                    state.isScrollInProgress,
+                    loadingState,
+                )
+            }.collect { (last, inProgress, loadingNow) ->
+                val (lastIdx, lastPos) = last ?: (-1 to -1)
+                val inputPos = state.layoutInfo.viewportEndOffset
+                val total = state.layoutInfo.totalItemsCount
+                android.util.Log.w("CHATSCROLL", "EVAL inProgress=$inProgress loading=$loadingNow lastIdx=$lastIdx total=$total lastPos=$lastPos inputPos=$inputPos atBottom=${lastPos != -1 && lastPos <= inputPos - 8}")
+            }
+        }
+
+        // 滚动轨迹观测：记录每次 firstVisibleItemIndex 变化（抓"上滑被拉回"瞬间的真实滚动轨迹）
+        LaunchedEffect(state) {
+            var lastIdx = -1
+            snapshotFlow { state.firstVisibleItemIndex to state.isScrollInProgress }
+                .collect { (idx, inProgress) ->
+                    if (lastIdx == -1) { lastIdx = idx; return@collect }
+                    val jump = kotlin.math.abs(idx - lastIdx) > 1
+                    android.util.Log.w("CHATSCROLL", "POS idx=$idx (was $lastIdx) inProgress=$inProgress jump=$jump total=${state.layoutInfo.totalItemsCount} msg=${conversationUpdated.messageNodes.size}")
+                    lastIdx = idx
+                }
         }
 
         // 滚动预取：提前在后台解析视口附近消息的 markdown/HTML/LaTeX 并写入进程级缓存，

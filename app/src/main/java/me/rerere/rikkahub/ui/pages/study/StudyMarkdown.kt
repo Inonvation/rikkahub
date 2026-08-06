@@ -21,9 +21,10 @@ fun StudyMarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
     onLinkClick: me.rerere.rikkahub.ui.components.richtext.LinkClickHandler? = null,
+    onToggleTask: ((String) -> Unit)? = null,
 ) {
     val wrapped = remember(content) { wrapBareLatex(content) }
-    MarkdownBlock(wrapped, modifier, style, onClickCitation, onLinkClick)
+    MarkdownBlock(wrapped, modifier, style, onClickCitation, onLinkClick, onToggleTask)
 }
 
 /**

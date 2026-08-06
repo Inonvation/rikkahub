@@ -34,6 +34,19 @@ class TrustedFolderHealthTest {
     }
 
     @Test
+    fun `duplicate broken links in one note are reported once`() {
+        val report = analyzeMarkdownHealth(
+            listOf(
+                "a.md" to "[[gone]] and [[gone]] again",
+                "b.md" to "content",
+            )
+        )
+        assertEquals(1, report.brokenLinks.size)
+        assertEquals("a.md", report.brokenLinks[0].source)
+        assertEquals("gone", report.brokenLinks[0].target)
+    }
+
+    @Test
     fun `alias and heading and block anchors do not break the target`() {
         val report = analyzeMarkdownHealth(
             listOf(

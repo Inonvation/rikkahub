@@ -3,16 +3,20 @@ package me.rerere.rikkahub.data.ai.tools
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tools.local.convertHtmlToMarkdown
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.toLocalString
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
+import me.rerere.search.ScrapedResult
 import java.time.LocalDate
 import kotlin.uuid.Uuid
 
@@ -79,6 +83,7 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
                             Scrape a URL for detailed page content using ${opts.displayName}.
                             Use this when the user requests content from a specific page or when search snippets are insufficient.
                             Avoid using it for common questions unless the user asks.
+                            Returned content is automatically converted to Markdown when the provider returns raw HTML.
                             """.trimIndent(),
                         parameters = { service.scrapingParameters(opts) },
                         execute = { args ->
@@ -87,7 +92,7 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
                                 commonOptions = settings.searchCommonOptions,
                                 serviceOptions = opts,
                             )
-                            val payload = JsonInstantPretty.encodeToJsonElement(result.getOrThrow()).jsonObject
+                            val payload = result.getOrThrow().toPayloadWithAutoMarkdown()
                             listOf(UIMessagePart.Text(payload.toString()))
                         }
                     )
@@ -192,6 +197,7 @@ private fun createSingleSearchTools(settings: Settings, concise: Boolean): Set<T
                         Scrape a URL for detailed page content.
                         Use this when the user requests content from a specific page or when search snippets are insufficient.
                         Avoid using it for common questions unless the user asks.
+                        Returned content is automatically converted to Markdown when the provider returns raw HTML.
                         """.trimIndent(),
                     parameters = {
                         val options = settings.searchServices.getOrElse(
@@ -210,10 +216,45 @@ private fun createSingleSearchTools(settings: Settings, concise: Boolean): Set<T
                             commonOptions = settings.searchCommonOptions,
                             serviceOptions = options,
                         )
-                        val payload = JsonInstantPretty.encodeToJsonElement(result.getOrThrow()).jsonObject
+                        val payload = result.getOrThrow().toPayloadWithAutoMarkdown()
                         listOf(UIMessagePart.Text(payload.toString()))
                     }
                 ))
         }
     }
+}
+
+/**
+ * 粗略判断一段抓取内容是否为 HTML。
+ * 命中开头 4KB 内的常见 HTML 标签特征即视为 HTML；纯文本/Markdown 判否。
+ */
+private fun looksLikeHtml(content: String): Boolean {
+    if (content.isBlank()) return false
+    val head = content.take(4096).lowercase()
+    return listOf("<html", "<head", "<body", "<div", "<article", "<main", "<h1", "<h2", "<h3", "<p>").any {
+        head.contains(it)
+    }
+}
+
+/**
+ * 把 scrape 结果序列化成 JSON，并把仍是原始 HTML 的 content 自动转成 Markdown。
+ * 已转 Markdown（如 Jina/Firecrawl）的 content 原样保留。
+ */
+private fun ScrapedResult.toPayloadWithAutoMarkdown(): JsonObject {
+    val json = JsonInstantPretty.encodeToJsonElement(this).jsonObject
+    val urls = json["urls"]?.jsonArray ?: return json
+    val converted = JsonArray(urls.map { item ->
+        val obj = item.jsonObject
+        val content = obj["content"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (looksLikeHtml(content)) {
+            JsonObject(obj.toMutableMap().apply {
+                put("content", JsonPrimitive(convertHtmlToMarkdown(content)))
+            })
+        } else {
+            obj
+        }
+    })
+    return JsonObject(json.toMutableMap().apply {
+        put("urls", converted)
+    })
 }

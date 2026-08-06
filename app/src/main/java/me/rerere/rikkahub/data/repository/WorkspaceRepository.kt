@@ -275,6 +275,21 @@ class WorkspaceRepository(
         }
     }
 
+    suspend fun fileDirPath(
+        id: String,
+        area: WorkspaceStorageArea,
+        path: String,
+    ): String? = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext null
+        manager.ensureWorkspace(workspace.root)
+        when (area) {
+            // FILES 区返回文件所在目录的绝对路径（HTML 预览相对资源解析基准）
+            WorkspaceStorageArea.FILES -> File(manager.filesDir(workspace.root), path).parentFile?.absolutePath
+            // LINUX/rootfs 区路径不映射到真实文件系统目录，返回 null（HTML 相对资源不可解析）
+            WorkspaceStorageArea.LINUX -> null
+        }
+    }
+
     suspend fun importFile(
         id: String,
         area: WorkspaceStorageArea,

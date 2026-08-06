@@ -125,17 +125,17 @@ fun TrustedFolderDetailPage(
     var selecting by remember { mutableStateOf(false) }
     val selectedPaths = remember { mutableStateListOf<String>() }
 
-    // 目录滚动位置：进子目录再返回时，恢复到离开时的位置（每个目录各存一份）
+    // 目录滚动位置：进子目录/跳编辑器再返回时，恢复到离开时的位置（每个目录各存一份）。
+    // 存 VM 里（VM 绑定导航栈、跳编辑器返回仍存活）；捕获触发时的 path 避免 onDispose 读到时已是新值。
     val listState = rememberLazyListState()
-    val dirScrollPositions = remember { mutableMapOf<String, Pair<Int, Int>>() }
-    // 离开当前目录（path 变化）时保存它的滚动位置
-    DisposableEffect(state.path) {
+    val currentPath = state.path
+    DisposableEffect(currentPath) {
         onDispose {
-            dirScrollPositions[state.path] =
+            vm.scrollPositions[currentPath] =
                 listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }
     }
-    // 进入目录（含返回上级）时，等加载完成后恢复该目录位置；首次进入回顶部。
+    // 进入目录（含返回上级/从编辑器返回）时，等加载完成后恢复该目录位置；首次进入回顶部。
     // key 只用 path：刷新当前目录（path 不变）不触发，不会把用户滚动位置拉回顶部。
     LaunchedEffect(state.path) {
         snapshotFlow { state.loading }.first { !it }
@@ -143,7 +143,7 @@ fun TrustedFolderDetailPage(
         if (state.entries.isEmpty()) return@LaunchedEffect
         // LazyColumn 可能尚未完成绑定，滚动失败时静默忽略，下次进入再恢复
         try {
-            val saved = dirScrollPositions[state.path]
+            val saved = vm.scrollPositions[state.path]
             if (saved != null) {
                 val maxIndex = state.entries.size - 1
                 listState.scrollToItem(saved.first.coerceIn(0, maxIndex), saved.second)
@@ -327,6 +327,9 @@ fun TrustedFolderDetailPage(
                             onClick = { path ->
                                 scope.launch { repository.recordRecentFile(projectId, path) }
                                 navController.navigate(Screen.TrustedFolderEditor(projectId, path))
+                            },
+                            onRemove = { path ->
+                                scope.launch { repository.removeRecentFile(projectId, path) }
                             },
                         )
                     }
@@ -704,11 +707,12 @@ private fun formatTime(ts: Long): String {
     return fmt.format(java.util.Date(ts))
 }
 
-/** 最近访问文件横向条：标题 + 可点击 chips（文件名），点击重新打开 */
+/** 最近访问文件横向条：标题 + 可点击 chips（文件名），点击重新打开，右侧 × 手动移除 */
 @Composable
 private fun RecentFilesRow(
     files: List<String>,
     onClick: (String) -> Unit,
+    onRemove: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -733,12 +737,27 @@ private fun RecentFilesRow(
                         .clip(RoundedCornerShape(16.dp))
                         .clickable { onClick(path) },
                 ) {
-                    Text(
-                        text = path.substringAfterLast('/'),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                    ) {
+                        Text(
+                            text = path.substringAfterLast('/'),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                        IconButton(
+                            onClick = { onRemove(path) },
+                            modifier = Modifier.size(20.dp),
+                        ) {
+                            Icon(
+                                HugeIcons.Cancel01,
+                                "从最近访问移除",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

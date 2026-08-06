@@ -30,6 +30,14 @@ class ConversationSession(
     // 处理状态（如 OCR 识别中）
     val processingStatus = MutableStateFlow<String?>(null)
 
+    // steering：生成中待注入的引导信号。非空时 GenerationHandler 在下一轮边界
+    // （工具调用完成/输出结束）消费，注入为 user_guidance 气泡 + 续答指令，不打断当前流式。
+    val steeringSignal = MutableStateFlow<String?>(null)
+
+    // steering 消费后清除「引导已排入」chip 的回调（由 sendGuidance 设置，GenerationHandler 消费时调用）
+    @Volatile
+    var onSteeringHandled: (() -> Unit)? = null
+
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()

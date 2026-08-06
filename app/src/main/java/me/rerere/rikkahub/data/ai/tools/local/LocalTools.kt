@@ -14,6 +14,8 @@ class LocalTools(
 ) {
     val javascriptTool by lazy { buildJavascriptTool() }
 
+    val htmlToMarkdownTool by lazy { buildHtmlToMarkdownTool() }
+
     val timeTool by lazy { buildTimeInfoTool() }
 
     val clipboardTool by lazy { buildClipboardTool(context) }
@@ -28,10 +30,17 @@ class LocalTools(
 
     val calendarCreateTool by lazy { buildCalendarCreateTool(context) }
 
+    val calendarUpdateTool by lazy { buildCalendarUpdateTool(context) }
+
+    val calendarDeleteTool by lazy { buildCalendarDeleteTool(context) }
+
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)
+        }
+        if (options.contains(LocalToolOption.HtmlToMarkdown)) {
+            tools.add(htmlToMarkdownTool)
         }
         if (options.contains(LocalToolOption.TimeInfo)) {
             tools.add(timeTool)
@@ -51,6 +60,8 @@ class LocalTools(
         if (options.contains(LocalToolOption.Calendar)) {
             tools.add(calendarQueryTool)
             tools.add(calendarCreateTool)
+            tools.add(calendarUpdateTool)
+            tools.add(calendarDeleteTool)
         }
         return tools
     }

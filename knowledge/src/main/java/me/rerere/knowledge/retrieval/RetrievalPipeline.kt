@@ -84,6 +84,12 @@ class RetrievalPipeline(
          * 避免"出现 50 次"和"出现 3 次"的分数差异过大。
          */
         const val KEYWORD_SCORE_CEILING = 5f
+
+        /** 关键词保底门槛：matchCount 达到该值才算「强字面命中」，才值得在最终结果里保底保留 */
+        const val KEYWORD_MIN_GUARANTEE_MATCH = 3
+
+        /** 关键词保底上限：最终结果里最多额外保留多少条关键词命中（避免挤掉语义相关结果） */
+        const val KEYWORD_MAX_GUARANTEE = 3
     }
     /**
      * Hybrid 检索：Vector + Keyword → RRF 融合 → MMR → 可选 reranking → threshold → topK
@@ -117,8 +123,10 @@ class RetrievalPipeline(
                 }
             }
             val keywordDeferred = async {
+                // 直接用 keywordSearcher 返回的 KeywordSearchResult（保留 matchCount）。
+                // 旧实现重新 .map 构造丢掉了 matchCount → 关键词结果在融合里分数恒 0，
+                // 几乎必然被 rerank/topK 挤掉，这是「关键词命中但融合后全没」的深层原因。
                 keywordSearcher.search(query, knowledgeBaseId, candidateLimit)
-                    .map { KeywordSearchResult(chunk = it.chunk, rank = it.rank, snippet = it.snippet) }
             }
             vectorDeferred.await() to keywordDeferred.await()
         }
@@ -127,14 +135,69 @@ class RetrievalPipeline(
 
         val diversified = mmrDiversify(fused, knowledgeBaseId, queryEmbedding, candidateLimit, mmrLambda)
 
+        // rerank 候选保底（对齐 NoteGen finalizeSearchResults）：
+        // 融合结果优先，再补向量/关键词各自 top 条。避免某一检索器的好结果在融合时被挤掉、
+        // rerank 看不到它——rerank 是在"融合结果"上重排，候选被挤掉就永远回不来。
         val results = if (reranker != null) {
-            reranker.rerank(query, diversified, topK)
+            val candidates = buildRerankCandidates(diversified, vectorResults, keywordResults, topK, candidateLimit)
+            reranker.rerank(query, candidates, topK)
         } else {
             diversified
         }
 
-        return applyThreshold(results, similarityThreshold).take(topK)
-            .mapIndexed { index, it -> it.copy(rank = index + 1) }
+        val thresholded = applyThreshold(results, similarityThreshold).take(topK)
+        // 关键词强命中保底：rerank 常把字面命中的结果排后，导致精确术语/文件名检索时
+        // 看不到关键词命中。从关键词路 top 结果里保底补充 matchCount 高的几条。
+        val finalResults = if (keywordResults.isNotEmpty()) {
+            guaranteeKeywordHits(thresholded, keywordResults, topK)
+        } else {
+            thresholded
+        }
+        return finalResults.mapIndexed { index, it -> it.copy(rank = index + 1) }
+    }
+
+    /**
+     * 关键词强命中保底：最终结果里强制保留若干条「字面命中强」的关键词结果。
+     *
+     * 背景：向量/rerank 主导下，纯字面匹配（精确术语、文件名、概念名）的片段常因语义分低
+     * 被排到 topK 之外——但这类查询恰恰是用户想要的精确命中。这里从关键词路 top 结果里
+     * 补充 matchCount >= [KEYWORD_MIN_GUARANTEE_MATCH] 的条目（最多 [KEYWORD_MAX_GUARANTEE] 条），
+     * 避免它们被语义分完全挤掉；已有同 chunk 的结果不重复。
+     */
+    private fun guaranteeKeywordHits(
+        results: List<RetrievalResult>,
+        keywordResults: List<KeywordSearchResult>,
+        topK: Int,
+    ): List<RetrievalResult> {
+        if (results.isEmpty() || topK <= 0) return results
+        val guaranteeCount = maxOf(1, minOf(KEYWORD_MAX_GUARANTEE, topK / 3))
+        val resultIds = results.map { it.chunk.id }.toMutableSet()
+        val finalList = results.toMutableList()
+        var added = 0
+        for (kr in keywordResults) {
+            if (added >= guaranteeCount) break
+            if (kr.matchCount < KEYWORD_MIN_GUARANTEE_MATCH) continue
+            if (kr.chunk.id in resultIds) continue
+            // 结果已满 topK：替换排名最后的条目（保底是"替换末尾"而非"追加"——
+            // 否则 thresholded 恒满 topK 时保底永远不生效，关键词命中依旧被语义结果挤掉）
+            if (finalList.size >= topK) {
+                finalList.removeAt(finalList.lastIndex)
+            }
+            finalList.add(
+                RetrievalResult(
+                    chunk = kr.chunk,
+                    score = kr.matchCount.toFloat(),
+                    normalizedScore = (kr.matchCount.toFloat() / KEYWORD_SCORE_CEILING).coerceIn(0f, 1f),
+                    scoreSource = ScoreSource.KEYWORD,
+                    rank = finalList.size + 1,
+                    snippet = kr.snippet,
+                    matchCount = kr.matchCount,
+                )
+            )
+            resultIds.add(kr.chunk.id)
+            added++
+        }
+        return finalList
     }
 
     /**
@@ -208,6 +271,68 @@ class RetrievalPipeline(
                     matchCount = result.matchCount,
                 )
             }
+    }
+
+    /**
+     * rerank 候选保底（对齐 NoteGen finalizeSearchResults）：融合结果优先，
+     * 再补向量/关键词各自 top max(topK, 5) 条。避免某一检索器的好结果在融合时被挤掉、
+     * rerank 看不到它。关键词保底时保留真实 matchCount，让 rerank 能按内容重新打分。
+     */
+    private fun buildRerankCandidates(
+        fused: List<RetrievalResult>,
+        vectorResults: List<VectorSearchResult>,
+        keywordResults: List<KeywordSearchResult>,
+        topK: Int,
+        candidateLimit: Int,
+    ): List<RetrievalResult> {
+        val perRetrieverCount = maxOf(topK, 5)
+        val seen = mutableSetOf<String>()
+        val candidates = mutableListOf<RetrievalResult>()
+
+        // 1) 融合结果优先（已按 RRF 排序）
+        for (r in fused) {
+            if (seen.add(r.chunk.id)) candidates.add(r)
+        }
+
+        // 2) 向量路保底（融合没带上的，按余弦分从高到低）
+        var vectorKept = 0
+        for (r in vectorResults) {
+            if (vectorKept >= perRetrieverCount || candidates.size >= candidateLimit) break
+            if (seen.add(r.chunk.id)) {
+                candidates.add(
+                    RetrievalResult(
+                        chunk = r.chunk,
+                        score = r.score,
+                        normalizedScore = r.score,
+                        scoreSource = ScoreSource.SEMANTIC,
+                        rank = 0,
+                    )
+                )
+                vectorKept++
+            }
+        }
+
+        // 3) 关键词路保底（FTS BM25 顺序，保留真实 matchCount）
+        var keywordKept = 0
+        for (r in keywordResults) {
+            if (keywordKept >= perRetrieverCount || candidates.size >= candidateLimit) break
+            if (seen.add(r.chunk.id)) {
+                candidates.add(
+                    RetrievalResult(
+                        chunk = r.chunk,
+                        score = r.matchCount.toFloat(),
+                        normalizedScore = (r.matchCount.toFloat() / KEYWORD_SCORE_CEILING).coerceIn(0f, 1f),
+                        scoreSource = ScoreSource.KEYWORD,
+                        rank = 0,
+                        snippet = r.snippet,
+                        matchCount = r.matchCount,
+                    )
+                )
+                keywordKept++
+            }
+        }
+
+        return candidates
     }
 
     /**

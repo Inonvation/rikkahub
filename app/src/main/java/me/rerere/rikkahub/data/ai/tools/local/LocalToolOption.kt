@@ -10,6 +10,10 @@ sealed class LocalToolOption {
     data object JavascriptEngine : LocalToolOption()
 
     @Serializable
+    @SerialName("html_to_markdown")
+    data object HtmlToMarkdown : LocalToolOption()
+
+    @Serializable
     @SerialName("time_info")
     data object TimeInfo : LocalToolOption()
 

@@ -87,6 +87,8 @@
   <string name="assistant_page_local_tools_javascript_engine_title">JavaScript 引擎</string>
   <string name="assistant_page_local_tools_time_info_desc">从设备获取当前日期、星期、时间和时区信息</string>
   <string name="assistant_page_local_tools_time_info_title">时间信息</string>
+  <string name="assistant_page_local_tools_html_to_markdown_desc">将抓取的网页或原始 HTML 转换为干净的 Markdown 文本，节省 token</string>
+  <string name="assistant_page_local_tools_html_to_markdown_title">HTML 转 Markdown</string>
   <string name="assistant_page_local_tools_tts_desc">让AI使用您所选的TTS服务为您朗读文本</string>
   <string name="assistant_page_local_tools_tts_title">文字转语音</string>
   <string name="assistant_page_manage_memory_title">管理记忆</string>
@@ -256,6 +258,12 @@
   <string name="chat_message_tool_search_prefix">Search: %1$s</string>
   <string name="chat_message_tool_search_results_count">%1$d results</string>
   <string name="chat_message_tool_search_web">Search web: %1$s</string>
+  <string name="chat_message_tool_javascript">JavaScript</string>
+  <string name="chat_message_tool_javascript_logs">Console</string>
+  <string name="chat_message_tool_javascript_result">Result</string>
+  <string name="chat_message_tool_javascript_no_result">No result</string>
+  <string name="chat_message_tool_html_to_markdown">HTML to Markdown</string>
+  <string name="chat_message_tool_html_to_markdown_no_result">No output</string>
   <string name="chat_message_tool_todo_write_updated">Task plan updated</string>
   <string name="chat_message_tool_todo_write_summary">%1$d/%2$d done</string>
   <string name="chat_message_tool_submit">Submit</string>
@@ -1422,6 +1430,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="tool_ui_speaking">Speaking: %s</string>
   <string name="tool_ui_replay">Replay</string>
   <string name="tool_ui_delete_memory">Delete memory</string>
+  <string name="tool_ui_expand">展开</string>
+  <string name="tool_ui_collapse">收起</string>
   <string name="tool_ui_memory_memory_content">Memory content</string>
   <string name="tool_ui_memory_deleted_hint">This memory has been deleted.</string>
   <string name="tool_ui_memory_no_content">No content</string>

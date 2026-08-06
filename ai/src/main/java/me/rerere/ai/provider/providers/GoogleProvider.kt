@@ -36,6 +36,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.util.HttpException
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import me.rerere.ai.registry.ModelRegistry
@@ -186,7 +187,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            throw HttpException("Failed to get response: ${response.code} ${response.body?.string()}", code = response.code)
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -317,13 +318,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                             val bodyElement = json.parseToJsonElement(bodyStr)
                             println(bodyElement)
                             if (bodyElement is JsonObject) {
-                                exception = Exception(
+                                exception = HttpException(
                                     bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                        ?: "unknown"
+                                        ?: "unknown",
+                                    code = response.code,
                                 )
                             }
                         } else {
-                            exception = Exception("Unknown error: ${response.code}")
+                            exception = HttpException("Unknown error: ${response.code}", code = response.code)
                         }
                     }
                 } catch (e: Throwable) {

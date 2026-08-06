@@ -51,6 +51,10 @@ fun WorkspaceFileEditorPage(
     val fileName = path.substringAfterLast('/').ifBlank { path }
     // JSON 文件启用「结构」树状预览模式
     val isJson = fileName.substringAfterLast('.', "").lowercase() == "json"
+    // HTML 文件启用「HTML」渲染预览模式（WebView）
+    val isHtml = fileName.substringAfterLast('.', "").lowercase() in setOf("html", "htm")
+    // HTML 内相对资源（图片/CSS/JS）的解析基准目录；仅 FILES 区可用
+    var htmlBaseUrl by remember { mutableStateOf<String?>(null) }
 
     val textState = rememberTextFieldState()
     var loading by remember { mutableStateOf(true) }
@@ -61,6 +65,11 @@ fun WorkspaceFileEditorPage(
         loading = true
         loadError = null
         runCatching {
+            if (isHtml && area == WorkspaceStorageArea.FILES) {
+                repository.fileDirPath(id, area, path)?.let { dirPath ->
+                    htmlBaseUrl = "file://$dirPath/"
+                }
+            }
             repository.readTextForPreview(id, area, path)
         }.onSuccess { content ->
             textState.setTextAndPlaceCursorAtEnd(content)
@@ -145,6 +154,8 @@ fun WorkspaceFileEditorPage(
                     .imePadding(),
                 sourceEditable = editable,
                 jsonStructure = isJson,
+                htmlMode = isHtml,
+                htmlBaseUrl = htmlBaseUrl,
             )
         }
     }

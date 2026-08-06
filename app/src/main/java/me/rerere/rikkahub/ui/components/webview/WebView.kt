@@ -48,13 +48,29 @@ internal class MyWebChromeClient(private val state: WebViewState) : WebChromeCli
     }
 }
 
-internal class MyWebViewClient(private val state: WebViewState) : WebViewClient() {
+internal class MyWebViewClient(
+    private val state: WebViewState,
+    private val onOpenExternalUrl: ((String) -> Boolean)? = null,
+) : WebViewClient() {
     override fun shouldInterceptRequest(
         view: WebView,
         request: WebResourceRequest
     ): WebResourceResponse? {
         return WebViewLocalAssets.intercept(view.context.applicationContext, request.url)
             ?: super.shouldInterceptRequest(view, request)
+    }
+
+    /**
+     * 主框架导航拦截。当 [onOpenExternalUrl] 提供且返回 true 时，交给外部处理（如系统浏览器），
+     * 不在 WebView 内继续导航；返回 null 或 false 时保持默认行为（WebView 内导航）。
+     */
+    override fun shouldOverrideUrlLoading(
+        view: WebView?,
+        request: WebResourceRequest
+    ): Boolean {
+        val url = request.url?.toString() ?: return super.shouldOverrideUrlLoading(view, request)
+        if (onOpenExternalUrl?.invoke(url) == true) return true
+        return super.shouldOverrideUrlLoading(view, request)
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -94,10 +110,11 @@ fun WebView(
     modifier: Modifier = Modifier,
     onCreated: (WebView) -> Unit = {},
     onUpdated: (WebView) -> Unit = {},
+    onOpenExternalUrl: ((String) -> Boolean)? = null,
 ) {
     // Remember the clients based on the state
     val webChromeClient = remember { MyWebChromeClient(state) }
-    val webViewClient = remember { MyWebViewClient(state) }
+    val webViewClient = remember(state, onOpenExternalUrl) { MyWebViewClient(state, onOpenExternalUrl) }
 
     Box(
         modifier = modifier

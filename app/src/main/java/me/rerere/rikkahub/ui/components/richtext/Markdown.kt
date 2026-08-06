@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +73,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -277,6 +279,9 @@ fun interface LinkClickHandler {
 
 private val LocalLinkClick = staticCompositionLocalOf<LinkClickHandler?> { null }
 
+/** 任务列表点击回调：参数为任务行完整文本（含 `- [ ]` 前缀），由上层翻转勾选并保存 */
+private val LocalOnToggleTask = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
 @OptIn(FlowPreview::class)
 @Composable
 fun MarkdownBlock(
@@ -285,6 +290,7 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
     onLinkClick: LinkClickHandler? = null,
+    onToggleTask: ((String) -> Unit)? = null,
 ) {
     // 超大文本降级为纯文本：流式期间每 chunk 都全量重解析成本过高，极端长文本不做实时解析。
     // 阈值以下保留正常 Markdown 渲染。
@@ -328,7 +334,10 @@ fun MarkdownBlock(
             .collect { setData(it) }
     }
 
-    CompositionLocalProvider(LocalLinkClick provides onLinkClick) {
+    CompositionLocalProvider(
+        LocalLinkClick provides onLinkClick,
+        LocalOnToggleTask provides onToggleTask,
+    ) {
         // 需要内部笔记链接跳转（onLinkClick 非空）时强制走 MarkdownNode 路径：
         // MarkdownNew 走 LinkAnnotation，不支持 note 链接回调；HTML 内容降级用 MarkdownNode 渲染。
         if (data.hasHtml && onLinkClick == null) {
@@ -487,25 +496,39 @@ private fun MarkdownNode(
             )
         }
 
-        // Checkbox（Obsidian 风格：圆角方块，勾选填主色）
+        // Checkbox（Obsidian 风格：圆角方块，勾选填主色；可点击切换勾选状态）。
+        // 乐观勾选：点击瞬间本地翻转显示，不等后台重渲染（源文本更新后由解析结果对齐）。
         GFMTokenTypes.CHECK_BOX -> {
-            val isChecked = node.getTextInNode(content).trim() == "[x]"
+            val parsedChecked = node.getTextInNode(content).trim() in listOf("[x]", "[X]")
+            val onToggle = LocalOnToggleTask.current
+            var optimisticChecked by remember(parsedChecked) { mutableStateOf(parsedChecked) }
+            // 任务行完整文本（含 `- [ ]` 前缀），供上层在源文本里定位并翻转
+            val lineStart = content.lastIndexOf('\n', (node.startOffset - 1).coerceAtLeast(0)) + 1
+            val lineEndRaw = content.indexOf('\n', node.endOffset)
+            val lineEnd = if (lineEndRaw == -1) content.length else lineEndRaw
+            val taskLine = content.substring(lineStart, lineEnd)
             Box(
                 modifier = modifier
                     .padding(top = 2.dp)
                     .size(16.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(
-                        if (isChecked) MaterialTheme.colorScheme.primary else Color.Transparent
+                        if (optimisticChecked) MaterialTheme.colorScheme.primary else Color.Transparent
                     )
                     .border(
                         width = 1.dp,
-                        color = if (isChecked) Color.Transparent else MaterialTheme.colorScheme.outline,
+                        color = if (optimisticChecked) Color.Transparent else MaterialTheme.colorScheme.outline,
                         shape = RoundedCornerShape(4.dp),
+                    )
+                    .then(
+                        if (onToggle != null) Modifier.clickable {
+                            optimisticChecked = !optimisticChecked
+                            onToggle(taskLine)
+                        } else Modifier
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                if (isChecked) {
+                if (optimisticChecked) {
                     Icon(
                         imageVector = HugeIcons.Tick01,
                         contentDescription = null,
@@ -1240,12 +1263,19 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
-        // 短引用链接：`[^id]` 脚注引用渲染成蓝色上标；其它（如 `[!type]`、未定义 `[text]`）原样保留方括号
+        // 短引用链接：`[^id]` 脚注引用渲染成蓝色上标序号（去掉 `[^`、`]`，右上角小字）；其它原样保留方括号
         node.type == MarkdownElementTypes.SHORT_REFERENCE_LINK -> {
             val label = node.getTextInNode(content)
             if (label.startsWith("[^")) {
-                withStyle(SpanStyle(color = colorScheme.primary, fontSize = 10.sp)) {
-                    append(label)
+                val id = label.removePrefix("[^").removeSuffix("]")
+                withStyle(
+                    SpanStyle(
+                        color = colorScheme.primary,
+                        fontSize = 9.sp,
+                        baselineShift = BaselineShift.Superscript,
+                    )
+                ) {
+                    append(id)
                 }
             } else {
                 append(label)
@@ -1553,9 +1583,16 @@ private fun AnnotatedString.Builder.appendObsidianInline(
                 }
             }
             token.startsWith("[^") -> {
-                // 脚注引用 [^id]
-                withStyle(SpanStyle(color = colorScheme.primary, fontSize = 10.sp)) {
-                    append(token)
+                // 脚注引用 [^id]：渲染为上标序号（去掉 `[^`、`]` 只留数字，右上角小字）
+                val id = token.removePrefix("[^").removeSuffix("]")
+                withStyle(
+                    SpanStyle(
+                        color = colorScheme.primary,
+                        fontSize = 9.sp,
+                        baselineShift = BaselineShift.Superscript,
+                    )
+                ) {
+                    append(id)
                 }
             }
             token.startsWith("#") -> {

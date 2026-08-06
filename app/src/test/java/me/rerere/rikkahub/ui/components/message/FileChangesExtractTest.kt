@@ -118,4 +118,119 @@ class FileChangesExtractTest {
         assertEquals(FileChangeStatus.EDITED, changes[0].status)
         assertEquals(FileChangeStatus.REMOVED, changes[1].status)
     }
+
+    @Test
+    fun `create_folder is not reported as a change`() {
+        val changes = extractTrustedFolderChanges(
+            listOf(tool("1", "trusted_folder_create_folder", """{"path":"newdir"}""", textOutput("""{"ok":true}""")))
+        )
+        assertEquals(0, changes.size)
+    }
+
+    @Test
+    fun `rename is EDITED with new path from output`() {
+        val changes = extractTrustedFolderChanges(
+            listOf(
+                tool(
+                    "1",
+                    "trusted_folder_rename",
+                    """{"path":"notes/old.md","new_name":"new.md"}""",
+                    textOutput("""{"action":"renamed","path":"notes/new.md"}"""),
+                )
+            )
+        )
+        assertEquals(1, changes.size)
+        assertEquals("notes/new.md", changes[0].path)
+        assertEquals(FileChangeStatus.EDITED, changes[0].status)
+    }
+
+    @Test
+    fun `move is EDITED with target path from output`() {
+        val changes = extractTrustedFolderChanges(
+            listOf(
+                tool(
+                    "1",
+                    "trusted_folder_move",
+                    """{"path":"notes/a.md","target_dir":"archive"}""",
+                    textOutput("""{"action":"moved","path":"archive/a.md"}"""),
+                )
+            )
+        )
+        assertEquals(1, changes.size)
+        assertEquals("archive/a.md", changes[0].path)
+        assertEquals(FileChangeStatus.EDITED, changes[0].status)
+    }
+
+    @Test
+    fun `edit and delete with error output are not reported`() {
+        val changes = extractTrustedFolderChanges(
+            listOf(
+                tool("1", "trusted_folder_edit", """{"path":"notes/a.md"}""", textOutput("""{"error":true,"message":"不存在"}""")),
+                tool("2", "trusted_folder_delete", """{"path":"notes/b.md"}""", textOutput("""{"error":"无权限"}""")),
+            )
+        )
+        assertEquals(0, changes.size)
+    }
+
+    @Test
+    fun `workspace edit with error output is not reported`() {
+        val changes = extractFileChanges(
+            listOf(tool("1", "workspace_edit_file", """{"path":"/workspace/a.txt"}""", textOutput("""{"error":true,"message":"old_text not found"}""")))
+        )
+        assertEquals(0, changes.size)
+    }
+
+    @Test
+    fun `workspace shell with error word in stdout is still parsed by diff keys`() {
+        // workspace_shell 的 stdout 是命令自由输出，可能含 "error" 字样，不能按 error 键过滤
+        val output = """{"addedFiles":["a.txt"],"stdout":"error: build failed","exitCode":1}"""
+        val changes = extractFileChanges(
+            listOf(tool("1", "workspace_shell", """{"command":"build"}""", textOutput(output)))
+        )
+        assertEquals(1, changes.size)
+        assertEquals(FileChangeStatus.ADDED, changes[0].status)
+    }
+
+    @Test
+    fun `delete_note is reported with title from output`() {
+        val items = extractStudyItems(
+            listOf(
+                tool(
+                    "1",
+                    "delete_note",
+                    """{"id":"x","confirm_title":"工作笔记"}""",
+                    textOutput("""{"deleted":true,"id":"x","title":"工作笔记","type":"note"}"""),
+                )
+            )
+        )
+        assertEquals(1, items.size)
+        assertEquals("已删笔记: 工作笔记", items[0].label)
+    }
+
+    @Test
+    fun `update_note without title in input still reported via output`() {
+        // 只改 content/tags 不传 title 的 update：输出带 title 即可显示
+        val items = extractStudyItems(
+            listOf(
+                tool(
+                    "1",
+                    "update_note",
+                    """{"id":"x","content":"new content"}""",
+                    textOutput("""{"updated":true,"id":"x","title":"学习笔记"}"""),
+                )
+            )
+        )
+        assertEquals(1, items.size)
+        assertEquals("笔记: 学习笔记", items[0].label)
+    }
+
+    @Test
+    fun `delete with error output not reported in study items`() {
+        val items = extractStudyItems(
+            listOf(
+                tool("1", "delete_note", """{"id":"x","confirm_title":"y"}""", textOutput("""{"error":true,"message":"确认标题不匹配"}"""))
+            )
+        )
+        assertEquals(0, items.size)
+    }
 }

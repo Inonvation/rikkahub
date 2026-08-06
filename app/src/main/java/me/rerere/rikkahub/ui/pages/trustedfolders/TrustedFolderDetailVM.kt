@@ -35,8 +35,13 @@ class TrustedFolderDetailVM(
     /** 目录缓存：进入过的目录条目快照，返回上级时秒开、不重复请求 SAF */
     private val dirCache = mutableMapOf<String, List<TrustedFolderEntry>>()
 
+    /** 各目录滚动位置（firstVisibleItemIndex, firstVisibleItemScrollOffset）。存 VM 里跨编辑器跳转保留 */
+    val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
+
     init {
         navigate(initialPath)
+        // 后台预热笔记/图片索引：双链跳转时命中缓存、不现场构建导致加载动画卡顿
+        viewModelScope.launch { repository.prewarmNoteIndex(projectId) }
     }
 
     fun open(entry: TrustedFolderEntry) {
@@ -75,9 +80,12 @@ class TrustedFolderDetailVM(
                 if (showConfig) entries else entries.filter { !it.name.startsWith(".") }
             }.onSuccess { entries ->
                 dirCache[path] = entries
+                // 目录可能已被用户导航离开：旧请求结果不覆盖当前状态（快速切换目录时防竞态）
+                if (_state.value.path != path) return@onSuccess
                 _state.update { it.copy(entries = entries, loading = false) }
             }
             .onFailure { error ->
+                if (_state.value.path != path) return@onFailure
                 _state.update {
                     it.copy(entries = emptyList(), loading = false, error = error.message ?: "加载失败")
                 }

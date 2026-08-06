@@ -497,9 +497,10 @@ fun analyzeMarkdownHealth(files: List<Pair<String, String>>): TrustedFolderHealt
             }
         }
     }
+    // 同一篇笔记里多次引用同一目标（如两个 [[X]]）只报一条，否则 UI 用 source:target 作 key 会重复崩溃
     return TrustedFolderHealthReport(
-        brokenLinks = broken,
-        emptyNotes = empty.sorted(),
+        brokenLinks = broken.distinctBy { it.source to it.target },
+        emptyNotes = empty.distinct().sorted(),
         totalNotes = files.size,
     )
 }
@@ -522,16 +523,42 @@ private fun contentWithoutFrontmatter(content: String): String {
 private fun kotlinx.serialization.json.JsonObject.string(name: String): String? =
     this[name]?.jsonPrimitive?.contentOrNull
 
-/** 必填相对路径：非法（`..` 逃逸等）直接抛错拒绝 */
+/** 必填相对路径：非法（绝对路径、`..` 逃逸等）直接抛错拒绝，并附工具区分引导 */
 private fun kotlinx.serialization.json.JsonObject.relPath(name: String): String {
     val path = string(name)?.replace('\\', '/')?.trim() ?: error("$name is required")
-    return SafeFolderAccess.validateRelPath(path)
+    return try {
+        SafeFolderAccess.validateRelPath(path)
+    } catch (e: IllegalArgumentException) {
+        // 绝对路径多半是模型把"沙盒绝对路径"或"设备真实路径"直接填进来了。
+        // 引导到 workspace（信任文件夹内路径是相对当前激活项目的），避免模型反复试错。
+        val hint = if (path.startsWith("/")) {
+            "信任文件夹内路径必须是相对当前激活项目的相对路径（如 notes/diary.md），不是绝对路径。" +
+                "若你想操作工作区沙盒文件，请改用 workspace_* 工具（路径以 /workspace/ 开头）。"
+        } else {
+            null
+        }
+        throw IllegalArgumentException(
+            if (hint != null) "${e.message}。$hint" else e.message ?: "非法路径"
+        )
+    }
 }
 
 /** 可选相对路径：缺失/空串返回根目录 */
 private fun kotlinx.serialization.json.JsonObject.relPathOrEmpty(name: String): String {
     val path = string(name)?.replace('\\', '/')?.trim().orEmpty()
-    return SafeFolderAccess.validateRelPath(path)
+    return try {
+        SafeFolderAccess.validateRelPath(path)
+    } catch (e: IllegalArgumentException) {
+        val hint = if (path.startsWith("/")) {
+            "信任文件夹内路径必须是相对当前激活项目的相对路径（如 notes/diary.md），不是绝对路径。" +
+                "若你想操作工作区沙盒文件，请改用 workspace_* 工具（路径以 /workspace/ 开头）。"
+        } else {
+            null
+        }
+        throw IllegalArgumentException(
+            if (hint != null) "${e.message}。$hint" else e.message ?: "非法路径"
+        )
+    }
 }
 
 /** 越界双保险：路径非法时强制 needsApproval=true（实际执行时 [SafeFolderAccess] 仍会硬拒绝） */

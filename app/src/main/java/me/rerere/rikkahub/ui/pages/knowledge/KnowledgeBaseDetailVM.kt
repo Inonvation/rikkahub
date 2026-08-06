@@ -84,6 +84,18 @@ class KnowledgeBaseDetailVM(
     private val _searchDurationMs = MutableStateFlow<Long?>(null)
     val searchDurationMs = _searchDurationMs.asStateFlow()
 
+    /** 分路检索诊断：向量 / 关键词 / 融合 各自的命中数与耗时 */
+    data class RouteDiagnostic(
+        val route: String,
+        val available: Boolean,
+        val hitCount: Int,
+        val durationMs: Long,
+        val note: String? = null,
+    )
+
+    private val _routeDiagnostics = MutableStateFlow<List<RouteDiagnostic>>(emptyList())
+    val routeDiagnostics = _routeDiagnostics.asStateFlow()
+
     // 检索错误信息（embedding 失败 / 检索异常等），UI 展示失败原因而非静默空列表
     private val _searchError = MutableStateFlow<String?>(null)
     val searchError = _searchError.asStateFlow()
@@ -196,6 +208,7 @@ class KnowledgeBaseDetailVM(
             _searchLoading.value = true
             _searchDurationMs.value = null
             _searchResults.value = emptyList()
+            _routeDiagnostics.value = emptyList()
             try {
                 val base = this@KnowledgeBaseDetailVM.base.value
                 if (base == null) {
@@ -249,6 +262,53 @@ class KnowledgeBaseDetailVM(
                     } else null
                 } else null
 
+                // ---- 分路检索诊断（向量 / 关键词 / 融合）----
+                val routeDiag = mutableListOf<RouteDiagnostic>()
+
+                // 关键词路（FTS，总是可用）
+                val kwStart = System.nanoTime()
+                val kwResults = knowledgeManager.keywordSearch(
+                    query = query,
+                    knowledgeBaseId = baseId,
+                    topK = _searchTopK.value,
+                )
+                routeDiag += RouteDiagnostic(
+                    route = "关键词",
+                    available = true,
+                    hitCount = kwResults.size,
+                    durationMs = (System.nanoTime() - kwStart) / 1_000_000,
+                )
+
+                // 向量路（需 embedding 模型）
+                if (queryEmbedding != null) {
+                    val semStart = System.nanoTime()
+                    val semResults = knowledgeManager.semanticSearch(
+                        query = query,
+                        queryEmbedding = queryEmbedding,
+                        knowledgeBaseId = baseId,
+                        topK = _searchTopK.value,
+                        similarityThreshold = _searchThreshold.value,
+                        reranker = reranker,
+                        mmrLambda = base.mmrLambda,
+                    )
+                    routeDiag += RouteDiagnostic(
+                        route = "向量",
+                        available = true,
+                        hitCount = semResults.size,
+                        durationMs = (System.nanoTime() - semStart) / 1_000_000,
+                    )
+                } else {
+                    routeDiag += RouteDiagnostic(
+                        route = "向量",
+                        available = false,
+                        hitCount = 0,
+                        durationMs = 0,
+                        note = "未配置 embedding 模型",
+                    )
+                }
+
+                // 融合路（hybrid + 可选 rerank）
+                val hyStart = System.nanoTime()
                 val results = knowledgeManager.search(
                     query = query,
                     queryEmbedding = queryEmbedding,
@@ -257,7 +317,16 @@ class KnowledgeBaseDetailVM(
                     similarityThreshold = _searchThreshold.value,
                     reranker = reranker,
                     keywordWeight = _searchKeywordWeight.value,
+                    mmrLambda = base.mmrLambda,
                 )
+                routeDiag += RouteDiagnostic(
+                    route = "融合",
+                    available = true,
+                    hitCount = results.size,
+                    durationMs = (System.nanoTime() - hyStart) / 1_000_000,
+                )
+
+                _routeDiagnostics.value = routeDiag
                 _searchResults.value = results
 
                 // 构建 chunkId -> 文档文件名 映射（用于结果来源展示）
@@ -272,6 +341,7 @@ class KnowledgeBaseDetailVM(
                 _searchError.value = null
             } catch (e: Exception) {
                 _searchResults.value = emptyList()
+                _routeDiagnostics.value = emptyList()
                 _searchError.value = e.message ?: e.javaClass.simpleName
             } finally {
                 _searchLoading.value = false

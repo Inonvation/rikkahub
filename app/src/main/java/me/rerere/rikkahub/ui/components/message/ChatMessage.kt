@@ -3,6 +3,9 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -42,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -302,6 +306,12 @@ private fun MessagePartsBlock(
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
 
+    // 整条正文淡入的 alpha：消息级（nodeId 隔离，重生成/新消息时重置）。用 Animatable 而非
+    // MutableTransitionState/布尔标志——正文 Text part 槽位随 thinking 步骤数漂移重建时，
+    // AnimatedVisibility 会被移除导致淡入中断或重播闪烁；Animatable 存当前 alpha，重建后
+    // LaunchedEffect 从当前值继续淡入到 1，不中断、不重播。
+    val assistantBodyAlpha = remember(nodeId) { Animatable(0f) }
+
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
@@ -344,34 +354,47 @@ private fun MessagePartsBlock(
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
-                    ChainOfThought(
-                        steps = block.steps,
-                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                        cardColors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                        ),
-                        stateKey = LocalConversationId.current?.let { "chain:$it:$nodeId" },
-                    ) { step ->
-                        when (step) {
-                            is ThinkingStep.ReasoningStep -> {
-                                key(step.reasoning.createdAt) {
-                                    ChatMessageReasoningStep(
-                                        reasoning = step.reasoning,
-                                        model = model,
-                                        assistant = assistant,
-                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                    )
+                    // 思维链卡片出现动画：只淡入、不做垂直展开。思考内容生成中卡片高度随流式
+                    // 文本增长，若用 expandVertically 播放出现动画会与逐字输出叠加成"内容被
+                    // 插进来"的观感；淡入 + 卡片自身 animateContentSize 平滑高度，接近原项目。
+                    // 流式追加 step 不改变 targetState（保持 true），不会反复重播。
+                    val thoughtAppearState = remember { MutableTransitionState(false) }
+                    LaunchedEffect(Unit) { thoughtAppearState.targetState = true }
+                    AnimatedVisibility(
+                        visibleState = thoughtAppearState,
+                        enter = fadeIn(animationSpec = tween(200)),
+                        exit = fadeOut(animationSpec = tween(150)),
+                    ) {
+                        ChainOfThought(
+                            modifier = Modifier.animateContentSize(),
+                            steps = block.steps,
+                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                            cardColors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+                            ),
+                            stateKey = LocalConversationId.current?.let { "chain:$it:$nodeId" },
+                        ) { step ->
+                            when (step) {
+                                is ThinkingStep.ReasoningStep -> {
+                                    key(step.reasoning.createdAt) {
+                                        ChatMessageReasoningStep(
+                                            reasoning = step.reasoning,
+                                            model = model,
+                                            assistant = assistant,
+                                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                        )
+                                    }
                                 }
-                            }
 
-                            is ThinkingStep.ToolStep -> {
-                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                    ChatMessageToolStep(
-                                        tool = step.tool,
-                                        loading = loading && !step.tool.isExecuted,
-                                        onToolApproval = onToolApproval,
-                                        onToolAnswer = onToolAnswer,
-                                    )
+                                is ThinkingStep.ToolStep -> {
+                                    key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                        ChatMessageToolStep(
+                                            tool = step.tool,
+                                            loading = loading && !step.tool.isExecuted,
+                                            onToolApproval = onToolApproval,
+                                            onToolAnswer = onToolAnswer,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -438,12 +461,30 @@ private fun MessagePartsBlock(
                         // 内部可选择的 Text 会频繁注册/注销，与 Compose 选择工具栏在绘制阶段
                         // 对 selectable 列表的排序产生并发修改，导致 ConcurrentModificationException。
                         // 生成结束后内容稳定，再启用文本选择。
-                        if (loading) {
-                            textContent()
-                        } else {
-                            SelectionContainer {
+                        val renderContent = @Composable {
+                            if (loading) {
                                 textContent()
+                            } else {
+                                SelectionContainer {
+                                    textContent()
+                                }
                             }
+                        }
+
+                        // 整条正文淡入：assistant 正文首次出现时平滑淡入一次（300ms），之后流式
+                        // 打字机逐字输出保持；user 消息不淡入。alpha 存消息级 Animatable，流式重建
+                        // 时 LaunchedEffect 从当前 alpha 继续，不中断、不重播。
+                        if (role == MessageRole.ASSISTANT) {
+                            LaunchedEffect(Unit) {
+                                assistantBodyAlpha.animateTo(1f, animationSpec = tween(300))
+                            }
+                            Box(
+                                Modifier.graphicsLayer { alpha = assistantBodyAlpha.value }
+                            ) {
+                                renderContent()
+                            }
+                        } else {
+                            renderContent()
                         }
                     }
 

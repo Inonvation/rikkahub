@@ -348,12 +348,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         if (!scrollSyncReady) return
         vm.chatListFirstVisibleItemIndex = chatListState.firstVisibleItemIndex
         vm.chatListFirstVisibleItemScrollOffset = chatListState.firstVisibleItemScrollOffset
-        // 同步"是否在底部"到 VM：导航返回重组合后用它初始化 wasAtBottom，
-        // 避免离开前不在底部、返回却被生成中自动滚动拉回底部
-        vm.chatListWasAtBottom = chatListState.layoutInfo.let { info ->
-            val last = info.visibleItemsInfo.lastOrNull() ?: return@let true
-            last.index >= info.totalItemsCount - 2
-        }
     }
     LaunchedEffect(chatListState) {
         snapshotFlow { chatListState.isScrollInProgress }
@@ -368,30 +362,26 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(chatListState) {
         scrollSyncReady = true
     }
+    // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次（VM 字段跨导航保持，
+    // 返回时若已初始化则跳过，不覆盖恢复的阅读位置）。复用 upstream 逻辑，但目标用 messageNodes.lastIndex
+    // （真实消息最后一项，永不越界）：不能用 totalItemsCount - 1（含 loading 指示器项，等它消失后 target
+    // 越界，LazyListState 每次 remeasure 都会把 scrollPosition 从越界位置 clamp 回合法位置，把用户下滑
+    // 反复拉回底部），也不能用 +5 越界钉底（同样的 clamp 抽搐 + 取消进行中的手势）。
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
+                    android.util.Log.w("CHATSCROLL", "FIRST_POSITION node: index=$index")
                     chatListState.scrollToItem(index)
                 }
             } else {
-                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                val target = conversation.messageNodes.lastIndex
+                android.util.Log.w("CHATSCROLL", "FIRST_POSITION bottom: msgSize=${conversation.currentMessages.size} target=$target init=$vm.chatListInitialized")
+                chatListState.requestScrollToItem(target)
             }
             vm.chatListInitialized = true
         }
-    }
-
-    // 切回正在生成中的对话时，滚动到底部以显示最新消息。
-    // 只在该会话"从无生成变为有生成"（loadingJob null→非 null 边沿）时触发。
-    // prevLoadingJob 存 VM 跨导航保留：导航返回重组合时 loadingJob 值不变，
-    // prevLoadingJob 也保持（而非被 remember 重置为 null），因此不会误判边沿、
-    // 不会把已恢复的阅读位置强拉到底。
-    LaunchedEffect(loadingJob) {
-        if (vm.chatListInitialized && loadingJob != null && vm.prevLoadingJob == null) {
-            chatListState.scrollToItem(conversation.currentMessages.size + 5)
-        }
-        vm.prevLoadingJob = loadingJob
     }
 
     when {
@@ -535,6 +525,9 @@ private fun ChatPageContent(
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
     val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
+    // 排队中的引导消息（生成中发送后挂载在输入框右上侧，等 AI 回合结束注入后由 VM 清除）
+    val pendingGuidance by vm.pendingGuidance.collectAsStateWithLifecycle()
+
     // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）。
     // distinctUntilChanged：只在计数变化时通知（0→N→0），子代理流式更新期间
     // 计数稳定，避免每次流式 chunk 都触发整个 ChatPageContent 重组（发烫/掉帧来源）。
@@ -549,33 +542,16 @@ private fun ChatPageContent(
         .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
 
-    // 自动滚动：检测用户是否滚离底部。
+    // 自动滚动：检测用户是否滚离底部（显示回到底部按钮）。
     // 首次进入新会话时列表可能还没完成首次布局（visibleItemsInfo 为空），此时
     // lastVisible 为 null，不能按"不在底部"处理（否则滚动按钮会短暂闪出一次）。
-    val userScrolledUp by remember {
+    val density = LocalDensity.current
+    val userScrolledUp by remember(density) {
         derivedStateOf {
             val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()
             lastVisible != null && lastVisible.index < chatListState.layoutInfo.totalItemsCount - 2
         }
     }
-
-    // 发送后滚动到底的标记：等待消息数量变化后再滚，确保新消息已进入列表
-    var pendingScrollAfterSend by remember { mutableStateOf(false) }
-
-    // 发送后自动滚动到底：目标用 totalItemsCount - 1（不用旧快照 currentMessages.size + 5），
-    // enableAutoScroll 关闭时不强制滚动，保持用户当前位置
-    LaunchedEffect(conversation.messageNodes.size) {
-        if (pendingScrollAfterSend) {
-            pendingScrollAfterSend = false
-            if (setting.displaySetting.enableAutoScroll) {
-                chatListState.requestScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
-            }
-        }
-    }
-
-    // AI 生成时自动滚动已统一由 ChatList 的自动跟随循环负责（snapshotFlow 监听布局，
-    // 基于 wasAtBottom + loadingState 驱动 requestScrollToItem）。此处的连续跟随器与之重复，
-    // 叠加 request 到同一目标会造成"强制滚底 + 连续 relayout"，已删除。
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         buildList {
@@ -700,21 +676,35 @@ private fun ChatPageContent(
                                 parts = inputState.getContents(),
                                 messageId = inputState.editingMessage!!,
                             )
-                        } else if (subAgentActiveCount > 0) {
-                            // 子代理运行中：主输入框发送走引导逻辑（引导合并进 AI 气泡，不单独成条）。
-                            // 有附件时回退普通发送，避免静默丢附件。
+                        } else if (loadingJob != null || subAgentActiveCount > 0) {
+                            // 生成中（主 AI 正在生成 或 子代理运行中）：主输入框发送走引导逻辑——
+                            // 不打断当前流式，先把消息挂到输入框右上侧（引导已排入），等当前回合
+                            // 自然结束再注入为 user_guidance 气泡续答。有附件时回退普通发送，避免静默丢附件。
                             val contents = inputState.getContents()
                             val hasAttachment = contents.any { it !is UIMessagePart.Text }
                             if (hasAttachment) {
                                 vm.handleMessageSend(contents)
                             } else {
-                                vm.sendGuidance(inputState.textContent.text.toString())
+                                val guidanceText = inputState.textContent.text.toString()
+                                vm.setPendingGuidance(guidanceText)
+                                vm.sendGuidance(guidanceText)
                             }
-                            pendingScrollAfterSend = true
+                            scope.launch {
+                                android.util.Log.w("CHATSCROLL", "SEND_SCROLL guidance-send")
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
+                            }
                         } else {
                             vm.handleMessageSend(inputState.getContents())
-                            // 发送后自动滚到底（等待新消息进入列表后在 LaunchedEffect 中执行）
-                            pendingScrollAfterSend = true
+                            scope.launch {
+                                android.util.Log.w("CHATSCROLL", "SEND_SCROLL normal-send")
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
+                            }
                         }
                         inputState.clearInput()
                         vm.clearDraft()
@@ -727,7 +717,13 @@ private fun ChatPageContent(
                             )
                         } else {
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
-                            pendingScrollAfterSend = true
+                            scope.launch {
+                                android.util.Log.w("CHATSCROLL", "SEND_SCROLL long-send")
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
+                            }
                         }
                         inputState.clearInput()
                         vm.clearDraft()
@@ -774,6 +770,8 @@ private fun ChatPageContent(
                     },
                     subAgentActive = subAgentActiveCount > 0,
                     subAgentActiveCount = subAgentActiveCount,
+                    pendingGuidance = pendingGuidance,
+                    onCancelPendingGuidance = { vm.clearPendingGuidance() },
                     onOpenSubAgentPanel = {
                         navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))
                     },
@@ -809,7 +807,6 @@ private fun ChatPageContent(
                 settings = setting,
                 hazeState = hazeState,
                 errors = errors,
-                initialWasAtBottom = vm.chatListWasAtBottom,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = {
@@ -858,6 +855,7 @@ private fun ChatPageContent(
                 onJumpToMessage = { index ->
                     previewMode = false
                     scope.launch {
+                        android.util.Log.w("CHATSCROLL", "JUMP_TO index=$index")
                         chatListState.requestScrollToItem(index)
                     }
                 },
@@ -909,9 +907,9 @@ private fun ChatPageContent(
                 Surface(
                     onClick = {
                         scope.launch {
+                            android.util.Log.w("CHATSCROLL", "FAB scroll-bottom")
                             // 目标统一为布局实际总项数 - 1（与自动滚动、MessageJumper 一致）：
-                            // 旧写法用 conversation.currentMessages.size + 5 估算，当列表尾部
-                            // 有错误卡片/加载指示器/滚动垫片等额外 item 时滚不到精确底部。
+                            // 用 totalItemsCount - 1 安全滚到底（不会越界）。
                             chatListState.animateScrollToItem(chatListState.layoutInfo.totalItemsCount - 1)
                         }
                     },
@@ -985,7 +983,6 @@ private fun ChatPageContent(
         }
     }
 }
-
 }
 
 @Composable

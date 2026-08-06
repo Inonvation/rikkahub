@@ -28,9 +28,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,19 +37,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.File01
 import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.ai.tools.analyzeMarkdownHealth
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderBrokenLink
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderHealthReport
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderProject
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedOp
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.IosGroup
@@ -61,7 +51,6 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
-import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 
 /**
@@ -76,32 +65,11 @@ fun TrustedFolderSettingsPage(projectId: String) {
     val toaster = LocalToaster.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    // 断链体检
-    val repository = koinInject<TrustedFolderRepository>()
+    // 断链体检：状态在 VM 里，跳转编辑页再返回结果仍保留
     val navController = LocalNavController.current
-    val scope = rememberCoroutineScope()
-    var healthReport by remember { mutableStateOf<TrustedFolderHealthReport?>(null) }
-    var healthLoading by remember { mutableStateOf(false) }
-    var healthError by remember { mutableStateOf<String?>(null) }
-
-    fun runHealthScan() {
-        if (healthLoading) return
-        healthLoading = true
-        healthError = null
-        scope.launch {
-            runCatching {
-                // 扫文件是 IO；断链/空笔记分析是 CPU 密集，放到后台线程避免卡 UI
-                val files = repository.scanMarkdownFiles(projectId)
-                withContext(Dispatchers.Default) { analyzeMarkdownHealth(files) }
-            }.onSuccess { report ->
-                healthReport = report
-                healthLoading = false
-            }.onFailure { e ->
-                healthError = e.message ?: "扫描失败"
-                healthLoading = false
-            }
-        }
-    }
+    val healthReport by vm.healthReport.collectAsStateWithLifecycle()
+    val healthLoading by vm.healthLoading.collectAsStateWithLifecycle()
+    val healthError by vm.healthError.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         vm.message.collect { toaster.show(it, type = ToastType.Error) }
@@ -263,7 +231,7 @@ fun TrustedFolderSettingsPage(projectId: String) {
                 }
                 item {
                     FilledTonalButton(
-                        onClick = { runHealthScan() },
+                        onClick = { vm.runHealthScan() },
                         enabled = !healthLoading,
                         modifier = Modifier.fillMaxWidth(),
                     ) {

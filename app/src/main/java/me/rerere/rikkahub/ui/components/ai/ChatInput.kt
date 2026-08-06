@@ -159,6 +159,10 @@ fun ChatInput(
     /** 活跃子代理任务数（用于图标右上角数量角标，并行多个子代理时显示） */
     subAgentActiveCount: Int = 0,
     onOpenSubAgentPanel: (() -> Unit)? = null,
+    /** 排队中的引导消息（生成中发送后挂载在输入框右上侧，等 AI 回合结束自动注入） */
+    pendingGuidance: String? = null,
+    /** 取消排队中的引导 */
+    onCancelPendingGuidance: (() -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -175,13 +179,14 @@ fun ChatInput(
     fun sendMessage() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onSendClick()
+        // 生成中且输入框无文字 → 停止；否则（含生成中有文字）→ 发送
+        if (loading && state.isEmpty()) onCancelClick() else onSendClick()
     }
 
     fun sendMessageWithoutAnswer() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onLongSendClick()
+        if (loading && state.isEmpty()) onCancelClick() else onLongSendClick()
     }
 
     val asr = LocalASRState.current
@@ -256,6 +261,16 @@ fun ChatInput(
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
+                    }
+
+                    pendingGuidance?.let { guidance ->
+                        PendingGuidanceChip(
+                            text = guidance,
+                            onCancel = { onCancelPendingGuidance?.invoke() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
                     }
 
                     TextInputRow(
@@ -448,12 +463,13 @@ fun ChatInput(
                                     )
                             ) {
                                 val containerColor = when {
-                                    loading -> MaterialTheme.colorScheme.errorContainer
+                                    // 生成中且无文字 → 停止按钮；有文字 → 发送按钮
+                                    loading && state.isEmpty() -> MaterialTheme.colorScheme.errorContainer
                                     state.isEmpty() -> MaterialTheme.colorScheme.surfaceContainerHigh
                                     else -> MaterialTheme.colorScheme.primary
                                 }
                                 val contentColor = when {
-                                    loading -> MaterialTheme.colorScheme.onErrorContainer
+                                    loading && state.isEmpty() -> MaterialTheme.colorScheme.onErrorContainer
                                     state.isEmpty() -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                                     else -> MaterialTheme.colorScheme.onPrimary
                                 }
@@ -462,7 +478,7 @@ fun ChatInput(
                                     shape = CircleShape,
                                     color = containerColor,
                                     content = {})
-                                if (loading) {
+                                if (loading && state.isEmpty()) {
                                     KeepScreenOn()
                                     Icon(
                                         imageVector = HugeIcons.Cancel01,
@@ -494,6 +510,49 @@ fun ChatInput(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+        }
+    }
+}
+
+/**
+ * 「引导已排入」胶囊：生成中发送的消息先挂在这里，等 AI 当前回合自然结束
+ * 注入为 user_guidance 气泡后再清除（pendingGuidance 变 null）。可手动取消。
+ */
+@Composable
+private fun PendingGuidanceChip(
+    text: String,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "引导已排入：$text",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = stringResource(R.string.stop),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
     }
 }

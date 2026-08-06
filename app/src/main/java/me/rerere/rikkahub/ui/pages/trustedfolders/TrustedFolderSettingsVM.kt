@@ -2,14 +2,19 @@ package me.rerere.rikkahub.ui.pages.trustedfolders
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.ai.tools.analyzeMarkdownHealth
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderHealthReport
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderProject
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedOp
@@ -29,6 +34,35 @@ class TrustedFolderSettingsVM(
 
     private val _message = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val message = _message.asSharedFlow()
+
+    // 断链体检状态存在 VM 里：跳转到笔记编辑页再返回，结果仍保留
+    private val _healthReport = MutableStateFlow<TrustedFolderHealthReport?>(null)
+    val healthReport = _healthReport.asStateFlow()
+
+    private val _healthLoading = MutableStateFlow(false)
+    val healthLoading = _healthLoading.asStateFlow()
+
+    private val _healthError = MutableStateFlow<String?>(null)
+    val healthError = _healthError.asStateFlow()
+
+    /** 断链/空笔记体检。扫文件是 IO，断链分析是 CPU 密集，放后台线程避免卡 UI */
+    fun runHealthScan() {
+        if (_healthLoading.value) return
+        _healthLoading.value = true
+        _healthError.value = null
+        viewModelScope.launch {
+            runCatching {
+                val files = repository.scanMarkdownFiles(projectId)
+                withContext(Dispatchers.Default) { analyzeMarkdownHealth(files) }
+            }.onSuccess { report ->
+                _healthReport.value = report
+                _healthLoading.value = false
+            }.onFailure { e ->
+                _healthError.value = e.message ?: "扫描失败"
+                _healthLoading.value = false
+            }
+        }
+    }
 
     fun updateApproval(op: TrustedOp, enabled: Boolean) = launch {
         runCatching {

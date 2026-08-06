@@ -14,12 +14,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +34,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownPreviewSwitcher
+import me.rerere.rikkahub.ui.components.richtext.convertWikilinksToNoteLinks
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -46,24 +47,45 @@ import java.io.File
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrustedFolderFileEditorPage(projectId: String, path: String) {
+fun TrustedFolderFileEditorPage(projectId: String, path: String, dest: String? = null) {
     val repository = koinInject<TrustedFolderRepository>()
     val navController = LocalNavController.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val fileName = path.substringAfterLast('/').ifBlank { path }
-    val isJson = fileName.substringAfterLast('.', "").lowercase() == "json"
 
     val textState = rememberTextFieldState()
     var loading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    // 实际文件路径：双链跳转时由 dest 解析而来，保存/图片解析都用它
+    var actualPath by remember { mutableStateOf(path) }
+    val fileName = actualPath.substringAfterLast('/').ifBlank { path.substringAfterLast('/').ifBlank { "笔记" } }
+    val isJson = fileName.substringAfterLast('.', "").lowercase() == "json"
 
-    LaunchedEffect(path) {
+    // 已加载标记（saveable）：从双链/返回回到同一 entry 时跳过重新加载，保留未保存编辑
+    var loadedOnce by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(path, dest) {
+        if (loadedOnce) {
+            // 返回同一条目：保留当前 textState（含未保存编辑），只结束加载态
+            loading = false
+            return@LaunchedEffect
+        }
+        loadedOnce = true
         loading = true
         loadError = null
-        runCatching { repository.readText(path, projectId) }
+        runCatching {
+            // 双链跳转：先解析目标笔记路径（索引构建若发生，在转圈期间于 IO 线程完成，不卡跳转）
+            val resolved = if (dest != null) {
+                withContext(Dispatchers.IO) { repository.resolveNotePath(dest, projectId) }
+            } else path
+            actualPath = resolved ?: path
+            if (dest != null && resolved == null) {
+                val pretty = runCatching { java.net.URLDecoder.decode(dest, "UTF-8") }.getOrDefault(dest)
+                throw IllegalStateException("找不到笔记：$pretty")
+            }
+            withContext(Dispatchers.IO) { repository.readText(actualPath, projectId) }
+        }
             .onSuccess {
                 textState.setTextAndPlaceCursorAtEnd(it)
                 loading = false
@@ -74,16 +96,10 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
             }
     }
 
-    // 后台预热笔记索引，加速本会话后续双链跳转（失败静默，回退惰性构建）
+    // 后台预热笔记索引，加速本会话后续双链跳转（失败静默，回退惰性构建）。
+    // 放 IO 线程：索引构建是文件扫描，避免占满 Default 池、让渲染预处理排队。
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.Default) { repository.prewarmNoteIndex(projectId) }
-    }
-
-    // 离开页面时清理图片降级产生的 cache 临时文件，避免长期累积
-    DisposableEffect(Unit) {
-        onDispose {
-            runCatching { File(context.cacheDir, "tf_note_images").deleteRecursively() }
-        }
+        withContext(Dispatchers.IO) { repository.prewarmNoteIndex(projectId) }
     }
 
     Scaffold(
@@ -106,14 +122,14 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
                                 scope.launch {
                                     runCatching {
                                         repository.writeText(
-                                            relPath = path,
+                                            relPath = actualPath,
                                             text = textState.text.toString(),
                                             overwrite = true,
                                             projectId = projectId,
                                         )
                                     }.onSuccess {
                                         toaster.show("已保存", type = ToastType.Success)
-                                        scope.launch { repository.recordRecentFile(projectId, path) }
+                                        scope.launch { repository.recordRecentFile(projectId, actualPath) }
                                     }.onFailure {
                                         toaster.show(it.message ?: "保存失败", type = ToastType.Error)
                                     }
@@ -154,18 +170,9 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
                 sourceEditable = true,
                 jsonStructure = isJson,
                 previewByDefault = true,
-                // 点击双链/内部链接：解析目标笔记并跳转（回到该笔记的渲染预览）
+                // 点击双链/内部链接：立即跳转，目标笔记在目标页内解析加载（转圈期间完成，不卡跳转）
                 onLinkClick = { dest ->
-                    scope.launch {
-                        val target = runCatching { repository.resolveNotePath(dest, projectId) }.getOrNull()
-                        if (target != null) {
-                            navController.navigate(Screen.TrustedFolderEditor(projectId, target))
-                        } else {
-                            // 显示解码后的笔记名（dest 可能被 percent-encode），方便用户核对
-                            val pretty = runCatching { java.net.URLDecoder.decode(dest, "UTF-8") }.getOrDefault(dest)
-                            toaster.show("找不到笔记：$pretty", type = ToastType.Error)
-                        }
-                    }
+                    navController.navigate(Screen.TrustedFolderEditor(projectId, "", dest = dest))
                     true
                 },
                 // 笔记内相对图片路径 → 可加载 URI：优先 content://（ContentResolver 校验可读），
@@ -180,7 +187,7 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
                     if (rel.isBlank()) {
                         null
                     } else {
-                        val noteDir = path.substringBeforeLast('/', missingDelimiterValue = "")
+                        val noteDir = actualPath.substringBeforeLast('/', missingDelimiterValue = "")
                         val relCandidates = if (noteDir.isEmpty()) listOf(rel) else listOf("$noteDir/$rel", rel)
                         // Obsidian 附件可能放在任意目录：先按文件名全局搜索，命中作为最高优先级候选
                         val globalPath = runCatching { repository.resolveImagePath(rel, projectId) }.getOrNull()
@@ -218,6 +225,41 @@ fun TrustedFolderFileEditorPage(projectId: String, path: String) {
                 noteEmbedResolver = { note ->
                     val p = runCatching { repository.resolveNotePath(note, projectId) }.getOrNull()
                     p?.let { runCatching { repository.readText(it, projectId) }.getOrNull() }
+                },
+                // 点击任务待办：翻转 `[ ]`↔`[x]` 并写盘（Obsidian 风格即改即存）。
+                // 先立即更新源文本（视觉即时响应），再后台保存；保存失败回滚。
+                onToggleTask = { taskLine ->
+                    val current = textState.text.toString()
+                    val normalizedTask = taskLine.trim()
+                    val newText = current.lineSequence().joinToString("\n") { line ->
+                        val lineTrimmed = line.trim()
+                        // 源行也做双链归一后比较：任务行含 [[双链]] 时，源行与预处理后的 taskLine 才能对上
+                        val isTaskLine = lineTrimmed.contains("[ ]") || lineTrimmed.contains("[x]") ||
+                            lineTrimmed.contains("[X]")
+                        val matched = isTaskLine && convertWikilinksToNoteLinks(lineTrimmed) == normalizedTask
+                        if (matched) {
+                            when {
+                                lineTrimmed.contains("[ ]") -> line.replaceFirst("[ ]", "[x]")
+                                else -> line.replaceFirst(Regex("""\[[xX]\]"""), "[ ]")
+                            }
+                        } else line
+                    }
+                    if (newText != current) {
+                        textState.edit { replace(0, current.length, newText) }
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    repository.writeText(actualPath, newText, overwrite = true, projectId = projectId)
+                                }
+                            }.onFailure {
+                                // 只在文本仍等于 newText 时回滚，避免覆盖用户在写盘等待期间的后续编辑
+                                if (textState.text.toString() == newText) {
+                                    textState.edit { replace(0, newText.length, current) }
+                                }
+                                toaster.show(it.message ?: "保存失败", type = ToastType.Error)
+                            }
+                        }
+                    }
                 },
             )
         }

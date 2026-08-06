@@ -158,6 +158,20 @@ private fun AssistantLocalToolContent(
             )
             item(
                 headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_html_to_markdown_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_html_to_markdown_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.HtmlToMarkdown),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.HtmlToMarkdown, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_clipboard_title))
                 },
                 supportingContent = {

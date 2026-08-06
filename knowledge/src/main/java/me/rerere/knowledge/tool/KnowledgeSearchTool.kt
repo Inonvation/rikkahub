@@ -17,6 +17,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
 import me.rerere.knowledge.retrieval.Reranker
+import me.rerere.knowledge.retrieval.RetrievalQueryStrategy
 import me.rerere.knowledge.retrieval.ScoreSource
 import me.rerere.knowledge.vector.toFloatArray
 import me.rerere.ai.core.InputSchema
@@ -195,7 +196,9 @@ class KnowledgeSearchTool(
             val config = configByBase[baseId]
 
             val overrideTopK = if (base.topK > 0) base.topK else 10
-            val overrideKeywordWeight = base.keywordWeight
+            // 动态检索策略：按 query 特征切换关键词权重（对齐 NoteGen rag-retrieval-policy）。
+            // 精确标识符/文件名 → 关键词主导；多条件 → 向量主导；短查询 → 略偏词面。
+            val overrideKeywordWeight = RetrievalQueryStrategy.keywordWeight(query, base.keywordWeight)
             val overrideMmrLambda = base.mmrLambda
 
             for (q in queries) {

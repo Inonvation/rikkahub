@@ -192,6 +192,9 @@ dependencies {
     // java-diff-utils (unified diff)
     implementation(libs.diffutils)
 
+    // jsoup (HTML parsing for html_to_markdown tool)
+    implementation(libs.jsoup)
+
     // coil
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)

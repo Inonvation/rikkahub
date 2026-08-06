@@ -47,6 +47,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.buildGuidanceInstruction
 import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
@@ -983,40 +984,41 @@ class ChatService(
      * 运行中子代理的引导走 [me.rerere.rikkahub.data.ai.subagent.SubAgentRunner.submitGuidance]
      * （详情页入口，每步注入子代理思维链），与本方法互不干扰。
      */
-    fun sendGuidance(conversationId: Uuid, text: String) {
+    fun sendGuidance(
+        conversationId: Uuid,
+        text: String,
+        /** 引导处理结束回调（注入完成或失败，UI 用它清除「引导已排入」chip） */
+        onInjected: (() -> Unit)? = null,
+    ) {
         if (text.isBlank()) return
         val session = getOrCreateSession(conversationId)
         if (session.state.value.isGroupDiscussion) return
 
-        val guidanceInstruction = buildString {
-            appendLine("## User guidance")
-            appendLine("The user has sent you the following guidance. Continue your existing response according to it:")
-            appendLine("```")
-            appendLine(text.take(1000))
-            appendLine("```")
-            appendLine("- Follow the guidance in your ongoing reply. Do NOT re-answer from scratch; build on your existing answer.")
-            appendLine("- If you were waiting for a running sub-agent, you may incorporate this guidance now and continue when results arrive.")
-        }
+        val guidanceInstruction = buildGuidanceInstruction(text)
 
         val runningJob = session.getJob()
-        // AI 正在生成：不强行取消当前流式请求——打断流会触发 OkHttp 的
-        // "stream was reset: CANCEL"，且被迫从头重新生成导致反应慢。
-        // 对齐子代理引导的"下个步骤边界注入"语义：等当前回合自然结束后再注入续答。
+        // AI 正在生成：不打断当前流式请求（打断会触发 OkHttp "stream was reset: CANCEL"，
+        // 且被迫从头重生成反应慢）。把引导写入 steering 信号，GenerationHandler 会在
+        // 当前轮次（工具调用完成/输出结束）的边界消费，作为下一轮续答指令注入——
+        // 引导在"完成了这次工具调用/输出后"就进入，无需等整个回合跑完。
         if (runningJob != null && runningJob.isActive) {
+            session.onSteeringHandled = onInjected
+            session.steeringSignal.value = text
+            // 兜底：若生成在 GenerationHandler 消费前就结束（信号残留），job 完成后补一次空闲注入
             appScope.launch {
                 try {
                     runCatching { runningJob.join() }
-                    // 等当前回合彻底结束（generationJob 置 null）。等待期间若有新回合接管
-                    // （如子代理完成触发的 resume），继续等到会话空闲，避免与新回合并发写入。
-                    session.generationJob.first { it == null }
-                    appendGuidancePart(conversationId, text)
-                    // 旧回合已结束：此时 setJob 续答 job 安全（不会 cancel 活跃的旧 job），
-                    // 且续答可被停止按钮中断。
-                    val resumeJob = appScope.launch {
-                        handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
+                    if (session.steeringSignal.value == text) {
+                        session.steeringSignal.value = null
+                        appendGuidancePart(conversationId, text)
+                        onInjected?.invoke()
+                        val resumeJob = appScope.launch {
+                            handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
+                        }
+                        session.setJob(resumeJob)
                     }
-                    session.setJob(resumeJob)
                 } catch (e: Exception) {
+                    onInjected?.invoke()
                     if (e is CancellationException) throw e
                     e.printStackTrace()
                     addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
@@ -1029,8 +1031,10 @@ class ChatService(
         val job = appScope.launch {
             try {
                 appendGuidancePart(conversationId, text)
+                onInjected?.invoke()
                 handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
             } catch (e: Exception) {
+                onInjected?.invoke()
                 if (e is CancellationException) throw e
                 e.printStackTrace()
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
@@ -1304,6 +1308,8 @@ class ChatService(
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversation.id.toString(),
                 resumeContext = resumeContext,
+                steeringSignal = session.steeringSignal,
+                onSteeringConsumed = { session.onSteeringHandled?.invoke() },
                 memories = loadMemoriesForGeneration(
                     assistant = assistant,
                     messages = messagesToGenerate,

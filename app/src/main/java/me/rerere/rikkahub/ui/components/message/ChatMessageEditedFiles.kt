@@ -634,37 +634,49 @@ internal fun warmMessageExtractions(messageId: String, parts: List<UIMessagePart
     extractTrustedFolderChangesCached(messageId, parts)
 }
 
+/**
+ * 判断工具的 JSON 输出是否携带失败标记。
+ * 结构化工具（workspace_* 文件类、trusted_folder_*、study 的 save/update/delete）失败时，
+ * output 是一个含 "error" 键的 JSON（见 GenerationHandler.executeTool 的异常兜底与 errorResult）。
+ * 命中则说明工具实际未生效，不计入变更展示，避免"改失败却显示已改"的假阳性。
+ * 注意：workspace_shell 的 stdout 是命令自由输出，可能恰好含 "error" 字样，不走此判定。
+ */
+private fun isToolOutputError(tool: UIMessagePart.Tool): Boolean =
+    tool.output.filterIsInstance<UIMessagePart.Text>().any { text ->
+        // 精确匹配 JSON 键（"error":），避免误伤正常内容里出现"error"单词的情况
+        text.text.contains("\"error\"")
+    }
+
 internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
     val changes = mutableListOf<FileChange>()
     parts.filterIsInstance<UIMessagePart.Tool>()
         .filter { it.isExecuted }
         .forEach { tool ->
             when (tool.toolName) {
-                "workspace_write_file" -> {
+                "workspace_write_file", "workspace_edit_file" -> {
+                    // 失败（output 含 error）不计入变更，避免假阳性
+                    if (isToolOutputError(tool)) return@forEach
                     val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
-                    val status = tool.output.filterIsInstance<UIMessagePart.Text>()
-                        .firstOrNull()?.text
-                        ?.let { text ->
-                            // 预筛：output 不含 changeStatus 键时跳过解析（默认按 ADDED，与既有逻辑等价）
-                            if (text.indexOf("changeStatus") < 0) null
-                            else runCatching {
-                                JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
-                                    ?.jsonPrimitive?.contentOrNull
-                            }.getOrNull()
-                        }
-                    changes.add(
-                        FileChange(
-                            path = path,
-                            status = if (status == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED,
-                        )
-                    )
-                }
-
-                "workspace_edit_file" -> {
-                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
-                        ?: return@forEach
-                    changes.add(FileChange(path, FileChangeStatus.EDITED))
+                    val status = if (tool.toolName == "workspace_edit_file") {
+                        FileChangeStatus.EDITED
+                    } else {
+                        tool.output.filterIsInstance<UIMessagePart.Text>()
+                            .firstOrNull()?.text
+                            ?.let { text ->
+                                // 预筛：output 不含 changeStatus 键时跳过解析（默认按 ADDED，与既有逻辑等价）
+                                if (text.indexOf("changeStatus") < 0) null
+                                else runCatching {
+                                    JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
+                                        ?.jsonPrimitive?.contentOrNull
+                                }.getOrNull()
+                            }
+                            ?.let { status ->
+                                if (status == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
+                            }
+                            ?: FileChangeStatus.ADDED
+                    }
+                    changes.add(FileChange(path, status))
                 }
 
                 "workspace_shell" -> {
@@ -774,23 +786,30 @@ private fun FileChangeChipGroup(
 private data class StudyToolConfig(
     val toolName: String,
     val inputField: String,
+    val outputField: String,
     val labelPrefix: String,
     val icon: ImageVector,
     val screen: Screen,
 )
 
+// outputField：优先从工具输出读该字段；若输出里没有（如 save_wrong_question 输出不含 title），
+// 回落读输入 inputField。delete_* 的输出统一带 title（见 StudyEditTools.executeDelete）。
 private val STUDY_TOOL_CONFIGS = listOf(
-    StudyToolConfig("save_vocabulary", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
-    StudyToolConfig("save_note", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
-    StudyToolConfig("save_wrong_question", "question", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
-    StudyToolConfig("save_knowledge_card", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
-    StudyToolConfig("update_vocabulary", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
-    StudyToolConfig("update_note", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
-    StudyToolConfig("update_wrong_question", "question", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
-    StudyToolConfig("update_knowledge_card", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
+    StudyToolConfig("save_vocabulary", "word", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
+    StudyToolConfig("save_note", "title", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
+    StudyToolConfig("save_wrong_question", "question", "title", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
+    StudyToolConfig("save_knowledge_card", "concept", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
+    StudyToolConfig("update_vocabulary", "word", "word", "生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
+    StudyToolConfig("update_note", "title", "title", "笔记", HugeIcons.Note01, Screen.NotesPanel),
+    StudyToolConfig("update_wrong_question", "question", "title", "错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
+    StudyToolConfig("update_knowledge_card", "concept", "concept", "知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
+    StudyToolConfig("delete_vocabulary", "word", "title", "已删生词", HugeIcons.BookOpen01, Screen.VocabularyPanel),
+    StudyToolConfig("delete_note", "title", "title", "已删笔记", HugeIcons.Note01, Screen.NotesPanel),
+    StudyToolConfig("delete_wrong_question", "question", "title", "已删错题", HugeIcons.Alert01, Screen.WrongQuestionPanel),
+    StudyToolConfig("delete_knowledge_card", "concept", "title", "已删知识点", HugeIcons.Bulb, Screen.KnowledgeCardPanel),
 )
 
-private data class StudyItem(
+internal data class StudyItem(
     val key: String,
     val label: String,
     val icon: ImageVector,
@@ -801,25 +820,7 @@ private data class StudyItem(
 @Composable
 internal fun StudyItemsList(parts: List<UIMessagePart>) {
     val navController = LocalNavController.current
-    val studyItems = remember(parts) {
-        parts.filterIsInstance<UIMessagePart.Tool>()
-            .filter { it.isExecuted }
-            .mapNotNull { tool ->
-                val config = STUDY_TOOL_CONFIGS.find { it.toolName == tool.toolName } ?: return@mapNotNull null
-                val value = tool.inputAsJson().jsonObject[config.inputField]
-                    ?.jsonPrimitive?.contentOrNull
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: return@mapNotNull null
-                val label = if (config.toolName in listOf("save_wrong_question", "update_wrong_question")) {
-                    "${config.labelPrefix}: ${value.take(20)}"
-                } else {
-                    "${config.labelPrefix}: $value"
-                }
-                StudyItem(key = "${config.toolName}:$value", label = label, icon = config.icon, screen = config.screen)
-            }
-            .distinctBy { it.key }
-    }
+    val studyItems = remember(parts) { extractStudyItems(parts) }
     if (studyItems.isEmpty()) return
 
     var expanded by remember { mutableStateOf(false) }
@@ -867,6 +868,47 @@ internal fun StudyItemsList(parts: List<UIMessagePart>) {
         }
     }
 }
+
+/**
+ * 从已执行的学习工具（save/update/delete）提取要展示的条目。
+ * 提取为纯函数便于单测；组合层 StudyItemsList 直接消费其结果。
+ * 规则：
+ *  - 失败（output 含 error）不计入，避免"删除失败却显示已删"的假阳性；
+ *  - 优先读工具输出的标记字段（saved/updated/deleted 输出带 word/title/concept），
+ *    输出里没有时（如 save_wrong_question 输出不含 title）回落读输入 key 字段，
+ *    这样 update 只改 content/tags 不动 title 时也能显示，delete 也能显示。
+ */
+internal fun extractStudyItems(parts: List<UIMessagePart>): List<StudyItem> =
+    parts.filterIsInstance<UIMessagePart.Tool>()
+        .filter { it.isExecuted }
+        .mapNotNull { tool ->
+            val config = STUDY_TOOL_CONFIGS.find { it.toolName == tool.toolName } ?: return@mapNotNull null
+            if (isToolOutputError(tool)) return@mapNotNull null
+            val output = tool.output.filterIsInstance<UIMessagePart.Text>()
+                .firstOrNull()?.text
+                ?.let { runCatching { JsonInstant.parseToJsonElement(it).jsonObject }.getOrNull() }
+            val value = output?.get(config.outputField)
+                ?.jsonPrimitive?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: tool.inputAsJson().jsonObject[config.inputField]
+                    ?.jsonPrimitive?.contentOrNull
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return@mapNotNull null
+            val label = if (config.toolName in listOf(
+                    "save_wrong_question",
+                    "update_wrong_question",
+                    "delete_wrong_question",
+                )
+            ) {
+                "${config.labelPrefix}: ${value.take(20)}"
+            } else {
+                "${config.labelPrefix}: $value"
+            }
+            StudyItem(key = "${config.toolName}:$value", label = label, icon = config.icon, screen = config.screen)
+        }
+        .distinctBy { it.key }
 
 /**
  * 信任文件夹工具的「文件变更」卡片：复用工作区文件变更的展示逻辑（新增/编辑/删除分类 chip），
@@ -989,43 +1031,84 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
     }
 }
 
-/** 从已执行的 trusted_folder 工具提取文件变更（新增/编辑/删除）。重命名/移动路径变化复杂，暂不计入。 */
+/**
+ * 从已执行的 trusted_folder 工具提取文件变更（新增/编辑/删除/重命名/移动）。
+ * 新增文件夹不展示（folder 本身不是文件变更，用户只关心文件级变更）；
+ * 重命名/移动以新路径记为 EDITED。
+ */
 internal fun extractTrustedFolderChanges(parts: List<UIMessagePart>): List<FileChange> {
     val changes = mutableListOf<FileChange>()
     parts.filterIsInstance<UIMessagePart.Tool>()
         .filter { it.isExecuted }
         .forEach { tool ->
             when (tool.toolName) {
-                "trusted_folder_write", "trusted_folder_create_folder" -> {
+                "trusted_folder_write" -> {
+                    // 失败（output 含 error）不计入变更，避免假阳性
+                    if (isToolOutputError(tool)) return@forEach
                     val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
-                    val status = if (tool.toolName == "trusted_folder_create_folder") {
-                        FileChangeStatus.ADDED
+                    val changeStatus = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { text ->
+                            if (text.indexOf("changeStatus") < 0) null
+                            else runCatching {
+                                JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
+                                    ?.jsonPrimitive?.contentOrNull
+                            }.getOrNull()
+                        }
+                    val status = if (changeStatus == "edited") {
+                        FileChangeStatus.EDITED
                     } else {
-                        val changeStatus = tool.output.filterIsInstance<UIMessagePart.Text>()
-                            .firstOrNull()?.text
-                            ?.let { text ->
-                                if (text.indexOf("changeStatus") < 0) null
-                                else runCatching {
-                                    JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
-                                        ?.jsonPrimitive?.contentOrNull
-                                }.getOrNull()
-                            }
-                        if (changeStatus == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
+                        FileChangeStatus.ADDED
                     }
                     changes.add(FileChange(path, status))
                 }
 
+                "trusted_folder_create_folder" -> {
+                    // 新增文件夹不计入文件变更展示（非文件级变更）
+                }
+
                 "trusted_folder_edit" -> {
+                    // 失败（output 含 error）不计入变更，避免假阳性
+                    if (isToolOutputError(tool)) return@forEach
                     val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     changes.add(FileChange(path, FileChangeStatus.EDITED))
                 }
 
                 "trusted_folder_delete" -> {
+                    if (isToolOutputError(tool)) return@forEach
                     val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     changes.add(FileChange(path, FileChangeStatus.REMOVED))
+                }
+
+                "trusted_folder_rename" -> {
+                    if (isToolOutputError(tool)) return@forEach
+                    val newPath = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { text ->
+                            runCatching {
+                                JsonInstant.parseToJsonElement(text).jsonObject["path"]
+                                    ?.jsonPrimitive?.contentOrNull
+                            }.getOrNull()
+                        }
+                    if (newPath.isNullOrBlank()) return@forEach
+                    changes.add(FileChange(newPath, FileChangeStatus.EDITED))
+                }
+
+                "trusted_folder_move" -> {
+                    if (isToolOutputError(tool)) return@forEach
+                    val newPath = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull()?.text
+                        ?.let { text ->
+                            runCatching {
+                                JsonInstant.parseToJsonElement(text).jsonObject["path"]
+                                    ?.jsonPrimitive?.contentOrNull
+                            }.getOrNull()
+                        }
+                    if (newPath.isNullOrBlank()) return@forEach
+                    changes.add(FileChange(newPath, FileChangeStatus.EDITED))
                 }
             }
         }

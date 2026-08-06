@@ -105,6 +105,7 @@ fun KnowledgeBaseDetailPage(baseId: String) {
     val searchDurationMs by vm.searchDurationMs.collectAsState()
     val searchError by vm.searchError.collectAsState()
     val semanticAvailable by vm.semanticAvailable.collectAsState()
+    val routeDiagnostics by vm.routeDiagnostics.collectAsState()
     val documentNames by vm.documentNames.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
@@ -550,6 +551,61 @@ fun KnowledgeBaseDetailPage(baseId: String) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(4.dp))
+                }
+
+                // 分路诊断：向量 / 关键词 / 融合 各自的命中数与耗时
+                if (routeDiagnostics.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                "分路诊断",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            routeDiagnostics.forEach { diag ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        diag.route,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.width(56.dp),
+                                    )
+                                    if (diag.available) {
+                                        Text(
+                                            "命中 ${diag.hitCount} 条",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Text(
+                                            "${diag.durationMs}ms",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        )
+                                    } else {
+                                        Text(
+                                            diag.note ?: "不可用",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
 
                 if (searchError != null && !searchLoading) {

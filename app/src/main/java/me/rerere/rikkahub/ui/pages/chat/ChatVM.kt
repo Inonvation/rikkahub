@@ -12,9 +12,11 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -67,14 +69,6 @@ class ChatVM(
     // 恢复进入前的聊天位置（rememberLazyListState 的 SaveableStateHolder 恢复不可靠）
     var chatListFirstVisibleItemIndex by mutableStateOf(0)
     var chatListFirstVisibleItemScrollOffset by mutableStateOf(0)
-
-    // 离开时是否位于列表底部 - 跨导航重组合保存。返回重组合后用它初始化 wasAtBottom，
-    // 避免"离开前不在底部、返回却被生成中的自动滚动拉回底部"（导航返回状态重置问题）。
-    var chatListWasAtBottom by mutableStateOf(true)
-
-    // 上次观测到的生成 job（跨导航保留）。导航返回重组合时若用 remember 存它会被重置为 null，
-    // 导致"loadingJob null→非 null"边沿被误判、把用户阅读位置强拉到底。存 VM 保证跨导航正确。
-    var prevLoadingJob: Job? by mutableStateOf(null)
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
@@ -202,10 +196,28 @@ class ChatVM(
         chatService.sendMessage(_conversationId, content, answer)
     }
 
-    /** 向主 AI 发送引导消息（子代理运行中主输入框发送走此路径）：合并进 AI 气泡、不单独成条 */
+    /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条 */
     fun sendGuidance(text: String) {
         if (text.isBlank()) return
-        chatService.sendGuidance(_conversationId, text)
+        chatService.sendGuidance(_conversationId, text) {
+            // 引导处理结束，清除「引导已排入」chip。只清除与本次引导一致的文本——
+            // 避免连续发送多条时，前一条注入完成就把后一条还排队的 chip 一起清掉。
+            if (_pendingGuidance.value == text) {
+                _pendingGuidance.value = null
+            }
+        }
+    }
+
+    /** 排队中的引导消息：发送后先挂载在输入框右上侧，等 AI 回合自然结束注入后再清除 */
+    private val _pendingGuidance = MutableStateFlow<String?>(null)
+    val pendingGuidance = _pendingGuidance.asStateFlow()
+
+    fun setPendingGuidance(text: String) {
+        _pendingGuidance.value = text
+    }
+
+    fun clearPendingGuidance() {
+        _pendingGuidance.value = null
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {

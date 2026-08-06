@@ -16,6 +16,48 @@ class ObsidianMarkdownPreprocessTest {
     }
 
     @Test
+    fun parseFrontmatter_extractsScalarProperty() {
+        val (props, body) = parseFrontmatter("---\ntitle: 测试笔记\n---\n\n正文")
+        assertEquals(listOf(FrontmatterProperty("title", "测试笔记")), props)
+        assertEquals("正文", body)
+    }
+
+    @Test
+    fun parseFrontmatter_extractsInlineArrayAsList() {
+        val (props, body) = parseFrontmatter("---\ntags: [a, b]\n---\n正文")
+        assertEquals(listOf(FrontmatterProperty("tags", "a,b", isList = true)), props)
+        assertEquals("正文", body)
+    }
+
+    @Test
+    fun parseFrontmatter_extractsBlockList() {
+        val (props, _) = parseFrontmatter("---\ntags:\n  - a\n  - b\n---\n正文")
+        assertEquals(listOf(FrontmatterProperty("tags", "a,b", isList = true)), props)
+    }
+
+    @Test
+    fun parseFrontmatter_stripsQuotes() {
+        val (props, _) = parseFrontmatter("---\ntitle: \"带引号标题\"\n---\n正文")
+        assertEquals(listOf(FrontmatterProperty("title", "带引号标题")), props)
+    }
+
+    @Test
+    fun parseFrontmatter_returnsOriginalWhenNoHeader() {
+        val content = "普通文本\n---\n分割线"
+        val (props, body) = parseFrontmatter(content)
+        assertTrue(props.isEmpty())
+        assertEquals(content, body)
+    }
+
+    @Test
+    fun parseFrontmatter_returnsOriginalWhenHeaderUnclosed() {
+        val content = "---\ntitle: x"
+        val (props, body) = parseFrontmatter(content)
+        assertTrue(props.isEmpty())
+        assertEquals(content, body)
+    }
+
+    @Test
     fun stripFrontmatter_keepsContentWithoutHeader() {
         val content = "普通文本\n---\n分割线"
         assertEquals(content, stripFrontmatter(content))
@@ -33,6 +75,29 @@ class ObsidianMarkdownPreprocessTest {
         val (body, footnotes) = extractFootnotes(content)
         assertEquals("正文引用[^1]继续\n更多正文", body)
         assertEquals("[^1] ：这是脚注内容\n[^2] ：第二脚注", footnotes)
+    }
+
+    @Test
+    fun convertInlineFootnotes_turnsInlineIntoReference() {
+        val (body, defs) = convertInlineFootnotes("正文^[脚注内容]继续")
+        assertEquals("正文[^1]继续", body)
+        assertEquals(listOf("[^1] ：脚注内容"), defs)
+    }
+
+    @Test
+    fun convertInlineFootnotes_avoidsIdConflict() {
+        // 正文已有 [^1] 引用，行内脚注从 2 开始，避免序号冲突
+        val (body, defs) = convertInlineFootnotes("引用[^1]和^[第二个脚注]")
+        assertEquals("引用[^1]和[^2]", body)
+        assertEquals(listOf("[^2] ：第二个脚注"), defs)
+    }
+
+    @Test
+    fun convertInlineFootnotes_keepsContentWithoutInline() {
+        val content = "普通文本"
+        val (body, defs) = convertInlineFootnotes(content)
+        assertEquals(content, body)
+        assertTrue(defs.isEmpty())
     }
 
     @Test
