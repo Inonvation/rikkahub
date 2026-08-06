@@ -90,7 +90,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -163,10 +162,6 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
-    autoFollowArmed: Boolean = false,
-    isUserDragging: Boolean = false,
-    bottomTolerancePx: Int = 0,
-    onManualScroll: () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -210,10 +205,6 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
                 onAssistantNameClick = onAssistantNameClick,
-                autoFollowArmed = autoFollowArmed,
-                isUserDragging = isUserDragging,
-                bottomTolerancePx = bottomTolerancePx,
-                onManualScroll = onManualScroll,
             )
         }
     }
@@ -246,15 +237,11 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
-    autoFollowArmed: Boolean,
-    isUserDragging: Boolean,
-    bottomTolerancePx: Int,
-    onManualScroll: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var isRecentScroll by remember { mutableStateOf(false) }
     val conversationUpdated by rememberUpdatedState(conversation)
-    val currentOnManualScroll by rememberUpdatedState(onManualScroll)
+    val loadingState by rememberUpdatedState(loading)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
 
@@ -266,8 +253,8 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                currentOnManualScroll()
-                scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
+                // reverseLayout 下正 delta 朝旧消息（顶部）滚动，音量键方向取反
+                scope.launch { state.scrollBy(if (isVolumeUp) scrollAmount else -scrollAmount) }
                 true
             } else false
         }
@@ -284,8 +271,8 @@ private fun ChatListNormal(
     // workspace 图片/链接点击 → 应用内预览（ImagePreviewDialog）
     var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
 
-    // 自动跟随键盘滚动
-    ImeLazyListAutoScroller(lazyListState = state)
+    // 自动跟随键盘滚动：reverseLayout 列表底部天然锚定在 IME 上方，无需补偿滚动
+    ImeLazyListAutoScroller(lazyListState = state, reverseLayout = true)
 
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(conversation)
@@ -311,8 +298,6 @@ private fun ChatListNormal(
             .flatMap { it.models }
             .associateBy { it.id }
     }
-    val lastMessageIndex = conversation.messageNodes.lastIndex
-
     // 回调引用通过 rememberUpdatedState 捕获：item 层用 remember(node) 缓存稳定闭包，
     // 使 ChatMessage 全部参数在 node 不变时保持稳定引用，LazyColumn 可见 item 可被 Compose 跳过重组
     // （静态滚动时避免 250-350 节点/条的整棵子树重跑）。闭包内部通过 State 读最新引用，避免过期值 bug。
@@ -333,39 +318,8 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 只在用户此前确实位于真实列表底部时跟随流式内容。
-        // scrollToItem 是可取消的：拖动开始、生成结束或设置关闭都会取消当前 effect，
-        // 不会留下跨过 LoadingIndicator 移除后才在下一次 remeasure 兑现的滚动请求。
-        val autoScrollEnabled = settings.displaySetting.enableAutoScroll
-        LaunchedEffect(
-            state,
-            autoScrollEnabled,
-            loading,
-            autoFollowArmed,
-            isUserDragging,
-            bottomTolerancePx,
-        ) {
-            if (!autoScrollEnabled || !loading || !autoFollowArmed || isUserDragging) {
-                return@LaunchedEffect
-            }
-            snapshotFlow {
-                val layoutInfo = state.layoutInfo
-                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
-                ChatScrollLayoutSnapshot(
-                    totalItemsCount = layoutInfo.totalItemsCount,
-                    lastVisibleItemIndex = lastVisibleItem?.index,
-                    lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
-                    viewportEndOffset = layoutInfo.viewportEndOffset,
-                )
-            }
-                .distinctUntilChanged()
-                .collectLatest { layout ->
-                    if (layout.totalItemsCount <= 0 || layout.isAtBottom(bottomTolerancePx)) {
-                        return@collectLatest
-                    }
-                    state.scrollToItem(layout.totalItemsCount - 1)
-                }
-        }
+        // reverseLayout 下聊天列表底部天然锚定：新内容从底部增长时旧内容自动往上顶，
+        // 无需任何跟随滚动，也就不存在"跟随跳动"。用户上滑浏览历史时也不会被拉回。
 
         // 滚动预取：提前在后台解析视口附近消息的 markdown/HTML/LaTeX 并写入进程级缓存，
         // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
@@ -376,10 +330,22 @@ private fun ChatListNormal(
             snapshotFlow { state.firstVisibleItemIndex / PREFETCH_WINDOW }
                 .distinctUntilChanged()
                 .collect {
-                    val firstVisible = state.firstVisibleItemIndex
+                    // reverseLayout 下 firstVisibleItemIndex 是视口最底可见项（item index），
+                    // 底部固定项（spacer + loading/systemPrompt）占据 bottomSlots 个槽位，
+                    // 把可见 item 范围映射回 messageNodes 的原始索引再取子区间。
+                    val firstVisible = state.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@collect
+                    val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
                     val size = conversationUpdated.messageNodes.size
-                    val lo = (firstVisible - PREFETCH_BEHIND).coerceAtLeast(0)
-                    val hi = (firstVisible + PREFETCH_AHEAD).coerceAtMost(size)
+                    if (size <= 0) return@collect
+                    val bottomSlots = if (loadingState) 2 else if (assistant?.allowConversationSystemPrompt == true) 2 else 1
+                    fun origIndex(itemIdx: Int): Int? {
+                        val k = itemIdx - bottomSlots
+                        return if (k in 0 until size) size - 1 - k else null
+                    }
+                    val oFirst = origIndex(firstVisible) ?: return@collect
+                    val oLast = origIndex(lastVisible) ?: return@collect
+                    val lo = (minOf(oFirst, oLast) - PREFETCH_BEHIND).coerceAtLeast(0)
+                    val hi = (maxOf(oFirst, oLast) + PREFETCH_AHEAD).coerceAtMost(size)
                     if (lo >= hi) return@collect
                     val nodes = conversationUpdated.messageNodes.subList(lo, hi)
                     val prefetchAssistant = assistant
@@ -443,6 +409,7 @@ private fun ChatListNormal(
             ) {
             LazyColumn(
                 state = state,
+                reverseLayout = true,
                 contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -454,8 +421,46 @@ private fun ChatListNormal(
                     )
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
+            // 底部固定项：spacer 永远在最底（index 0），loading / systemPrompt 在它上方；
+            // 消息按时间倒序从下往上排（index 2..），最新消息在最靠近底部。
+            item(ScrollBottomKey) {
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                )
+            }
+            if (loading) {
+                item(LoadingIndicatorKey) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        RabbitLoadingIndicator(
+                            modifier = Modifier.size(28.dp)
+                        )
+                        AnimatedVisibility(
+                            visible = processingStatus != null,
+                        ) {
+                            Text(
+                                text = processingStatus ?: "",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            } else if (assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+                item(key = "ConversationSystemPrompt") {
+                    ConversationSystemPromptButton(
+                        customSystemPrompt = conversation.customSystemPrompt,
+                        onSystemPromptChange = onConversationSystemPromptChange,
+                    )
+                }
+            }
             itemsIndexed(
-                items = conversation.messageNodes,
+                items = conversation.messageNodes.asReversed(),
                 key = { index, item -> item.id },
                 // 按消息形态分类，让 LazyColumn 槽位按形态复用组合/布局缓存
                 // （含工具消息重子树：工具气泡 + 文件变更卡片，与纯文本消息形态差异大）
@@ -515,7 +520,7 @@ private fun ChatListNormal(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
-                            loading = loading && index == lastMessageIndex,
+                            loading = loading && index == 0,
                             onRegenerate = regenCb,
                             onEdit = editCb,
                             onFork = forkCb,
@@ -528,51 +533,10 @@ private fun ChatListNormal(
                             onClearTranslation = remember(node) { { msg: UIMessage -> currentOnClearTranslation.value(msg) } },
                             onToolApproval = toolApprovalCb,
                             onToolAnswer = toolAnswerCb,
-                            lastMessage = index == lastMessageIndex,
+                            lastMessage = index == 0,
                             onAssistantNameClick = assistantNameCb,
                         )
                     }
-            }
-
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
-                item(key = "ConversationSystemPrompt") {
-                    ConversationSystemPromptButton(
-                        customSystemPrompt = conversation.customSystemPrompt,
-                        onSystemPromptChange = onConversationSystemPromptChange,
-                    )
-                }
-            }
-
-            if (loading) {
-                item(LoadingIndicatorKey) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        RabbitLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
-                        ) {
-                            Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 为了能正确滚动到这
-            item(ScrollBottomKey) {
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                )
             }
             }
             }
@@ -680,7 +644,6 @@ private fun ChatListNormal(
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
                 state = state,
-                onManualScroll = onManualScroll,
             )
 
             // Suggestion
@@ -931,7 +894,6 @@ private fun BoxScope.MessageJumper(
     onLeft: Boolean,
     scope: CoroutineScope,
     state: LazyListState,
-    onManualScroll: () -> Unit,
 ) {
     val hapticController = rememberHaptic()
     AnimatedVisibility(
@@ -951,9 +913,8 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
-                        state.scrollToItem(0)
+                        state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }
                 },
                 shape = CircleShape,
@@ -972,13 +933,8 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
-                        state.animateScrollToItem(
-                            (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
-                                0
-                            )
-                        )
+                        state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                     }
                 },
                 shape = CircleShape,
@@ -997,9 +953,12 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
-                        state.animateScrollToItem(state.firstVisibleItemIndex + 1)
+                        state.animateScrollToItem(
+                            (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
+                                0
+                            )
+                        )
                     }
                 },
                 shape = CircleShape,
@@ -1017,9 +976,8 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
-                        state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
+                        state.scrollToItem(0)
                     }
                 },
                 shape = CircleShape,
