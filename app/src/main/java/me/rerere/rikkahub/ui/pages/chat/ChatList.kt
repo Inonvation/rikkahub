@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -90,9 +91,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -163,10 +164,6 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
-    autoFollowArmed: Boolean = false,
-    isUserDragging: Boolean = false,
-    bottomTolerancePx: Int = 0,
-    onManualScroll: () -> Unit = {},
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -210,10 +207,6 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
                 onAssistantNameClick = onAssistantNameClick,
-                autoFollowArmed = autoFollowArmed,
-                isUserDragging = isUserDragging,
-                bottomTolerancePx = bottomTolerancePx,
-                onManualScroll = onManualScroll,
             )
         }
     }
@@ -246,15 +239,11 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
-    autoFollowArmed: Boolean,
-    isUserDragging: Boolean,
-    bottomTolerancePx: Int,
-    onManualScroll: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val loadingState by rememberUpdatedState(loading)
     var isRecentScroll by remember { mutableStateOf(false) }
     val conversationUpdated by rememberUpdatedState(conversation)
-    val currentOnManualScroll by rememberUpdatedState(onManualScroll)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
 
@@ -266,7 +255,6 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                currentOnManualScroll()
                 scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
@@ -283,6 +271,15 @@ private fun ChatListNormal(
     var showExportSheet by remember { mutableStateOf(false) }
     // workspace 图片/链接点击 → 应用内预览（ImagePreviewDialog）
     var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
+
+    // 判断当前是否在列表底部（含输入栏高度修正），用于自动滚动跟随
+    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        val lastPos = lastItem.offset + lastItem.size
+        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
+        return lastPos <= inputPos - 8
+    }
 
     // 自动跟随键盘滚动
     ImeLazyListAutoScroller(lazyListState = state)
@@ -333,38 +330,18 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 只在用户此前确实位于真实列表底部时跟随流式内容。
-        // scrollToItem 是可取消的：拖动开始、生成结束或设置关闭都会取消当前 effect，
-        // 不会留下跨过 LoadingIndicator 移除后才在下一次 remeasure 兑现的滚动请求。
-        val autoScrollEnabled = settings.displaySetting.enableAutoScroll
-        LaunchedEffect(
-            state,
-            autoScrollEnabled,
-            loading,
-            autoFollowArmed,
-            isUserDragging,
-            bottomTolerancePx,
-        ) {
-            if (!autoScrollEnabled || !loading || !autoFollowArmed || isUserDragging) {
-                return@LaunchedEffect
-            }
-            snapshotFlow {
-                val layoutInfo = state.layoutInfo
-                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
-                ChatScrollLayoutSnapshot(
-                    totalItemsCount = layoutInfo.totalItemsCount,
-                    lastVisibleItemIndex = lastVisibleItem?.index,
-                    lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
-                    viewportEndOffset = layoutInfo.viewportEndOffset,
-                )
-            }
-                .distinctUntilChanged()
-                .collectLatest { layout ->
-                    if (layout.totalItemsCount <= 0 || layout.isAtBottom(bottomTolerancePx)) {
-                        return@collectLatest
+        // 自动滚动到底部：生成加载中且用户在底部时，跟随输出滚动。
+        // requestScrollToItem 内部有去抖，避免频繁触发重布局。
+        if (settings.displaySetting.enableAutoScroll) {
+            LaunchedEffect(state) {
+                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                    if (!state.isScrollInProgress && loadingState) {
+                        if (visibleItemsInfo.isAtBottom()) {
+                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
+                        }
                     }
-                    state.scrollToItem(layout.totalItemsCount - 1)
                 }
+            }
         }
 
         // 滚动预取：提前在后台解析视口附近消息的 markdown/HTML/LaTeX 并写入进程级缓存，
@@ -419,13 +396,12 @@ private fun ChatListNormal(
                 }
         }
 
-        // 判断最近是否滚动：滚动开始即显示；滚动结束后才延时隐藏。
-        // 原来"滚动进行中 delay(1500) 后强制隐藏"会在快速滚动时反复闪烁
-        // （滚一下藏一下又滚又藏），且滚动结束又 delay 一次造成双倍等待。
-        // 改为：开始滚动 → 显示；停止滚动 → 等 1.5s 再隐藏。滚动期间稳定显示。
+        // 判断最近是否滚动：滚动开始显示，delay 1500ms 后隐藏
         LaunchedEffect(state.isScrollInProgress) {
             if (state.isScrollInProgress) {
                 isRecentScroll = true
+                delay(1500)
+                isRecentScroll = false
             } else {
                 delay(1500)
                 isRecentScroll = false
@@ -680,7 +656,6 @@ private fun ChatListNormal(
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
                 state = state,
-                onManualScroll = onManualScroll,
             )
 
             // Suggestion
@@ -931,7 +906,6 @@ private fun BoxScope.MessageJumper(
     onLeft: Boolean,
     scope: CoroutineScope,
     state: LazyListState,
-    onManualScroll: () -> Unit,
 ) {
     val hapticController = rememberHaptic()
     AnimatedVisibility(
@@ -951,7 +925,6 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
                         state.scrollToItem(0)
                     }
@@ -972,7 +945,6 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
@@ -997,7 +969,6 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
                         state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                     }
@@ -1017,7 +988,6 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    onManualScroll()
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }
