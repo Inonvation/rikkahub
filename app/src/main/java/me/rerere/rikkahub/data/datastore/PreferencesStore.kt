@@ -642,6 +642,20 @@ class SettingsStore(
         }
     }
 
+    suspend fun updateAssistantSkills(assistantId: Uuid, enabledSkills: Set<String>) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(enabledSkills = enabledSkills)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
     suspend fun updateAssistantMcpServers(assistantId: Uuid, mcpServers: Set<Uuid>) {
         update { settings ->
             settings.copy(

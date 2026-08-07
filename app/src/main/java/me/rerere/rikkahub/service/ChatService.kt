@@ -1348,11 +1348,15 @@ class ChatService(
                     }
                     addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
                     addAll(createTrustedFolderTools(trustedFolderRepository))
-                    if (assistant.enabledSkills.isNotEmpty()) {
+                    val allSkills = skillManager.listSkills()
+                    if (allSkills.isNotEmpty()) {
                         addAll(
                             createSkillTools(
                                 enabledSkills = assistant.enabledSkills,
-                                allSkills = skillManager.listSkills(),
+                                allSkills = allSkills,
+                                setEnabledSkills = { skills ->
+                                    settingsStore.updateAssistantSkills(assistant.id, skills)
+                                },
                             )
                         )
                     }
