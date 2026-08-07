@@ -92,6 +92,18 @@ class McpManager(
     val syncingStatus: StateFlow<Map<Uuid, McpStatus>>
         get() = statusStore.status
 
+    /**
+     * 最近被 AI（mcp_admin_* 工具）修改过的服务器 id -> 修改时间戳。
+     * 设置页据此提示用户「该服务器配置正在被 AI 修改」，避免覆盖冲突。
+     */
+    private val _aiModifiedServers = kotlinx.coroutines.flow.MutableStateFlow<Map<Uuid, Long>>(emptyMap())
+    val aiModifiedServers: StateFlow<Map<Uuid, Long>> = _aiModifiedServers
+
+    /** 标记一个服务器配置刚被 AI 修改过，供 UI 提示 */
+    fun markAiModified(serverId: Uuid) {
+        _aiModifiedServers.value = _aiModifiedServers.value + (serverId to System.currentTimeMillis())
+    }
+
     fun getClient(config: McpServerConfig): Client? = sessionRegistry.getClient(config.id)
 
     fun getStatus(config: McpServerConfig): Flow<McpStatus> = sessionRegistry.getStatus(config.id)
