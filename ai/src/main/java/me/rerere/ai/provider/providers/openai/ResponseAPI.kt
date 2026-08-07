@@ -37,9 +37,14 @@ import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.OpenAIReasoningMetadata
+import me.rerere.ai.ui.ReasoningType
+import me.rerere.ai.ui.ServerToolMetadata
+import me.rerere.ai.ui.ServerToolProtocol
+import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
+import me.rerere.ai.ui.resolvedProtocol
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
@@ -320,27 +325,55 @@ class ResponseAPI(
         for (group in groups) {
             when (group) {
                 is PartGroup.Content -> {
+                    val emittedReasoningIds = mutableSetOf<String>()
                     group.parts.forEach { part ->
                         when (part) {
                             is UIMessagePart.Reasoning -> {
+                                val reasoningMetadata = part.metadataAs<OpenAIReasoningMetadata>()
+                                val reasoningId = reasoningMetadata?.reasoningId
+                                if (reasoningId != null && !emittedReasoningIds.add(reasoningId)) {
+                                    return@forEach
+                                }
                                 // 先输出累积的文本/图片内容
                                 if (contentBuffer.isNotEmpty()) {
                                     addContentItem(MessageRole.ASSISTANT, contentBuffer)
                                     contentBuffer.clear()
                                 }
                                 // 输出 reasoning item
-                                val reasoningMetadata = part.metadataAs<OpenAIReasoningMetadata>()
+                                val reasoningParts = if (reasoningId == null) {
+                                    listOf(part)
+                                } else {
+                                    group.parts.filterIsInstance<UIMessagePart.Reasoning>().filter {
+                                        it.metadataAs<OpenAIReasoningMetadata>()?.reasoningId == reasoningId
+                                    }
+                                }
                                 add(buildJsonObject {
                                     put("type", "reasoning")
-                                    reasoningMetadata?.reasoningId?.let {
-                                        put("id", it)
-                                    }
+                                    reasoningId?.let { put("id", it) }
                                     put("summary", buildJsonArray {
-                                        add(buildJsonObject {
-                                            put("type", "summary_text")
-                                            put("text", part.reasoning)
-                                        })
+                                        reasoningParts
+                                            .filter { it.reasoningType == ReasoningType.SUMMARY_TEXT }
+                                            .filter { it.reasoning.isNotEmpty() }
+                                            .forEach {
+                                                add(buildJsonObject {
+                                                    put("type", "summary_text")
+                                                    put("text", it.reasoning)
+                                                })
+                                            }
                                     })
+                                    val content = reasoningParts
+                                        .filter { it.reasoningType == ReasoningType.REASONING_TEXT }
+                                        .filter { it.reasoning.isNotEmpty() }
+                                    if (content.isNotEmpty()) {
+                                        put("content", buildJsonArray {
+                                            content.forEach {
+                                                add(buildJsonObject {
+                                                    put("type", "reasoning_text")
+                                                    put("text", it.reasoning)
+                                                })
+                                            }
+                                        })
+                                    }
                                     reasoningMetadata?.encryptedContent?.let {
                                         put("encrypted_content", it)
                                     }
@@ -357,6 +390,14 @@ class ResponseAPI(
 
                             is UIMessagePart.Text -> {
                                 contentBuffer.add(part)
+                            }
+
+                            is UIMessagePart.ServerTool -> {
+                                if (contentBuffer.isNotEmpty()) {
+                                    addContentItem(MessageRole.ASSISTANT, contentBuffer)
+                                    contentBuffer.clear()
+                                }
+                                addServerToolItem(part)
                             }
 
                             else -> {}
@@ -425,6 +466,30 @@ class ResponseAPI(
         }
     }
 
+    private fun JsonArrayBuilder.addServerToolItem(tool: UIMessagePart.ServerTool) {
+        val metadata = tool.metadataAs<ServerToolMetadata>()
+        val protocol = metadata?.resolvedProtocol()
+        if (protocol != null && protocol != ServerToolProtocol.OPENAI_RESPONSES) return
+
+        val rawCall = metadata?.call.takeIf { protocol == ServerToolProtocol.OPENAI_RESPONSES }
+        if (rawCall != null) {
+            add(rawCall)
+            return
+        }
+
+        add(buildJsonObject {
+            put("type", "${tool.toolName.removeSuffix("_call")}_call")
+            put("id", tool.toolCallId)
+            put("status", tool.status.toOpenAIStatus())
+            tool.input?.let { input ->
+                if (tool.toolName.removeSuffix("_call") == "web_search") put("action", input)
+                else if (input is JsonObject) input.forEach { (key, value) -> put(key, value) }
+                else put("input", input)
+            }
+            tool.output?.let { put("output", it) }
+        })
+    }
+
     private fun JsonArrayBuilder.addUserItems(message: UIMessage) {
         val contentParts = message.parts.filter { it is UIMessagePart.Text || it is UIMessagePart.Image }
         if (contentParts.isNotEmpty()) {
@@ -472,7 +537,7 @@ class ResponseAPI(
         })
     }
 
-    private fun parseResponseOutput(jsonObject: JsonObject): TextGenerationResult {
+    internal fun parseResponseOutput(jsonObject: JsonObject): TextGenerationResult {
         println(jsonObject)
         val outputs = jsonObject["output"]?.jsonArray ?: error("output not found")
         val parts = arrayListOf<UIMessagePart>()
@@ -482,8 +547,11 @@ class ResponseAPI(
             val type = output["type"]?.jsonPrimitive?.content ?: error("output type not found")
             when (type) {
                 "reasoning" -> {
-                    val summary = output["summary"]?.jsonArray ?: error("summary not found")
-                    summary.map { it.jsonObject }.forEach { part ->
+                    val reasoningMetadata = OpenAIReasoningMetadata(
+                        reasoningId = output["id"]?.jsonPrimitive?.contentOrNull,
+                        encryptedContent = output["encrypted_content"]?.jsonPrimitive?.contentOrNull,
+                    ).toMetadata()
+                    output["summary"]?.jsonArray.orEmpty().map { it.jsonObject }.forEach { part ->
                         val partType = part["type"]?.jsonPrimitive?.content ?: error("part type not found")
                         when (partType) {
                             "summary_text" -> {
@@ -492,10 +560,25 @@ class ResponseAPI(
                                     UIMessagePart.Reasoning(
                                         reasoning = text,
                                         createdAt = Clock.System.now(),
-                                        finishedAt = Clock.System.now()
+                                        finishedAt = Clock.System.now(),
+                                        metadata = reasoningMetadata,
+                                        reasoningType = ReasoningType.SUMMARY_TEXT,
                                     )
                                 )
                             }
+                        }
+                    }
+                    output["content"]?.jsonArray.orEmpty().map { it.jsonObject }.forEach { part ->
+                        if (part["type"]?.jsonPrimitive?.contentOrNull == "reasoning_text") {
+                            parts.add(
+                                UIMessagePart.Reasoning(
+                                    reasoning = part["text"]?.jsonPrimitive?.content ?: error("text not found"),
+                                    createdAt = Clock.System.now(),
+                                    finishedAt = Clock.System.now(),
+                                    metadata = reasoningMetadata,
+                                    reasoningType = ReasoningType.REASONING_TEXT,
+                                )
+                            )
                         }
                     }
                 }
@@ -533,6 +616,10 @@ class ResponseAPI(
                         }
                     }
                 }
+
+                else -> if (isOpenAIServerToolCall(type)) {
+                    parts.add(output.toOpenAIServerTool())
+                }
             }
         }
 
@@ -558,6 +645,46 @@ class ResponseAPI(
                 ?: 0
         )
     }
+}
+
+internal fun isOpenAIServerToolCall(type: String): Boolean =
+    type.endsWith("_call") && type !in setOf(
+        "function_call",
+        "custom_tool_call",
+        "computer_call",
+        "local_shell_call",
+        "shell_call",
+        "image_generation_call",
+    )
+
+internal fun JsonObject.toOpenAIServerTool(): UIMessagePart.ServerTool {
+    val type = get("type")?.jsonPrimitive?.contentOrNull ?: "server_tool_call"
+    val protocolFields = setOf("type", "id", "status", "result", "output")
+    val input = get("action") ?: JsonObject(filterKeys { it !in protocolFields })
+        .takeUnless { it.isEmpty() }
+    return UIMessagePart.ServerTool(
+        toolCallId = get("id")?.jsonPrimitive?.contentOrNull ?: "",
+        toolName = type.removeSuffix("_call"),
+        input = input,
+        output = get("output") ?: get("result"),
+        status = get("status")?.jsonPrimitive?.contentOrNull.toServerToolStatus(),
+        metadata = ServerToolMetadata(
+            protocol = ServerToolProtocol.OPENAI_RESPONSES,
+            call = this,
+        ).toMetadata(),
+    )
+}
+
+internal fun String?.toServerToolStatus(): ServerToolStatus = when (this) {
+    "completed" -> ServerToolStatus.COMPLETED
+    "failed", "incomplete", "cancelled" -> ServerToolStatus.FAILED
+    else -> ServerToolStatus.IN_PROGRESS
+}
+
+private fun ServerToolStatus.toOpenAIStatus(): String = when (this) {
+    ServerToolStatus.IN_PROGRESS -> "in_progress"
+    ServerToolStatus.COMPLETED -> "completed"
+    ServerToolStatus.FAILED -> "failed"
 }
 
 private fun isModelAllowTemperature(model: Model): Boolean {
