@@ -6,6 +6,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,8 +29,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -682,6 +685,11 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
     state.EditStateContent { config, updateValue ->
         val pagerState = rememberPagerState { 2 }
         val scope = rememberCoroutineScope()
+        val mcpManager = koinInject<McpManager>()
+        val aiModifiedServers by mcpManager.aiModifiedServers.collectAsStateWithLifecycle()
+        val lastAiModifiedAt = aiModifiedServers[config.id]
+        val aiModified = lastAiModifiedAt != null &&
+            System.currentTimeMillis() - lastAiModifiedAt < 5 * 60 * 1000L
         ModalBottomSheet(
             onDismissRequest = {
                 state.dismiss()
@@ -695,6 +703,28 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (aiModified) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            HugeIcons.AlertCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Text(
+                            text = "该服务器配置最近被 AI 修改过，请确认当前显示的值是最新的，避免覆盖 AI 的更改。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
                 SecondaryTabRow(
                     selectedTabIndex = pagerState.currentPage,
                     containerColor = Color.Transparent

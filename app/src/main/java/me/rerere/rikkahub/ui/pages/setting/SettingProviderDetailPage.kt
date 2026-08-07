@@ -371,7 +371,6 @@ private fun ModelList(
     val providerManager = koinInject<ProviderManager>()
     val modelList by produceState(emptyList(), providerSetting) {
         runCatching {
-            println("loading models...")
             value = providerManager.getProviderByType(providerSetting)
                 .listModels(providerSetting)
                 .sortedBy { it.modelId }

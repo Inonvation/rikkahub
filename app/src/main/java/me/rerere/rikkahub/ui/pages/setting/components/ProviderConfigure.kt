@@ -182,6 +182,16 @@ internal fun ProviderSetting.withDefaultNameIfBlank(): ProviderSetting = copyPro
     name = name.ifBlank { defaultProviderName() }
 )
 
+/** base URL 留空时回退到默认 base URL（按类型）。 */
+internal fun ProviderSetting.withDefaultBaseUrlIfBlank(): ProviderSetting {
+    val defaultBaseUrl = defaultBaseUrlForReset()
+    return when (this) {
+        is ProviderSetting.OpenAI -> copy(baseUrl = baseUrl.ifBlank { defaultBaseUrl })
+        is ProviderSetting.Google -> copy(baseUrl = baseUrl.ifBlank { defaultBaseUrl })
+        is ProviderSetting.Claude -> copy(baseUrl = baseUrl.ifBlank { defaultBaseUrl })
+    }
+}
+
 private fun String.convertToTargetBaseUrl(targetDefaultBaseUrl: String): String {
     val sourceUrl = this.toHttpUrlOrNull() ?: return this
     val sourceHost = sourceUrl.host.lowercase()
@@ -265,6 +275,7 @@ private fun ProviderConfigureOpenAI(
         value = provider.baseUrl,
         onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
+        placeholder = { Text(provider.defaultBaseUrlForReset()) },
         modifier = Modifier.fillMaxWidth(),
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
     )
@@ -416,6 +427,7 @@ private fun ProviderConfigureClaude(
         value = provider.baseUrl,
         onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
+        placeholder = { Text(provider.defaultBaseUrlForReset()) },
         modifier = Modifier.fillMaxWidth(),
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
     )
@@ -546,11 +558,12 @@ private fun ProviderConfigureGoogle(
             value = provider.baseUrl,
             onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
             label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
+            placeholder = { Text(provider.defaultBaseUrlForReset()) },
             modifier = Modifier.fillMaxWidth(),
             isError = provider.baseUrl.isNotBlank() && (
                 !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
                 ),
-            supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
+            supportingText = if (provider.baseUrl.isNotBlank() && !provider.baseUrl.endsWith("/v1beta")) {
                 { Text("The base URL usually ends with `/v1beta`") }
             } else null,
         )

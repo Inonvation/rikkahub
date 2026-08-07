@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.setting
 import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
+import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
@@ -77,6 +78,8 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.defaultProviderName
+import me.rerere.rikkahub.ui.pages.setting.components.withDefaultBaseUrlIfBlank
 import me.rerere.rikkahub.ui.pages.setting.components.withDefaultNameIfBlank
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
@@ -89,6 +92,7 @@ import kotlin.uuid.Uuid
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val navController = LocalNavController.current
     var searchQuery by remember { mutableStateOf("") }
     val lazyListState = rememberLazyListState()
@@ -179,13 +183,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         state = reorderableState,
                         key = provider.id
                     ) { isDragging ->
+                        val hapticController = rememberHaptic()
+                        val toaster = LocalToaster.current
                         ProviderItem(
                             modifier = Modifier
                                 .scale(if (isDragging) 0.95f else 1f)
                                 .fillMaxWidth(),
                             provider = provider,
                             dragHandle = {
-                                val hapticController = rememberHaptic()
                                 IconButton(
                                     onClick = {},
                                     modifier = Modifier
@@ -203,6 +208,18 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                         contentDescription = null
                                     )
                                 }
+                            },
+                            onCopy = {
+                                hapticController.tap()
+                                vm.updateSettings(
+                                    settings.copy(
+                                        providers = listOf(provider.copyProvider(Uuid.random())) + settings.providers
+                                    )
+                                )
+                                toaster.show(
+                                    context.getString(R.string.setting_provider_page_copy_success),
+                                    type = ToastType.Success
+                                )
                             },
                             onClick = {
                                 navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
@@ -542,7 +559,15 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
     IconButton(
         onClick = {
             hapticController.lightTap()
-            dialogState.open(ProviderSetting.OpenAI().copyProvider(name = ""))
+            dialogState.open(
+                ProviderSetting.OpenAI().copyProvider(name = "").let {
+                    when (it) {
+                        is ProviderSetting.OpenAI -> it.copy(baseUrl = "")
+                        is ProviderSetting.Google -> it.copy(baseUrl = "")
+                        is ProviderSetting.Claude -> it.copy(baseUrl = "")
+                    }
+                }
+            )
         }
     ) {
         Icon(HugeIcons.Add01, "Add")
@@ -557,9 +582,19 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
                 Text(stringResource(R.string.setting_provider_page_add_provider))
             },
             text = {
-                dialogState.currentState?.let {
-                    ProviderConfigure(it) { newState ->
-                        dialogState.currentState = newState
+                dialogState.currentState?.let { state ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        AutoAIIcon(
+                            name = state.name.ifBlank { state.defaultProviderName() },
+                            modifier = Modifier.size(56.dp)
+                        )
+                        ProviderConfigure(state) { newState ->
+                            dialogState.currentState = newState
+                        }
                     }
                 }
             },
@@ -567,7 +602,9 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
                 TextButton(
                     onClick = {
                         hapticController.tap()
-                        dialogState.currentState = dialogState.currentState?.withDefaultNameIfBlank()
+                        dialogState.currentState = dialogState.currentState
+                            ?.withDefaultNameIfBlank()
+                            ?.withDefaultBaseUrlIfBlank()
                         dialogState.confirm()
                     }
                 ) {
@@ -593,6 +630,7 @@ private fun ProviderItem(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
     dragHandle: @Composable () -> Unit,
+    onCopy: () -> Unit,
     onClick: () -> Unit
 ) {
     val hapticController = rememberHaptic()
@@ -653,6 +691,17 @@ private fun ProviderItem(
                         }
                     }
                 }
+            }
+            IconButton(
+                onClick = {
+                    hapticController.tap()
+                    onCopy()
+                }
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Copy01,
+                    contentDescription = stringResource(R.string.assistant_page_clone)
+                )
             }
             dragHandle()
         }

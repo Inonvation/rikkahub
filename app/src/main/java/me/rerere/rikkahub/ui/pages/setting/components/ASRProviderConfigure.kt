@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.R
@@ -77,6 +78,7 @@ private fun OpenAIRealtimeASRConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { onValueChange(setting.copy(apiKey = it)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("sk-...") }
@@ -192,6 +194,7 @@ private fun DashScopeASRConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { onValueChange(setting.copy(apiKey = it)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("sk-...") }
@@ -278,6 +281,7 @@ private fun VolcengineASRConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { onValueChange(setting.copy(apiKey = it)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("your-api-key") }
@@ -332,6 +336,7 @@ private fun MiMoASRConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { onValueChange(setting.copy(apiKey = it)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("sk-... or tp-...") }
@@ -418,6 +423,7 @@ private fun StepASRConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { onValueChange(setting.copy(apiKey = it)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("your-stepfun-api-key") }

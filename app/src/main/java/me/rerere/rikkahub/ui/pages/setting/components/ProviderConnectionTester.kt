@@ -74,6 +74,7 @@ fun ProviderConnectionTester(
         var selectedModel by remember { mutableStateOf(allModels.firstOrNull()) }
         var chatNonStreaming by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
         var chatStreamingText by remember { mutableStateOf("") }
+        var chatStreaming by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
         var chatTools by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
         var embeddingState by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
         var rerankingState by remember { mutableStateOf<UiState<String>>(UiState.Idle) }
@@ -81,6 +82,7 @@ fun ProviderConnectionTester(
         fun resetStates() {
             chatNonStreaming = UiState.Idle
             chatStreamingText = ""
+            chatStreaming = UiState.Idle
             chatTools = UiState.Idle
             embeddingState = UiState.Idle
             rerankingState = UiState.Idle
@@ -135,7 +137,7 @@ fun ProviderConnectionTester(
                     when (model.type) {
                         ModelType.CHAT -> {
                             TestResultItem("非流式", chatNonStreaming, (chatNonStreaming as? UiState.Success)?.data ?: "")
-                            TestResultItem("流式", chatNonStreaming, chatStreamingText)
+                            TestResultItem("流式", chatStreaming, chatStreamingText)
                             TestResultItem("工具调用", chatTools, (chatTools as? UiState.Success)?.data ?: "")
                         }
                         ModelType.EMBEDDING -> {
@@ -171,7 +173,7 @@ fun ProviderConnectionTester(
                                         }
                                         launch {
                                             runCatching {
-                                                chatNonStreaming = if (chatNonStreaming is UiState.Success) chatNonStreaming else UiState.Loading
+                                                chatStreaming = UiState.Loading
                                                 val flow = provider.streamText(
                                                     providerSetting = internalProvider,
                                                     messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
@@ -182,7 +184,8 @@ fun ProviderConnectionTester(
                                                         chatStreamingText += chunk.text
                                                     }
                                                 }
-                                            }.onFailure { chatNonStreaming = UiState.Error(it) }
+                                                chatStreaming = UiState.Success(chatStreamingText)
+                                            }.onFailure { chatStreaming = UiState.Error(it) }
                                         }
                                         launch {
                                             runCatching {
@@ -234,7 +237,7 @@ fun ProviderConnectionTester(
                                 }
                             }
                         },
-                        enabled = !(chatNonStreaming is UiState.Loading || embeddingState is UiState.Loading || rerankingState is UiState.Loading || chatTools is UiState.Loading),
+                        enabled = !(chatNonStreaming is UiState.Loading || chatStreaming is UiState.Loading || embeddingState is UiState.Loading || rerankingState is UiState.Loading || chatTools is UiState.Loading),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(R.string.setting_provider_page_test))

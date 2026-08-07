@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -176,6 +177,7 @@ private fun OpenAITTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -248,6 +250,7 @@ private fun MiMoTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -314,6 +317,7 @@ private fun MiniMaxTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -413,6 +417,7 @@ private fun GeminiTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -519,6 +524,7 @@ private fun QwenTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -617,6 +623,7 @@ private fun GroqTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -688,6 +695,7 @@ private fun XAITTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -791,6 +799,7 @@ private fun ElevenLabsTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -897,6 +906,7 @@ private fun FishAudioTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
@@ -1004,6 +1014,7 @@ private fun StepTTSConfiguration(
     ) {
         OutlinedTextField(
             value = setting.apiKey,
+            visualTransformation = PasswordVisualTransformation(),
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
