@@ -65,6 +65,7 @@ import me.rerere.rikkahub.data.ai.subagent.SUBAGENT_GUIDANCE_MARKER
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.components.message.ChatMessageNerdLine
 import me.rerere.rikkahub.ui.components.message.ChatMessageReasoningStep
+import me.rerere.rikkahub.ui.components.message.ChatMessageServerToolStep
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
@@ -351,6 +352,12 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                                                         onToolApproval = null,
                                                         onToolAnswer = null,
                                                     )
+                                                }
+
+                                                is ThinkingStep.ServerToolStep -> key(
+                                                    step.tool.toolCallId.ifBlank { step.hashCode().toString() }
+                                                ) {
+                                                    ChatMessageServerToolStep(tool = step.tool)
                                                 }
                                             }
                                         }

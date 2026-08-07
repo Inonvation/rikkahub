@@ -85,6 +85,7 @@ import me.rerere.rikkahub.ui.components.ai.MediaFileInputRow
 import me.rerere.rikkahub.ui.components.ai.TakePicButton
 import me.rerere.rikkahub.ui.components.message.ChatMessageAssistantAvatar
 import me.rerere.rikkahub.ui.components.message.ChatMessageReasoningStep
+import me.rerere.rikkahub.ui.components.message.ChatMessageServerToolStep
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
@@ -798,6 +799,12 @@ private fun DiscussionMessageContent(
                                     onToolApproval = null,
                                     onToolAnswer = null,
                                 )
+                            }
+
+                            is ThinkingStep.ServerToolStep -> key(
+                                step.tool.toolCallId.ifBlank { step.hashCode().toString() }
+                            ) {
+                                ChatMessageServerToolStep(tool = step.tool)
                             }
                         }
                     }
