@@ -58,6 +58,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.utils.UiState
@@ -81,6 +82,9 @@ fun WebDavTab(
     val scope = rememberCoroutineScope()
     var showBackupFiles by remember { mutableStateOf(false) }
     var restoringItemId by remember { mutableStateOf<String?>(null) }
+    // 二次确认：删除远端备份 / 恢复本地库
+    var pendingDeleteItem by remember { mutableStateOf<WebDavBackupItem?>(null) }
+    var pendingRestoreItem by remember { mutableStateOf<WebDavBackupItem?>(null) }
     var isBackingUp by remember { mutableStateOf(false) }
 
     fun updateWebDavConfig(newConfig: WebDavConfig) {
@@ -334,49 +338,10 @@ fun WebDavTab(
                                 item = item,
                                 isRestoring = restoringItemId == item.displayName,
                                 onDelete = {
-                                    scope.launch {
-                                        runCatching {
-                                            vm.deleteWebDavBackupFile(item)
-                                            toaster.show(
-                                                context.getString(R.string.backup_page_delete_success),
-                                                type = ToastType.Success
-                                            )
-                                            vm.loadBackupFileItems()
-                                        }.onFailure { err ->
-                                            err.printStackTrace()
-                                            toaster.show(
-                                                context.getString(
-                                                    R.string.backup_page_delete_failed,
-                                                    err.message ?: ""
-                                                ),
-                                                type = ToastType.Error
-                                            )
-                                        }
-                                    }
+                                    pendingDeleteItem = item
                                 },
                                 onRestore = { restoreItem ->
-                                    scope.launch {
-                                        restoringItemId = restoreItem.displayName
-                                        runCatching {
-                                            vm.restore(item = restoreItem)
-                                            toaster.show(
-                                                context.getString(R.string.backup_page_restore_success),
-                                                type = ToastType.Success
-                                            )
-                                            showBackupFiles = false
-                                            onShowRestartDialog()
-                                        }.onFailure { err ->
-                                            err.printStackTrace()
-                                            toaster.show(
-                                                context.getString(
-                                                    R.string.backup_page_restore_failed,
-                                                    err.message ?: ""
-                                                ),
-                                                type = ToastType.Error
-                                            )
-                                        }
-                                        restoringItemId = null
-                                    }
+                                    pendingRestoreItem = restoreItem
                                 },
                             )
                         }
@@ -402,6 +367,79 @@ fun WebDavTab(
             }
         }
     }
+
+    // 删除远端备份二次确认
+    RikkaConfirmDialog(
+        show = pendingDeleteItem != null,
+        title = stringResource(R.string.backup_page_delete),
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            val item = pendingDeleteItem
+            pendingDeleteItem = null
+            if (item != null) {
+                scope.launch {
+                    runCatching {
+                        vm.deleteWebDavBackupFile(item)
+                        toaster.show(
+                            context.getString(R.string.backup_page_delete_success),
+                            type = ToastType.Success
+                        )
+                        vm.loadBackupFileItems()
+                    }.onFailure { err ->
+                        err.printStackTrace()
+                        toaster.show(
+                            context.getString(
+                                R.string.backup_page_delete_failed,
+                                err.message ?: ""
+                            ),
+                            type = ToastType.Error
+                        )
+                    }
+                }
+            }
+        },
+        onDismiss = { pendingDeleteItem = null },
+        text = { Text("此操作将从远端永久删除该备份，且不可恢复。确定继续？") }
+    )
+
+    // 恢复备份二次确认（覆盖本地数据库）
+    RikkaConfirmDialog(
+        show = pendingRestoreItem != null,
+        title = stringResource(R.string.backup_page_restore_now),
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            val item = pendingRestoreItem
+            pendingRestoreItem = null
+            if (item != null) {
+                scope.launch {
+                    restoringItemId = item.displayName
+                    runCatching {
+                        vm.restore(item = item)
+                        toaster.show(
+                            context.getString(R.string.backup_page_restore_success),
+                            type = ToastType.Success
+                        )
+                        showBackupFiles = false
+                        onShowRestartDialog()
+                    }.onFailure { err ->
+                        err.printStackTrace()
+                        toaster.show(
+                            context.getString(
+                                R.string.backup_page_restore_failed,
+                                err.message ?: ""
+                            ),
+                            type = ToastType.Error
+                        )
+                    }
+                    restoringItemId = null
+                }
+            }
+        },
+        onDismiss = { pendingRestoreItem = null },
+        text = { Text("恢复将用远端备份覆盖当前本地数据（含聊天记录与设置），且不可撤销。确定继续？") }
+    )
 }
 
 @Composable

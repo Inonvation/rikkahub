@@ -1,17 +1,22 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
+import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File01
 import me.rerere.hugeicons.stroke.FileImport
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,14 +24,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.StickyHeader
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
@@ -46,9 +54,14 @@ fun ImportExportTab(
     val context = LocalContext.current
     var isExporting by remember { mutableStateOf(false) }
     var isRestoring by remember { mutableStateOf(false) }
+    val backupProgress by vm.backupProgress.collectAsStateWithLifecycle()
 
     // 导入类型：local 为本地备份，chatbox 为 Chatbox 导入，cherry 为 Cherry Studio 导入
     var importType by remember { mutableStateOf("local") }
+
+    // 二次确认：选中文件后不立即恢复，等用户确认（导入会覆盖本地数据）
+    var pendingImportType by remember { mutableStateOf<String?>(null) }
+    var pendingImportFile by remember { mutableStateOf<File?>(null) }
 
     // 创建文件保存的launcher
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -62,9 +75,11 @@ fun ImportExportTab(
                     val exportFile = vm.exportToFile()
 
                     // 复制到用户选择的位置
-                    context.contentResolver.openOutputStream(targetUri)?.use { outputStream ->
+                    val outputStream = context.contentResolver.openOutputStream(targetUri)
+                        ?: throw java.io.IOException("无法打开导出目标位置（openOutputStream 返回 null）")
+                    outputStream.use { out ->
                         FileInputStream(exportFile).use { inputStream ->
-                            inputStream.copyTo(outputStream)
+                            inputStream.copyTo(out)
                         }
                     }
 
@@ -82,6 +97,7 @@ fun ImportExportTab(
                         type = ToastType.Error
                     )
                 }
+                vm.backupProgress.value = null
                 isExporting = false
             }
         }
@@ -91,79 +107,27 @@ fun ImportExportTab(
     val openDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
+        // 选择文件后立即复制到临时文件并解析预览，确认对话框展示后可直接恢复
         uri?.let { sourceUri ->
+            val type = importType
             scope.launch {
-                isRestoring = true
-                runCatching {
-                    when (importType) {
-                        "local" -> {
-                            // 本地备份导入：处理zip文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_restore_${System.currentTimeMillis()}.zip")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从临时文件恢复
-                            vm.restoreFromLocalFile(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
-
-                        "chatbox" -> {
-                            // Chatbox导入：处理json文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_chatbox_${System.currentTimeMillis()}.json")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从Chatbox文件恢复
-                            vm.restoreFromChatBox(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
-
-                        "cherry" -> {
-                            // Cherry Studio导入：处理zip文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_cherry_${System.currentTimeMillis()}.zip")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从Cherry Studio备份恢复
-                            vm.restoreFromCherryStudio(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
-                    }
-
-                    toaster.show(
-                        context.getString(R.string.backup_page_restore_success),
-                        type = ToastType.Success
-                    )
-                    onShowRestartDialog()
-                }.onFailure { e ->
-                    e.printStackTrace()
-                    toaster.show(
-                        context.getString(R.string.backup_page_restore_failed, e.message ?: ""),
-                        type = ToastType.Error
-                    )
+                val extension = when (type) {
+                    "local", "cherry" -> "zip"
+                    "chatbox" -> "json"
+                    else -> "bin"
                 }
-                isRestoring = false
+                val tempFile =
+                    File(context.cacheDir, "temp_restore_${System.currentTimeMillis()}.$extension")
+
+                context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
+                    FileOutputStream(tempFile).use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+
+                vm.analyzeBackupPreview(tempFile, type)
+                pendingImportFile = tempFile
+                pendingImportType = type
             }
         }
     }
@@ -281,5 +245,102 @@ fun ImportExportTab(
                 )
             }
         }
+    }
+
+    // 导入二次确认（导入会覆盖本地数据）
+    val pendingFile = pendingImportFile
+    val previewText by vm.backupPreview.collectAsStateWithLifecycle()
+    if (pendingFile != null) {
+        RikkaConfirmDialog(
+            show = true,
+            title = stringResource(R.string.backup_page_restore_now),
+            confirmText = stringResource(R.string.confirm),
+            dismissText = stringResource(R.string.cancel),
+            onConfirm = {
+                pendingImportFile = null
+                vm.backupPreview.value = null
+                scope.launch {
+                    isRestoring = true
+                    runCatching {
+                        when (pendingImportType ?: "local") {
+                            "local" -> {
+                                // 本地备份导入：直接用已复制的临时文件恢复
+                                vm.restoreFromLocalFile(pendingFile)
+                            }
+
+                            "chatbox" -> {
+                                // Chatbox导入：直接用已复制的临时文件恢复
+                                vm.restoreFromChatBox(pendingFile)
+                            }
+
+                            "cherry" -> {
+                                // Cherry Studio导入：直接用已复制的临时文件恢复
+                                vm.restoreFromCherryStudio(pendingFile)
+                            }
+                        }
+
+                        toaster.show(
+                            context.getString(R.string.backup_page_restore_success),
+                            type = ToastType.Success
+                        )
+                        onShowRestartDialog()
+                    }.onFailure { e ->
+                        e.printStackTrace()
+                        toaster.show(
+                            context.getString(R.string.backup_page_restore_failed, e.message ?: ""),
+                            type = ToastType.Error
+                        )
+                    }
+                    // 清理临时文件
+                    pendingFile.delete()
+                    vm.backupProgress.value = null
+                    isRestoring = false
+                }
+            },
+            onDismiss = {
+                pendingImportFile = null
+                pendingImportType = null
+                vm.backupPreview.value = null
+                pendingFile.delete()
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    previewText?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Text("导入将覆盖当前本地数据（含聊天记录与设置），且不可撤销。确定继续？")
+                }
+            }
+        )
+    }
+
+    // 导入/导出进度窗口：展示当前阶段的大致进度
+    val currentProgress = backupProgress
+    if (currentProgress != null && (isExporting || isRestoring)) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = {
+                Text(
+                    if (isExporting) {
+                        stringResource(R.string.backup_page_exporting)
+                    } else {
+                        stringResource(R.string.backup_page_importing)
+                    }
+                )
+            },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(currentProgress)
+                    CircularWavyProgressIndicator(modifier = Modifier.size(40.dp))
+                }
+            },
+            confirmButton = {}
+        )
     }
 }

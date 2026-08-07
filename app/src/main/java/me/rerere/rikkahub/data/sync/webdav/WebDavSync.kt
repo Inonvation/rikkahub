@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
@@ -30,9 +31,23 @@ class WebDavSync(
     private val json: Json,
     private val context: Context,
     private val httpClient: HttpClient,
+    private val database: AppDatabase,
 ) {
     private fun getClient(config: WebDavConfig): WebDavClient {
         return WebDavClient(config, httpClient)
+    }
+
+    /**
+     * 备份前把未落盘的 WAL 合并进主库文件，保证备份的 .db 自洽一致，
+     * 避免备份到「主库 + 未合并 wal」的不一致组合（恢复后表现为 database disk image is malformed）。
+     * checkpoint 失败不阻断备份（仍有 db/wal/shm 三件套兜底），只记日志。
+     */
+    private fun checkpointWal() {
+        try {
+            database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
+        } catch (e: Exception) {
+            Log.w(TAG, "checkpointWal: WAL checkpoint failed, backup may be inconsistent", e)
+        }
     }
 
     suspend fun testConnection(config: WebDavConfig) = withContext(Dispatchers.IO) {
@@ -111,7 +126,11 @@ class WebDavSync(
         Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName}")
     }
 
-    suspend fun restoreFromLocalFile(file: File, config: WebDavConfig) = withContext(Dispatchers.IO) {
+    suspend fun restoreFromLocalFile(
+        file: File,
+        config: WebDavConfig,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromLocalFile: Starting restore from ${file.absolutePath}")
 
         if (!file.exists()) {
@@ -123,7 +142,7 @@ class WebDavSync(
         }
 
         try {
-            restoreFromBackupFile(file, config)
+            restoreFromBackupFile(file, config, onProgress)
             Log.i(TAG, "restoreFromLocalFile: Restore completed successfully")
         } catch (e: Exception) {
             Log.e(TAG, "restoreFromLocalFile: Failed to restore from local file", e)
@@ -131,7 +150,10 @@ class WebDavSync(
         }
     }
 
-    suspend fun prepareBackupFile(config: WebDavConfig): File = withContext(Dispatchers.IO) {
+    suspend fun prepareBackupFile(
+        config: WebDavConfig,
+        onProgress: ((String) -> Unit)? = null,
+    ): File = withContext(Dispatchers.IO) {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val backupFile = File(context.cacheDir, "backup_$timestamp.zip")
 
@@ -141,6 +163,7 @@ class WebDavSync(
 
         // Create zip file and backup data
         ZipOutputStream(FileOutputStream(backupFile)).use { zipOut ->
+            onProgress?.invoke("正在导出设置…")
             addVirtualFileToZip(
                 zipOut = zipOut,
                 name = "settings.json",
@@ -149,6 +172,8 @@ class WebDavSync(
 
             // Backup database files
             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
+                onProgress?.invoke("正在导出聊天记录…")
+                checkpointWal()
                 val dbFile = context.getDatabasePath("rikka_hub")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "rikka_hub.db")
@@ -167,6 +192,7 @@ class WebDavSync(
 
             // Backup app files
             if (config.items.contains(WebDavConfig.BackupItem.FILES)) {
+                onProgress?.invoke("正在导出上传文件…")
                 val uploadFolder = File(context.filesDir, FileFolders.UPLOAD)
                 if (uploadFolder.exists() && uploadFolder.isDirectory) {
                     Log.i(TAG, "prepareBackupFile: Backing up files from ${uploadFolder.absolutePath}")
@@ -181,6 +207,7 @@ class WebDavSync(
 
                 val skillsFolder = File(context.filesDir, FileFolders.SKILLS)
                 if (skillsFolder.exists() && skillsFolder.isDirectory) {
+                    onProgress?.invoke("正在导出技能…")
                     Log.i(TAG, "prepareBackupFile: Backing up skills from ${skillsFolder.absolutePath}")
                     addDirectoryToZip(
                         zipOut = zipOut,
@@ -194,6 +221,7 @@ class WebDavSync(
 
                 val fontsFolder = File(context.filesDir, FileFolders.FONTS)
                 if (fontsFolder.exists() && fontsFolder.isDirectory) {
+                    onProgress?.invoke("正在导出字体…")
                     Log.i(TAG, "prepareBackupFile: Backing up fonts from ${fontsFolder.absolutePath}")
                     fontsFolder.listFiles()?.forEach { file ->
                         if (file.isFile) {
@@ -213,7 +241,11 @@ class WebDavSync(
         backupFile
     }
 
-    private suspend fun restoreFromBackupFile(backupFile: File, config: WebDavConfig) = withContext(Dispatchers.IO) {
+    private suspend fun restoreFromBackupFile(
+        backupFile: File,
+        config: WebDavConfig,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
         ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
@@ -224,6 +256,7 @@ class WebDavSync(
 
                     when (zipEntry.name) {
                         "settings.json" -> {
+                            onProgress?.invoke("正在恢复设置…")
                             val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
                             Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                             try {
@@ -239,6 +272,7 @@ class WebDavSync(
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
                             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
+                                onProgress?.invoke("正在恢复聊天记录…")
                                 val dbFile = when (zipEntry.name) {
                                     "rikka_hub.db" -> context.getDatabasePath("rikka_hub")
                                     "rikka_hub-wal" -> File(
@@ -275,6 +309,7 @@ class WebDavSync(
                             if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
                                 zipEntry.name.startsWith("${FileFolders.UPLOAD}/")
                             ) {
+                                onProgress?.invoke("正在恢复上传文件…")
                                 val fileName = zipEntry.name.substringAfter("${FileFolders.UPLOAD}/")
                                 if (fileName.isNotEmpty()) {
                                     val uploadFolder = File(context.filesDir, FileFolders.UPLOAD)
@@ -283,7 +318,16 @@ class WebDavSync(
                                         Log.i(TAG, "restoreFromBackupFile: Created upload directory")
                                     }
 
-                                    val targetFile = File(uploadFolder, fileName)
+                                    val targetFile = safeResolveWithin(uploadFolder, fileName)
+                                    if (targetFile == null) {
+                                        // 恶意/损坏备份的路径穿越条目：跳过，绝不写出目标目录
+                                        Log.w(
+                                            TAG,
+                                            "restoreFromBackupFile: Skipping unsafe upload entry ${zipEntry.name} (path traversal)"
+                                        )
+                                        zipIn.closeEntry()
+                                        return@let
+                                    }
                                     Log.i(
                                         TAG,
                                         "restoreFromBackupFile: Restoring file ${zipEntry.name} to ${targetFile.absolutePath}"
@@ -305,14 +349,24 @@ class WebDavSync(
                             } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
                                 zipEntry.name.startsWith("${FileFolders.SKILLS}/")
                             ) {
+                                onProgress?.invoke("正在恢复技能…")
                                 restoreSkillEntry(zipIn, zipEntry.name)
                             } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
                                 zipEntry.name.startsWith("${FileFolders.FONTS}/")
                             ) {
+                                onProgress?.invoke("正在恢复字体…")
                                 val fileName = zipEntry.name.substringAfter("${FileFolders.FONTS}/")
                                 if (fileName.isNotEmpty() && !fileName.contains('/')) {
                                     val fontsFolder = File(context.filesDir, FileFolders.FONTS).apply { mkdirs() }
-                                    val targetFile = File(fontsFolder, fileName)
+                                    val targetFile = safeResolveWithin(fontsFolder, fileName)
+                                        ?: run {
+                                            Log.w(
+                                                TAG,
+                                                "restoreFromBackupFile: Skipping unsafe font entry ${zipEntry.name} (path traversal)"
+                                            )
+                                            zipIn.closeEntry()
+                                            return@let
+                                        }
                                     FileOutputStream(targetFile).use { outputStream ->
                                         zipIn.copyTo(outputStream)
                                     }
@@ -333,6 +387,29 @@ class WebDavSync(
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
+    }
+
+    /**
+     * 防 Zip-Slip 路径穿越：把 zip 内的相对路径解析到 root 之下，
+     * 解析结果越出 root（含 ".." 或绝对路径）时返回 null，调用方应跳过该条目。
+     */
+    private fun safeResolveWithin(root: File, relativePath: String): File? {
+        val target = File(root, relativePath)
+        val rootCanonical = try {
+            root.canonicalPath
+        } catch (e: Exception) {
+            return null
+        }
+        val targetCanonical = try {
+            target.canonicalPath
+        } catch (e: Exception) {
+            return null
+        }
+        if (targetCanonical == rootCanonical || targetCanonical.startsWith(rootCanonical + File.separator)) {
+            return target
+        }
+        Log.w(TAG, "safeResolveWithin: blocked path traversal: $relativePath (root=$rootCanonical)")
+        return null
     }
 
     private fun addFileToZip(zipOut: ZipOutputStream, file: File, entryName: String) {

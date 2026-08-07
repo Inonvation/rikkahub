@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
@@ -31,9 +32,23 @@ class S3Sync(
     private val json: Json,
     private val context: Context,
     private val httpClient: HttpClient,
+    private val database: AppDatabase,
 ) {
     private fun getS3Client(config: S3Config): S3Client {
         return S3Client(config, httpClient)
+    }
+
+    /**
+     * 备份前把未落盘的 WAL 合并进主库文件，保证备份的 .db 自洽一致，
+     * 避免备份到「主库 + 未合并 wal」的不一致组合（恢复后表现为 database disk image is malformed）。
+     * checkpoint 失败不阻断备份（仍有 db/wal/shm 三件套兜底），只记日志。
+     */
+    private fun checkpointWal() {
+        try {
+            database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
+        } catch (e: Exception) {
+            Log.w(TAG, "checkpointWal: WAL checkpoint failed, backup may be inconsistent", e)
+        }
     }
 
     suspend fun testS3(config: S3Config) = withContext(Dispatchers.IO) {
@@ -126,6 +141,7 @@ class S3Sync(
 
             // Backup database files
             if (config.items.contains(S3Config.BackupItem.DATABASE)) {
+                checkpointWal()
                 val dbFile = context.getDatabasePath("rikka_hub")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "rikka_hub.db")
@@ -260,7 +276,16 @@ class S3Sync(
                                         Log.i(TAG, "restoreFromBackupFile: Created upload directory")
                                     }
 
-                                    val targetFile = File(uploadFolder, fileName)
+                                    val targetFile = safeResolveWithin(uploadFolder, fileName)
+                                    if (targetFile == null) {
+                                        // 恶意/损坏备份的路径穿越条目：跳过，绝不写出目标目录
+                                        Log.w(
+                                            TAG,
+                                            "restoreFromBackupFile: Skipping unsafe upload entry ${zipEntry.name} (path traversal)"
+                                        )
+                                        zipIn.closeEntry()
+                                        return@let
+                                    }
                                     Log.i(
                                         TAG,
                                         "restoreFromBackupFile: Restoring file ${zipEntry.name} to ${targetFile.absolutePath}"
@@ -289,7 +314,15 @@ class S3Sync(
                                 val fileName = zipEntry.name.substringAfter("${FileFolders.FONTS}/")
                                 if (fileName.isNotEmpty() && !fileName.contains('/')) {
                                     val fontsFolder = File(context.filesDir, FileFolders.FONTS).apply { mkdirs() }
-                                    val targetFile = File(fontsFolder, fileName)
+                                    val targetFile = safeResolveWithin(fontsFolder, fileName)
+                                        ?: run {
+                                            Log.w(
+                                                TAG,
+                                                "restoreFromBackupFile: Skipping unsafe font entry ${zipEntry.name} (path traversal)"
+                                            )
+                                            zipIn.closeEntry()
+                                            return@let
+                                        }
                                     FileOutputStream(targetFile).use { outputStream ->
                                         zipIn.copyTo(outputStream)
                                     }
@@ -310,6 +343,29 @@ class S3Sync(
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
+    }
+
+    /**
+     * 防 Zip-Slip 路径穿越：把 zip 内的相对路径解析到 root 之下，
+     * 解析结果越出 root（含 ".." 或绝对路径）时返回 null，调用方应跳过该条目。
+     */
+    private fun safeResolveWithin(root: File, relativePath: String): File? {
+        val target = File(root, relativePath)
+        val rootCanonical = try {
+            root.canonicalPath
+        } catch (e: Exception) {
+            return null
+        }
+        val targetCanonical = try {
+            target.canonicalPath
+        } catch (e: Exception) {
+            return null
+        }
+        if (targetCanonical == rootCanonical || targetCanonical.startsWith(rootCanonical + File.separator)) {
+            return target
+        }
+        Log.w(TAG, "safeResolveWithin: blocked path traversal: $relativePath (root=$rootCanonical)")
+        return null
     }
 
     private fun addFileToZip(zipOut: ZipOutputStream, file: File, entryName: String) {

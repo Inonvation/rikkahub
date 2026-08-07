@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.sync.BackupPreviewAnalyzer
 import me.rerere.rikkahub.data.sync.importer.ChatboxImporter
 import me.rerere.rikkahub.data.sync.importer.CherryStudioProviderImporter
 import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
@@ -36,6 +37,12 @@ class BackupVM(
 
     val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
     val s3BackupItems = MutableStateFlow<UiState<List<S3BackupItem>>>(UiState.Idle)
+
+    /** 本地导入导出的大致进度提示（阶段文字），null 表示无进行中的操作 */
+    val backupProgress = MutableStateFlow<String?>(null)
+
+    /** 待导入备份的预览描述（在确认对话框中展示），null 表示无预览 */
+    val backupPreview = MutableStateFlow<String?>(null)
 
     init {
         loadBackupFileItems()
@@ -83,9 +90,12 @@ class BackupVM(
     }
 
     suspend fun exportToFile(): File {
+        backupProgress.value = "正在准备备份文件…"
         val file = webDavSync.prepareBackupFile(
-            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries)
+            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries),
+            onProgress = { backupProgress.value = it }
         )
+        backupProgress.value = "正在写入目标文件…"
         recordBackupTime()
         return file
     }
@@ -94,7 +104,13 @@ class BackupVM(
         webDavSync.restoreFromLocalFile(
             file,
             settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries),
+            onProgress = { backupProgress.value = it }
         )
+    }
+
+    /** 解析待导入备份包的内容预览，结果写入 [backupPreview] */
+    suspend fun analyzeBackupPreview(file: File, importType: String) {
+        backupPreview.value = BackupPreviewAnalyzer.analyze(file, importType)
     }
 
     suspend fun restoreFromChatBox(file: File): ChatboxRestoreResult {
@@ -105,6 +121,7 @@ class BackupVM(
             assistantId = settings.value.assistantId,
             providers = settings.value.providers,
             onConversation = { conversation ->
+                backupProgress.value = "正在导入对话 (${importedConversations + skippedExistingConversations + 1})…"
                 if (conversationRepository.existsConversationById(conversation.id)) {
                     skippedExistingConversations++
                 } else {
@@ -144,13 +161,15 @@ class BackupVM(
     }
 
     fun restoreFromCherryStudio(file: File) {
+        backupProgress.value = "正在导入 Cherry Studio 配置…"
         val importProviders = CherryStudioProviderImporter.importProviders(file)
 
         if (importProviders.isEmpty()) {
             throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
         }
 
-        Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
+        // 只打数量，不打 provider 明细：ProviderSetting 是 data class，toString 会包含明文 apiKey
+        Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers")
 
         updateSettings(
             settings.value.copy(
