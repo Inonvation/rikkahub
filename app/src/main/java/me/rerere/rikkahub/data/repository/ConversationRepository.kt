@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.repository
 
 import android.database.sqlite.SQLiteBlobTooBigException
+import android.util.Log
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -322,6 +323,15 @@ class ConversationRepository(
 
     suspend fun updateConversation(conversation: Conversation) {
         database.withTransaction {
+            // 防呆：调用方误传空 nodes 时不得清空已有历史（否则聊天记录被整段删光）。
+            // 当前调用方都先读完整 Conversation 再保存，不会触发；此守卫是「定时炸弹」防御。
+            if (conversation.messageNodes.isEmpty() &&
+                messageNodeDAO.getNodesOfConversationPaged(conversation.id.toString(), 1, 0).isNotEmpty()
+            ) {
+                throw IllegalStateException(
+                    "updateConversation: refusing to wipe ${conversation.id} history with empty messageNodes"
+                )
+            }
             conversationDAO.update(
                 conversationToConversationEntity(conversation)
             )
@@ -483,26 +493,32 @@ class ConversationRepository(
                 val page = try {
                     messageNodeDAO.getNodesOfConversationPaged(conversationId, pageSize, offset)
                 } catch (e: SQLiteBlobTooBigException) {
-                    e.printStackTrace()
+                    // 整页查询失败：记日志并跳页（比静默丢整页好，至少可追踪）
+                    Log.e("ConversationRepository", "loadMessageNodes: page query failed at offset=$offset", e)
                     offset += pageSize
                     continue
                 } catch (e: IllegalStateException) {
-                    e.printStackTrace()
+                    Log.e("ConversationRepository", "loadMessageNodes: page query failed at offset=$offset", e)
                     offset += pageSize
                     continue
                 }
                 if (page.isEmpty()) break
                 page.forEach { entity ->
-                    val messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
-                    val nodeId = Uuid.parse(entity.id)
-                    nodes.add(
-                        MessageNode(
-                            id = nodeId,
-                            messages = messages,
-                            selectIndex = entity.selectIndex,
-                            isFavorite = favoriteNodeIds.contains(nodeId)
+                    // 单条节点损坏只跳过该条，不整页丢弃——避免聊天记录莫名变短
+                    runCatching {
+                        val messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
+                        val nodeId = Uuid.parse(entity.id)
+                        nodes.add(
+                            MessageNode(
+                                id = nodeId,
+                                messages = messages,
+                                selectIndex = entity.selectIndex,
+                                isFavorite = favoriteNodeIds.contains(nodeId)
+                            )
                         )
-                    )
+                    }.onFailure { e ->
+                        Log.e("ConversationRepository", "loadMessageNodes: skipping corrupted node ${entity.id}", e)
+                    }
                 }
                 offset += page.size
             }

@@ -44,7 +44,10 @@ class FilesManager(
         val resolvedName = displayName ?: getFileNameFromUri(uri) ?: "file"
         val resolvedMime = mimeType ?: getFileMimeType(uri) ?: "application/octet-stream"
         val target = createTargetFile(folder, resolvedName, resolvedMime)
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        // 空流直接抛错，绝不建「磁盘无文件、DB 有记录」的幽灵记录
+        val inputStream = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("Cannot open input stream for uri: $uri")
+        inputStream.use { input ->
             target.outputStream().use { output ->
                 input.copyTo(output)
             }

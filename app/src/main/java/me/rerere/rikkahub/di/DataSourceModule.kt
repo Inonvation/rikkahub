@@ -82,33 +82,43 @@ val dataSourceModule = module {
             .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
-                    val dictDir = SimpleDictManager.extractDict(context)
-                    val cursor = db.query("SELECT jieba_dict(?)", arrayOf(dictDir.absolutePath))
-                    cursor.use {
-                        if (it.moveToFirst()) {
-                            val result = it.getString(0)
-                            val success = result?.trimEnd('/') == dictDir.absolutePath.trimEnd('/')
-                            if (!success) {
-                                android.util.Log.e(
-                                    "DataSourceModule",
-                                    "jieba_dict failed: $result, path=${dictDir.absolutePath}"
-                                )
+                    // 消息 FTS 初始化任一步失败都不能让 DB open 崩溃（否则应用启动即崩）。
+                    // 失败只记日志：消息全文搜索不可用，检索走 LIKE 兜底，app 正常可用。
+                    try {
+                        val dictDir = SimpleDictManager.extractDict(context)
+                        val cursor = db.query("SELECT jieba_dict(?)", arrayOf(dictDir.absolutePath))
+                        cursor.use {
+                            if (it.moveToFirst()) {
+                                val result = it.getString(0)
+                                val success = result?.trimEnd('/') == dictDir.absolutePath.trimEnd('/')
+                                if (!success) {
+                                    android.util.Log.e(
+                                        "DataSourceModule",
+                                        "jieba_dict failed: $result, path=${dictDir.absolutePath}"
+                                    )
+                                }
                             }
                         }
-                    }
-                    db.execSQL(
-                        """
-                        CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
-                            text,
-                            node_id UNINDEXED,
-                            message_id UNINDEXED,
-                            conversation_id UNINDEXED,
-                            title UNINDEXED,
-                            update_at UNINDEXED,
-                            tokenize = 'simple'
+                        db.execSQL(
+                            """
+                            CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+                                text,
+                                node_id UNINDEXED,
+                                message_id UNINDEXED,
+                                conversation_id UNINDEXED,
+                                title UNINDEXED,
+                                update_at UNINDEXED,
+                                tokenize = 'simple'
+                            )
+                            """.trimIndent()
                         )
-                        """.trimIndent()
-                    )
+                    } catch (e: Exception) {
+                        android.util.Log.e(
+                            "DataSourceModule",
+                            "message_fts init failed (libsimple/jieba/virtual table); search will fall back to LIKE",
+                            e
+                        )
+                    }
                 }
             })
             .openHelperFactory(
@@ -285,7 +295,17 @@ val dataSourceModule = module {
             .addNetworkInterceptor(RequestLoggingInterceptor())
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.HEADERS
+                // 请求头日志仅在 debug 生效；release 关闭，避免 API key / 用户内容进 logcat。
+                // 即便 debug，也把含密钥的请求头脱敏（Authorization、x-api-key 等）。
+                level = if (BuildConfig.DEBUG) {
+                    HttpLoggingInterceptor.Level.HEADERS
+                } else {
+                    HttpLoggingInterceptor.Level.NONE
+                }
+                redactHeader("Authorization")
+                redactHeader("x-api-key")
+                redactHeader("api-key")
+                redactHeader("x-goog-api-key")
             })
             .build().also { SearchService.init(it, get()) }
     }
@@ -312,7 +332,8 @@ val dataSourceModule = module {
             settingsStore = get(),
             json = get(),
             context = get(),
-            httpClient = get()
+            httpClient = get(),
+            database = get()
         )
     }
 
@@ -336,7 +357,8 @@ val dataSourceModule = module {
             settingsStore = get(),
             json = get(),
             context = get(),
-            httpClient = get()
+            httpClient = get(),
+            database = get()
         )
     }
 

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
@@ -43,6 +44,21 @@ class ConversationSession(
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
     val isInUse: Boolean get() = refCount.get() > 0 || isGenerating
+
+    /**
+     * 最近一次生成活动时间（单调时钟，ms）：流式输出落地时由 ChatService 更新。
+     * resumeAfterSubAgent 用它在等待期间判断母代理是否还在正常产出——
+     * 有活动说明正常流式/工具循环，不该掐断；等待期间毫无活动才视为挂起并接管。
+     */
+    @Volatile
+    var lastGenerationActivityAt: Long = 0L
+
+    /**
+     * 生成中排队的待发送消息（带附件时不能走 steering 文本引导，只能排队等回合结束再发）。
+     * 回合正常结束后由 ChatService 取出并作为普通新消息发送；被取消时不自动发（保留）。
+     */
+    @Volatile
+    var pendingSendContents: List<UIMessagePart>? = null
 
     // 空闲检查任务
     private var idleCheckJob: Job? = null
@@ -81,7 +97,13 @@ class ConversationSession(
         _generationJob.value?.cancel()
         _generationJob.value = job
         job?.invokeOnCompletion {
-            _generationJob.value = null
+            // 身份校验：仅当「当前引用的就是本次 job」时才清空。否则旧 job 被取消后
+            // 仍要跑完 onCompletion（含 suspend 落库），会在新 job 写入之后才完成，
+            // 无条件置 null 会把新 job 引用清掉——停止按钮消失、stopGeneration 失效、
+            // resumeAfterSubAgent 防重入失效（生成停不下来/并发续答）的根因。
+            if (_generationJob.value === job) {
+                _generationJob.value = null
+            }
             if (refCount.get() <= 0) {
                 scheduleIdleCheck()
             }

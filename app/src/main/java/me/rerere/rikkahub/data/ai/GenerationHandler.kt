@@ -239,22 +239,27 @@ class GenerationHandler(
             val effectiveResumeContext = if (!pendingSteering.isNullOrBlank()) {
                 steeringSignal?.value = null
                 onSteeringConsumed?.invoke()
+                val guidancePart = UIMessagePart.Tool(
+                    toolCallId = Uuid.random().toString(),
+                    toolName = "user_guidance",
+                    input = "{}",
+                    output = listOf(
+                        UIMessagePart.Text(
+                            buildJsonObject { put("text", JsonPrimitive(pendingSteering)) }.toString()
+                        )
+                    ),
+                    approvalState = ToolApprovalState.Approved,
+                )
                 val lastMsg = messages.lastOrNull()
-                if (lastMsg != null) {
-                    val guidancePart = UIMessagePart.Tool(
-                        toolCallId = Uuid.random().toString(),
-                        toolName = "user_guidance",
-                        input = "{}",
-                        output = listOf(
-                            UIMessagePart.Text(
-                                buildJsonObject { put("text", JsonPrimitive(pendingSteering)) }.toString()
-                            )
-                        ),
-                        approvalState = ToolApprovalState.Approved,
-                    )
-                    messages = messages.dropLast(1) + lastMsg.copy(parts = lastMsg.parts + guidancePart)
-                    emit(GenerationChunk.Messages(messages))
+                messages = if (lastMsg?.role == MessageRole.ASSISTANT) {
+                    // 正常情况：追加到最后一条 assistant 气泡
+                    messages.dropLast(1) + lastMsg.copy(parts = lastMsg.parts + guidancePart)
+                } else {
+                    // 空消息或最后一条是 USER（用户刚发完还没产出 AI 气泡）：
+                    // 新建 assistant 消息承载引导，避免气泡落进用户消息
+                    messages + UIMessage(role = MessageRole.ASSISTANT, parts = listOf(guidancePart))
                 }
+                emit(GenerationChunk.Messages(messages))
                 buildGuidanceInstruction(pendingSteering)
             } else {
                 resumeContext
@@ -775,7 +780,7 @@ class GenerationHandler(
                 }.getOrElse {
                     // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                     if (it is CancellationException) throw it
-                    it.printStackTrace()
+                    Log.w(TAG, "Tool execution failed", it)
                     tool.copy(
                         output = listOf(
                             UIMessagePart.Text(

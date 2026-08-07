@@ -2,6 +2,7 @@ package me.rerere.rikkahub.service
 
 import android.app.Application
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
@@ -73,6 +74,7 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createSubAgentTools
@@ -560,7 +562,7 @@ class ChatService(
             subAgentRunner.taskCompletedFlow.collect { task ->
                 runCatching {
                     resumeAfterSubAgent(task)
-                }.onFailure { it.printStackTrace() }
+                }.onFailure { Log.w(TAG, "resumeAfterSubAgent failed", it) }
             }
         }
     }
@@ -592,12 +594,26 @@ class ChatService(
         if (session?.isGenerating == true) {
             Log.w(TAG, "resume: parent generating, waiting <= ${RESUME_WAIT_MS}ms (task=${task.taskId})")
             val runningJob = session.getJob()
+            val waitStartedAt = SystemClock.elapsedRealtime()
             withTimeoutOrNull(RESUME_WAIT_MS) { runningJob?.join() }
             if (session.isGenerating) {
-                Log.w(TAG, "resume: parent still generating after wait, cancelling old job to take over (task=${task.taskId})")
-                // 母代理回合仍未结束（SSE 挂起）：取消旧 job 强制接管续答，结果不丢失
-                session.getJob()?.cancel()
-                runCatching { session.getJob()?.join() }
+                // 等待期间父回合有新的流式输出/工具结果落地：说明它在正常产出，
+                // 只是较慢（超长生成/多轮工具/思考模型），不能掐断——否则用户看到回复被中断。
+                val hadActivity = session.lastGenerationActivityAt > waitStartedAt
+                if (hadActivity) {
+                    Log.w(
+                        TAG,
+                        "resume: parent still producing output after wait, NOT cancelling (task=${task.taskId})"
+                    )
+                } else {
+                    Log.w(
+                        TAG,
+                        "resume: parent hung (no output during wait), cancelling old job to take over (task=${task.taskId})"
+                    )
+                    // 母代理回合挂起（SSE 不返回内容也不结束）：取消旧 job 强制接管续答，结果不丢失
+                    session.getJob()?.cancel()
+                    runCatching { session.getJob()?.join() }
+                }
             }
         }
 
@@ -694,7 +710,6 @@ class ChatService(
                     handleMessageComplete(conversationId, resumeContext = resumePrompt)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
-                    e.printStackTrace()
                     addError(e, conversationId, title = context.getString(R.string.error_title_generation))
                 }
             }
@@ -848,10 +863,40 @@ class ChatService(
 
     // ---- 发送消息 ----
 
+    /**
+     * 生成中发送消息的统一入口：会话正在生成时把消息排入队列（不打断当前流式），
+     * 当前回合正常结束后自动发送；空闲时直接发送。带附件消息无法走 steering 文本引导，
+     * 只能走这个排队机制——避免「生成中发图片静默取消当前回复」（#17）。
+     */
+    fun sendMessageQueued(conversationId: Uuid, content: List<UIMessagePart>) {
+        if (content.isEmptyInputMessage()) return
+        val session = getOrCreateSession(conversationId)
+        if (session.isGenerating) {
+            session.pendingSendContents = content
+        } else {
+            sendMessage(conversationId, content)
+        }
+    }
+
+    /** 回合正常结束后自动发送排队的待发消息（join 当前 job 确保其彻底结束，避免 setJob 取消正在收尾的 job） */
+    private fun scheduleDrainPendingSend(conversationId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        if (session.pendingSendContents == null) return
+        appScope.launch {
+            session.getJob()?.join()
+            // 等待期间用户若发起了新操作，sendMessage 会清掉 pending → 这里拿到 null 就不发，避免抢占
+            val pending = session.pendingSendContents ?: return@launch
+            session.pendingSendContents = null
+            sendMessage(conversationId, pending)
+        }
+    }
+
     fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
 
         val session = getOrCreateSession(conversationId)
+        // 新发送覆盖旧的未送达排队消息（如用户停止后残留的 pending）
+        session.pendingSendContents = null
         val previousJob = session.getJob()
         previousJob?.cancel()
 
@@ -965,7 +1010,6 @@ class ChatService(
 
                 _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
-                e.printStackTrace()
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
             }
         }
@@ -1009,6 +1053,12 @@ class ChatService(
             appScope.launch {
                 try {
                     runCatching { runningJob.join() }
+                    // 用户手动停止了生成（job 被取消）：引导没被消费也不该重启生成——
+                    // 否则用户刚点停止，又幽灵般自动开始一次新生成（#14）。
+                    if (runningJob.isCancelled) {
+                        onInjected?.invoke()
+                        return@launch
+                    }
                     if (session.steeringSignal.value == text) {
                         session.steeringSignal.value = null
                         appendGuidancePart(conversationId, text)
@@ -1021,7 +1071,6 @@ class ChatService(
                 } catch (e: Exception) {
                     onInjected?.invoke()
                     if (e is CancellationException) throw e
-                    e.printStackTrace()
                     addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
                 }
             }
@@ -1037,7 +1086,6 @@ class ChatService(
             } catch (e: Exception) {
                 onInjected?.invoke()
                 if (e is CancellationException) throw e
-                e.printStackTrace()
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
             }
         }
@@ -1149,9 +1197,27 @@ class ChatService(
                     handleMessageComplete(conversationId)
                 } else {
                     if (regenerateAssistantMsg) {
-                        val node = conversation.getMessageNodeByMessage(message)
+                        val node = conversation.getMessageNodeByMessage(message) ?: return@launch
                         val nodeIndex = conversation.messageNodes.indexOf(node)
-                        handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
+                        if (nodeIndex < 0) return@launch
+                        if (nodeIndex == 0) {
+                            // 首条即 assistant：生成上下文为空，重生成无意义，报可读错误而非崩溃（#16）
+                            addError(
+                                IllegalStateException(
+                                    "This message is the first one and has no preceding context to regenerate from."
+                                ),
+                                conversationId,
+                                title = context.getString(R.string.error_title_regenerate_message),
+                            )
+                            return@launch
+                        }
+                        // 重生成 assistant 消息：截断到目标消息之前，生成上下文之后不留悬空旧尾部（#15）。
+                        // 与 USER 分支的 subList 截断保持一致，避免「A1' 不知道 U2 → U2→A2 悬空」的语义错乱。
+                        val newConversation = conversation.copy(
+                            messageNodes = conversation.messageNodes.subList(0, nodeIndex)
+                        )
+                        saveConversation(conversationId, newConversation)
+                        handleMessageComplete(conversationId)
                     } else {
                         saveConversation(conversationId, conversation)
                     }
@@ -1360,6 +1426,14 @@ class ChatService(
                             )
                         )
                     }
+                    addAll(
+                        createMcpManagerTools(
+                            mcpManager = mcpManager,
+                            settingsStore = settingsStore,
+                            assistant = assistant,
+                            isEnabled = settings.enableMcpManager,
+                        )
+                    )
                     mcpManager.getAllAvailableTools().also { allTools ->
                         val invalidNames = allTools
                             .map { it.second }
@@ -1430,6 +1504,8 @@ class ChatService(
             }.collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {
+                        // 标记生成活动：resumeAfterSubAgent 靠它判断父回合是否正常产出
+                        sessions[conversationId]?.lastGenerationActivityAt = SystemClock.elapsedRealtime()
                         if (!hasEmittedGenerationStarted) {
                             hasEmittedGenerationStarted = true
                             appEventBus.tryEmit(
@@ -1459,7 +1535,6 @@ class ChatService(
             if (it is CancellationException) {
                 // 用户主动停止生成 / resume 超时取消：不补唤醒，避免"已停止却自动续答复活"
             } else {
-                it.printStackTrace()
                 addError(it, conversationId, title = context.getString(R.string.error_title_generation))
                 Logging.log(TAG, "handleMessageComplete: $it")
                 Logging.log(TAG, it.stackTraceToString())
@@ -1476,16 +1551,19 @@ class ChatService(
 
             // 异步唤醒续答（resumeContext 非空）：不重新生成标题/建议，避免噪音
             if (resumeContext == null) {
+                // 标题/建议串行生成：两者各自 getConversationById 后整对象 copy 落库，
+                // 并发会读改写交错互相覆盖（标题或建议偶发丢失，无报错）。串行保证后写者读到前写者结果。
                 launchWithConversationReference(conversationId) {
                     generateTitle(conversationId, finalConversation)
-                }
-                launchWithConversationReference(conversationId) {
                     generateSuggestion(conversationId, finalConversation)
                 }
             }
 
             // 母代理回合正常结束：补唤醒该会话已完成但未消费的子代理
             scheduleRoundEndResume(conversationId)
+
+            // 回合正常结束：自动发送生成中排队的待发消息（带附件的新消息，不打断当前流式）
+            scheduleDrainPendingSend(conversationId)
         }
     }
 
@@ -1903,7 +1981,6 @@ class ChatService(
                 )
             }
         }.onFailure {
-            it.printStackTrace()
             addError(
                 error = it,
                 conversationId = conversationId,
@@ -2011,7 +2088,7 @@ class ChatService(
                 )
             )
         }.onFailure {
-            it.printStackTrace()
+            Log.w(TAG, "generateSuggestion failed", it)
         }
     }
 
