@@ -21,6 +21,12 @@ interface KnowledgeCardDao {
     @Query("SELECT * FROM knowledge_cards WHERE archived = 1 ORDER BY created_at DESC")
     suspend fun getArchived(): List<KnowledgeCardEntity>
 
+    @Query("SELECT * FROM knowledge_cards WHERE archived = 0 AND (:subject IS NULL OR subject = :subject) ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPaged(subject: String?, limit: Int, offset: Int): List<KnowledgeCardEntity>
+
+    @Query("SELECT COUNT(*) FROM knowledge_cards WHERE archived = 0 AND (:subject IS NULL OR subject = :subject)")
+    suspend fun countActive(subject: String?): Int
+
     @Query("UPDATE knowledge_cards SET archived = 1 WHERE id = :id")
     suspend fun archive(id: String)
 

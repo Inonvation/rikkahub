@@ -21,6 +21,15 @@ interface WrongQuestionDao {
     @Query("SELECT * FROM wrong_questions WHERE archived = 1 ORDER BY created_at DESC")
     suspend fun getArchived(): List<WrongQuestionEntity>
 
+    @Query("SELECT * FROM wrong_questions WHERE archived = 0 AND (:subject IS NULL OR subject = :subject) ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPaged(subject: String?, limit: Int, offset: Int): List<WrongQuestionEntity>
+
+    @Query("SELECT COUNT(*) FROM wrong_questions WHERE archived = 0 AND (:subject IS NULL OR subject = :subject)")
+    suspend fun countActive(subject: String?): Int
+
+    @Query("SELECT * FROM wrong_questions WHERE archived = 0 AND (:subject IS NULL OR subject = :subject) ORDER BY RANDOM() LIMIT :limit")
+    suspend fun getRandom(subject: String?, limit: Int): List<WrongQuestionEntity>
+
     @Query("UPDATE wrong_questions SET archived = 1 WHERE id = :id")
     suspend fun archive(id: String)
 

@@ -160,6 +160,8 @@ object ToolUIRegistry {
         StudyMindmapToolUI,
         StudySummaryToolUI,
         StudySearchToolUI,
+        StudyListToolUI,
+        StudyQuizToolUI,
         StudyUpdateVocabularyToolUI,
         StudyUpdateNoteToolUI,
         StudyUpdateWrongQuestionToolUI,
@@ -381,7 +383,7 @@ private fun JsonArrayItemCard(element: JsonElement) {
                 val text = value.jsonPrimitive.asText()
                 if (key != "content") {
                     Text(
-                        text = key,
+                        text = displayFieldName(key),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -390,7 +392,7 @@ private fun JsonArrayItemCard(element: JsonElement) {
             }
             nested.forEach { (key, value) ->
                 Text(
-                    text = key,
+                    text = displayFieldName(key),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -485,6 +487,99 @@ private fun JsonCollapsibleContent(content: String) {
 /** 展开后仍内联渲染的内容上限：超过则改用固定高度滚动区 */
 private const val MAX_INLINE_CHARS = 8 * 1024
 
+/** 工具入参/输出字段名中文化映射，未匹配时原样返回 */
+private val FIELD_NAME_MAP = mapOf(
+    "query" to "搜索词",
+    "url" to "链接",
+    "title" to "标题",
+    "content" to "内容",
+    "text" to "文本",
+    "code" to "代码",
+    "file_path" to "文件路径",
+    "path" to "路径",
+    "max_results" to "结果数量",
+    "max_tokens" to "最大 Token 数",
+    "items" to "条目",
+    "status" to "状态",
+    "action" to "操作",
+    "result" to "结果",
+    "logs" to "日志",
+    "id" to "ID",
+    "name" to "名称",
+    "task" to "任务",
+    "taskId" to "任务 ID",
+    "answer" to "回答",
+    "images" to "图片",
+    "total_minutes" to "总时长",
+    "app_name" to "应用名称",
+    "package" to "包名",
+    "updatedAt" to "更新时间",
+    "createdAt" to "创建时间",
+    "total_ms" to "耗时",
+    "reasoning" to "推理",
+    "thought" to "思考",
+    "summary" to "摘要",
+    "description" to "描述",
+    "category" to "分类",
+    "subject" to "科目",
+    "tags" to "标签",
+    "language" to "语言",
+    "locale" to "语言",
+    "scene" to "场景",
+    "depth" to "深度",
+    "tone" to "语气",
+    "keyword" to "关键词",
+    "keywords" to "关键词",
+    "word" to "单词",
+    "question" to "问题",
+    "note" to "笔记",
+    "categoryId" to "分类 ID",
+    "type" to "类型",
+    "role" to "角色",
+    "count" to "数量",
+    "total" to "总计",
+    "source" to "来源",
+    "provider" to "提供商",
+    "model" to "模型",
+    "temperature" to "温度",
+    "filename" to "文件名",
+    "directory" to "目录",
+    "command" to "命令",
+    "cwd" to "工作目录",
+    "working_directory" to "工作目录",
+    "start_date" to "开始日期",
+    "end_date" to "结束日期",
+    "startDate" to "开始日期",
+    "endDate" to "结束日期",
+    "time" to "时间",
+    "date" to "日期",
+    "duration" to "时长",
+    "message" to "消息",
+    "error" to "错误",
+    "success" to "成功",
+    "input" to "输入",
+    "output" to "输出",
+    "data" to "数据",
+    "key" to "键",
+    "value" to "值",
+    "links" to "链接列表",
+    "urls" to "链接列表",
+    "pdf_url" to "PDF 链接",
+    "offset" to "偏移量",
+    "limit" to "数量限制",
+    "relevance" to "相关度",
+    "score" to "评分",
+    "has_more" to "还有更多",
+    "results" to "结果列表",
+    "material" to "素材",
+    "instruction" to "指示",
+    "exam" to "测验",
+    "mode" to "模式",
+)
+
+/** 字段名中文化，未匹配时原样返回 */
+private fun displayFieldName(key: String): String = FIELD_NAME_MAP[key] ?: key
+
 /**
  * 工具入参/输出的结构化展示：
  * - JSON 对象/数组 → 按字段逐行渲染，字段名清晰标注
@@ -552,12 +647,14 @@ private fun isShortValue(primitive: JsonPrimitive): Boolean {
 private fun JsonPrimitive.asText(): String =
     contentOrNull ?: content
 
-/** 横排单字段：label（字段名）+ value（短值） */
+/** 横排单字段：label（字段名）+ value（短值）同行紧凑展示 */
 @Composable
 private fun JsonFieldValueColumn(key: String, value: JsonPrimitive) {
-    Column {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
-            text = key,
+            text = displayFieldName(key) + "：",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -591,9 +688,9 @@ private fun JsonFieldRow(label: String, value: JsonElement) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
-            text = label,
+            text = displayFieldName(label),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         when (value) {
             is JsonObject, is JsonArray -> JsonFieldView(value)

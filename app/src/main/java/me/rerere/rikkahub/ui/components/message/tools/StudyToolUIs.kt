@@ -18,14 +18,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.ChartBarLine
 import me.rerere.hugeicons.stroke.CheckList
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.NodeEdit
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.data.model.StudySubject
@@ -324,6 +327,95 @@ object StudySearchToolUI : ToolUIRenderer {
         if (results == null || results.isEmpty()) return
         Text(
             text = "找到 ${results.size} 条",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+            modifier = Modifier.shimmer(isLoading = context.loading),
+        )
+    }
+}
+
+/**
+ * 学习列举 (study_list): 摘要显示返回条数
+ */
+object StudyListToolUI : ToolUIRenderer {
+    override val toolName: String = "study_list"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Menu03
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val type = context.arguments.getStringContent("type")
+        val label = STUDY_TYPE_LABELS.firstOrNull { it.first == type }?.second ?: type
+        return "列举$label"
+    }
+
+    private fun content(context: ToolUIContext): JsonObject? = context.content?.jsonObjectOrNull
+
+    override fun hasSummary(context: ToolUIContext): Boolean =
+        (content(context)?.get("results") as? JsonArray)?.isNotEmpty() == true
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val obj = content(context) ?: return
+        val total = (obj["total"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        val count = (obj["count"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        val text = when {
+            total != null && total > (count ?: 0) -> "共 $total 条，显示 ${count ?: 0}"
+            total != null -> "共 $total 条"
+            else -> "返回 ${count ?: 0} 条"
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+            modifier = Modifier.shimmer(isLoading = context.loading),
+        )
+    }
+}
+
+/**
+ * 学习测验 (study_quiz): 摘要显示测验模式
+ */
+object StudyQuizToolUI : ToolUIRenderer {
+    override val toolName: String = "study_quiz"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.BookOpen01
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val type = context.arguments.getStringContent("type")
+        val label = STUDY_TYPE_LABELS.firstOrNull { it.first == type }?.second ?: type
+        return "测验$label"
+    }
+
+    private fun content(context: ToolUIContext): JsonObject? = context.content?.jsonObjectOrNull
+
+    override fun hasSummary(context: ToolUIContext): Boolean =
+        (content(context)?.get("error") as? JsonPrimitive)?.contentOrNull != "true"
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val obj = content(context) ?: return
+        if ((obj["error"] as? JsonPrimitive)?.contentOrNull == "true") {
+            Text(
+                text = obj.getStringContent("message") ?: "暂无素材",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                modifier = Modifier.shimmer(isLoading = context.loading),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            return
+        }
+        val mode = (obj["mode"] as? JsonPrimitive)?.contentOrNull ?: "short_answer"
+        val modeLabel = when (mode) {
+            "choice" -> "选择题"
+            "short_answer" -> "简答题"
+            "recite" -> "抽背"
+            else -> mode
+        }
+        Text(
+            text = "$modeLabel 模式",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
             modifier = Modifier.shimmer(isLoading = context.loading),

@@ -93,6 +93,7 @@ private fun groupToolsForPrompt(tools: List<Tool>): String {
     tools.forEach { tool ->
         val prefix = when {
             tool.name in known -> tool.name
+            tool.name.startsWith("mcp_admin_") -> "MCP management"
             tool.name.startsWith("mcp__") -> "MCP servers"
             tool.name.startsWith("workspace_") -> "workspace"
             tool.name.startsWith("search_web") -> "web search"

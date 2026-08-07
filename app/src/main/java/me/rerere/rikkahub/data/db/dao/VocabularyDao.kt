@@ -15,6 +15,15 @@ interface VocabularyDao {
     @Query("SELECT * FROM vocabulary WHERE archived = 0 ORDER BY created_at DESC")
     suspend fun getAll(): List<VocabularyEntity>
 
+    @Query("SELECT * FROM vocabulary WHERE archived = 0 ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPaged(limit: Int, offset: Int): List<VocabularyEntity>
+
+    @Query("SELECT COUNT(*) FROM vocabulary WHERE archived = 0")
+    suspend fun countActive(): Int
+
+    @Query("SELECT * FROM vocabulary WHERE archived = 0 ORDER BY RANDOM() LIMIT :limit")
+    suspend fun getRandom(limit: Int): List<VocabularyEntity>
+
     @Query("SELECT * FROM vocabulary WHERE archived = 1 ORDER BY created_at DESC")
     suspend fun getArchived(): List<VocabularyEntity>
 

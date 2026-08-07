@@ -237,7 +237,7 @@ suspend fun subAgentRunLoop(
                 onStep("工具 ${def.name} 执行完成")
             }.onFailure { e ->
                 if (e is CancellationException) throw e
-                e.printStackTrace()
+                Log.w(TAG, "Tool execution failed", e)
                 executedTools += tool.copy(
                     output = listOf(
                         UIMessagePart.Text(

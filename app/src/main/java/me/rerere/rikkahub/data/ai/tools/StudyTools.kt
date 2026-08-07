@@ -42,6 +42,10 @@ class StudyTools(
             }
             // study_search 始终可用（只读），供 update/delete 定位目标
             add(createStudySearchTool(studyDaoSet, subjectScope))
+            // study_list 始终可用（只读），供导师列举已保存的学习内容
+            add(createStudyListTool(studyDaoSet, subjectScope))
+            // study_quiz 始终可用（只读），供导师基于已保存的生词/错题出题测验
+            add(createStudyQuizTool(studyDaoSet, subjectScope))
             if (permissions.editEnabled) {
                 add(createUpdateVocabularyTool(studyDaoSet, permissions, subjectScope))
                 add(createUpdateNoteTool(studyDaoSet, permissions, subjectScope))

@@ -158,3 +158,115 @@ fun createStudyReadTool(
         }
     }
 )
+
+/**
+ * study_list 工具：按类型分页列举用户在"学习面板"中已保存的内容（生词 / 笔记 / 错题 / 知识点卡片）。
+ * 只读，不需要审批。受学科隔离约束：只能列举当前助手学科范围内的内容。
+ *
+ * @param subjectScope 学科隔离：非空时只返回该学科的内容；生词（无学科）仅在 scope 为英语时返回。
+ */
+fun createStudyListTool(
+    daos: StudyDaoSet,
+    subjectScope: String? = null,
+): Tool = Tool(
+    name = "study_list",
+    description = """
+        List the user's saved study content (vocabulary/note/wrong_question/knowledge_card) in the study panel.
+        Use this when the user wants to review, browse, or get an overview of what has been saved so far.
+        Returns a paginated list of {id, type, title, subject}. Call study_read with an id to open the full content.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("type", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray {
+                        add("vocabulary"); add("note"); add("wrong_question"); add("knowledge_card")
+                    })
+                    put("description", "Type of study content to list")
+                })
+                put("limit", buildJsonObject {
+                    put("type", "integer")
+                    put("description", "Max results to return (default 20, 1-50)")
+                })
+                put("offset", buildJsonObject {
+                    put("type", "integer")
+                    put("description", "Skip the first N results for pagination (default 0)")
+                })
+            },
+            required = listOf("type")
+        )
+    },
+    needsApproval = { false },
+    execute = { args ->
+        val params = args.jsonObject
+        val type = params["type"]?.jsonPrimitive?.contentOrNull
+            ?: return@Tool errorResult("type 不能为空")
+        val limit = (params["limit"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 20).coerceIn(1, 50)
+        val offset = (params["offset"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0).coerceAtLeast(0)
+
+        class ListEntry(val id: String, val title: String, val subject: String, val category: String?)
+
+        val sqlSubject = if (subjectScope == null || subjectScope == StudySubject.OTHER) null else subjectScope
+        val vocabularyAllowed = subjectScope == null || subjectScope == StudySubject.OTHER || subjectScope == StudySubject.ENGLISH
+
+        val entries: List<ListEntry>
+        val total: Int
+        when (type) {
+            "vocabulary" -> {
+                if (!vocabularyAllowed) {
+                    entries = emptyList()
+                    total = 0
+                } else {
+                    total = daos.vocabularyDao.countActive()
+                    entries = daos.vocabularyDao.getPaged(limit, offset).map {
+                        ListEntry(it.id, titleOf(it), "", null)
+                    }
+                }
+            }
+            "note" -> {
+                total = daos.noteDao.countActive(sqlSubject)
+                entries = daos.noteDao.getPaged(sqlSubject, limit, offset).map {
+                    ListEntry(it.id, titleOf(it), it.subject, it.category)
+                }
+            }
+            "wrong_question" -> {
+                total = daos.wrongQuestionDao.countActive(sqlSubject)
+                entries = daos.wrongQuestionDao.getPaged(sqlSubject, limit, offset).map {
+                    ListEntry(it.id, titleOf(it), it.subject, null)
+                }
+            }
+            "knowledge_card" -> {
+                total = daos.knowledgeCardDao.countActive(sqlSubject)
+                entries = daos.knowledgeCardDao.getPaged(sqlSubject, limit, offset).map {
+                    ListEntry(it.id, titleOf(it), it.subject, null)
+                }
+            }
+            else -> return@Tool errorResult("未知类型: $type")
+        }
+
+        val page = entries
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("count", JsonPrimitive(page.size))
+                    put("total", JsonPrimitive(total))
+                    put("type", JsonPrimitive(type))
+                    put("offset", JsonPrimitive(offset))
+                    put("has_more", JsonPrimitive(offset + page.size < total))
+                    put("results", buildJsonArray {
+                        page.forEach { entry ->
+                            add(buildJsonObject {
+                                put("id", JsonPrimitive(entry.id))
+                                put("type", JsonPrimitive(type))
+                                put("title", JsonPrimitive(entry.title))
+                                put("subject", JsonPrimitive(entry.subject))
+                                if (entry.category != null) put("category", JsonPrimitive(entry.category))
+                            })
+                        }
+                    })
+                }.toString()
+            )
+        )
+    }
+)

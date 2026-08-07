@@ -463,7 +463,7 @@ class SubAgentRunner(
                     createdAt = task.createdAt.toEpochMilliseconds(),
                 )
             )
-        }.onFailure { it.printStackTrace() }
+        }.onFailure { Log.w("SubAgentRunner", "Failed to persist usage for task", it) }
     }
 
     // ---- 任务历史持久化（对齐聊天消息落库：状态变化写库，重启后从库恢复） ----
@@ -482,7 +482,7 @@ class SubAgentRunner(
                     taskJson = JsonInstant.encodeToString(task),
                 )
             )
-        }.onFailure { it.printStackTrace() }
+        }.onFailure { Log.w("SubAgentRunner", "Failed to persist task snapshot", it) }
     }
 
     /**
@@ -510,7 +510,7 @@ class SubAgentRunner(
                 // 只补进不冲突的（内存里没有的 taskId）；冲突保留内存态
                 (restored.filterKeys { it !in current } + current)
             }
-        }.onFailure { it.printStackTrace() }
+        }.onFailure { Log.w("SubAgentRunner", "Failed to restore task history", it) }
     }
 
     /** 从历史库读取单个任务（内存态没有时，详情页/工具跳转用） */
@@ -548,7 +548,8 @@ class SubAgentRunner(
 
     /** 删除某会话的全部任务历史（删会话时级联调用） */
     suspend fun deleteTasksOfConversation(conversationId: Uuid) {
-        runCatching { taskDao.deleteByConversation(conversationId.toString()) }.onFailure { it.printStackTrace() }
+        runCatching { taskDao.deleteByConversation(conversationId.toString()) }
+            .onFailure { Log.w("SubAgentRunner", "Failed to delete task history", it) }
     }
 
     private suspend fun runInternal(
