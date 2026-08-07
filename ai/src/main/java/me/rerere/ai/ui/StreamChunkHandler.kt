@@ -361,7 +361,12 @@ private fun UIMessage.appendMessage(delta: UIMessage): UIMessage {
                     )
                 } else {
                     acc + UIMessagePart.Image(
-                        url = "data:image/png;base64,${deltaPart.url}",
+                        // delta 已是完整 data URL 时不二次加前缀，否则 data:image/png;base64,data:... 图片损坏
+                        url = if (deltaPart.url.startsWith("data:")) {
+                            deltaPart.url
+                        } else {
+                            "data:image/png;base64,${deltaPart.url}"
+                        },
                         metadata = deltaPart.metadata,
                     )
                 }

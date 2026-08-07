@@ -236,7 +236,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -286,7 +286,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
         requestBody["messages"]!!.jsonArray.forEach {
             Log.i(TAG, "streamText: $it")
@@ -322,7 +322,6 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
                 Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
 
                 val bodyRaw = response?.body?.stringSafe()
@@ -334,7 +333,6 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
                 } finally {
                     if (exception is HttpException) {
                         exception.code = response?.code
@@ -733,8 +731,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
+                    // 思考数据仅用于状态推进，不落日志（内容可能含用户敏感信息）
                 }
 
                 "tool_use" -> {

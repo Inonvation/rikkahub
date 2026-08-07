@@ -125,7 +125,8 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                     val url = imageObject["image_url"]?.jsonObjectOrNull
                         ?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
-                    add(UIMessagePart.Image(url.substringAfter("data:image/png;base64,")))
+                    // 按 ;base64, 通用切分，避免硬编码 png 导致 jpeg/webp 保留前缀（二次包裹损坏）
+                    add(UIMessagePart.Image(url.substringAfter(";base64,")))
                 }
             },
             annotations = parseAnnotations(payload["annotations"]?.jsonArrayOrNull ?: JsonArray(emptyList())),

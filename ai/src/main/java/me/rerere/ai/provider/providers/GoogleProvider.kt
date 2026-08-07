@@ -233,7 +233,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
@@ -253,7 +253,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
+                Log.d(TAG, "onEvent: $data")
 
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
@@ -272,15 +272,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             ) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.message}")
-
                 try {
                     if (t == null && response != null) {
                         val bodyStr = response.body.stringSafe()
                         if (!bodyStr.isNullOrEmpty()) {
                             val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
                             if (bodyElement is JsonObject) {
                                 exception = HttpException(
                                     bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
@@ -293,7 +289,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         }
                     }
                 } catch (e: Throwable) {
-                    e.printStackTrace()
                     exception = e
                 } finally {
                     close(exception ?: Exception("Stream failed"))
@@ -301,7 +296,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onClosed(eventSource: EventSource) {
-                println("[onClosed] 连接已关闭")
+                Log.d(TAG, "streamText: onClosed")
                 sendChunks(decoder.onClosed())
                 close()
             }
@@ -311,7 +306,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource")
+            Log.d(TAG, "streamText: awaiting close, cancelling event source")
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -388,39 +383,36 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             buildContents(messages)
         )
 
-        // Tools
-        if (params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)) {
+        // Tools：函数工具与内置工具（googleSearch/urlContext）合并进同一个 tools 数组。
+        // 之前两处分别 put("tools") 会互相覆盖——同时启用时函数工具被静默丢弃。
+        if (params.tools.isNotEmpty() || params.model.tools.isNotEmpty()) {
             put("tools", buildJsonArray {
-                add(buildJsonObject {
-                    put("functionDeclarations", buildJsonArray {
-                        params.tools.forEach { tool ->
-                            add(buildJsonObject {
-                                put("name", JsonPrimitive(tool.name))
-                                put("description", JsonPrimitive(tool.description))
-                                put(
-                                    key = "parameters",
-                                    element = json.encodeToJsonElement(tool.parameters())
-                                        .removeElements(
-                                            listOf(
-                                                "const",
-                                                "exclusiveMaximum",
-                                                "exclusiveMinimum",
-                                                "format",
-                                                "additionalProperties",
-                                                "enum",
+                if (params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)) {
+                    add(buildJsonObject {
+                        put("functionDeclarations", buildJsonArray {
+                            params.tools.forEach { tool ->
+                                add(buildJsonObject {
+                                    put("name", JsonPrimitive(tool.name))
+                                    put("description", JsonPrimitive(tool.description))
+                                    put(
+                                        key = "parameters",
+                                        element = json.encodeToJsonElement(tool.parameters())
+                                            .removeElements(
+                                                listOf(
+                                                    "const",
+                                                    "exclusiveMaximum",
+                                                    "exclusiveMinimum",
+                                                    "format",
+                                                    "additionalProperties",
+                                                    "enum",
+                                                )
                                             )
-                                        )
-                                )
-                            })
-                        }
+                                    )
+                                })
+                            }
+                        })
                     })
-                })
-            })
-        }
-        // Model BuiltIn Tools
-        // 目前不能和工具调用兼容
-        if (params.model.tools.isNotEmpty()) {
-            put("tools", buildJsonArray {
+                }
                 params.model.tools.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> {

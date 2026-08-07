@@ -95,7 +95,7 @@ class ChatCompletionsAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -147,7 +147,7 @@ class ChatCompletionsAPI(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
@@ -182,26 +182,22 @@ class ChatCompletionsAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
                         exception = bodyElement.parseErrorDetail()
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
                     exception = e
                 } finally {
                     if (exception is HttpException) {
                         exception.code = response?.code
                     }
-                    close(exception)
+                    // body 为空/不可读且无原始异常时，不能 close(null)=正常完成——HTTP 失败必须报错
+                    close(exception ?: HttpException("Stream failed (HTTP ${response?.code})", code = response?.code))
                 }
             }
 
@@ -214,7 +210,7 @@ class ChatCompletionsAPI(
         val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource ")
+            Log.d(TAG, "streamText: awaiting close, cancelling event source")
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -577,7 +573,7 @@ class ChatCompletionsAPI(
                                             put("url", encodedImage.base64)
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        Log.w(TAG, "fetch remote image failed, using empty text", it)
                                         put("type", "text")
                                         put("text", "")
                                     }
@@ -634,7 +630,7 @@ class ChatCompletionsAPI(
                                             put("url", encodedImage.base64)
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        Log.w(TAG, "fetch remote image failed, using empty text", it)
                                         put("type", "text")
                                         put("text", "")
                                     }
@@ -751,7 +747,8 @@ class ChatCompletionsAPI(
                     if (type != "image_url") return@forEach
                     val url = imageObject["image_url"]?.jsonObjectOrNull?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
-                    add(UIMessagePart.Image(url.substringAfter("data:image/png;base64,")))
+                    // 按 ;base64, 通用切分，避免硬编码 png 导致 jpeg/webp 保留前缀（二次包裹损坏）
+                    add(UIMessagePart.Image(url.substringAfter(";base64,")))
                 }
             },
             annotations = parseAnnotations(

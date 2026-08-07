@@ -68,9 +68,15 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         }
 
         this.url.startsWith("data:") -> {
-            // 从 data URL 提取 mime type
+            // 从 data URL 提取 mime type；withPrefix=false 时返回裸 base64，
+            // 否则返回完整 data URL。之前无条件返回完整 data URL，
+            // 导致 Google/Claude 把 data:image/...;base64, 当裸 base64 发送（协议非法、图片损坏）。
             val mimeType = url.substringAfter("data:").substringBefore(";")
-            EncodedImage(base64 = url, mimeType = mimeType)
+            val rawBase64 = url.substringAfter(";base64,")
+            EncodedImage(
+                base64 = if (withPrefix) url else rawBase64,
+                mimeType = mimeType
+            )
         }
         this.url.startsWith("http") -> {
             // HTTP URL 无法确定 mime type，默认使用 image/png
