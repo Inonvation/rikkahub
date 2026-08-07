@@ -1,11 +1,6 @@
 package me.rerere.rikkahub.ui.components.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -107,17 +102,18 @@ fun <T> ChainOfThought(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .animateContentSize(),
             ) {
-                // 折叠时仅显示尾部 collapsedVisibleCount 步；被折叠的中间步骤用 AnimatedVisibility 平滑收起/展开。
-                // trailingSteps 始终渲染（折叠时可见）；leadingSteps 在展开时出现、折叠时收起。
-                val trailingSteps = steps.takeLast(collapsedVisibleCount)
-                val leadingSteps = if (expanded || !canCollapse) steps.dropLast(collapsedVisibleCount) else emptyList()
-                // 折叠瞬间 AnimatedVisibility 需保留最后可见的中间步骤来播放 exit 动画：
-                // visible 变 false 时若内容已随列表同步变空，exit 会"瞬间消失"、看不到收起动画（概率无动画根因）。
-                // 仅当 leadingSteps 非空时更新快照；折叠态保持最后一次展开内容供 exit 播放。
-                var lastLeadingSteps by remember { mutableStateOf(leadingSteps) }
-                if (leadingSteps.isNotEmpty()) lastLeadingSteps = leadingSteps
+                // 对齐上游：折叠时直接截断步骤（visibleSteps），用外层 animateContentSize 平滑高度。
+                // 此前用 AnimatedVisibility + expandVertically/shrinkVertically 逐步骤播放垂直动画，
+                // 生成结束 steps 定稿、折叠状态变化时会触发这个动画，卡片 item 高度延迟变化，
+                // 用户停留后下滑即被挤动（"生成完跳一下"）。改为无逐步骤动画，高度一次性变化。
+                val visibleSteps = if (expanded || !canCollapse) {
+                    steps
+                } else {
+                    steps.takeLast(collapsedVisibleCount)
+                }
 
                 // 显示展开/折叠按钮（统一在顶部）
                 if (canCollapse) {
@@ -185,21 +181,8 @@ fun <T> ChainOfThought(
                     }
                 ) {
                     Column {
-                        // 中间被折叠/展开的步骤：AnimatedVisibility 平滑过渡（垂直展开 + 淡入淡出）
-                        AnimatedVisibility(
-                            visible = leadingSteps.isNotEmpty(),
-                            enter = expandVertically() + fadeIn(),
-                            exit = shrinkVertically() + fadeOut(),
-                        ) {
-                            // 用 lastLeadingSteps 快照渲染：折叠时保留最后可见的中间步骤供 exit 动画播放
-                            Column {
-                                lastLeadingSteps.fastForEach { step ->
-                                    scope.content(step)
-                                }
-                            }
-                        }
-                        // 尾部始终可见的步骤
-                        trailingSteps.fastForEach { step ->
+                        // 对齐上游：直接渲染可见步骤，无逐步骤垂直动画
+                        visibleSteps.fastForEach { step ->
                             scope.content(step)
                         }
                     }
@@ -431,16 +414,10 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 }
             }
 
-            // 展开内容（缩进对齐 label）。用 AnimatedVisibility 让展开/收起平滑过渡
-            // （垂直展开 + 淡入淡出，复用 JsonTree/SubAgentRunningBanner 的模式）。
-            // 用 visible 布尔而非 MutableTransitionState：思考内容生成中（Preview）初始即展开，
-            // 若让 AnimatedVisibility 首帧 false→true 播放展开动画，会与流式逐字输出叠加成
-            // "内容像被插进来"的观感。初始展开直接显示，仅点击展开/收起时播放入场/退场动画。
-            AnimatedVisibility(
-                visible = contentVisible && hasContent,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
+            // 展开内容（缩进对齐 label）。对齐上游：直接条件渲染，无垂直展开/收起动画，
+            // 避免生成结束步骤展开/收起时 item 高度延迟变化（跳动源）。外层 Column 的
+            // animateContentSize 已平滑整体高度。
+            if (contentVisible && hasContent) {
                 Box(
                     modifier = Modifier
                         .then(
@@ -452,8 +429,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         )
                         .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
                 ) {
-                    // hasContent 已保证非空，这里用安全调用满足编译器对可空 content 的检查
-                    content?.invoke()
+                    content()
                 }
             }
         }

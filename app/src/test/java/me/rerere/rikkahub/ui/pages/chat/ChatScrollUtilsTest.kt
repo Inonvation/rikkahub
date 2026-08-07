@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.pages.chat
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,15 +7,16 @@ import org.junit.Test
 class ChatScrollUtilsTest {
     @Test
     fun `empty layout is not at bottom`() {
-        assertFalse(isRealListBottom(null, null, 1000))
+        assertFalse(isRealListBottom(0, null, null, 1000))
     }
 
     @Test
-    fun `scrolled up with non-zero first visible is not at bottom`() {
+    fun `middle item fully visible is not at bottom`() {
         assertFalse(
             isRealListBottom(
-                firstVisibleItemIndex = 4,
-                firstVisibleItemEndOffset = 980,
+                totalItemsCount = 10,
+                lastVisibleItemIndex = 4,
+                lastVisibleItemEndOffset = 980,
                 viewportEndOffset = 1000,
                 tolerancePx = 3,
             )
@@ -24,22 +24,24 @@ class ChatScrollUtilsTest {
     }
 
     @Test
-    fun `bottom spacer fully visible at bottom edge is at bottom`() {
+    fun `terminal item fully visible is at bottom`() {
         assertTrue(
             isRealListBottom(
-                firstVisibleItemIndex = 0,
-                firstVisibleItemEndOffset = 1000,
+                totalItemsCount = 10,
+                lastVisibleItemIndex = 9,
+                lastVisibleItemEndOffset = 1000,
                 viewportEndOffset = 1000,
             )
         )
     }
 
     @Test
-    fun `bottom spacer within rounding tolerance is at bottom`() {
+    fun `terminal item within rounding tolerance is at bottom`() {
         assertTrue(
             isRealListBottom(
-                firstVisibleItemIndex = 0,
-                firstVisibleItemEndOffset = 1002,
+                totalItemsCount = 10,
+                lastVisibleItemIndex = 9,
+                lastVisibleItemEndOffset = 1002,
                 viewportEndOffset = 1000,
                 tolerancePx = 2,
             )
@@ -47,11 +49,12 @@ class ChatScrollUtilsTest {
     }
 
     @Test
-    fun `bottom spacer clipped beyond tolerance is not at bottom`() {
+    fun `partially clipped terminal item is not at bottom`() {
         assertFalse(
             isRealListBottom(
-                firstVisibleItemIndex = 0,
-                firstVisibleItemEndOffset = 1040,
+                totalItemsCount = 10,
+                lastVisibleItemIndex = 9,
+                lastVisibleItemEndOffset = 1040,
                 viewportEndOffset = 1000,
                 tolerancePx = 2,
             )
@@ -59,34 +62,58 @@ class ChatScrollUtilsTest {
     }
 
     @Test
-    fun `short list anchored at bottom is at bottom`() {
+    fun `short list terminal item above viewport end is at bottom`() {
         assertTrue(
             isRealListBottom(
-                firstVisibleItemIndex = 0,
-                firstVisibleItemEndOffset = 500,
+                totalItemsCount = 2,
+                lastVisibleItemIndex = 1,
+                lastVisibleItemEndOffset = 500,
                 viewportEndOffset = 1000,
             )
         )
     }
 
     @Test
-    fun `bottom item index must be zero`() {
+    fun `long last message without terminal spacer is not at bottom`() {
         assertFalse(
             isRealListBottom(
-                firstVisibleItemIndex = 1,
-                firstVisibleItemEndOffset = 990,
+                totalItemsCount = 12,
+                lastVisibleItemIndex = 10,
+                lastVisibleItemEndOffset = 2600,
                 viewportEndOffset = 1000,
             )
         )
     }
 
     @Test
-    fun `message index maps to reversed item index`() {
-        // 5 条消息 + bottomSlots=2（spacer + loading）
-        assertEquals(2, messageItemIndex(messageNodesSize = 5, messageIndex = 4, bottomSlots = 2))
-        assertEquals(6, messageItemIndex(messageNodesSize = 5, messageIndex = 0, bottomSlots = 2))
-        // bottomSlots=1（spacer 或 loading 二选一时）
-        assertEquals(1, messageItemIndex(messageNodesSize = 5, messageIndex = 4, bottomSlots = 1))
-        assertEquals(5, messageItemIndex(messageNodesSize = 5, messageIndex = 0, bottomSlots = 1))
+    fun `loading indicator cannot replace terminal spacer`() {
+        assertFalse(
+            isRealListBottom(
+                totalItemsCount = 12,
+                lastVisibleItemIndex = 10,
+                lastVisibleItemEndOffset = 900,
+                viewportEndOffset = 1000,
+            )
+        )
+        assertTrue(
+            isRealListBottom(
+                totalItemsCount = 12,
+                lastVisibleItemIndex = 11,
+                lastVisibleItemEndOffset = 950,
+                viewportEndOffset = 1000,
+            )
+        )
+    }
+
+    @Test
+    fun `old terminal index is invalid after item count changes`() {
+        assertFalse(
+            isRealListBottom(
+                totalItemsCount = 11,
+                lastVisibleItemIndex = 11,
+                lastVisibleItemEndOffset = 950,
+                viewportEndOffset = 1000,
+            )
+        )
     }
 }

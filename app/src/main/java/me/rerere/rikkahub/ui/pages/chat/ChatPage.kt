@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -363,24 +364,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         scrollSyncReady = true
     }
     // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次（VM 字段跨导航保持，
-    // 返回时若已初始化则跳过，不覆盖恢复的阅读位置）。reverseLayout 下 0 永远是最底（spacer），
-    // 不依赖 loading 项数量，不存在旧实现的越界目标问题；指定 nodeId 时把 messageNodes 索引映射回 item 索引。
+    // 返回时若已初始化则跳过，不覆盖恢复的阅读位置）。复用 upstream 逻辑，但目标用 messageNodes.lastIndex
+    // （真实消息最后一项，永不越界）：不能用 totalItemsCount - 1（含 loading 指示器项，等它消失后 target
+    // 越界，LazyListState 每次 remeasure 都会把 scrollPosition 从越界位置 clamp 回合法位置，把用户下滑
+    // 反复拉回底部），也不能用 +5 越界钉底（同样的 clamp 抽搐 + 取消进行中的手势）。
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
-            // 底部固定项（spacer + loading/systemPrompt）占的槽位数
-            val bottomSlots = if (loadingJob != null) 2
-            else if (setting.getCurrentAssistant().allowConversationSystemPrompt) 2
-            else 1
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
-                    val target = messageItemIndex(conversation.messageNodes.size, index, bottomSlots)
-                    android.util.Log.w("CHATSCROLL", "FIRST_POSITION node: index=$index target=$target")
-                    chatListState.scrollToItem(target)
+                    android.util.Log.w("CHATSCROLL", "FIRST_POSITION node: index=$index")
+                    chatListState.scrollToItem(index)
                 }
             } else {
-                android.util.Log.w("CHATSCROLL", "FIRST_POSITION bottom: msgSize=${conversation.currentMessages.size} target=0 init=$vm.chatListInitialized")
-                chatListState.requestScrollToItem(0)
+                val target = conversation.messageNodes.lastIndex
+                android.util.Log.w("CHATSCROLL", "FIRST_POSITION bottom: msgSize=${conversation.currentMessages.size} target=$target init=$vm.chatListInitialized")
+                chatListState.requestScrollToItem(target)
             }
             vm.chatListInitialized = true
         }
@@ -544,30 +543,57 @@ private fun ChatPageContent(
         .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
 
-    // reverseLayout 下底部固定项 ScrollBottom spacer 是 index 0，位于视口最底。
-    // "在底部" = 最底可见项是 index 0 且底边完整进入视口；只看最后消息 index 会在
-    // 长消息顶部刚进入视口时错误隐藏 FAB。
+    // 统一用永久尾项 ScrollBottomKey 判断真实底部。只看最后消息 index 会在长消息
+    // 顶部刚进入视口时错误隐藏 FAB，也无法区分列表中部的 item 间距。
     val density = LocalDensity.current
     val bottomTolerancePx = with(density) { 1.dp.roundToPx() }
+    val isUserDragging by chatListState.interactionSource.collectIsDraggedAsState()
     val atRealBottom by remember(chatListState, bottomTolerancePx) {
         derivedStateOf {
             val layoutInfo = chatListState.layoutInfo
-            val firstVisibleItem = layoutInfo.visibleItemsInfo.firstOrNull()
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
             isRealListBottom(
-                firstVisibleItemIndex = firstVisibleItem?.index,
-                firstVisibleItemEndOffset = firstVisibleItem?.let { it.offset + it.size },
+                totalItemsCount = layoutInfo.totalItemsCount,
+                lastVisibleItemIndex = lastVisibleItem?.index,
+                lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
                 viewportEndOffset = layoutInfo.viewportEndOffset,
                 tolerancePx = bottomTolerancePx,
             )
         }
     }
-    // 首帧布局为空时不能按"不在底部"显示 FAB（否则滚动按钮会短暂闪出一次）。
-    // 包在 derivedStateOf 里避免滚动时逐帧读 layoutInfo 触发整页重组（滚动掉帧隐患）。
-    val userScrolledUp by remember(chatListState, bottomTolerancePx) {
-        derivedStateOf {
-            chatListState.layoutInfo.totalItemsCount > 0 && !atRealBottom
+
+    // autoFollowArmed 表示用户是否仍把滚动控制权交给自动跟随。
+    // 内容增长把终点推出视口时不能解除它；只有用户 drag/人工跳转才解除，
+    // 等滚动稳定在真实底部后再重新武装。
+    var autoFollowInitialized by remember(conversation.id) { mutableStateOf(false) }
+    var autoFollowArmed by remember(conversation.id) { mutableStateOf(false) }
+    LaunchedEffect(chatListState, conversation.id) {
+        snapshotFlow {
+            Triple(
+                chatListState.layoutInfo.totalItemsCount,
+                chatListState.isScrollInProgress,
+                atRealBottom,
+            )
         }
+            .distinctUntilChanged()
+            .collect { (totalItemsCount, isScrollInProgress, isAtBottom) ->
+                if (!autoFollowInitialized && totalItemsCount > 0) {
+                    // 首次获得有效布局：按此刻是否在真实底部决定初始武装，
+                    // 进入会话即滚到历史位置/消息时不应自动跟随。
+                    autoFollowArmed = isAtBottom
+                    autoFollowInitialized = true
+                } else if (autoFollowInitialized && !isScrollInProgress && isAtBottom) {
+                    // 用户/程序滚动稳定在底部后重新武装。
+                    autoFollowArmed = true
+                }
+            }
     }
+    // drag 一开始就解除武装并取消自动跟随；松手后的 fling 仍在滚动，不能趁机回底，
+    // 只有滚动最终稳定在真实底部时才重新武装。
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) autoFollowArmed = false
+    }
+    val userScrolledUp = autoFollowInitialized && !atRealBottom
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         buildList {
@@ -707,13 +733,19 @@ private fun ChatPageContent(
                             }
                             scope.launch {
                                 android.util.Log.w("CHATSCROLL", "SEND_SCROLL guidance-send")
-                                chatListState.requestScrollToItem(0)
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
                             }
                         } else {
                             vm.handleMessageSend(inputState.getContents())
                             scope.launch {
                                 android.util.Log.w("CHATSCROLL", "SEND_SCROLL normal-send")
-                                chatListState.requestScrollToItem(0)
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
                             }
                         }
                         inputState.clearInput()
@@ -729,7 +761,10 @@ private fun ChatPageContent(
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
                             scope.launch {
                                 android.util.Log.w("CHATSCROLL", "SEND_SCROLL long-send")
-                                chatListState.requestScrollToItem(0)
+                                chatListState.requestScrollToItem(
+                                    (chatListState.layoutInfo.totalItemsCount - 1)
+                                        .coerceAtLeast(conversation.currentMessages.lastIndex)
+                                )
                             }
                         }
                         inputState.clearInput()
@@ -861,10 +896,9 @@ private fun ChatPageContent(
                 },
                 onJumpToMessage = { index ->
                     previewMode = false
-                    val bottomSlots = if (loadingJob != null) 2 else if (assistant.allowConversationSystemPrompt) 2 else 1
-                    val target = messageItemIndex(conversation.messageNodes.size, index, bottomSlots)
+                    autoFollowArmed = false
                     scope.launch {
-                        chatListState.scrollToItem(target)
+                        chatListState.scrollToItem(index)
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason ->
@@ -883,6 +917,10 @@ private fun ChatPageContent(
                 onAssistantNameClick = {
                     showAssistantPicker = true
                 },
+                autoFollowArmed = autoFollowArmed,
+                isUserDragging = isUserDragging,
+                bottomTolerancePx = bottomTolerancePx,
+                onManualScroll = { autoFollowArmed = false },
             )
             }
 
@@ -915,9 +953,9 @@ private fun ChatPageContent(
                 Surface(
                     onClick = {
                         scope.launch {
-                            // reverseLayout 下 0 = 底部（spacer）
-                            if (chatListState.layoutInfo.totalItemsCount > 0) {
-                                chatListState.animateScrollToItem(0)
+                            val targetIndex = chatListState.layoutInfo.totalItemsCount - 1
+                            if (targetIndex >= 0) {
+                                chatListState.animateScrollToItem(targetIndex)
                             }
                         }
                     },

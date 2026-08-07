@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -356,47 +355,39 @@ private fun MessagePartsBlock(
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
-                    // 思维链卡片出现动画：只淡入、不做垂直展开。思考内容生成中卡片高度随流式
-                    // 文本增长，若用 expandVertically 播放出现动画会与逐字输出叠加成"内容被
-                    // 插进来"的观感；淡入 + 卡片自身 animateContentSize 平滑高度，接近原项目。
-                    // 流式追加 step 不改变 targetState（保持 true），不会反复重播。
-                    val thoughtAppearState = remember { MutableTransitionState(false) }
-                    LaunchedEffect(Unit) { thoughtAppearState.targetState = true }
-                    AnimatedVisibility(
-                        visibleState = thoughtAppearState,
-                        enter = fadeIn(animationSpec = tween(200)),
-                        exit = fadeOut(animationSpec = tween(150)),
-                    ) {
-                        ChainOfThought(
-                            modifier = Modifier.animateContentSize(),
-                            steps = block.steps,
-                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                            cardColors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                            ),
-                            stateKey = LocalConversationId.current?.let { "chain:$it:$nodeId" },
-                        ) { step ->
-                            when (step) {
-                                is ThinkingStep.ReasoningStep -> {
-                                    key(step.reasoning.createdAt) {
-                                        ChatMessageReasoningStep(
-                                            reasoning = step.reasoning,
-                                            model = model,
-                                            assistant = assistant,
-                                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                        )
-                                    }
+                    // 对齐上游：思维链卡片直接渲染，不做出现淡入动画。
+                    // 此前用 AnimatedVisibility 淡入 200ms，生成结束后动画仍在进行，
+                    // 卡片 item 高度在动画期间变化；用户停留片刻后下滑时，滚动 offset
+                    // 按动画前高度计算，LazyColumn 重测布局产生视觉跳动（"生成完跳一下"）。
+                    ChainOfThought(
+                        modifier = Modifier.animateContentSize(),
+                        steps = block.steps,
+                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                        cardColors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+                        ),
+                        stateKey = LocalConversationId.current?.let { "chain:$it:$nodeId" },
+                    ) { step ->
+                        when (step) {
+                            is ThinkingStep.ReasoningStep -> {
+                                key(step.reasoning.createdAt) {
+                                    ChatMessageReasoningStep(
+                                        reasoning = step.reasoning,
+                                        model = model,
+                                        assistant = assistant,
+                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                    )
                                 }
+                            }
 
-                                is ThinkingStep.ToolStep -> {
-                                    key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                        ChatMessageToolStep(
-                                            tool = step.tool,
-                                            loading = loading && !step.tool.isExecuted,
-                                            onToolApproval = onToolApproval,
-                                            onToolAnswer = onToolAnswer,
-                                        )
-                                    }
+                            is ThinkingStep.ToolStep -> {
+                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                    ChatMessageToolStep(
+                                        tool = step.tool,
+                                        loading = loading && !step.tool.isExecuted,
+                                        onToolApproval = onToolApproval,
+                                        onToolAnswer = onToolAnswer,
+                                    )
                                 }
                             }
                         }
@@ -411,7 +402,7 @@ private fun MessagePartsBlock(
                         val textContent = @Composable {
                             if (role == MessageRole.USER) {
                                 Surface(
-                                    modifier = if (!loading) Modifier.animateContentSize() else Modifier,
+                                    modifier = Modifier.animateContentSize(),
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     onClick = { onUserMessageClick?.invoke() },
@@ -430,7 +421,7 @@ private fun MessagePartsBlock(
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
                                     Surface(
-                                        modifier = if (!loading) Modifier.animateContentSize() else Modifier,
+                                        modifier = Modifier.animateContentSize(),
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     ) {
@@ -453,7 +444,7 @@ private fun MessagePartsBlock(
                                             visual = true,
                                         ),
                                         onClickCitation = handleClickCitation,
-                                        modifier = if (!loading) Modifier.animateContentSize() else Modifier
+                                        modifier = Modifier.animateContentSize()
                                     )
                                 }
                             }
