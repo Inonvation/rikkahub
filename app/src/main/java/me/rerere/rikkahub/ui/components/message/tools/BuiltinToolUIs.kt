@@ -257,31 +257,33 @@ object SearchWebToolUI : ToolUIRenderer {
 
     @Composable
     override fun Summary(context: ToolUIContext) {
-        context.content.getStringContent("answer")?.let { answer ->
-            Text(
-                text = answer,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.shimmer(isLoading = context.loading),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        val items = items(context)
-        if (items.isNotEmpty()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                FaviconRow(
-                    urls = items.mapNotNull { it.getStringContent("url") },
-                    size = 18.dp,
-                )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            context.content.getStringContent("answer")?.let { answer ->
                 Text(
-                    text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
+                    text = answer,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.shimmer(isLoading = context.loading),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+            val items = items(context)
+            if (items.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    FaviconRow(
+                        urls = items.mapNotNull { it.getStringContent("url") },
+                        size = 18.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    )
+                }
             }
         }
     }
