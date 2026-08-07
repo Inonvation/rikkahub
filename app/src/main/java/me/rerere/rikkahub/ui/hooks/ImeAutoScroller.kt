@@ -25,7 +25,13 @@ fun ImeLazyListAutoScroller(
             ime.getBottom(localDensity)
         }.collect { keyboardHeight ->
             if (keyboardHeight > 0) {
-                lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
+                // 仅当用户已停在列表底部时才随键盘下滚；阅读历史消息时调出输入法不打断（#18）
+                val total = lazyListState.layoutInfo.totalItemsCount
+                val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val isAtBottom = total == 0 || lastVisible >= total - 1
+                if (isAtBottom) {
+                    lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
+                }
                 imeHeigh = keyboardHeight
             } else {
                 imeHeigh = 0

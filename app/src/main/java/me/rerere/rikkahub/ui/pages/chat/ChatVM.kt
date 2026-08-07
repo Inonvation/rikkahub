@@ -191,6 +191,12 @@ class ChatVM(
         chatService.sendMessage(_conversationId, content, answer)
     }
 
+    /** 生成中发送消息（带附件走此路径）：正在生成则排队，回合正常结束后自动发送，不打断当前流式（#17） */
+    fun sendMessageQueued(content: List<UIMessagePart>) {
+        if (content.isEmptyInputMessage()) return
+        chatService.sendMessageQueued(_conversationId, content)
+    }
+
     /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条 */
     fun sendGuidance(text: String) {
         if (text.isBlank()) return

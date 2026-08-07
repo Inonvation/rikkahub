@@ -78,12 +78,10 @@ android {
             // 用 debug 签名 + debug 包名后缀（用户指定），与 debug 包完全一致，可覆盖安装
             signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // AGP 9 用 optimization{} 启用 R8 混淆 + 资源压缩（含默认 proguard 规则）。
+            // 旧的 isMinifyEnabled/isShrinkResources/proguardFiles 已废弃，且引用的
+            // proguard-rules.pro 在上游「简化 keep rules」时被删除——合入冲突残留，
+            // 保留会导致构建引用不存在的文件。
             optimization {
                 enable = true
             }

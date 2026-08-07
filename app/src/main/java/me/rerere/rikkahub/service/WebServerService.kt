@@ -60,7 +60,10 @@ class WebServerService : Service() {
                 serviceScope.launch {
                     settingsStore.update { it.copy(webServerEnabled = false) }
                 }
-                // 不立即 stopSelf，等状态流检测到停止后再结束
+                // 无条件结束前台服务：状态流里的 stopSelf 只在「曾进入 running」时触发，
+                // 若服务器从未启动成功（端口被占/启动失败），wasRunning 恒为 false，
+                // 不在此兜底的话前台服务会永久驻留。
+                stopSelf()
             }
 
             null -> {

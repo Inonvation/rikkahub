@@ -629,7 +629,9 @@ private fun ChatPageContent(
                             val contents = inputState.getContents()
                             val hasAttachment = contents.any { it !is UIMessagePart.Text }
                             if (hasAttachment) {
-                                vm.handleMessageSend(contents)
+                                // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
+                                // 附件无法走 steering 文本引导，走 sendMessageQueued 的排队机制（#17）。
+                                vm.sendMessageQueued(contents)
                             } else {
                                 val guidanceText = inputState.textContent.text.toString()
                                 vm.setPendingGuidance(guidanceText)

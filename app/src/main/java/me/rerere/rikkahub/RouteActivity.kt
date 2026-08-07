@@ -246,9 +246,24 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // Navigate to the chat screen if a conversation ID is provided
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
+        }
+        // Activity 存活期间再次以 SEND / PROCESS_TEXT 启动（例如从最近任务再次分享）时，
+        // ShareHandler 组件的 remember 只捕获首次 intent，这里必须直接入栈，否则新分享内容被吞。
+        when (intent.action) {
+            Intent.ACTION_SEND -> {
+                val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+                val imageUri = intent.getStringExtra(Intent.EXTRA_STREAM)
+                navStack?.add(Screen.ShareHandler(text, imageUri))
+            }
+
+            Intent.ACTION_PROCESS_TEXT -> {
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString() ?: ""
+                navStack?.add(Screen.ShareHandler(text, null))
+            }
         }
     }
 
@@ -274,16 +289,19 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val startScreen = Screen.Chat(
-            id = if (settings.displaySetting.createNewConversationOnStart) {
-                Uuid.random().toString()
-            } else {
-                readStringPreference(
-                    "lastConversationId",
+        // remember：避免每次重组都同步读 SharedPreferences + 生成 UUID（主线程磁盘读）
+        val startScreen = remember(settings.displaySetting.createNewConversationOnStart) {
+            Screen.Chat(
+                id = if (settings.displaySetting.createNewConversationOnStart) {
                     Uuid.random().toString()
-                ) ?: Uuid.random().toString()
-            }
-        )
+                } else {
+                    readStringPreference(
+                        "lastConversationId",
+                        Uuid.random().toString()
+                    ) ?: Uuid.random().toString()
+                }
+            )
+        }
 
         val backStack = rememberNavBackStack(startScreen)
         SideEffect { this@RouteActivity.navStack = backStack }

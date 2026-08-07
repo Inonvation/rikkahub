@@ -114,22 +114,24 @@ class WebServerManager(
     fun stop() {
         _state.value =
             _state.value.copy(isRunning = false, isLoading = true, hostname = null, address = null, error = null)
-        appScope.launch {
-            try {
-                Log.i(TAG, "Stopping web server")
-                server?.stop(1000, 2000)
-                server = null
-                runCatching {
-                    nsdRegistrar.unregister()
-                }.onFailure {
-                    Log.w(TAG, "NSD unregister failed", it)
-                }
-                _state.value = _state.value.copy(isLoading = false)
-                Log.i(TAG, "Web server stopped")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to stop web server", e)
-                _state.value = _state.value.copy(isLoading = false, error = e.message)
+        appScope.launch { suspendStop() }
+    }
+
+    private suspend fun suspendStop() {
+        try {
+            Log.i(TAG, "Stopping web server")
+            server?.stop(1000, 2000)
+            server = null
+            runCatching {
+                nsdRegistrar.unregister()
+            }.onFailure {
+                Log.w(TAG, "NSD unregister failed", it)
             }
+            _state.value = _state.value.copy(isLoading = false)
+            Log.i(TAG, "Web server stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop web server", e)
+            _state.value = _state.value.copy(isLoading = false, error = e.message)
         }
     }
 
@@ -138,8 +140,15 @@ class WebServerManager(
         serviceName: String = _state.value.serviceName,
         localhostOnly: Boolean = _state.value.localhostOnly
     ) {
-        stop()
-        start(port, serviceName, localhostOnly)
+        // stop() 是异步的（appScope.launch 内），不能「先 stop 再 start」——
+        // start 会因 server 仍非空而提前返回，导致 restart 变成 no-op。
+        // 在同一协程里先真正停掉（等待 server 置空）再启动。
+        appScope.launch {
+            _state.value =
+                _state.value.copy(isRunning = false, isLoading = true, hostname = null, address = null, error = null)
+            suspendStop()
+            start(port, serviceName, localhostOnly)
+        }
     }
 
     private fun isPortAvailable(port: Int): Boolean {

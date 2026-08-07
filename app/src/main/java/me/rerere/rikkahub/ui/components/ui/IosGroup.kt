@@ -88,6 +88,7 @@ private class IosGroupScopeImpl : IosGroupScope {
 fun IosGroup(
     title: String? = null,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
     content: IosGroupScope.() -> Unit,
 ) {
     val scope = IosGroupScopeImpl()
@@ -99,7 +100,17 @@ fun IosGroup(
                 ProvideTextStyle(MaterialTheme.typography.labelMedium) {
                     Text(
                         text = title,
-                        modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
+                        modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+                    )
+                }
+            }
+        }
+        if (subtitle != null) {
+            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                    Text(
+                        text = subtitle,
+                        modifier = Modifier.padding(start = 16.dp, top = 0.dp, bottom = 6.dp),
                     )
                 }
             }

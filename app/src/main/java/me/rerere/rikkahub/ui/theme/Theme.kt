@@ -67,9 +67,19 @@ fun RikkahubTheme(
     }
     val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
         if (darkTheme && amoledDarkMode) {
+            // AMOLED 纯黑：把 background/surface 及各 surface 容器色阶一并置黑，
+            // 否则卡片/顶栏仍是亮灰块，屏幕无法真正「息屏省电」
             colorScheme.copy(
                 background = AMOLED_DARK_BACKGROUND,
                 surface = AMOLED_DARK_BACKGROUND,
+                surfaceDim = AMOLED_DARK_BACKGROUND,
+                surfaceBright = AMOLED_DARK_BACKGROUND,
+                surfaceContainerLowest = AMOLED_DARK_BACKGROUND,
+                surfaceContainerLow = AMOLED_DARK_BACKGROUND,
+                surfaceContainer = AMOLED_DARK_BACKGROUND,
+                surfaceContainerHigh = AMOLED_DARK_BACKGROUND,
+                surfaceContainerHighest = AMOLED_DARK_BACKGROUND,
+                surfaceVariant = AMOLED_DARK_BACKGROUND,
             )
         } else {
             colorScheme

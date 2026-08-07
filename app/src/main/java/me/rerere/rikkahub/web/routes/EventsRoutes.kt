@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -42,8 +44,10 @@ fun Route.eventsRoutes(
         }
 
         // Full settings snapshot; StateFlow emits the current value immediately on connect.
+        // 只发脱敏后的 Settings：清空 provider 明文 apiKey/privateKey，
+        // 避免把全部密钥推给前端（JWT 关闭时 = 局域网任意设备可读）。
         val settingsEvents = settingsStore.settingsFlow.map { settings ->
-            EventPayload(event = "settings", json = JsonInstant.encodeToString(settings))
+            EventPayload(event = "settings", json = JsonInstant.encodeToString(settings.redactForWeb()))
         }
 
         // Conversation list invalidation, scoped to the currently selected assistant.
@@ -112,4 +116,19 @@ fun Route.eventsRoutes(
 private data class EventPayload(
     val event: String,
     val json: String,
+)
+
+/**
+ * Web 端脱敏：清空 provider 明文密钥（apiKey / privateKey）。
+ * 前端 ProviderProfile 只消费 id/enabled/name/models，脱敏不影响功能；
+ * 未脱敏时 /api/events 会把全部 API key 推给前端。
+ */
+private fun Settings.redactForWeb(): Settings = copy(
+    providers = providers.map { provider ->
+        when (provider) {
+            is ProviderSetting.OpenAI -> provider.copy(apiKey = "")
+            is ProviderSetting.Google -> provider.copy(apiKey = "", privateKey = "")
+            is ProviderSetting.Claude -> provider.copy(apiKey = "")
+        }
+    }
 )

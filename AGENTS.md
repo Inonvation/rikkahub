@@ -2,9 +2,21 @@
 
 本文档面向贡献者，概述本仓库的模块结构、开发流程，便于快速上手并保持一致的协作质量。
 
+## 关键事实：这是个人定制 fork
+
+本仓库是 [rikkahub/rikkahub](https://github.com/rikkahub/rikkahub) 的定制分支，由 **Inonvation** 维护，仅限个人使用：
+
+- **Firebase 已移除**（Analytics / Crashlytics），构建**不需要** `google-services.json`
+- 自定义包名 `com.inonvation.rikkahub`，自定义签名 `keystore.jks`
+- `origin` → `https://github.com/Inonvation/rikkahub.git`（日常推送）
+- `upstream` → `https://github.com/rikkahub/rikkahub.git`（原项目）
+- **永不向 upstream 推送或提 PR**；拉上游用 `git fetch upstream && git merge upstream/main`
+
+更多定制细节见 `CLAUDE.md`。
+
 ## Build, Test, and Development Commands
 
-使用 Android Studio 或命令行 Gradle：
+使用 Android Studio 或命令行 Gradle（`compileSdk=37` / `minSdk=26` / Java 17）：
 
 ```bash
 ./gradlew assembleDebug          # 构建 Debug APK
@@ -13,8 +25,15 @@
 ./gradlew lint                   # 运行 Android Lint
 ```
 
-构建应用需要在 `app/` 下提供 `google-services.json`（用于 Firebase）。
-`web` 模块会在 `preBuild` 阶段构建 `web-ui/` 并复制静态资源，需要本地可用 `pnpm`。
+构建/安装要点（与上游不同，容易猜错）：
+
+- **入口 Activity 是 `RouteActivity`**（MAIN/LAUNCHER），项目里**没有** `MainActivity`
+- `debug` 与 `release` 变体都带 `applicationIdSuffix = ".debug"`，实际包名 `com.inonvation.rikkahub.debug`；`release` 变体用 debug 签名（`signingConfigs.getByName("debug")`）
+- **ABI 拆分包**：默认只打 `arm64-v8a`；加 `-PallAbis` 打全 ABI。APK 输出在 `app/build/outputs/apk/{debug|release}/app-arm64-v8a-{debug|release}.apk`
+- `web` 模块 `preBuild` 会执行 `pnpm run build` 构建 `web-ui/` 并复制静态资源，**需要本地可用 `pnpm`**（Windows 走 `cmd /c pnpm run build`）；该任务只 build 不 install，需先 `pnpm install --frozen-lockfile`
+- `material3/material-color-utilities` 是 git 子模块，clone 需 `--recursive`
+- Room schema 由 KSP 导出到 `app/schemas`，`androidTest` 用它做 migration 测试
+- 签名配置在 `local.properties`（已 gitignore）；CI（`.github/workflows/daily-build.yml`）通过 secrets 解码 keystore 并写入
 
 ## Coding Style & Naming Conventions
 
@@ -33,55 +52,52 @@
 - 单元测试：`FooTest.kt`
 - 仪器测试：`FooInstrumentedTest.kt` 或 `*Test.kt`
 
+`ai` 模块的 SSE 流式测试依赖 `ai/src/test/resources/stream-traces/` 下的 `events.jsonl`，由 `trace-cli`（bun）录制生成；新增 provider 流式场景需配套生成 trace + `expected.json` 并注册到 `StreamTraceReplayTest`。
+
 ## Module Structure
 
-- **app**: Main application module with UI, ViewModels, and core logic
+- **app**: Main application module with UI, ViewModels, and core logic（内含 `:app:baselineprofile` 子模块）
 - **ai**: AI SDK abstraction layer for different providers (OpenAI, Google, Anthropic)
 - **common**: Common utilities and extensions
 - **document**: Document parsing module for handling PDF, DOCX, PPTX, and EPUB files
 - **highlight**: Code syntax highlighting implementation
+- **knowledge**: 知识库模块（Room 持久化 + `:ai`），namespace `me.rerere.knowledge`
 - **material3**: Material color utility extensions used by the app UI
 - **search**: Search functionality SDK for multiple providers (Exa, Tavily, Zhipu, Bing, Brave, SearXNG, and others)
 - **speech**: Speech module for TTS and ASR implementations
 - **web**: Embedded web server module that provides Ktor server startup function and hosts static frontend build files (
   built from web-ui/ React project)
 - **workspace**: Sandboxed per-workspace file system and shell execution environment exposed to the AI as tools.
+- **build-logic**: 约定插件 `rikkahub.android.library` / `rikkahub.android.library.compose`，feature 模块统一 apply
+
+仓库内还有两个独立工具（不在 Gradle 构建内）：
+
+- **trace-cli**（bun）：录制真实 Provider 的 SSE 响应生成 `ai` 模块可回放的 `events.jsonl`
+- **locale-tui**（uv）：Android `strings.xml` 翻译管理 TUI，`cd locale-tui && uv run python src/main.py`，改动字符串资源时用 `locale-tui-localization` skill
 
 ## Concepts
 
 - **Assistant**: An assistant configuration with system prompts, model parameters, and conversation isolation. Each
   assistant maintains its own settings including temperature, context size, custom headers, tools, memory options, regex
-  transformations, and prompt injections (mode/lorebook). Assistants provide isolated chat environments with specific
-  behaviors and capabilities. (app/src/main/java/me/rerere/rikkahub/data/model/Assistant.kt)
+  transformations, and prompt injections (mode/lorebook). (app/src/main/java/me/rerere/rikkahub/data/model/Assistant.kt)
 
-- **Conversation**: A persistent conversation thread between the user and an assistant. Each conversation maintains a
-  list of MessageNodes in a tree structure to support message branching, along with metadata like title, creation time,
-  update time, pin status, chat suggestions, optional conversation-level system prompt, and prompt injection bindings. (
-  app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
+- **Conversation**: A persistent conversation thread between the user and an assistant, keeping a list of MessageNodes
+  in a tree structure to support message branching, plus metadata like title, pin status, chat suggestions, optional
+  conversation-level system prompt, and prompt injection bindings. (app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
 
 - **UIMessage**: A platform-agnostic message abstraction that encapsulates chat messages with different types of content
-  parts (text, images, documents, reasoning, tool calls/results, etc.). Each message has a role (USER, ASSISTANT,
-  SYSTEM, TOOL), creation timestamp, model ID, token usage information, and optional annotations. UIMessages support
-  streaming updates through chunk merging. (ai/src/main/java/me/rerere/ai/ui/Message.kt)
+  parts (text, images, documents, reasoning, tool calls/results, etc.), with a role (USER, ASSISTANT, SYSTEM, TOOL),
+  token usage info, and streaming support through chunk merging. (ai/src/main/java/me/rerere/ai/ui/Message.kt)
 
-- **MessageNode**: A container holding one or more UIMessages to implement message branching functionality. Each node
-  maintains a list of alternative messages and tracks which message is currently selected (selectIndex). This enables
-  users to regenerate responses and switch between different conversation branches, creating a tree-like conversation
-  structure. (app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
+- **MessageNode**: A container holding one or more UIMessages to implement message branching; each node keeps a list of
+  alternative messages and tracks the selected one (selectIndex), enabling regeneration and branch switching.
+  (app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt)
 
-- **Message Transformer**: A pipeline mechanism for transforming messages before sending to AI providers (
-  InputMessageTransformer) or after receiving responses (OutputMessageTransformer). Transformers can modify message
-  content, add metadata, apply templates, handle special tags, convert formats, and perform OCR. Common transformers
-  include:
-  - TemplateTransformer: Apply Pebble templates to user messages with variables like time/date
-  - ThinkTagTransformer: Extract `<think>` tags and convert to reasoning parts
-  - RegexOutputTransformer: Apply regex replacements to assistant responses
-  - DocumentAsPromptTransformer: Convert document attachments to text prompts
-  - Base64ImageToLocalFileTransformer: Convert base64 images to local file references
-  - OcrTransformer: Perform OCR on images to extract text
-
-  Output transformers support `visualTransform()` for UI display during streaming and `onGenerationFinish()` for final
-  processing after generation completes.
+- **Message Transformer**: A pipeline for transforming messages before sending to AI providers (
+  InputMessageTransformer) or after receiving responses (OutputMessageTransformer). Common transformers include:
+  TemplateTransformer (Pebble templates), ThinkTagTransformer (`<think>` → reasoning), RegexOutputTransformer,
+  DocumentAsPromptTransformer, Base64ImageToLocalFileTransformer, OcrTransformer. Output transformers support
+  `visualTransform()` for streaming UI and `onGenerationFinish()` for final processing.
   (app/src/main/java/me/rerere/rikkahub/data/ai/transformers/Transformer.kt)
 
 ## Internationalization
