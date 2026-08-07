@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -1677,7 +1678,7 @@ class ChatService(
                     reasoningLevel = ReasoningLevel.OFF,  // 改写不需要推理，省 token/延迟
                 ),
             )
-            result.choices[0].message?.toText()?.trim()?.takeIf { it.isNotBlank() } ?: query
+            result.message.toText().trim().takeIf { it.isNotBlank() } ?: query
         } catch (e: CancellationException) {
             throw e  // 不吞取消，让生成链正常中止
         } catch (e: Exception) {
@@ -1715,7 +1716,7 @@ class ChatService(
                     reasoningLevel = ReasoningLevel.OFF,
                 ),
             )
-            result.choices[0].message?.toText()?.trim()?.takeIf { it.isNotBlank() }
+            result.message.toText().trim().takeIf { it.isNotBlank() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1750,7 +1751,7 @@ class ChatService(
                     reasoningLevel = ReasoningLevel.OFF,
                 ),
             )
-            result.choices[0].message?.toText()?.trim()
+            result.message.toText().trim()
                 ?.lines()
                 ?.map { it.trim() }
                 ?.filter { it.isNotBlank() && it != query }
@@ -1862,18 +1863,19 @@ class ChatService(
         conversationId: Uuid,
         conversation: Conversation,
         force: Boolean = false
-    ) {
+    ) = withContext(Dispatchers.IO) {
         val shouldGenerate = when {
             force -> true
             conversation.title.isBlank() -> true
             else -> false
         }
-        if (!shouldGenerate) return
+        if (!shouldGenerate) return@withContext
 
         runCatching {
             val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.titleModelId, fallback = settings.fastModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
+            val model = settings.findModelById(settings.titleModelId, fallback = settings.fastModelId)
+                ?: return@runCatching
+            val provider = model.findProvider(settings.providers) ?: return@runCatching
 
             val providerHandler = providerManager.getProviderByType(provider)
             val result = providerHandler.generateText(
@@ -1893,7 +1895,7 @@ class ChatService(
             conversationRepo.getConversationById(conversation.id)?.let {
                 saveConversation(
                     conversationId,
-                    it.copy(title = result.choices[0].message?.toText()?.trim() ?: "")
+                    it.copy(title = result.message.toText().trim())
                 )
             }
         }.onFailure {
@@ -1951,19 +1953,23 @@ class ChatService(
                 reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.promptOptimizeThinkingBudgetForScene(scene)),
             ),
         )
-        result.choices[0].message?.toText()?.trim().orEmpty()
+        result.message.toText().trim().orEmpty()
     }
 
     // ---- 生成建议 ----
 
-    suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) {
-        // 群组讨论不生成建议
-        if (conversation.isGroupDiscussion) return
+    suspend fun generateSuggestion(
+        conversationId: Uuid,
+        conversation: Conversation,
+    ) = withContext(Dispatchers.IO) {
         runCatching {
+            // 群组讨论不生成建议
+            if (conversation.isGroupDiscussion) return@runCatching
             val settings = settingsStore.settingsFlow.first()
-            if (!settings.enableSuggestion) return
-            val model = settings.findModelById(settings.suggestionModelId, fallback = settings.fastModelId) ?: return
-            val provider = model.findProvider(settings.providers) ?: return
+            if (!settings.enableSuggestion) return@runCatching
+            val model = settings.findModelById(settings.suggestionModelId, fallback = settings.fastModelId)
+                ?: return@runCatching
+            val provider = model.findProvider(settings.providers) ?: return@runCatching
 
             sessions[conversationId]?.let { session ->
                 updateConversation(
@@ -1986,8 +1992,8 @@ class ChatService(
                 params = backgroundTextGenerationParams(model),
             )
             val suggestions =
-                result.choices[0].message?.toText()?.split("\n")?.map { it.trim() }
-                    ?.filter { it.isNotBlank() } ?: emptyList()
+                result.message.toText().split("\n").map { it.trim() }
+                    .filter { it.isNotBlank() }
 
             val latestConversation = conversationRepo.getConversationById(conversationId)
                 ?: sessions[conversationId]?.state?.value
@@ -2066,7 +2072,7 @@ class ChatService(
                 params = backgroundTextGenerationParams(model),
             )
 
-            return result.choices[0].message?.toText()?.trim()
+            return result.message.toText().trim().takeIf { it.isNotBlank() }
                 ?: throw IllegalStateException("Failed to generate compressed summary")
         }
 

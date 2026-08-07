@@ -31,7 +31,6 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
-import me.rerere.ai.core.merge
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
@@ -42,7 +41,8 @@ import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
-import me.rerere.ai.ui.handleMessageChunk
+import me.rerere.ai.ui.StreamChunkHandler
+import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
 import me.rerere.ai.util.HttpException
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
@@ -591,6 +591,7 @@ class GenerationHandler(
         if (stream) {
             // 指数退避重试：只重试「还没收到任何内容」的失败（429/5xx/网络错误）。
             // 已开始输出后失败不重试，避免重复输出；重试不丢已保留的内容。
+            val streamChunkHandler = StreamChunkHandler(model)
             var attempt = 0
             var receivedAnyChunk = false
             while (true) {
@@ -601,16 +602,7 @@ class GenerationHandler(
                         params = params
                     ).collect {
                         receivedAnyChunk = true
-                        messages = messages.handleMessageChunk(chunk = it, model = model)
-                        it.usage?.let { usage ->
-                            messages = messages.mapIndexed { index, message ->
-                                if (index == messages.lastIndex) {
-                                    message.copy(usage = message.usage.merge(usage))
-                                } else {
-                                    message
-                                }
-                            }
-                        }
+                        messages = streamChunkHandler.handle(messages, it)
                         onUpdateMessages(messages)
                     }
                     break
@@ -643,23 +635,12 @@ class GenerationHandler(
             var attempt = 0
             while (true) {
                 try {
-                    val chunk = providerImpl.generateText(
+                    val result = providerImpl.generateText(
                         providerSetting = provider,
                         messages = messagesToSend,
                         params = params,
                     )
-                    messages = messages.handleMessageChunk(chunk = chunk, model = model)
-                    chunk.usage?.let { usage ->
-                        messages = messages.mapIndexed { index, message ->
-                            if (index == messages.lastIndex) {
-                                message.copy(
-                                    usage = message.usage.merge(usage)
-                                )
-                            } else {
-                                message
-                            }
-                        }
-                    }
+                    messages = messages.handleTextGenerationResult(result = result, model = model)
                     onUpdateMessages(messages)
                     break
                 } catch (e: CancellationException) {
@@ -839,6 +820,7 @@ class GenerationHandler(
 
             var messages = listOf(UIMessage.user(prompt))
             var translatedText = ""
+            val streamChunkHandler = StreamChunkHandler(model)
 
             providerHandler.streamText(
                 providerSetting = provider,
@@ -848,7 +830,7 @@ class GenerationHandler(
                     reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
                 ),
             ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk)
+                messages = streamChunkHandler.handle(messages, chunk)
                 translatedText = messages.lastOrNull()?.toText() ?: ""
 
                 if (translatedText.isNotBlank()) {
@@ -859,7 +841,7 @@ class GenerationHandler(
         } else {
             // Use Qwen MT model with special translation options
             val messages = listOf(UIMessage.user(sourceText))
-            val chunk = providerHandler.generateText(
+            val result = providerHandler.generateText(
                 providerSetting = provider,
                 messages = messages,
                 params = TextGenerationParams(
@@ -880,7 +862,7 @@ class GenerationHandler(
                     )
                 ),
             )
-            val translatedText = chunk.choices.firstOrNull()?.message?.toText() ?: ""
+            val translatedText = result.message.toText()
 
             if (translatedText.isNotBlank()) {
                 onStreamUpdate?.invoke(translatedText)

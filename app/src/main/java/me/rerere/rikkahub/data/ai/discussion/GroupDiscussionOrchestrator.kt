@@ -302,11 +302,10 @@ class GroupDiscussionOrchestrator(
                 messages = messages,
                 params = TextGenerationParams(model = model, temperature = 0.2f),
             )
-            val raw = chunk.choices.getOrNull(0)?.message
-                ?.parts
-                ?.filterIsInstance<UIMessagePart.Text>()
-                ?.joinToString("\n") { it.text }
-                .orEmpty()
+            val raw = chunk.message
+                .parts
+                .filterIsInstance<UIMessagePart.Text>()
+                .joinToString("\n") { it.text }
                 .trim()
             parseSelectorJson(raw)
         }.getOrNull()

@@ -41,6 +41,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.RerankingGenerationParams
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
@@ -157,14 +158,14 @@ fun ProviderConnectionTester(
                                         launch {
                                             runCatching {
                                                 chatNonStreaming = UiState.Loading
-                                                val chunk = provider.generateText(
+                                                val result = provider.generateText(
                                                     providerSetting = internalProvider,
                                                     messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
                                                     params = TextGenerationParams(model = model, customHeaders = model.customHeaders, customBody = model.customBodies)
                                                 )
-                                                val text = chunk.choices.firstOrNull()?.message?.parts
-                                                    ?.filterIsInstance<UIMessagePart.Text>()
-                                                    ?.joinToString("") { it.text } ?: ""
+                                                val text = result.message.parts
+                                                    .filterIsInstance<UIMessagePart.Text>()
+                                                    .joinToString("") { it.text }
                                                 chatNonStreaming = UiState.Success(text)
                                             }.onFailure { chatNonStreaming = UiState.Error(it) }
                                         }
@@ -177,9 +178,9 @@ fun ProviderConnectionTester(
                                                     params = TextGenerationParams(model = model, customHeaders = model.customHeaders, customBody = model.customBodies)
                                                 )
                                                 flow.collect { chunk ->
-                                                    chunk.choices.firstOrNull()?.delta?.parts
-                                                        ?.filterIsInstance<UIMessagePart.Text>()
-                                                        ?.forEach { chatStreamingText += it.text }
+                                                    if (chunk is StreamChunk.TextDelta) {
+                                                        chatStreamingText += chunk.text
+                                                    }
                                                 }
                                             }.onFailure { chatNonStreaming = UiState.Error(it) }
                                         }
@@ -187,16 +188,16 @@ fun ProviderConnectionTester(
                                             runCatching {
                                                 chatTools = UiState.Loading
                                                 val testTool = Tool(name = "get_current_time", description = "Get the current date and time.", execute = { emptyList() })
-                                                val chunk = provider.generateText(
+                                                val result = provider.generateText(
                                                     providerSetting = internalProvider,
                                                     messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("Use the get_current_time tool.")),
                                                     params = TextGenerationParams(model = model, tools = listOf(testTool), customHeaders = model.customHeaders, customBody = model.customBodies)
                                                 )
-                                                val message = chunk.choices.firstOrNull()?.message
-                                                val toolCall = message?.parts?.filterIsInstance<UIMessagePart.Tool>()?.firstOrNull()
-                                                val result = if (toolCall != null) "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
-                                                else "未调用工具，响应: " + (message?.parts?.filterIsInstance<UIMessagePart.Text>()?.joinToString("") { it.text } ?: "")
-                                                chatTools = UiState.Success(result)
+                                                val message = result.message
+                                                val toolCall = message.parts.filterIsInstance<UIMessagePart.Tool>().firstOrNull()
+                                                val resultText = if (toolCall != null) "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
+                                                else "未调用工具，响应: " + (message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text })
+                                                chatTools = UiState.Success(resultText)
                                             }.onFailure { chatTools = UiState.Error(it) }
                                         }
                                     }

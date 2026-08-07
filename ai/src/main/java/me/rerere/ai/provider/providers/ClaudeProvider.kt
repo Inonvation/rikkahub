@@ -34,11 +34,12 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.ImageGenerationItem
-import me.rerere.ai.ui.MessageChunk
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.ClaudeReasoningMetadata
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
@@ -111,7 +112,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): MessageChunk = withContext(Dispatchers.IO) {
+    ): TextGenerationResult = withContext(Dispatchers.IO) {
         val requestBody = buildMessageRequest(providerSetting, messages, params)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
@@ -139,17 +140,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val stopReason = bodyJson["stop_reason"]?.jsonPrimitive?.contentOrNull ?: "unknown"
         val usage = parseTokenUsage(bodyJson)
 
-        MessageChunk(
+        TextGenerationResult(
             id = id,
             model = model,
-            choices = listOf(
-                UIMessageChoice(
-                    index = 0,
-                    delta = null,
-                    message = parseMessage(content),
-                    finishReason = stopReason
-                )
-            ),
+            message = parseMessage(content),
+            finishReason = stopReason,
             usage = usage
         )
     }
@@ -158,7 +153,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = callbackFlow {
+    ): Flow<StreamChunk> = callbackFlow {
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
@@ -176,6 +171,16 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             Log.i(TAG, "streamText: $it")
         }
 
+        val decoder = ClaudeStreamDecoder()
+
+        fun sendChunks(chunks: Iterable<StreamChunk>) {
+            chunks.forEach { chunk ->
+                trySend(chunk).onFailure { e ->
+                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                }
+            }
+        }
+
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -184,51 +189,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 data: String
             ) {
                 Log.d(TAG, "onEvent: type=$type, data=$data")
-                if (data == "[DONE]") {
-                    return
-                }
-
-                val dataJson = json.parseToJsonElement(data).jsonObject
-                val deltaMessage = parseMessage(buildJsonArray {
-                    val contentBlockObj = dataJson["content_block"]?.jsonObject
-                    val deltaObj = dataJson["delta"]?.jsonObject
-                    if (contentBlockObj != null) {
-                        add(contentBlockObj)
-                    }
-                    if (deltaObj != null) {
-                        add(deltaObj)
-                    }
-                })
-                val tokenUsage = parseTokenUsage(dataJson)
-                val messageChunk = MessageChunk(
-                    id = id ?: "",
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = deltaMessage,
-                            message = null,
-                            finishReason = null
-                        )
-                    ),
-                    usage = tokenUsage
-                )
-
-                trySend(messageChunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
-                }
-
-                when (type) {
-                    "message_stop" -> {
-                        Log.d(TAG, "Stream ended")
-                        close()
-                    }
-
-                    "error" -> {
-                        val eventData = json.parseToJsonElement(data).jsonObject
-                        val error = eventData["error"]?.parseErrorDetail()
-                        close(error)
-                    }
+                try {
+                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                    sendChunks(result.chunks)
+                    if (result.completed) close()
+                } catch (e: Throwable) {
+                    close(e)
                 }
             }
 
@@ -257,6 +223,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onClosed(eventSource: EventSource) {
+                sendChunks(decoder.onClosed())
                 close()
             }
         }

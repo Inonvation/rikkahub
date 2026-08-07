@@ -20,10 +20,11 @@ import me.rerere.ai.core.sum
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.handleMessageChunk
 
 private const val TAG = "SubAgentLoop"
 
@@ -94,15 +95,18 @@ suspend fun subAgentRunLoop(
             // 每步重置 Reasoning delta 提取基线：只回调本步新增的思考增量
             var lastReasoningLen = 0
             var stepUsage: TokenUsage? = null
+            val streamChunkHandler = StreamChunkHandler(params.model)
             providerImpl.streamText(
                 providerSetting = providerSetting,
                 messages = messages,
                 params = params,
             ).collect { chunk ->
-                messages = messages.handleMessageChunk(chunk = chunk, model = params.model)
+                messages = streamChunkHandler.handle(messages, chunk)
                 lastMessages = messages
-                // 收集本步 usage（chunk 级增量，merge 累积后回调调用方）
-                chunk.usage?.let { stepUsage = stepUsage.merge(it) }
+                // 收集本步 usage（StreamChunk.Usage 携带累计用量，merge 累积后回调调用方）
+                if (chunk is StreamChunk.Usage) {
+                    stepUsage = stepUsage.merge(chunk.usage)
+                }
                 // 实时上推结构化消息（供 UI 重建思维链时间线）
                 onMessagesUpdate(messages)
                 // 提取本轮新增文本 delta，实时回调

@@ -29,14 +29,15 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.registry.ModelRegistry
-import me.rerere.ai.ui.MessageChunk
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
@@ -73,7 +74,7 @@ class ResponseAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): MessageChunk {
+    ): TextGenerationResult {
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
@@ -96,7 +97,7 @@ class ResponseAPI(
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw HttpException("Failed to get response: ${response.code} ${response.body.string()}", code = response.code)
+            throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -111,7 +112,7 @@ class ResponseAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<MessageChunk> = callbackFlow {
+    ): Flow<StreamChunk> = callbackFlow {
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
@@ -131,6 +132,16 @@ class ResponseAPI(
 
         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
+        val decoder = ResponseApiStreamDecoder()
+
+        fun sendChunks(chunks: Iterable<StreamChunk>) {
+            chunks.forEach { chunk ->
+                trySend(chunk).onFailure { e ->
+                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                }
+            }
+        }
+
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -138,20 +149,13 @@ class ResponseAPI(
                 type: String?,
                 data: String
             ) {
-                if (data == "[DONE]") {
-                    close()
-                    return
-                }
                 Log.d(TAG, "onEvent: $id/$type $data")
-                val eventJson = json.parseToJsonElement(data).jsonObject
-                val chunk = parseResponseDelta(eventJson)
-                if (chunk != null) {
-                    trySend(chunk).onFailure { e ->
-                        Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
-                    }
-                }
-                if (type == "response.completed") {
-                    close()
+                try {
+                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                    sendChunks(result.chunks)
+                    if (result.completed) close()
+                } catch (e: Throwable) {
+                    close(e)
                 }
             }
 
@@ -181,6 +185,7 @@ class ResponseAPI(
             }
 
             override fun onClosed(eventSource: EventSource) {
+                sendChunks(decoder.onClosed())
                 close()
             }
         }
@@ -291,7 +296,14 @@ class ResponseAPI(
 
     internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
         messages
-            .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
+            .filter { message ->
+                message.role != MessageRole.SYSTEM && (
+                    message.isValidToUpload() || message.parts.any { part ->
+                        part is UIMessagePart.Reasoning &&
+                            part.metadataAs<OpenAIReasoningMetadata>()?.encryptedContent != null
+                    }
+                )
+            }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
                     addAssistantItems(message)
@@ -460,222 +472,7 @@ class ResponseAPI(
         })
     }
 
-    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
-        val chunkType = jsonObject["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-
-        when (chunkType) {
-            "response.output_text.delta" -> {
-                return MessageChunk(
-                    id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = UIMessage.assistant(
-                                jsonObject["delta"]?.jsonPrimitive?.contentOrNull ?: ""
-                            ),
-                            message = null,
-                            finishReason = null
-                        )
-                    )
-                )
-            }
-
-            "response.reasoning_summary_text.delta", "response.reasoning_text.delta" -> {
-                return MessageChunk(
-                    id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = UIMessage(
-                                role = MessageRole.ASSISTANT,
-                                parts = listOf(
-                                    UIMessagePart.Reasoning(
-                                        reasoning = jsonObject["delta"]?.jsonPrimitive?.contentOrNull
-                                            ?: "",
-                                        createdAt = Clock.System.now(),
-                                        finishedAt = null
-                                    )
-                                )
-                            ),
-                            message = null,
-                            finishReason = null
-                        )
-                    )
-                )
-            }
-
-            "response.output_item.added" -> {
-                val item = jsonObject["item"]?.jsonObject ?: error("chunk item not found")
-                val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
-                if (type == "function_call") {
-                    return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                message = null,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Tool(
-                                            toolCallId = id,
-                                            toolName = item["name"]?.jsonPrimitive?.content ?: "",
-                                            input = item["arguments"]?.jsonPrimitive?.content
-                                                ?: "",
-                                            output = emptyList()
-                                        )
-                                    )
-                                ),
-                                finishReason = null
-                            )
-                        )
-                    )
-                } else if (type == "image_generation_call") {
-                    return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(UIMessagePart.Image(url = ""))
-                                ),
-                                message = null,
-                                finishReason = null
-                            )
-                        )
-                    )
-                } else if (type == "reasoning") {
-                    val encryptedContent = item["encrypted_content"]?.jsonPrimitive?.content
-                    return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                message = null,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Reasoning(
-                                            reasoning = "",
-                                            createdAt = Clock.System.now(),
-                                            finishedAt = null,
-                                            metadata = OpenAIReasoningMetadata(
-                                                reasoningId = id,
-                                                encryptedContent = encryptedContent,
-                                            ).toMetadata()
-                                        )
-                                    )
-                                ),
-                                finishReason = null,
-                            )
-                        )
-                    )
-                }
-            }
-
-            "response.output_item.done" -> {
-                val item = jsonObject["item"]?.jsonObject ?: error("chunk item not found")
-                val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
-                if (type == "reasoning") {
-                    val encryptedContent = item["encrypted_content"]?.jsonPrimitive?.content
-                    return MessageChunk(
-                        id = id,
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                message = null,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Reasoning(
-                                            reasoning = "",
-                                            createdAt = Clock.System.now(),
-                                            finishedAt = null,
-                                            metadata = OpenAIReasoningMetadata(
-                                                reasoningId = id,
-                                                encryptedContent = encryptedContent,
-                                            ).toMetadata()
-                                        )
-                                    )
-                                ),
-                                finishReason = null,
-                            )
-                        )
-                    )
-                } else if (type == "image_generation_call") {
-                    val result = item["result"]?.jsonPrimitive?.content ?: error("result not found")
-                    return MessageChunk(
-                        id = item["id"]?.jsonPrimitive?.content ?: error("item_id not found"),
-                        model = "",
-                        choices = listOf(
-                            UIMessageChoice(
-                                index = 0,
-                                delta = UIMessage(
-                                    role = MessageRole.ASSISTANT,
-                                    parts = listOf(
-                                        UIMessagePart.Image(url = result)
-                                    )
-                                ),
-                                message = null,
-                                finishReason = null
-                            )
-                        )
-                    )
-                }
-            }
-
-            "response.function_call_arguments.done" -> {
-                val toolCallId =
-                    jsonObject["item_id"]?.jsonPrimitive?.content ?: error("item_id not found")
-                val arguments =
-                    jsonObject["arguments"]?.jsonPrimitive?.content ?: error("arguments not found")
-                return MessageChunk(
-                    id = toolCallId,
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = UIMessage(
-                                role = MessageRole.ASSISTANT,
-                                parts = listOf(
-                                    UIMessagePart.Tool(
-                                        toolCallId = toolCallId,
-                                        toolName = "",
-                                        input = arguments,
-                                        output = emptyList()
-                                    )
-                                )
-                            ),
-                            message = null,
-                            finishReason = null
-                        )
-                    ),
-                )
-            }
-
-            "response.completed" -> {
-                return MessageChunk(
-                    id = jsonObject["item_id"]?.jsonPrimitive?.contentOrNull ?: "",
-                    model = "",
-                    choices = emptyList(),
-                    usage = parseTokenUsage(jsonObject["response"]?.jsonObject?.get("usage")?.jsonObject)
-                )
-            }
-        }
-
-        return null
-    }
-
-    private fun parseResponseOutput(jsonObject: JsonObject): MessageChunk {
+    private fun parseResponseOutput(jsonObject: JsonObject): TextGenerationResult {
         println(jsonObject)
         val outputs = jsonObject["output"]?.jsonArray ?: error("output not found")
         val parts = arrayListOf<UIMessagePart>()
@@ -739,20 +536,14 @@ class ResponseAPI(
             }
         }
 
-        return MessageChunk(
+        return TextGenerationResult(
             id = jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: "",
             model = jsonObject["model"]?.jsonPrimitive?.contentOrNull ?: "",
-            choices = listOf(
-                UIMessageChoice(
-                    index = 0,
-                    message = UIMessage(
-                        role = MessageRole.ASSISTANT,
-                        parts = parts,
-                    ),
-                    finishReason = null,
-                    delta = null
-                )
+            message = UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = parts,
             ),
+            finishReason = jsonObject["status"]?.jsonPrimitive?.contentOrNull,
             usage = parseTokenUsage(jsonObject["usage"]?.jsonObject)
         )
     }
@@ -794,4 +585,3 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
         else -> ResponseProviderCapabilities()
     }
 }
-
