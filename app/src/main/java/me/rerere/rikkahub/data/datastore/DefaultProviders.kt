@@ -19,6 +19,13 @@ import kotlin.uuid.Uuid
 
 val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
+/**
+ * 「未选择模型」的确定性哨兵（全零 UUID，findModelById 永不命中）。
+ * 用于 imageGenerationModelId / ocrModelId：未配置时保持稳定，不会每次
+ * 重算生成随机 UUID（否则进入会话时模型选择会随机跳变，或被随机值固化）。
+ */
+val UNSET_MODEL_ID = Uuid.parse("00000000-0000-0000-0000-000000000000")
+
 val DEFAULT_PROVIDERS = listOf(
     ProviderSetting.OpenAI(
         id = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"),

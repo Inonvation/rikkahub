@@ -61,6 +61,18 @@ object SettingsJsonMigrator {
                 }
             }
 
+            // V5: 刷新内置导师的 systemPrompt 为代码最新模板
+            root["assistants"]?.let { element ->
+                val migrated = refreshTutorPrompts(JsonInstant.encodeToString(element))
+                root["assistants"] = JsonInstant.parseToJsonElement(migrated)
+            }
+
+            // V6: 用代码最新默认配置整体刷新内置导师
+            root["assistants"]?.let { element ->
+                val migrated = refreshBuiltinAssistants(JsonInstant.encodeToString(element))
+                root["assistants"] = JsonInstant.parseToJsonElement(migrated)
+            }
+
             JsonInstant.encodeToString(JsonObject(root))
         }.onFailure {
             Log.e(TAG, "migrate: Failed to migrate settings JSON, using original", it)

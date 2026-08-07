@@ -46,6 +46,8 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -74,7 +76,9 @@ private val Context.settingsStore by preferencesDataStore(
             PreferenceStoreV1Migration(),
             PreferenceStoreV2Migration(),
             PreferenceStoreV3Migration(),
-            PreferenceStoreV4Migration()
+            PreferenceStoreV4Migration(),
+            PreferenceStoreV5Migration(),
+            PreferenceStoreV6Migration()
         )
     }
 )
@@ -86,7 +90,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
-        const val CURRENT_DATA_VERSION = 4
+        const val CURRENT_DATA_VERSION = 6
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 
@@ -233,12 +237,12 @@ class SettingsStore(
                     ?: DEFAULT_AUTO_MODEL_ID,
                 enableSuggestion = preferences[ENABLE_SUGGESTION] != false,
                 suggestionModelId = preferences[SUGGESTION_MODEL]?.let { Uuid.parse(it) },
-                imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+                imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: UNSET_MODEL_ID,
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                 translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
-                ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+                ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: UNSET_MODEL_ID,
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
@@ -313,7 +317,7 @@ class SettingsStore(
                 } ?: emptyList(),
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
-                webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
+                webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] != false,
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
@@ -505,7 +509,9 @@ class SettingsStore(
 
             preferences[SEARCH_SERVICES] = JsonInstant.encodeToString(settings.searchServices)
             preferences[SEARCH_COMMON] = JsonInstant.encodeToString(settings.searchCommonOptions)
-            preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, settings.searchServices.size - 1)
+            // 空列表时 coerceIn(0, -1) 会抛异常导致每次 update 都崩，先判空
+            preferences[SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) 0
+            else settings.searchServiceSelected.coerceIn(0, settings.searchServices.size - 1)
             preferences[SEARCH_ENABLED_SERVICES] = JsonInstant.encodeToString(
                 settings.enabledSearchServiceIds.ifEmpty {
                     settings.searchServices.getOrNull(settings.searchServiceSelected)?.let { listOf(it.id) }
@@ -707,7 +713,7 @@ data class Settings(
     val chatModelId: Uuid = Uuid.random(),
     val fastModelId: Uuid = Uuid.random(),
     val titleModelId: Uuid? = null,
-    val imageGenerationModelId: Uuid = Uuid.random(),
+    val imageGenerationModelId: Uuid = UNSET_MODEL_ID,
     val titlePrompt: String = DEFAULT_TITLE_PROMPT,
     val translateModeId: Uuid = Uuid.random(),
     val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
@@ -715,7 +721,7 @@ data class Settings(
     val enableSuggestion: Boolean = true,
     val suggestionModelId: Uuid? = null,
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
-    val ocrModelId: Uuid = Uuid.random(),
+    val ocrModelId: Uuid = UNSET_MODEL_ID,
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
@@ -736,6 +742,7 @@ data class Settings(
     val searchServiceSelected: Int = 0,
     val enabledSearchServiceIds: List<kotlin.uuid.Uuid> = emptyList(),
     val mcpServers: List<McpServerConfig> = emptyList(),
+    val enableMcpManager: Boolean = true,
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
     val ttsProviders: List<TTSProviderSetting> = DEFAULT_TTS_PROVIDERS,
@@ -749,7 +756,7 @@ data class Settings(
     val skillOrder: List<String> = emptyList(),
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
-    val webServerJwtEnabled: Boolean = false,
+    val webServerJwtEnabled: Boolean = true,
     val webServerAccessPassword: String = "",
     val webServerLocalhostOnly: Boolean = false,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
@@ -1108,7 +1115,7 @@ val DEFAULT_MODE_INJECTIONS = listOf(
         id = Uuid.parse("e1e2e3e4-d5e6-f7a8-b9c0-d1e2f3a4b5c6"),
         content = """
             English study mode active. Be concise and direct — no filler words.
-            - Word lookup: **{word}** /{pronunciation}/, definitions with Chinese, examples, memory aid, collocations, 考研提示. Call `save_vocabulary` after.
+            - Word lookup: # **{word}** /{pronunciation}/ as H1, then ## 释义 / ## 例句 / ## 助记 / ## 搭配 / ## 近义词与反义词 / ## 考研提示. Call `save_vocabulary` after.
             - Translation: direct + 2-3 alternatives + key vocabulary. No preamble.
             - Exam questions: identify type → guide step-by-step → explain reasoning → summarize.
             - Grammar in Chinese, rest in English. Use Markdown.
