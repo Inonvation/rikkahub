@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
@@ -12,6 +13,10 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.sync.BackupPreviewAnalyzer
+import me.rerere.rikkahub.data.sync.CloudSyncCoordinator
+import me.rerere.rikkahub.data.sync.SyncConfig
+import me.rerere.rikkahub.data.sync.SyncState
+import me.rerere.rikkahub.data.sync.SyncStateStore
 import me.rerere.rikkahub.data.sync.importer.ChatboxImporter
 import me.rerere.rikkahub.data.sync.importer.CherryStudioProviderImporter
 import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
@@ -28,6 +33,8 @@ class BackupVM(
     private val webDavSync: WebDavSync,
     private val s3Sync: S3Sync,
     private val conversationRepository: ConversationRepository,
+    private val cloudSyncCoordinator: CloudSyncCoordinator,
+    private val syncStateStore: SyncStateStore,
 ) : ViewModel() {
     val settings = settingsStore.settingsFlow.stateIn(
         scope = viewModelScope,
@@ -44,6 +51,19 @@ class BackupVM(
     /** 待导入备份的预览描述（在确认对话框中展示），null 表示无预览 */
     val backupPreview = MutableStateFlow<String?>(null)
 
+    /** 云同步状态（来自 SyncStateStore，供 SyncTab 展示） */
+    val syncState = syncStateStore.stateFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = SyncState()
+    )
+
+    /** 云同步进行中标志（UI 按钮禁用/加载） */
+    val syncRunning = MutableStateFlow(false)
+
+    /** 云同步结果提示（成功/失败文案），null 表示无提示 */
+    val syncMessage = MutableStateFlow<String?>(null)
+
     init {
         loadBackupFileItems()
         loadS3BackupFileItems()
@@ -52,6 +72,31 @@ class BackupVM(
     fun updateSettings(settings: Settings) {
         viewModelScope.launch {
             settingsStore.update(settings)
+        }
+    }
+
+    fun updateSyncConfig(update: (SyncConfig) -> SyncConfig) {
+        viewModelScope.launch {
+            val current = settingsStore.settingsFlowRaw.first()
+            settingsStore.update(current.copy(syncConfig = update(current.syncConfig)))
+        }
+    }
+
+    /** 手动立即同步（force=true 忽略最小间隔）。 */
+    fun syncNow() {
+        viewModelScope.launch {
+            if (syncRunning.value) return@launch
+            syncRunning.value = true
+            syncMessage.value = null
+            runCatching {
+                if (cloudSyncCoordinator.syncIfNeeded(force = true)) {
+                    "同步完成"
+                } else {
+                    "未触发同步（未启用/离线/已在同步中）"
+                }
+            }.onSuccess { syncMessage.value = it }
+                .onFailure { syncMessage.value = "同步失败: ${it.message}" }
+            syncRunning.value = false
         }
     }
 
@@ -77,12 +122,22 @@ class BackupVM(
     }
 
     suspend fun backup() {
-        webDavSync.backup(settings.value.webDavConfig)
+        backupProgress.value = "正在准备备份…"
+        webDavSync.backup(
+            settings.value.webDavConfig,
+            onProgress = { backupProgress.value = it }
+        )
+        backupProgress.value = "备份完成"
         recordBackupTime()
     }
 
     suspend fun restore(item: WebDavBackupItem) {
-        webDavSync.restore(config = settings.value.webDavConfig, item = item)
+        webDavSync.restore(
+            config = settings.value.webDavConfig,
+            item = item,
+            onProgress = { backupProgress.value = it }
+        )
+        backupProgress.value = "恢复完成"
     }
 
     suspend fun deleteWebDavBackupFile(item: WebDavBackupItem) {
@@ -201,12 +256,22 @@ class BackupVM(
     }
 
     suspend fun backupToS3() {
-        s3Sync.backupToS3(settings.value.s3Config)
+        backupProgress.value = "正在准备备份…"
+        s3Sync.backupToS3(
+            settings.value.s3Config,
+            onProgress = { backupProgress.value = it }
+        )
+        backupProgress.value = "备份完成"
         recordBackupTime()
     }
 
     suspend fun restoreFromS3(item: S3BackupItem) {
-        s3Sync.restoreFromS3(config = settings.value.s3Config, item = item)
+        s3Sync.restoreFromS3(
+            config = settings.value.s3Config,
+            item = item,
+            onProgress = { backupProgress.value = it }
+        )
+        backupProgress.value = "恢复完成"
     }
 
     suspend fun deleteS3BackupFile(item: S3BackupItem) {

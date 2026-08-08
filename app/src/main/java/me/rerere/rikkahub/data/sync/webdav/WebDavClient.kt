@@ -31,12 +31,45 @@ import java.time.format.DateTimeFormatter
 
 private const val TAG = "WebDavClient"
 
+/**
+ * 坚果云兼容：
+ * 1. host 为 dav.jianguoyun.com 且未配置 path 时自动补 /dav 前缀。
+ * 2. 429/503 限流冷却：以 base URL 为 key 记录 temporaryBlockUntil，冷却期内跳过请求。
+ */
 class WebDavClient(
     private val config: WebDavConfig,
     private val httpClient: HttpClient,
 ) {
+    companion object {
+        /** 坚果云 host 检测（buildUrl 与测试共用）。 */
+        internal fun isJianguoyunHost(base: String): Boolean {
+            return runCatching {
+                val host = java.net.URI(base).host?.lowercase() ?: return false
+                host == "dav.jianguoyun.com" || host.endsWith(".dav.jianguoyun.com")
+            }.getOrDefault(false)
+        }
+
+        /**
+         * 坚果云 base URL 规范化：host 为 dav.jianguoyun.com 时确保以 `/dav/` 结尾。
+         * - 裸域名自动补 `/dav/`
+         * - 已含 `/dav`（有/无尾斜杠）统一为 `/dav/`
+         * 坚果云根集合要求尾斜杠，否则 PROPFIND 返回 410 Gone。
+         */
+        internal fun normalizeBase(base: String, path: String): String {
+            val trimmed = base.trimEnd('/')
+            if (path.isBlank() && isJianguoyunHost(trimmed)) {
+                val withDav = if (trimmed.endsWith("/dav")) trimmed else "$trimmed/dav"
+                return "$withDav/"
+            }
+            return trimmed
+        }
+
+        /** base URL -> 冷却截止时间（ms）。跨实例共享，避免多次 429 打满限流。 */
+        private val temporaryBlockUntil = HashMap<String, Long>()
+    }
+
     private fun WebDavConfig.buildUrl(vararg segments: String): String {
-        val base = url.trimEnd('/')
+        val base = normalizeBase(url, path).trimEnd('/')
         val pathSegments = listOfNotNull(
             path.takeIf { it.isNotBlank() }?.trim('/'),
             *segments.map { it.trim('/') }.toTypedArray()
@@ -48,12 +81,36 @@ class WebDavClient(
             "$base/${pathSegments.joinToString("/")}"
         }
     }
+
+    /** 请求前检查：冷却期内直接抛异常（调用方将同步失败并记 pendingSync）。 */
+    private fun checkNotBlocked() {
+        val until = temporaryBlockUntil[config.url.trimEnd('/')] ?: return
+        if (System.currentTimeMillis() < until) {
+            throw WebDavException(
+                "Throttled by server, cooling down until $until",
+                429,
+                "rate limited",
+            )
+        }
+        temporaryBlockUntil.remove(config.url.trimEnd('/'))
+    }
+
+    /** 请求后检查限流：429/503 时按 Retry-After（或默认 60s）记录冷却。 */
+    private fun recordThrottleIfNeeded(response: HttpResponse) {
+        val status = response.status.value
+        if (status != 429 && status != 503) return
+        val retryAfterSec = response.headers["Retry-After"]?.toLongOrNull()
+        val cooldownMs = (retryAfterSec?.coerceAtLeast(0) ?: 60L) * 1000L
+        temporaryBlockUntil[config.url.trimEnd('/')] = System.currentTimeMillis() + cooldownMs
+        Log.w(TAG, "server throttle $status, cooldown ${cooldownMs}ms")
+    }
     suspend fun put(
         path: String,
         data: ByteArray,
         contentType: String = "application/octet-stream",
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "PUT: $url")
 
@@ -67,6 +124,7 @@ class WebDavClient(
                 setBody(data)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "put failed: ${response.status} - $errorBody")
@@ -84,6 +142,7 @@ class WebDavClient(
         contentType: String = "application/octet-stream",
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "PUT (stream file): $url")
 
@@ -98,6 +157,7 @@ class WebDavClient(
                 setBody(file.readChannel())
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "put(file) failed: ${response.status} - $errorBody")
@@ -111,6 +171,7 @@ class WebDavClient(
 
     suspend fun get(path: String): Result<ByteArray> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "GET: $url")
 
@@ -119,6 +180,7 @@ class WebDavClient(
                 basicAuth(config.username, config.password)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "get failed: ${response.status} - $errorBody")
@@ -132,6 +194,7 @@ class WebDavClient(
 
     suspend fun getStream(path: String): Result<InputStream> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "GET (stream): $url")
 
@@ -140,6 +203,7 @@ class WebDavClient(
                 basicAuth(config.username, config.password)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "getStream failed: ${response.status} - $errorBody")
@@ -152,6 +216,7 @@ class WebDavClient(
 
     suspend fun downloadToFile(path: String, targetFile: File): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "GET (download to file): $url")
 
@@ -159,6 +224,7 @@ class WebDavClient(
                 method = HttpMethod.Get
                 basicAuth(config.username, config.password)
             }.execute { response ->
+                recordThrottleIfNeeded(response)
                 if (!response.status.isSuccess()) {
                     val errorBody = response.bodyAsText()
                     Log.e(TAG, "downloadToFile failed: ${response.status} - $errorBody")
@@ -183,6 +249,7 @@ class WebDavClient(
 
     suspend fun delete(path: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "DELETE: $url")
 
@@ -191,6 +258,7 @@ class WebDavClient(
                 basicAuth(config.username, config.password)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "delete failed: ${response.status} - $errorBody")
@@ -204,6 +272,7 @@ class WebDavClient(
 
     suspend fun head(path: String): Result<WebDavResourceInfo> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "HEAD: $url")
 
@@ -212,6 +281,7 @@ class WebDavClient(
                 basicAuth(config.username, config.password)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess()) {
                 throw WebDavException("Resource not found: ${response.status}", response.status.value, "")
             }
@@ -222,6 +292,7 @@ class WebDavClient(
                 contentLength = response.headers["Content-Length"]?.toLongOrNull() ?: 0,
                 contentType = response.headers["Content-Type"] ?: "application/octet-stream",
                 lastModified = parseLastModified(response.headers["Last-Modified"]),
+                etag = response.headers["ETag"]?.trim('"'),
                 isCollection = false,
             )
         }
@@ -229,6 +300,7 @@ class WebDavClient(
 
     suspend fun mkcol(path: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "MKCOL: $url")
 
@@ -237,6 +309,7 @@ class WebDavClient(
                 basicAuth(config.username, config.password)
             }
 
+            recordThrottleIfNeeded(response)
             // 201 Created or 405 Method Not Allowed (already exists) are acceptable
             if (!response.status.isSuccess() && response.status != HttpStatusCode.MethodNotAllowed) {
                 val errorBody = response.bodyAsText()
@@ -254,6 +327,7 @@ class WebDavClient(
         depth: Int = 1,
     ): Result<List<WebDavResourceInfo>> = withContext(Dispatchers.IO) {
         runCatching {
+            checkNotBlocked()
             val url = config.buildUrl(path)
             Log.d(TAG, "PROPFIND: $url, depth: $depth")
 
@@ -264,6 +338,7 @@ class WebDavClient(
                 |    <D:getcontentlength/>
                 |    <D:getcontenttype/>
                 |    <D:getlastmodified/>
+                |    <D:getetag/>
                 |    <D:resourcetype/>
                 |  </D:prop>
                 |</D:propfind>
@@ -279,6 +354,7 @@ class WebDavClient(
                 setBody(propfindBody)
             }
 
+            recordThrottleIfNeeded(response)
             if (!response.status.isSuccess() && response.status.value != 207) {
                 val errorBody = response.bodyAsText()
                 Log.e(TAG, "propfind failed: ${response.status} - $errorBody")
@@ -333,6 +409,7 @@ class WebDavClient(
         var currentContentLength: Long = 0
         var currentContentType: String? = null
         var currentLastModified: Instant? = null
+        var currentEtag: String? = null
         var currentIsCollection = false
         var currentTag: String? = null
         var inResponse = false
@@ -349,6 +426,7 @@ class WebDavClient(
                             currentContentLength = 0
                             currentContentType = null
                             currentLastModified = null
+                            currentEtag = null
                             currentIsCollection = false
                         }
                         "collection" -> {
@@ -366,6 +444,7 @@ class WebDavClient(
                             "getcontentlength" -> currentContentLength = text.toLongOrNull() ?: 0
                             "getcontenttype" -> currentContentType = text
                             "getlastmodified" -> currentLastModified = parseLastModified(text)
+                            "getetag" -> currentEtag = text.trim('"')
                         }
                     }
                 }
@@ -383,6 +462,7 @@ class WebDavClient(
                                 contentLength = currentContentLength,
                                 contentType = currentContentType ?: "application/octet-stream",
                                 lastModified = currentLastModified,
+                                etag = currentEtag,
                                 isCollection = currentIsCollection,
                             )
                         )
@@ -426,6 +506,7 @@ data class WebDavResourceInfo(
     val contentLength: Long,
     val contentType: String,
     val lastModified: Instant?,
+    val etag: String?,
     val isCollection: Boolean,
 )
 

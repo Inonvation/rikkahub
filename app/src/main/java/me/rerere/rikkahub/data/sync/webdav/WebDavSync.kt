@@ -13,6 +13,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import me.rerere.rikkahub.data.sync.BackupSplitter
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
@@ -37,19 +38,6 @@ class WebDavSync(
         return WebDavClient(config, httpClient)
     }
 
-    /**
-     * 备份前把未落盘的 WAL 合并进主库文件，保证备份的 .db 自洽一致，
-     * 避免备份到「主库 + 未合并 wal」的不一致组合（恢复后表现为 database disk image is malformed）。
-     * checkpoint 失败不阻断备份（仍有 db/wal/shm 三件套兜底），只记日志。
-     */
-    private fun checkpointWal() {
-        try {
-            database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
-        } catch (e: Exception) {
-            Log.w(TAG, "checkpointWal: WAL checkpoint failed, backup may be inconsistent", e)
-        }
-    }
-
     suspend fun testConnection(config: WebDavConfig) = withContext(Dispatchers.IO) {
         val client = getClient(config)
         // Test by listing the root directory
@@ -57,21 +45,45 @@ class WebDavSync(
         Log.i(TAG, "testConnection: Connection successful")
     }
 
-    suspend fun backup(config: WebDavConfig) = withContext(Dispatchers.IO) {
-        val file = prepareBackupFile(config)
+    suspend fun backup(
+        config: WebDavConfig,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
+        val file = prepareBackupFile(config, onProgress)
         val client = getClient(config)
 
         // Ensure the backup directory exists
         client.ensureCollectionExists().getOrThrow()
 
-        // Upload the backup file
-        client.put(
-            path = file.name,
-            file = file,
-            contentType = "application/zip"
-        ).getOrThrow()
-
-        Log.i(TAG, "backup: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        if (BackupSplitter.needsSplit(file)) {
+            // 大文件分片上传（如坚果云 500MB 单文件上限 → 413）
+            onProgress?.invoke("文件较大，正在分片上传…")
+            val splitDir = File(context.cacheDir, "split_${System.currentTimeMillis()}")
+            splitDir.mkdirs()
+            try {
+                val parts = BackupSplitter.split(file, splitDir)
+                parts.forEachIndexed { index, part ->
+                    onProgress?.invoke("正在上传分片 ${index + 1}/${parts.size}…")
+                    client.put(
+                        path = BackupSplitter.partName(file.name, index + 1),
+                        file = part,
+                        contentType = "application/octet-stream"
+                    ).getOrThrow()
+                }
+                Log.i(TAG, "backup: Uploaded ${file.name} in ${parts.size} parts (${file.length().fileSizeToString()})")
+            } finally {
+                splitDir.deleteRecursively()
+            }
+        } else {
+            // 常规单文件上传
+            onProgress?.invoke("正在上传备份文件…")
+            client.put(
+                path = file.name,
+                file = file,
+                contentType = "application/zip"
+            ).getOrThrow()
+            Log.i(TAG, "backup: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        }
 
         // Clean up temp file
         file.delete()
@@ -85,32 +97,82 @@ class WebDavSync(
 
         val resources = client.list().getOrThrow()
 
+        // 分片文件 backup_x.zip.partN 聚合为父备份条目；常规 backup_x.zip 单独成条
+        val parts = resources.filter { BackupSplitter.partIndex(it.displayName) != null }
+        val partGroups = parts.groupBy { it.displayName.substringBeforeLast(".part") }
+
         resources
-            .filter { !it.isCollection && it.displayName.startsWith("backup_") && it.displayName.endsWith(".zip") }
-            .map { resource ->
-                WebDavBackupItem(
-                    href = resource.href,
-                    displayName = resource.displayName,
-                    size = resource.contentLength,
-                    lastModified = resource.lastModified ?: Instant.EPOCH
-                )
+            .filter { !it.isCollection && it.displayName.startsWith("backup_") }
+            .mapNotNull { resource ->
+                val baseName = resource.displayName
+                val group = partGroups[baseName] ?: emptyList()
+                if (BackupSplitter.partIndex(baseName) != null) {
+                    // 分片本身不作为独立条目
+                    null
+                } else if (group.isNotEmpty()) {
+                    // 分片备份：聚合 size，lastModified 取分片最晚者
+                    WebDavBackupItem(
+                        href = resource.href,
+                        displayName = baseName,
+                        size = group.sumOf { it.contentLength },
+                        lastModified = group.maxOf { it.lastModified ?: Instant.EPOCH }
+                    )
+                } else {
+                    WebDavBackupItem(
+                        href = resource.href,
+                        displayName = baseName,
+                        size = resource.contentLength,
+                        lastModified = resource.lastModified ?: Instant.EPOCH
+                    )
+                }
             }
             .sortedByDescending { it.lastModified }
     }
 
-    suspend fun restore(config: WebDavConfig, item: WebDavBackupItem) = withContext(Dispatchers.IO) {
+    suspend fun restore(
+        config: WebDavConfig,
+        item: WebDavBackupItem,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         val client = getClient(config)
         val backupFile = File(context.cacheDir, item.displayName)
 
         try {
-            // Download backup file directly to file to avoid OOM
-            Log.i(TAG, "restore: Downloading ${item.displayName}")
-            client.downloadToFile(item.displayName, backupFile).getOrThrow()
+            // 检查是否为分片备份
+            val resources = client.list().getOrThrow()
+            val partFiles = resources
+                .filter { BackupSplitter.partIndex(it.displayName) != null }
+                .filter { it.displayName.startsWith("${item.displayName}.part") }
+                .sortedBy { BackupSplitter.partIndex(it.displayName) }
 
-            Log.i(TAG, "restore: Downloaded ${backupFile.length().fileSizeToString()}")
+            if (partFiles.isNotEmpty()) {
+                // 分片恢复：按序下载分片 → 合并成完整 zip → 解压
+                onProgress?.invoke("正在下载备份分片…")
+                val splitDir = File(context.cacheDir, "split_${System.currentTimeMillis()}")
+                splitDir.mkdirs()
+                try {
+                    val downloadedParts = partFiles.mapIndexed { index, part ->
+                        val localPart = File(splitDir, part.displayName)
+                        onProgress?.invoke("正在下载分片 ${index + 1}/${partFiles.size}…")
+                        client.downloadToFile(part.displayName, localPart).getOrThrow()
+                        localPart
+                    }
+                    onProgress?.invoke("正在合并分片…")
+                    BackupSplitter.merge(downloadedParts, backupFile)
+                    Log.i(TAG, "restore: Merged ${partFiles.size} parts to ${backupFile.length().fileSizeToString()}")
+                } finally {
+                    splitDir.deleteRecursively()
+                }
+            } else {
+                // 常规单文件下载
+                Log.i(TAG, "restore: Downloading ${item.displayName}")
+                onProgress?.invoke("正在下载备份文件…")
+                client.downloadToFile(item.displayName, backupFile).getOrThrow()
+                Log.i(TAG, "restore: Downloaded ${backupFile.length().fileSizeToString()}")
+            }
 
             // Restore from backup file
-            restoreFromBackupFile(backupFile, config)
+            restoreFromBackupFile(backupFile, config, onProgress)
         } finally {
             // Clean up temp file
             if (backupFile.exists()) {
@@ -122,8 +184,18 @@ class WebDavSync(
 
     suspend fun deleteBackupFile(config: WebDavConfig, item: WebDavBackupItem) = withContext(Dispatchers.IO) {
         val client = getClient(config)
-        client.delete(item.displayName).getOrThrow()
-        Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName}")
+        val resources = client.list().getOrThrow()
+        val parts = resources.filter {
+            BackupSplitter.partIndex(it.displayName) != null &&
+                it.displayName.startsWith("${item.displayName}.part")
+        }
+        if (parts.isNotEmpty()) {
+            parts.forEach { part -> client.delete(part.displayName).getOrThrow() }
+            Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName} (${parts.size} parts)")
+        } else {
+            client.delete(item.displayName).getOrThrow()
+            Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName}")
+        }
     }
 
     suspend fun restoreFromLocalFile(
@@ -173,7 +245,7 @@ class WebDavSync(
             // Backup database files
             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
                 onProgress?.invoke("正在导出聊天记录…")
-                checkpointWal()
+                database.checkpointWal()
                 val dbFile = context.getDatabasePath("rikka_hub")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "rikka_hub.db")
@@ -190,9 +262,11 @@ class WebDavSync(
                 }
             }
 
-            // Backup app files
-            if (config.items.contains(WebDavConfig.BackupItem.FILES)) {
-                onProgress?.invoke("正在导出上传文件…")
+            // Backup chat files (upload folder)
+            if (config.items.contains(WebDavConfig.BackupItem.CHAT_FILES) ||
+                config.items.contains(WebDavConfig.BackupItem.FILES)
+            ) {
+                onProgress?.invoke("正在导出聊天附件…")
                 val uploadFolder = File(context.filesDir, FileFolders.UPLOAD)
                 if (uploadFolder.exists() && uploadFolder.isDirectory) {
                     Log.i(TAG, "prepareBackupFile: Backing up files from ${uploadFolder.absolutePath}")
@@ -204,7 +278,10 @@ class WebDavSync(
                 } else {
                     Log.w(TAG, "prepareBackupFile: Upload folder does not exist or is not a directory")
                 }
+            }
 
+            // Backup skills
+            if (config.items.contains(WebDavConfig.BackupItem.SKILLS)) {
                 val skillsFolder = File(context.filesDir, FileFolders.SKILLS)
                 if (skillsFolder.exists() && skillsFolder.isDirectory) {
                     onProgress?.invoke("正在导出技能…")
@@ -218,7 +295,12 @@ class WebDavSync(
                 } else {
                     Log.w(TAG, "prepareBackupFile: Skills folder does not exist or is not a directory")
                 }
+            }
 
+            // Backup fonts
+            if (config.items.contains(WebDavConfig.BackupItem.FONTS) ||
+                config.items.contains(WebDavConfig.BackupItem.FILES)
+            ) {
                 val fontsFolder = File(context.filesDir, FileFolders.FONTS)
                 if (fontsFolder.exists() && fontsFolder.isDirectory) {
                     onProgress?.invoke("正在导出字体…")
@@ -306,7 +388,8 @@ class WebDavSync(
                         }
 
                         else -> {
-                            if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
+                            if ((config.items.contains(WebDavConfig.BackupItem.FILES) ||
+                                    config.items.contains(WebDavConfig.BackupItem.CHAT_FILES)) &&
                                 zipEntry.name.startsWith("${FileFolders.UPLOAD}/")
                             ) {
                                 onProgress?.invoke("正在恢复上传文件…")
@@ -346,12 +429,14 @@ class WebDavSync(
                                         throw Exception("Failed to restore file ${zipEntry.name}: ${e.message}")
                                     }
                                 }
-                            } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
+                            } else if ((config.items.contains(WebDavConfig.BackupItem.FILES) ||
+                                    config.items.contains(WebDavConfig.BackupItem.SKILLS)) &&
                                 zipEntry.name.startsWith("${FileFolders.SKILLS}/")
                             ) {
                                 onProgress?.invoke("正在恢复技能…")
                                 restoreSkillEntry(zipIn, zipEntry.name)
-                            } else if (config.items.contains(WebDavConfig.BackupItem.FILES) &&
+                            } else if ((config.items.contains(WebDavConfig.BackupItem.FILES) ||
+                                    config.items.contains(WebDavConfig.BackupItem.FONTS)) &&
                                 zipEntry.name.startsWith("${FileFolders.FONTS}/")
                             ) {
                                 onProgress?.invoke("正在恢复字体…")

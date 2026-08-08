@@ -12,7 +12,7 @@ data class S3Config(
     val pathStyle: Boolean = true,
     val items: List<BackupItem> = listOf(
         BackupItem.DATABASE,
-        BackupItem.FILES
+        BackupItem.CHAT_FILES
     ),
 ) {
     val host: String
@@ -36,6 +36,13 @@ data class S3Config(
     @Serializable
     enum class BackupItem {
         DATABASE,
+        /** 兼容旧配置：旧版 FILES 含聊天附件+字体；新版不再使用，仅防旧 JSON 反序列化失败 */
         FILES,
+        /** 聊天附件（upload 目录） */
+        CHAT_FILES,
+        /** 技能文件（可能很大，默认不随整包备份，避免超出远端单文件上限） */
+        SKILLS,
+        /** 字体文件 */
+        FONTS,
     }
 }

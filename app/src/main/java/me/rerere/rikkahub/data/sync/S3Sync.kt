@@ -38,19 +38,6 @@ class S3Sync(
         return S3Client(config, httpClient)
     }
 
-    /**
-     * 备份前把未落盘的 WAL 合并进主库文件，保证备份的 .db 自洽一致，
-     * 避免备份到「主库 + 未合并 wal」的不一致组合（恢复后表现为 database disk image is malformed）。
-     * checkpoint 失败不阻断备份（仍有 db/wal/shm 三件套兜底），只记日志。
-     */
-    private fun checkpointWal() {
-        try {
-            database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
-        } catch (e: Exception) {
-            Log.w(TAG, "checkpointWal: WAL checkpoint failed, backup may be inconsistent", e)
-        }
-    }
-
     suspend fun testS3(config: S3Config) = withContext(Dispatchers.IO) {
         val client = getS3Client(config)
         // Test by listing objects with max 1 result
@@ -58,18 +45,42 @@ class S3Sync(
         Log.i(TAG, "testS3: Connection successful")
     }
 
-    suspend fun backupToS3(config: S3Config) = withContext(Dispatchers.IO) {
-        val file = prepareBackupFile(config)
+    suspend fun backupToS3(
+        config: S3Config,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
+        val file = prepareBackupFile(config, onProgress)
         val client = getS3Client(config)
-        val key = "rikkahub_backups/${file.name}"
+        val keyPrefix = "rikkahub_backups/${file.name}"
 
-        client.putObject(
-            key = key,
-            file = file,
-            contentType = "application/zip"
-        ).getOrThrow()
-
-        Log.i(TAG, "backupToS3: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        if (BackupSplitter.needsSplit(file)) {
+            // 大文件分片上传（规避单文件上限，如 413）
+            onProgress?.invoke("文件较大，正在分片上传…")
+            val splitDir = File(context.cacheDir, "split_${System.currentTimeMillis()}")
+            splitDir.mkdirs()
+            try {
+                val parts = BackupSplitter.split(file, splitDir)
+                parts.forEachIndexed { index, part ->
+                    onProgress?.invoke("正在上传分片 ${index + 1}/${parts.size}…")
+                    client.putObject(
+                        key = "${keyPrefix}.part${index + 1}",
+                        file = part,
+                        contentType = "application/octet-stream"
+                    ).getOrThrow()
+                }
+                Log.i(TAG, "backupToS3: Uploaded ${file.name} in ${parts.size} parts (${file.length().fileSizeToString()})")
+            } finally {
+                splitDir.deleteRecursively()
+            }
+        } else {
+            onProgress?.invoke("正在上传备份文件…")
+            client.putObject(
+                key = keyPrefix,
+                file = file,
+                contentType = "application/zip"
+            ).getOrThrow()
+            Log.i(TAG, "backupToS3: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        }
 
         // Clean up temp file
         file.delete()
@@ -82,32 +93,75 @@ class S3Sync(
             maxKeys = 1000
         ).getOrThrow()
 
-        result.objects
-            .filter { it.key.startsWith("rikkahub_backups/backup_") && it.key.endsWith(".zip") }
-            .map { obj ->
-                S3BackupItem(
-                    key = obj.key,
-                    displayName = obj.key.substringAfterLast("/"),
-                    size = obj.size,
-                    lastModified = obj.lastModified ?: Instant.EPOCH
-                )
+        // 分片 backup_x.zip.partN 聚合为父条目；常规 backup_x.zip 单独成条
+        val all = result.objects
+            .filter { it.key.startsWith("rikkahub_backups/backup_") }
+        val parts = all.filter { BackupSplitter.partIndex(it.key.substringAfterLast("/")) != null }
+        val partGroups = parts.groupBy { it.key.substringBeforeLast(".part") }
+
+        all
+            .mapNotNull { obj ->
+                val baseName = obj.key.substringAfterLast("/")
+                val group = partGroups[obj.key] ?: emptyList()
+                if (BackupSplitter.partIndex(baseName) != null) {
+                    null
+                } else {
+                    S3BackupItem(
+                        key = obj.key,
+                        displayName = baseName,
+                        size = group.sumOf { it.size }.takeIf { group.isNotEmpty() } ?: obj.size,
+                        lastModified = (group.mapNotNull { it.lastModified }.maxOrNull())
+                            ?: obj.lastModified ?: Instant.EPOCH
+                    )
+                }
             }
             .sortedByDescending { it.lastModified }
     }
 
-    suspend fun restoreFromS3(config: S3Config, item: S3BackupItem) = withContext(Dispatchers.IO) {
+    suspend fun restoreFromS3(
+        config: S3Config,
+        item: S3BackupItem,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         val client = getS3Client(config)
         val backupFile = File(context.cacheDir, item.displayName)
 
         try {
-            // Download backup file directly to file to avoid OOM
-            Log.i(TAG, "restoreFromS3: Downloading ${item.displayName}")
-            client.downloadObjectToFile(item.key, backupFile).getOrThrow()
+            // 检查是否为分片备份
+            val result = client.listObjects(
+                prefix = "rikkahub_backups/${item.displayName}.part",
+                maxKeys = 1000
+            ).getOrThrow()
+            val partObjects = result.objects.sortedBy {
+                BackupSplitter.partIndex(it.key.substringAfterLast("/"))
+            }
 
-            Log.i(TAG, "restoreFromS3: Downloaded ${backupFile.length().fileSizeToString()}")
+            if (partObjects.isNotEmpty()) {
+                onProgress?.invoke("正在下载备份分片…")
+                val splitDir = File(context.cacheDir, "split_${System.currentTimeMillis()}")
+                splitDir.mkdirs()
+                try {
+                    val downloadedParts = partObjects.mapIndexed { index, part ->
+                        val localPart = File(splitDir, part.key.substringAfterLast("/"))
+                        onProgress?.invoke("正在下载分片 ${index + 1}/${partObjects.size}…")
+                        client.downloadObjectToFile(part.key, localPart).getOrThrow()
+                        localPart
+                    }
+                    onProgress?.invoke("正在合并分片…")
+                    BackupSplitter.merge(downloadedParts, backupFile)
+                    Log.i(TAG, "restoreFromS3: Merged ${partObjects.size} parts to ${backupFile.length().fileSizeToString()}")
+                } finally {
+                    splitDir.deleteRecursively()
+                }
+            } else {
+                Log.i(TAG, "restoreFromS3: Downloading ${item.displayName}")
+                onProgress?.invoke("正在下载备份文件…")
+                client.downloadObjectToFile(item.key, backupFile).getOrThrow()
+                Log.i(TAG, "restoreFromS3: Downloaded ${backupFile.length().fileSizeToString()}")
+            }
 
             // Restore from backup file
-            restoreFromBackupFile(backupFile, config)
+            restoreFromBackupFile(backupFile, config, onProgress)
         } finally {
             // Clean up temp file
             if (backupFile.exists()) {
@@ -119,11 +173,24 @@ class S3Sync(
 
     suspend fun deleteS3BackupFile(config: S3Config, item: S3BackupItem) = withContext(Dispatchers.IO) {
         val client = getS3Client(config)
-        client.deleteObject(item.key).getOrThrow()
-        Log.i(TAG, "deleteS3BackupFile: Deleted ${item.key}")
+        val result = client.listObjects(
+            prefix = "rikkahub_backups/${item.displayName}.part",
+            maxKeys = 1000
+        ).getOrThrow()
+        val parts = result.objects
+        if (parts.isNotEmpty()) {
+            parts.forEach { client.deleteObject(it.key).getOrThrow() }
+            Log.i(TAG, "deleteS3BackupFile: Deleted ${item.displayName} (${parts.size} parts)")
+        } else {
+            client.deleteObject(item.key).getOrThrow()
+            Log.i(TAG, "deleteS3BackupFile: Deleted ${item.key}")
+        }
     }
 
-    suspend fun prepareBackupFile(config: S3Config): File = withContext(Dispatchers.IO) {
+    suspend fun prepareBackupFile(
+        config: S3Config,
+        onProgress: ((String) -> Unit)? = null,
+    ): File = withContext(Dispatchers.IO) {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val backupFile = File(context.cacheDir, "backup_$timestamp.zip")
 
@@ -133,6 +200,7 @@ class S3Sync(
 
         // Create zip file and backup data
         ZipOutputStream(FileOutputStream(backupFile)).use { zipOut ->
+            onProgress?.invoke("正在导出设置…")
             addVirtualFileToZip(
                 zipOut = zipOut,
                 name = "settings.json",
@@ -141,7 +209,8 @@ class S3Sync(
 
             // Backup database files
             if (config.items.contains(S3Config.BackupItem.DATABASE)) {
-                checkpointWal()
+                onProgress?.invoke("正在导出聊天记录…")
+                database.checkpointWal()
                 val dbFile = context.getDatabasePath("rikka_hub")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "rikka_hub.db")
@@ -158,8 +227,11 @@ class S3Sync(
                 }
             }
 
-            // Backup app files
-            if (config.items.contains(S3Config.BackupItem.FILES)) {
+            // Backup chat files (upload folder)
+            if (config.items.contains(S3Config.BackupItem.CHAT_FILES) ||
+                config.items.contains(S3Config.BackupItem.FILES)
+            ) {
+                onProgress?.invoke("正在导出聊天附件…")
                 val uploadFolder = File(context.filesDir, FileFolders.UPLOAD)
                 if (uploadFolder.exists() && uploadFolder.isDirectory) {
                     Log.i(TAG, "prepareBackupFile: Backing up files from ${uploadFolder.absolutePath}")
@@ -171,9 +243,13 @@ class S3Sync(
                 } else {
                     Log.w(TAG, "prepareBackupFile: Upload folder does not exist or is not a directory")
                 }
+            }
 
+            // Backup skills
+            if (config.items.contains(S3Config.BackupItem.SKILLS)) {
                 val skillsFolder = File(context.filesDir, FileFolders.SKILLS)
                 if (skillsFolder.exists() && skillsFolder.isDirectory) {
+                    onProgress?.invoke("正在导出技能…")
                     Log.i(TAG, "prepareBackupFile: Backing up skills from ${skillsFolder.absolutePath}")
                     addDirectoryToZip(
                         zipOut = zipOut,
@@ -184,9 +260,15 @@ class S3Sync(
                 } else {
                     Log.w(TAG, "prepareBackupFile: Skills folder does not exist or is not a directory")
                 }
+            }
 
+            // Backup fonts
+            if (config.items.contains(S3Config.BackupItem.FONTS) ||
+                config.items.contains(S3Config.BackupItem.FILES)
+            ) {
                 val fontsFolder = File(context.filesDir, FileFolders.FONTS)
                 if (fontsFolder.exists() && fontsFolder.isDirectory) {
+                    onProgress?.invoke("正在导出字体…")
                     Log.i(TAG, "prepareBackupFile: Backing up fonts from ${fontsFolder.absolutePath}")
                     fontsFolder.listFiles()?.forEach { file ->
                         if (file.isFile) {
@@ -206,7 +288,11 @@ class S3Sync(
         backupFile
     }
 
-    private suspend fun restoreFromBackupFile(backupFile: File, config: S3Config) = withContext(Dispatchers.IO) {
+    private suspend fun restoreFromBackupFile(
+        backupFile: File,
+        config: S3Config,
+        onProgress: ((String) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
         ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
@@ -265,7 +351,8 @@ class S3Sync(
                         }
 
                         else -> {
-                            if (config.items.contains(S3Config.BackupItem.FILES) &&
+                            if ((config.items.contains(S3Config.BackupItem.FILES) ||
+                                    config.items.contains(S3Config.BackupItem.CHAT_FILES)) &&
                                 zipEntry.name.startsWith("${FileFolders.UPLOAD}/")
                             ) {
                                 val fileName = zipEntry.name.substringAfter("${FileFolders.UPLOAD}/")
@@ -304,11 +391,13 @@ class S3Sync(
                                         throw Exception("Failed to restore file ${zipEntry.name}: ${e.message}")
                                     }
                                 }
-                            } else if (config.items.contains(S3Config.BackupItem.FILES) &&
+                            } else if ((config.items.contains(S3Config.BackupItem.FILES) ||
+                                    config.items.contains(S3Config.BackupItem.SKILLS)) &&
                                 zipEntry.name.startsWith("${FileFolders.SKILLS}/")
                             ) {
                                 restoreSkillEntry(zipIn, zipEntry.name)
-                            } else if (config.items.contains(S3Config.BackupItem.FILES) &&
+                            } else if ((config.items.contains(S3Config.BackupItem.FILES) ||
+                                    config.items.contains(S3Config.BackupItem.FONTS)) &&
                                 zipEntry.name.startsWith("${FileFolders.FONTS}/")
                             ) {
                                 val fileName = zipEntry.name.substringAfter("${FileFolders.FONTS}/")
