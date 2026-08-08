@@ -71,6 +71,7 @@ import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Recycle01
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Note01
@@ -85,6 +86,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.sync.CloudSyncCoordinator
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
 import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
 import me.rerere.rikkahub.ui.components.ui.Tooltip
@@ -96,6 +98,7 @@ import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
@@ -113,6 +116,7 @@ fun ChatDrawerContent(
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val repo = koinInject<ConversationRepository>()
+    val cloudSyncCoordinator = koinInject<CloudSyncCoordinator>()
 
     val activity = context as ComponentActivity
     val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = activity)
@@ -297,6 +301,8 @@ fun ChatDrawerContent(
                     .fillMaxWidth()
                     .weight(1f),
                 onClick = {
+                    // 切换会话即更新启动恢复目标：进程被杀重建后能回到当前会话，而非跳回旧会话
+                    context.writeStringPreference("lastConversationId", it.id.toString())
                     navigateToChatPage(navController, it.id)
                 },
                 onRegenerateTitle = {
@@ -365,6 +371,29 @@ fun ChatDrawerContent(
                 )
             }
 
+            DrawerAction(
+                icon = { Icon(HugeIcons.Refresh01, null) },
+                label = { Text(stringResource(R.string.chat_drawer_sync)) },
+                onClick = {
+                    scope.launch {
+                        runCatching {
+                            val ok = cloudSyncCoordinator.syncIfNeeded(force = true)
+                            toaster.show(
+                                context.getString(
+                                    if (ok) R.string.chat_drawer_sync_success
+                                    else R.string.chat_drawer_sync_skipped
+                                ),
+                                type = if (ok) ToastType.Success else ToastType.Warning
+                            )
+                        }.onFailure { e ->
+                            toaster.show(
+                                context.getString(R.string.chat_drawer_sync_failed, e.message ?: ""),
+                                type = ToastType.Error
+                            )
+                        }
+                    }
+                },
+            )
             DrawerAction(
                 icon = { Icon(HugeIcons.Image02, null) },
                 label = { Text(stringResource(R.string.chat_page_menu_image_generation)) },

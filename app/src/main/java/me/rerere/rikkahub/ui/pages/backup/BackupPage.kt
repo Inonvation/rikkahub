@@ -30,13 +30,14 @@ import me.rerere.rikkahub.ui.pages.backup.components.BackupDialog
 import me.rerere.rikkahub.ui.pages.backup.tabs.ImportExportTab
 import me.rerere.rikkahub.ui.pages.backup.tabs.ReminderTab
 import me.rerere.rikkahub.ui.pages.backup.tabs.S3Tab
+import me.rerere.rikkahub.ui.pages.backup.tabs.SyncTab
 import me.rerere.rikkahub.ui.pages.backup.tabs.WebDavTab
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
 fun BackupPage(vm: BackupVM = koinViewModel()) {
-    val pagerState = rememberPagerState { 4 }
+    val pagerState = rememberPagerState { 5 }
     val scope = rememberCoroutineScope()
     var showRestartDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -70,21 +71,26 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 Tab(
                     selected = pagerState.currentPage == 0,
                     onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                    text = { Text(stringResource(R.string.backup_page_webdav_backup)) }
+                    text = { Text(stringResource(R.string.backup_page_sync)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 1,
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                    text = { Text(stringResource(R.string.backup_page_s3_backup)) }
+                    text = { Text(stringResource(R.string.backup_page_webdav_backup)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 2,
                     onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
-                    text = { Text(stringResource(R.string.backup_page_import_export)) }
+                    text = { Text(stringResource(R.string.backup_page_s3_backup)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 3,
                     onClick = { scope.launch { pagerState.animateScrollToPage(3) } },
+                    text = { Text(stringResource(R.string.backup_page_import_export)) }
+                )
+                Tab(
+                    selected = pagerState.currentPage == 4,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(4) } },
                     text = { Text(stringResource(R.string.backup_page_reminder)) }
                 )
             }
@@ -97,27 +103,31 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             ) { page ->
                 when (page) {
                     0 -> {
+                        SyncTab(vm = vm)
+                    }
+
+                    1 -> {
                         WebDavTab(
                             vm = vm,
                             onShowRestartDialog = { showRestartDialog = true }
                         )
                     }
 
-                    1 -> {
+                    2 -> {
                         S3Tab(
                             vm = vm,
                             onShowRestartDialog = { showRestartDialog = true }
                         )
                     }
 
-                    2 -> {
+                    3 -> {
                         ImportExportTab(
                             vm = vm,
                             onShowRestartDialog = { showRestartDialog = true }
                         )
                     }
 
-                    3 -> {
+                    4 -> {
                         ReminderTab(vm = vm)
                     }
                 }

@@ -78,6 +78,7 @@ fun S3Tab(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val s3Config = settings.s3Config
     val backupItemsState by vm.s3BackupItems.collectAsStateWithLifecycle()
+    val backupProgress by vm.backupProgress.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -215,11 +216,12 @@ fun S3Tab(
                         MultiChoiceSegmentedButtonRow(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            S3Config.BackupItem.entries.forEachIndexed { index, item ->
+                            val selectableItems = S3Config.BackupItem.entries.filter { it != S3Config.BackupItem.FILES }
+                            selectableItems.forEachIndexed { index, item ->
                                 SegmentedButton(
                                     shape = SegmentedButtonDefaults.itemShape(
                                         index = index,
-                                        count = S3Config.BackupItem.entries.size
+                                        count = selectableItems.size
                                     ),
                                     onCheckedChange = { checked ->
                                         val newItems = if (checked) {
@@ -234,7 +236,10 @@ fun S3Tab(
                                     Text(
                                         when (item) {
                                             S3Config.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                            S3Config.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                            S3Config.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
+                                            S3Config.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
+                                            S3Config.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
+                                            S3Config.BackupItem.FILES -> ""
                                         }
                                     )
                                 }
@@ -324,6 +329,16 @@ fun S3Tab(
                     }
                 )
             }
+        }
+        if (isBackingUp && !backupProgress.isNullOrBlank()) {
+            Text(
+                text = backupProgress.orEmpty(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 

@@ -77,6 +77,7 @@ fun WebDavTab(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val webDavConfig = settings.webDavConfig
     val backupItemsState by vm.webDavBackupItems.collectAsStateWithLifecycle()
+    val backupProgress by vm.backupProgress.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -197,11 +198,12 @@ fun WebDavTab(
                     MultiChoiceSegmentedButtonRow(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        WebDavConfig.BackupItem.entries.forEachIndexed { index, item ->
+                        val selectableItems = WebDavConfig.BackupItem.entries.filter { it != WebDavConfig.BackupItem.FILES }
+                        selectableItems.forEachIndexed { index, item ->
                             SegmentedButton(
                                 shape = SegmentedButtonDefaults.itemShape(
                                     index = index,
-                                    count = WebDavConfig.BackupItem.entries.size
+                                    count = selectableItems.size
                                 ),
                                 onCheckedChange = { checked ->
                                     val newItems = if (checked) {
@@ -216,7 +218,10 @@ fun WebDavTab(
                                 Text(
                                     when (item) {
                                         WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                        WebDavConfig.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                        WebDavConfig.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
+                                        WebDavConfig.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
+                                        WebDavConfig.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
+                                        WebDavConfig.BackupItem.FILES -> ""
                                     }
                                 )
                             }
@@ -305,6 +310,16 @@ fun WebDavTab(
                     }
                 )
             }
+        }
+        if (isBackingUp && !backupProgress.isNullOrBlank()) {
+            Text(
+                text = backupProgress.orEmpty(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
