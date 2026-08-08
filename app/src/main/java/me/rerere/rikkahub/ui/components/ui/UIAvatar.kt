@@ -108,7 +108,7 @@ fun UIAvatar(
     var preCropTempFile by remember { mutableStateOf<File?>(null) }
 
     fun saveAvatarImage(uri: Uri) {
-        val localUris = filesManager.createChatFilesByContents(listOf(uri))
+        val localUris = filesManager.createChatFilesByContents(listOf(uri), source = "avatar")
         localUris.firstOrNull()?.let { localUri ->
             onUpdate?.invoke(Avatar.Image(localUri.toString()))
         }

@@ -92,8 +92,12 @@ class FilesManager(
         )
     }
 
-    fun observe(folder: String = FileFolders.UPLOAD): Flow<List<ManagedFileEntity>> =
-        repository.listByFolder(folder)
+    fun observe(folder: String = FileFolders.UPLOAD, source: String? = null): Flow<List<ManagedFileEntity>> {
+        return when (source) {
+            null -> repository.listByFolder(folder)
+            else -> repository.listByFolderAndSource(folder, source)
+        }
+    }
 
     suspend fun list(folder: String = FileFolders.UPLOAD): List<ManagedFileEntity> =
         repository.listByFolder(folder).first()
@@ -105,7 +109,7 @@ class FilesManager(
     fun getFile(entity: ManagedFileEntity): File =
         File(context.filesDir, entity.relativePath)
 
-    fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
+    fun createChatFilesByContents(uris: List<Uri>, source: String = "chat"): List<Uri> {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
@@ -132,7 +136,8 @@ class FilesManager(
                     folder = FileFolders.UPLOAD,
                     file = file,
                     displayName = sourceName,
-                    mimeType = guessedMime
+                    mimeType = guessedMime,
+                    source = source
                 )
                 newUris.add(file.toUri())
             }.onFailure {
@@ -489,6 +494,21 @@ class FilesManager(
         repository.deleteById(id) > 0
     }
 
+    /** 批量删除：同时删磁盘文件与 DB 记录。返回成功删除的数量。 */
+    suspend fun deleteByIds(ids: List<Long>, deleteFromDisk: Boolean = true): Int = withContext(Dispatchers.IO) {
+        var deleted = 0
+        ids.forEach { id ->
+            val entity = repository.getById(id) ?: return@forEach
+            if (deleteFromDisk) {
+                runCatching { getFile(entity).delete() }
+            }
+            if (repository.deleteById(id) > 0) {
+                deleted++
+            }
+        }
+        deleted
+    }
+
     suspend fun deleteAll(folder: String = FileFolders.UPLOAD): Boolean = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, folder)
         val entries = dir.listFiles()
@@ -532,6 +552,7 @@ class FilesManager(
         file: File,
         displayName: String,
         mimeType: String,
+        source: String = "chat",
     ): ManagedFileEntity {
         val now = System.currentTimeMillis()
         return repository.insert(
@@ -543,11 +564,18 @@ class FilesManager(
                 sizeBytes = file.length(),
                 createdAt = now,
                 updatedAt = now,
+                source = source,
             )
         )
     }
 
-    private fun trackManagedFile(folder: String, file: File, displayName: String, mimeType: String) {
+    private fun trackManagedFile(
+        folder: String,
+        file: File,
+        displayName: String,
+        mimeType: String,
+        source: String = "chat",
+    ) {
         val relativePath = buildRelativePath(folder, file)
         appScope.launch(Dispatchers.IO) {
             runCatching {
@@ -565,6 +593,7 @@ class FilesManager(
                         sizeBytes = file.length(),
                         createdAt = now,
                         updatedAt = now,
+                        source = source,
                     )
                 )
             }.onFailure {
