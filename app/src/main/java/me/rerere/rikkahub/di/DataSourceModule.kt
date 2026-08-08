@@ -1,9 +1,10 @@
 package me.rerere.rikkahub.di
 
+import android.content.Context
+import android.util.Log
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
-import android.content.Context
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.http.HttpHeaders
@@ -14,12 +15,10 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
-import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.VocabularySettingsStore
@@ -45,6 +44,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_36_37
 import me.rerere.rikkahub.data.db.migrations.Migration_37_38
 import me.rerere.rikkahub.data.db.migrations.Migration_38_39
 import me.rerere.rikkahub.data.db.migrations.Migration_39_40
+import me.rerere.rikkahub.data.db.migrations.Migration_40_41
 import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.dao.WrongQuestionDao
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
@@ -55,6 +55,11 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
+import me.rerere.rikkahub.data.sync.SyncManager
+import me.rerere.rikkahub.data.sync.SyncStateStore
+import me.rerere.rikkahub.data.sync.AppDbSyncAccess
+import me.rerere.rikkahub.data.sync.CloudSyncCoordinator
+import me.rerere.rikkahub.data.sync.SettingsStoreSyncAccess
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -76,10 +81,14 @@ val dataSourceModule = module {
     }
 
     single {
+        SyncStateStore(context = get())
+    }
+
+    single {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40, Migration_40_41)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     // 消息 FTS 初始化任一步失败都不能让 DB open 崩溃（否则应用启动即崩）。
@@ -293,7 +302,6 @@ val dataSourceModule = module {
                 }
             }
             .addNetworkInterceptor(RequestLoggingInterceptor())
-            .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 // 请求头日志仅在 debug 生效；release 关闭，避免 API key / 用户内容进 logcat。
                 // 即便 debug，也把含密钥的请求头脱敏（Authorization、x-api-key 等）。
@@ -352,6 +360,44 @@ val dataSourceModule = module {
         }
     }
 
+    // 同步专用 client：大 DB 上传需要宽松 writeTimeout（共享 client 是 readTimeout 10min 的 AI 流式调优）
+    single<HttpClient>(named("syncClient")) {
+        HttpClient(OkHttp) {
+            engine {
+                config {
+                    connectTimeout(20, TimeUnit.SECONDS)
+                    readTimeout(120, TimeUnit.SECONDS)
+                    writeTimeout(300, TimeUnit.SECONDS)
+                    followSslRedirects(true)
+                    followRedirects(true)
+                    retryOnConnectionFailure(true)
+                }
+            }
+        }
+    }
+
+    single {
+        val context: Context = get()
+        SyncManager(
+            settings = SettingsStoreSyncAccess(settingsStore = get()),
+            stateStore = get(),
+            dbAccess = AppDbSyncAccess(context = context, database = get()),
+            filesRoot = context.filesDir,
+            syncPendingDir = java.io.File(context.filesDir, ".sync_pending").apply { mkdirs() },
+            logger = { Log.d("SyncManager", it) },
+        )
+    }
+
+    single {
+        CloudSyncCoordinator(
+            context = get(),
+            settingsStore = get(),
+            syncManager = get(),
+            stateStore = get(),
+            httpClient = get<HttpClient>(named("syncClient")),
+        )
+    }
+
     single {
         S3Sync(
             settingsStore = get(),
@@ -367,9 +413,5 @@ val dataSourceModule = module {
             .baseUrl("https://api.rikka-ai.com")
             .addConverterFactory(get<Json>().asConverterFactory("application/json; charset=UTF8".toMediaType()))
             .build()
-    }
-
-    single<RikkaHubAPI> {
-        get<Retrofit>().create(RikkaHubAPI::class.java)
     }
 }

@@ -56,6 +56,7 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.sync.s3.S3Config
+import me.rerere.rikkahub.data.sync.SyncConfig
 import me.rerere.rikkahub.ui.theme.CustomTheme
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
@@ -212,6 +213,9 @@ class SettingsStore(
         val MODEL_PRICING = stringPreferencesKey("model_pricing")
         val COST_CURRENCY = stringPreferencesKey("cost_currency")
         val COST_USD_CNY_RATE = doublePreferencesKey("cost_usd_cny_rate")
+
+        // 远端同步
+        val SYNC_CONFIG = stringPreferencesKey("sync_config")
     }
 
     private val dataStore = context.settingsStore
@@ -349,6 +353,9 @@ class SettingsStore(
                 modelPricingOverrides = preferences[MODEL_PRICING]?.let {
                     runCatching { JsonInstant.decodeFromString<List<ModelPricingConfig>>(it) }.getOrNull()
                 } ?: emptyList(),
+                syncConfig = preferences[SYNC_CONFIG]?.let {
+                    runCatching { JsonInstant.decodeFromString<SyncConfig>(it) }.getOrNull()
+                } ?: SyncConfig(),
             )
         }
         .map {
@@ -567,6 +574,7 @@ class SettingsStore(
             preferences[COST_CURRENCY] = settings.costCurrency.name
             preferences[COST_USD_CNY_RATE] = settings.costUsdCnyRate.coerceAtLeast(1.0)
             preferences[MODEL_PRICING] = JsonInstant.encodeToString(settings.modelPricingOverrides)
+            preferences[SYNC_CONFIG] = JsonInstant.encodeToString(settings.syncConfig)
             preferences[VERSION] = CURRENT_DATA_VERSION
         }
     }
@@ -785,6 +793,8 @@ data class Settings(
     val costUsdCnyRate: Double = 7.2,
     /** 用户自定的模型定价覆盖（精确 modelId 匹配，优先于内置预置表） */
     val modelPricingOverrides: List<ModelPricingConfig> = emptyList(),
+    /** 远端增量同步配置（设备本地项，不同步） */
+    val syncConfig: SyncConfig = SyncConfig(),
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储
@@ -858,13 +868,20 @@ data class WebDavConfig(
     val path: String = "rikkahub_backups",
     val items: List<BackupItem> = listOf(
         BackupItem.DATABASE,
-        BackupItem.FILES
+        BackupItem.CHAT_FILES
     ),
 ) {
     @Serializable
     enum class BackupItem {
         DATABASE,
+        /** 兼容旧配置：旧版 FILES 含聊天附件+字体；新版不再使用，仅防旧 JSON 反序列化失败 */
         FILES,
+        /** 聊天附件（upload 目录） */
+        CHAT_FILES,
+        /** 技能文件（可能很大，默认不随整包备份，避免超出远端单文件上限） */
+        SKILLS,
+        /** 字体文件 */
+        FONTS,
     }
 }
 

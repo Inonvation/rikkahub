@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import me.rerere.common.android.appTempFolder
 import com.whl.quickjs.android.QuickJSLoader
 import me.rerere.rikkahub.di.appModule
@@ -67,6 +68,12 @@ class RikkaHubApp : Application() {
         // Init QuickJS native library
         QuickJSLoader.init()
 
+        // 应用待恢复的 DB（必须在任何 get<AppDatabase>() 之前同步完成）
+        applyPendingDbRestore()
+
+        // Start CloudSync (incremental sync)
+        startCloudSync()
+
         // delete temp files
         deleteTempFiles()
 
@@ -82,6 +89,9 @@ class RikkaHubApp : Application() {
         // sync upload files to DB
         syncManagedFiles()
 
+        // Schedule daily sync worker
+        scheduleCloudSyncWorker()
+
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
@@ -92,7 +102,8 @@ class RikkaHubApp : Application() {
     }
 
     private fun incrementLaunchCount() {
-        get<AppScope>().launch {
+        // IO 调度：DataStore 读写本就走 IO，避免在主线程协程上做全量设置序列化
+        get<AppScope>().launch(Dispatchers.IO) {
             runCatching {
                 val store = get<SettingsStore>()
                 val current = store.settingsFlowRaw.first()
@@ -151,6 +162,53 @@ class RikkaHubApp : Application() {
             }.onFailure {
                 Log.e(TAG, "syncManagedFiles failed", it)
             }
+        }
+    }
+
+    /**
+     * 应用上次同步下载的 DB（dbRestorePending）。
+     * 必须在任何 get<AppDatabase>() 之前同步执行，否则无法替换已打开的活动 DB。
+     * 失败不阻塞启动，DB 以本地现状启动。
+     */
+    private fun applyPendingDbRestore() {
+        runBlocking {
+            runCatching {
+                get<me.rerere.rikkahub.data.sync.SyncManager>().applyPendingDbRestore()
+            }.onFailure {
+                Log.e(TAG, "applyPendingDbRestore failed", it)
+            }
+        }
+    }
+
+    /** 异步启动云同步（读 syncConfig → 在线检查 → 间隔/互斥 → 增量 sync）。 */
+    private fun startCloudSync() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<me.rerere.rikkahub.data.sync.CloudSyncCoordinator>().syncIfNeeded(force = false)
+            }.onFailure {
+                Log.e(TAG, "startCloudSync failed", it)
+            }
+        }
+    }
+
+    /** 注册每日兜底同步 Worker（ExistingPeriodicWorkPolicy.UPDATE 保证配置变更后幂等重建）。 */
+    private fun scheduleCloudSyncWorker() {
+        runCatching {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+            val request = androidx.work.PeriodicWorkRequestBuilder<me.rerere.rikkahub.data.sync.SyncWorker>(
+                24, java.util.concurrent.TimeUnit.HOURS
+            )
+                .setConstraints(constraints)
+                .build()
+            androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "cloud_sync",
+                androidx.work.ExistingPeriodicWorkPolicy.UPDATE,
+                request,
+            )
+        }.onFailure {
+            Log.e(TAG, "scheduleCloudSyncWorker failed", it)
         }
     }
 
