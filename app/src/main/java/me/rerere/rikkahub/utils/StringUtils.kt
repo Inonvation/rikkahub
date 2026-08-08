@@ -61,6 +61,15 @@ fun Long.fileSizeToString(): String {
     return "%.${precision}f %s".format(value, units[unitIndex])
 }
 
+/**
+ * 文件/文件夹列表的修改时间显示格式（MM-dd HH:mm）。
+ * 供工作区与信任文件夹文件列表统一使用，显示格式：时间｜占用 / 时间丨n项丨占用。
+ */
+fun Long.formatFileTime(): String {
+    val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(this))
+}
+
 fun Int.formatNumber(): String {
     val absValue = kotlin.math.abs(this)
     val sign = if (this < 0) "-" else ""

@@ -70,22 +70,22 @@ fun AssistantExtensionsPage(id: String) {
                 Tab(
                     selected = pagerState.currentPage == 0,
                     onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_quick_messages)) }
+                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_skills)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 1,
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_mode_injections)) }
+                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_quick_messages)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 2,
                     onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_lorebooks)) }
+                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_mode_injections)) }
                 )
                 Tab(
                     selected = pagerState.currentPage == 3,
                     onClick = { scope.launch { pagerState.animateScrollToPage(3) } },
-                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_skills)) }
+                    text = { Text(stringResource(R.string.assistant_extensions_page_tab_lorebooks)) }
                 )
             }
 
@@ -97,6 +97,35 @@ fun AssistantExtensionsPage(id: String) {
             ) { page ->
                 when (page) {
                     0 -> {
+                        if (skills.isEmpty()) {
+                            ExtensionEmptyState(
+                                message = stringResource(R.string.assistant_extensions_page_empty_skills),
+                                buttonText = stringResource(R.string.assistant_extensions_page_goto_extensions),
+                                onAction = { navController.navigate(Screen.Skills) },
+                            )
+                        } else {
+                            Column {
+                                SkillsContent(
+                                    modifier = Modifier.weight(1f),
+                                    skills = skills,
+                                    enabledSkills = assistant.enabledSkills,
+                                    onToggle = { name, checked ->
+                                        val newSkills = if (checked) assistant.enabledSkills + name
+                                        else assistant.enabledSkills - name
+                                        vm.update(assistant.copy(enabledSkills = newSkills))
+                                    },
+                                )
+                                TextButton(
+                                    onClick = { navController.navigate(Screen.Skills) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(stringResource(R.string.assistant_extensions_page_goto_extensions))
+                                }
+                            }
+                        }
+                    }
+
+                    1 -> {
                         if (settings.quickMessages.isEmpty()) {
                             ExtensionEmptyState(
                                 message = stringResource(R.string.assistant_extensions_page_empty_quick_messages),
@@ -125,7 +154,7 @@ fun AssistantExtensionsPage(id: String) {
                         }
                     }
 
-                    1 -> {
+                    2 -> {
                         if (settings.modeInjections.isEmpty()) {
                             ExtensionEmptyState(
                                 message = stringResource(R.string.assistant_extensions_page_empty_mode_injections),
@@ -154,7 +183,7 @@ fun AssistantExtensionsPage(id: String) {
                         }
                     }
 
-                    2 -> {
+                    3 -> {
                         if (settings.lorebooks.isEmpty()) {
                             ExtensionEmptyState(
                                 message = stringResource(R.string.assistant_extensions_page_empty_lorebooks),
@@ -178,35 +207,6 @@ fun AssistantExtensionsPage(id: String) {
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Text(stringResource(R.string.assistant_extensions_page_goto_prompts))
-                                }
-                            }
-                        }
-                    }
-
-                    3 -> {
-                        if (skills.isEmpty()) {
-                            ExtensionEmptyState(
-                                message = stringResource(R.string.assistant_extensions_page_empty_skills),
-                                buttonText = stringResource(R.string.assistant_extensions_page_goto_extensions),
-                                onAction = { navController.navigate(Screen.Skills) },
-                            )
-                        } else {
-                            Column {
-                                SkillsContent(
-                                    modifier = Modifier.weight(1f),
-                                    skills = skills,
-                                    enabledSkills = assistant.enabledSkills,
-                                    onToggle = { name, checked ->
-                                        val newSkills = if (checked) assistant.enabledSkills + name
-                                        else assistant.enabledSkills - name
-                                        vm.update(assistant.copy(enabledSkills = newSkills))
-                                    },
-                                )
-                                TextButton(
-                                    onClick = { navController.navigate(Screen.Skills) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.assistant_extensions_page_goto_extensions))
                                 }
                             }
                         }

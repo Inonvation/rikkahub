@@ -7,16 +7,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.extendColors
@@ -120,6 +122,14 @@ fun ProviderConnectionTester(
                             resetStates()
                         },
                         modifier = Modifier.fillMaxWidth(),
+                        leading = {
+                            (selectedModel ?: allModels.firstOrNull())?.let { m ->
+                                AutoAIIcon(name = m.displayName, modifier = Modifier.size(24.dp))
+                            }
+                        },
+                        optionLeading = { model ->
+                            AutoAIIcon(name = model.displayName, modifier = Modifier.size(24.dp))
+                        },
                         optionToString = { model ->
                             val typeLabel = when (model.type) {
                                 ModelType.CHAT -> "对话"
@@ -149,7 +159,7 @@ fun ProviderConnectionTester(
                         else -> {}
                     }
 
-                    TextButton(
+                    Button(
                         onClick = {
                             hapticController.heavyTap()
                             resetStates()

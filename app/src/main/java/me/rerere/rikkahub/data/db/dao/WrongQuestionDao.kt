@@ -42,9 +42,6 @@ interface WrongQuestionDao {
     @Query("SELECT * FROM wrong_questions WHERE subject = :subject ORDER BY created_at DESC")
     suspend fun getBySubject(subject: String): List<WrongQuestionEntity>
 
-    @Query("SELECT * FROM wrong_questions ORDER BY review_count ASC, last_reviewed_at ASC LIMIT :limit")
-    suspend fun getDueForReview(limit: Int = 20): List<WrongQuestionEntity>
-
     @Query("SELECT * FROM wrong_questions WHERE archived = 0 AND (title LIKE '%' || :query || '%' OR question LIKE '%' || :query || '%' OR answer LIKE '%' || :query || '%' OR solution LIKE '%' || :query || '%' OR knowledge_points LIKE '%' || :query || '%') ORDER BY created_at DESC")
     suspend fun search(query: String): List<WrongQuestionEntity>
 

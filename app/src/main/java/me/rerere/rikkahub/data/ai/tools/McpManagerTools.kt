@@ -125,7 +125,7 @@ fun createMcpManagerTools(
     val systemPrompt: (me.rerere.ai.provider.Model, List<me.rerere.ai.ui.UIMessage>) -> String = { _, _ ->
         buildString {
             appendLine("**MCP Server Management**")
-            appendLine("You can manage MCP (Model Context Protocol) server configurations using the `mcp_admin_*` tools. Use these tools to list, inspect, add, update, delete, and test MCP servers.")
+            appendLine("You can manage MCP (Model Context Protocol) server configurations using the `mcp_admin_*` tools. Use these tools to list, inspect, add, update, delete, and test MCP servers. Use `mcp_admin_assistant_set_enabled` to control which configured MCP servers are enabled for the current assistant.")
             appendLine("<configured_mcp_servers>")
             allServers().forEach { server ->
                 appendLine("  <server id=\"${server.id}\">${server.commonOptions.name} (${mcpTransportOf(server)}, status: ${statusText(server)})</server>")
@@ -326,6 +326,43 @@ fun createMcpManagerTools(
                 }
                 mcpManager.markAiModified(server.id)
                 listOf(UIMessagePart.Text("MCP server '${updated.commonOptions.name}' (id=${server.id}) updated."))
+            },
+        ),
+        Tool(
+            name = "mcp_admin_assistant_set_enabled",
+            description = """
+                Enable or disable a configured MCP server for the current assistant.
+                When enabled, the server's tools become available to this assistant (next message onwards).
+                Use `mcp_admin_list` first to discover available server ids.
+            """.trimIndent(),
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("id", buildJsonObject {
+                            put("type", "string")
+                            put("description", "The id (UUID) of the MCP server")
+                        })
+                        put("enabled", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "true to enable this MCP server for the current assistant, false to disable it")
+                        })
+                    },
+                    required = listOf("id", "enabled"),
+                )
+            },
+            execute = { args ->
+                val json = args.jsonObject
+                val id = json["id"]?.jsonPrimitive?.contentOrNull ?: error("id is required")
+                val enabled = json["enabled"]?.jsonPrimitive?.booleanOrNull ?: error("enabled must be a boolean")
+                val server = findServer(id)
+                val newSet = if (enabled) assistant.mcpServers + server.id else assistant.mcpServers - server.id
+                settingsStore.updateAssistantMcpServers(assistant.id, newSet)
+                listOf(
+                    UIMessagePart.Text(
+                        "MCP server '${server.commonOptions.name}' (id=${server.id}) " +
+                            "${if (enabled) "enabled" else "disabled"} for the current assistant."
+                    )
+                )
             },
         ),
         Tool(

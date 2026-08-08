@@ -39,9 +39,6 @@ interface KnowledgeCardDao {
     @Query("SELECT * FROM knowledge_cards WHERE subject = :subject ORDER BY created_at DESC")
     suspend fun getBySubject(subject: String): List<KnowledgeCardEntity>
 
-    @Query("SELECT * FROM knowledge_cards ORDER BY review_count ASC, last_reviewed_at ASC LIMIT :limit")
-    suspend fun getDueForReview(limit: Int = 20): List<KnowledgeCardEntity>
-
     @Query("SELECT * FROM knowledge_cards WHERE archived = 0 AND (concept LIKE '%' || :query || '%' OR explanation LIKE '%' || :query || '%' OR memory_aid LIKE '%' || :query || '%') ORDER BY created_at DESC")
     suspend fun search(query: String): List<KnowledgeCardEntity>
 

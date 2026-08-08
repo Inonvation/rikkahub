@@ -26,7 +26,23 @@ class WorkspaceFileSystem(
             .filter { !isHiddenWorkspaceName(it.name) }
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
             .take(config.maxListEntries)
-            .map { it.toEntry(root) }
+            .map { it.toEntry(root).withChildCount(root) }
+    }
+
+    /**
+     * 目录的直接子项数（文件+子文件夹）。轻量实现：仅一次 listFiles 计数，不做递归遍历，
+     * 避免大目录列表（尤其嵌套文件夹）因统计占用而卡顿。占用仅对文件显示。
+     */
+    fun directoryChildCount(root: File, path: String): Int {
+        val dir = resolvePath(root, path)
+        if (!dir.exists() || !dir.isDirectory) return 0
+        return dir.listFiles().orEmpty().count { !isHiddenWorkspaceName(it.name) }
+    }
+
+    /** 目录条目补充直接子项数（文件原样返回，不统计占用） */
+    private fun WorkspaceFileEntry.withChildCount(root: File): WorkspaceFileEntry {
+        if (!isDirectory) return this
+        return copy(childCount = directoryChildCount(root, path))
     }
 
     /**

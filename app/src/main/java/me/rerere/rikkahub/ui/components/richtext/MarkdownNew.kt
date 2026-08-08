@@ -364,12 +364,14 @@ private fun HtmlParagraphContent(
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
     // 段落是否含 <a>：决定是否给段落 Text 挂 clickable，让 AnnotatedString 里的链接可点
     val hasLinks = remember(element) { element.select("a").isNotEmpty() }
-    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览入口，传给链接构建（非组合）使用
+    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览/跳转入口，传给链接构建（非组合）使用
     val wsResolver = LocalWorkspaceImageResolver.current
     val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val openWorkspaceFile = LocalOpenWorkspaceFile.current
     val onWsLinkClick: (String) -> Unit = { dest ->
         val url = resolveWorkspaceImage(dest, wsResolver)
         if (url != null) openWsPreview(url)
+        else if (isWorkspaceLink(dest)) openWorkspaceFile(dest)
     }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
@@ -740,12 +742,14 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
-    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览入口，传给链接构建（非组合）使用
+    // workspace 链接点击处理器：组合上下文捕获 resolver + 预览/跳转入口，传给链接构建（非组合）使用
     val wsResolver = LocalWorkspaceImageResolver.current
     val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val openWorkspaceFile = LocalOpenWorkspaceFile.current
     val onWsLinkClick: (String) -> Unit = { dest ->
         val url = resolveWorkspaceImage(dest, wsResolver)
         if (url != null) openWsPreview(url)
+        else if (isWorkspaceLink(dest)) openWorkspaceFile(dest)
     }
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }

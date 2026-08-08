@@ -131,7 +131,6 @@ private val parser by lazy {
 
 private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
 private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL)
-val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
 private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
 private val LATEX_BLOCK_LINE_BREAK_REGEX = Regex("""[ \t]*\r?\n[ \t]*""")
@@ -363,14 +362,6 @@ fun MarkdownBlock(
     }
 }
 
-// for debug
-private fun dumpAst(node: ASTNode, text: String, indent: String = "") {
-    println("$indent${node.type} ${if (node.children.isEmpty()) node.getTextInNode(text) else ""} | ${node.javaClass.simpleName}")
-    node.children.fastForEach {
-        dumpAst(it, text, "$indent  ")
-    }
-}
-
 object HeaderStyle {
     private const val LINE_HEIGHT_RATIO = 1.25f
 
@@ -594,9 +585,10 @@ private fun MarkdownNode(
             val context = LocalContext.current
             // 在组合上下文读取链接处理器，供点击回调使用（clickable 的 onClick 非组合上下文）
             val handler = LocalLinkClick.current
-            // workspace 链接：组合时解析 + 捕获预览入口（clickable 回调非组合上下文）
+            // workspace 链接：组合时解析 + 捕获预览/跳转入口（clickable 回调非组合上下文）
             val wsResolved = resolveWorkspaceImage(linkDest)
             val openWsPreview = LocalOpenWorkspaceImagePreview.current
+            val openWorkspaceFile = LocalOpenWorkspaceFile.current
             Text(
                 text = linkText,
                 color = MaterialTheme.colorScheme.primary,
@@ -606,6 +598,11 @@ private fun MarkdownNode(
                     val wsUrl = wsResolved
                     if (wsUrl != null) {
                         openWsPreview(wsUrl)
+                        return@clickable
+                    }
+                    // workspace 非图片链接：应用内打开文件/定位目录，不走系统浏览器
+                    if (isWorkspaceLink(linkDest)) {
+                        openWorkspaceFile(linkDest)
                         return@clickable
                     }
                     // note: 前缀的内部笔记链接（双链/内部路径预处理产物）交给回调接管，而非系统浏览器
@@ -913,7 +910,6 @@ private fun Paragraph(
     onClickCitation: (String) -> Unit = {},
     modifier: Modifier,
 ) {
-    // dumpAst(node, content)
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
         FlowRow(modifier = modifier) {
             node.children.fastForEach { child ->
@@ -942,12 +938,17 @@ private fun Paragraph(
     // CompositionLocal 需在组合上下文读取，remember 只缓存闭包
     val wsResolver = LocalWorkspaceImageResolver.current
     val openWsPreview = LocalOpenWorkspaceImagePreview.current
+    val openWorkspaceFile = LocalOpenWorkspaceFile.current
     val noteHandler = LocalLinkClick.current
-    val linkHandler: ((String) -> Boolean)? = remember(wsResolver, openWsPreview, noteHandler) {
+    val linkHandler: ((String) -> Boolean)? = remember(wsResolver, openWsPreview, openWorkspaceFile, noteHandler) {
         { dest: String ->
             val wsUrl = resolveWorkspaceImage(dest, wsResolver)
             if (wsUrl != null) {
                 openWsPreview(wsUrl)
+                true
+            } else if (isWorkspaceLink(dest)) {
+                // workspace 非图片链接：应用内打开文件/定位目录，不走系统浏览器
+                openWorkspaceFile(dest)
                 true
             } else {
                 noteHandler?.onLinkClick(dest) ?: false

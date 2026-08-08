@@ -69,6 +69,7 @@ private fun buildWorkspacePrompt(
     appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout).")
     appendLine("- Prefer workspace_shell / workspace_edit_file / workspace_list_files / workspace_grep.")
     appendLine("- To show workspace images to the user: use Markdown image syntax ![alt](/workspace/<relative-path>) in your reply body (path is relative under /workspace; images only; the UI loads them automatically).")
+    appendLine("- To link a workspace file the user can open: use Markdown link syntax [文件名](/workspace/<relative-path>) in your reply body (path is relative under /workspace; tapping opens the file in the app — text files open the editor, folders locate the directory). Do not use image syntax for non-image files.")
     appendLine("- Skills: /skills/<skill>/SKILL.md; /upload is read-only.")
     append("</workspace>")
     if (!envContent.isNullOrBlank()) {

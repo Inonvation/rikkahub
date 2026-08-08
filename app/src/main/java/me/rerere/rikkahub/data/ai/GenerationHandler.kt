@@ -43,6 +43,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
+import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.ai.ui.limitContext
 import me.rerere.ai.util.HttpException
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
@@ -76,10 +77,19 @@ private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 private const val MAX_GENERATION_RETRIES = 2
 private const val RETRY_INITIAL_BACKOFF_MS = 1000L
 
-// ---- 防失控启发式（对齐 NoteGen 的 toolResultEvidence / MAX_IDENTICAL_READ_RESULT_REPEATS）----
-private const val MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS = 2
-private const val MAX_IDENTICAL_READ_RESULT_REPEATS = 2
-private const val AUTO_STOP_NOTICE = "\n\n---\n*模型连续多轮没有新进展，已自动停止。你可以继续发送消息。*"
+// ---- 流式输出中断续答唤醒 ----
+// 网络中断等导致已开始输出的流式失败时，向模型发送「继续生成」指令尝试唤醒续答，
+// 让模型在既有部分输出上接续（而非从头重来）。最多唤醒 MAX_STREAM_RESUME_ATTEMPTS 次，
+// 超出后仍失败则抛出，保留部分输出交给上层报错。
+private const val MAX_STREAM_RESUME_ATTEMPTS = 1
+
+// ---- 防失控启发式（精准死循环检测）----
+// 旧方案按「输出指纹」判断"是否新进展"：AI 试错时反复调用同一工具而输出恰好相同
+// （查同一数据/读同一文件），会被误判为无进展而自动停止，剥夺模型的试错空间。
+// 现改为按「工具入参」判定：只有连续多轮发起**完全相同**的工具调用
+// （toolName + input 均一致）才算死循环；入参有变化即视为模型在试错/推进，绝不中断。
+private const val MAX_IDENTICAL_CALL_ROUNDS = 4
+private const val AUTO_STOP_NOTICE = "\n\n---\n*模型连续多轮重复相同操作且无进展，已自动停止。你可以继续发送消息。*"
 
 // ---- 工作区文件工具串行化（并发竞态防护）----
 // 背景：GenerationHandler 一轮内并行执行所有工具；workspace_edit_file / workspace_write_file
@@ -156,10 +166,9 @@ private fun Throwable.isRetryable(): Boolean = when (this) {
 /** 指数退避：第 1 次重试前等 1s，第 2 次 2s，第 3 次 4s */
 private fun backoffDelay(attempt: Int): Long = RETRY_INITIAL_BACKOFF_MS * (1L shl (attempt - 1))
 
-/** 工具输出的轻量指纹（toolName + 文本部分），用于检测「重复读 / 无新证据」 */
-private fun UIMessagePart.Tool.signature(): String {
-    val text = output.filterIsInstance<UIMessagePart.Text>().joinToString("\\n") { it.text }
-    return "$toolName:$text"
+/** 工具调用的指纹（toolName + 原始入参），用于检测「完全相同调用重复」的死循环 */
+private fun UIMessagePart.Tool.inputFingerprint(): String {
+    return "$toolName:${input.trim()}"
 }
 
 /**
@@ -174,6 +183,18 @@ internal fun buildGuidanceInstruction(text: String): String = buildString {
     appendLine("```")
     appendLine("- Follow the guidance in your ongoing reply. Do NOT re-answer from scratch; build on your existing answer.")
     appendLine("- If you were waiting for a running sub-agent, you may incorporate this guidance now and continue when results arrive.")
+}
+
+/**
+ * 构造「流式输出中断续答唤醒」指令：流式生成因网络/服务端错误中断时，作为最后一条 USER
+ * 消息注入，提示模型在已生成的部分输出上继续，而不是从头重来。
+ */
+internal fun buildStreamResumeInstruction(): String = buildString {
+    appendLine("## Your previous output was interrupted")
+    appendLine("Your previous response was cut off by a connection error before it was finished.")
+    appendLine("- Continue writing from exactly where you stopped. Do NOT re-answer from scratch or repeat what is already written.")
+    appendLine("- If you were in the middle of a tool call or reasoning, finish it and then complete your answer.")
+    appendLine("- Keep the same style and structure as your existing output.")
 }
 
 @Serializable
@@ -222,12 +243,9 @@ class GenerationHandler(
         var messages: List<UIMessage> = messages
 
         // 防失控启发式状态（跨轮累积）：
-        // seenSignatures = 所有轮见过的工具输出指纹；noProgressRounds = 连续无新证据轮数；
-        // lastSignatureByName / identicalRepeatByName = 同一工具连续相同输出计数
-        val seenSignatures = mutableSetOf<String>()
-        var noProgressRounds = 0
-        val lastSignatureByName = mutableMapOf<String, String>()
-        val identicalRepeatByName = mutableMapOf<String, Int>()
+        // prevRoundFingerprints = 上一轮工具调用指纹集合；identicalCallRounds = 连续完全相同调用轮数
+        var prevRoundFingerprints: Set<String>? = null
+        var identicalCallRounds = 0
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -453,43 +471,21 @@ class GenerationHandler(
                 )
             )
 
-            // ---- 防失控启发式（对齐 NoteGen runtime.ts 的 toolResultEvidence / MAX_IDENTICAL_READ_RESULT_REPEATS）----
-            // 1) 连续多轮工具输出没有任何新内容（无新证据）→ 自动收尾
-            val currentSignatures = executedTools.map { it.signature() }
-            val hasNewEvidence = currentSignatures.any { it !in seenSignatures }
-            if (hasNewEvidence) {
-                noProgressRounds = 0
-                seenSignatures.addAll(currentSignatures)
+            // ---- 防失控启发式（精准死循环检测）----
+            // 仅当「本轮工具调用指纹集合」与上一轮完全一致（toolName + 入参均未变）时累计
+            // 死循环轮数；任何一轮出现新的工具或不同的入参，都视为模型在试错/推进，立即清零。
+            // 相比旧的「输出无新证据」判定，不再误杀「反复读同一数据但尝试不同方案」的场景。
+            val currentFingerprints = executedTools.map { it.inputFingerprint() }.toSet()
+            val prev = prevRoundFingerprints
+            if (prev != null && currentFingerprints.isNotEmpty() && currentFingerprints == prev) {
+                identicalCallRounds++
             } else {
-                noProgressRounds++
+                identicalCallRounds = 0
             }
+            prevRoundFingerprints = currentFingerprints
 
-            // 2) 同一工具连续多次返回完全相同输出（重复读死循环）→ 自动收尾。
-            //    仅在「本轮无新证据」时才判定——若有新进展（新工具/新输出）说明 AI 在正常推进，
-            //    即使某个稳定输出工具（如 kb_list）返回相同结果也不算死循环，避免误杀。
-            var repeatedRead = false
-            if (!hasNewEvidence) {
-                executedTools.forEach { tool ->
-                    val sig = tool.signature()
-                    val last = lastSignatureByName[tool.toolName]
-                    if (last == sig) {
-                        val count = (identicalRepeatByName[tool.toolName] ?: 1) + 1
-                        identicalRepeatByName[tool.toolName] = count
-                        if (count >= MAX_IDENTICAL_READ_RESULT_REPEATS) repeatedRead = true
-                    } else {
-                        identicalRepeatByName[tool.toolName] = 1
-                    }
-                    lastSignatureByName[tool.toolName] = sig
-                }
-            }
-
-            if (repeatedRead || noProgressRounds >= MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS) {
-                val reason = if (repeatedRead) {
-                    "same tool returned identical result repeatedly"
-                } else {
-                    "no new progress for $MAX_CONSECUTIVE_NO_PROGRESS_ROUNDS rounds"
-                }
-                Log.i(TAG, "generateText: auto-stop ($reason)")
+            if (identicalCallRounds >= MAX_IDENTICAL_CALL_ROUNDS) {
+                Log.i(TAG, "generateText: auto-stop (identical tool calls for $MAX_IDENTICAL_CALL_ROUNDS rounds)")
                 val lastMsg = messages.last()
                 messages = messages.dropLast(1) + lastMsg.copy(
                     parts = lastMsg.parts + UIMessagePart.Text(AUTO_STOP_NOTICE)
@@ -567,7 +563,8 @@ class GenerationHandler(
         // 续答唤醒指令：作为 provider 看到的最后一条 USER 消息追加（transforms 之后，避免被
         // 输入转换器改写；不写 system 保持缓存前缀稳定）。只进 internalMessages 发送列表，
         // 不落持久化 messages —— handleMessageChunk 仍并入上一条 assistant 消息，不分段。
-        val messagesToSend = if (!resumeContext.isNullOrBlank()) {
+        // 流式输出中断续答唤醒时会被重建为「internalMessages + 部分输出 + 继续指令」。
+        var messagesToSend = if (!resumeContext.isNullOrBlank()) {
             internalMessages + UIMessage(
                 role = MessageRole.USER,
                 parts = listOf(UIMessagePart.Text(resumeContext)),
@@ -577,6 +574,8 @@ class GenerationHandler(
         }
 
         var messages: List<UIMessage> = messages
+        // 流式续答唤醒时用于定位「本次流式新增的部分输出」：取 messages 中位于原始输入之后的部分。
+        val originalMessagesCount = messages.size
         val params = TextGenerationParams(
             model = model,
             temperature = assistant.temperature,
@@ -596,17 +595,20 @@ class GenerationHandler(
         if (stream) {
             // 指数退避重试：只重试「还没收到任何内容」的失败（429/5xx/网络错误）。
             // 已开始输出后失败不重试，避免重复输出；重试不丢已保留的内容。
-            val streamChunkHandler = StreamChunkHandler(model)
+            // 已开始输出但中断（网络/超时等可恢复错误）：先发「继续生成」指令唤醒续答，
+            // 让模型在已生成的部分输出上接续，而不是从头重来或直接放弃。
             var attempt = 0
-            var receivedAnyChunk = false
+            var streamResumeAttempts = 0
             while (true) {
+                // 每次尝试（含指数退避重试与续答唤醒）都是独立响应流，必须用新的
+                // StreamChunkHandler——其内部持有本次流的合并索引，不可复用。
+                val streamChunkHandler = StreamChunkHandler(model)
                 try {
                     providerImpl.streamText(
                         providerSetting = provider,
                         messages = messagesToSend,
                         params = params
                     ).collect {
-                        receivedAnyChunk = true
                         messages = streamChunkHandler.handle(messages, it)
                         onUpdateMessages(messages)
                     }
@@ -627,8 +629,59 @@ class GenerationHandler(
                     if (!currentCoroutineContext().isActive) {
                         throw CancellationException("Generation cancelled during stream", e)
                     }
-                    // 可重试且尚未开始输出：指数退避后重试整轮请求
-                    if (receivedAnyChunk || attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
+                    // 已开始输出但中断（可恢复错误）：向模型发「继续生成」指令唤醒续答，
+                    // 复用已生成的部分输出作为上下文，让模型接续而非重复。限次，避免死循环。
+                    // 仅当本次流式产生了实质内容（非空文本/工具/推理）才续答：若模型刚发出
+                    // TextStart 空文本就断流，部分输出为空，续答等价于从头重试，浪费一次尝试，
+                    // 此时走下方普通重试更合适。
+                    val streamedPart = messages.drop(originalMessagesCount)
+                    val hasMeaningfulOutput =
+                        streamedPart.isNotEmpty() && streamedPart.any { !it.parts.isEmptyUIMessage() } ||
+                            // 输入末尾已是 ASSISTANT（resumeContext 续答时中断）：handle 原地更新，
+                            // drop 为空，但 messages.last() 可能已含部分输出
+                            (streamedPart.isEmpty() && messages.isNotEmpty() &&
+                                messages.last().role == MessageRole.ASSISTANT &&
+                                !messages.last().parts.isEmptyUIMessage())
+                    if (hasMeaningfulOutput &&
+                        streamResumeAttempts < MAX_STREAM_RESUME_ATTEMPTS &&
+                        e.isRetryable()
+                    ) {
+                        streamResumeAttempts++
+                        attempt++
+                        Log.w(
+                            TAG,
+                            "stream interrupted after output, resuming with continue instruction (attempt #$streamResumeAttempts)"
+                        )
+                        // 重建发送列表：internalMessages(含 system 的完整发送列表) + 本次流式新增的部分输出
+                        // + 继续指令。局部 messages 在流式中已被 streamChunkHandler 追加/更新了本次生成的
+                        // assistant 内容；模型据此在上文基础上接续。
+                        // - 输入末尾是 USER（常规首轮/regenerate）：handle 会新建 assistant 消息，
+                        //   取 messages.drop(originalMessagesCount) 即本次部分输出。
+                        // - 输入末尾已是 ASSISTANT（resumeContext 续答时中断）：handle 原地更新最后一条，
+                        //   drop 为空。此时用含部分输出的 messages.last()（必为 assistant）替换/追加到
+                        //   internalMessages 末尾，避免部分输出对模型不可见导致续答从头重写。
+                        val resumeBase = if (streamedPart.isNotEmpty()) {
+                            internalMessages + streamedPart
+                        } else if (messages.isNotEmpty() && messages.last().role == MessageRole.ASSISTANT) {
+                            if (internalMessages.isNotEmpty() && internalMessages.last().role == MessageRole.ASSISTANT) {
+                                // internalMessages 末尾是同一 assistant（未被 limitContext 截断）：直接替换
+                                internalMessages.dropLast(1) + messages.last()
+                            } else {
+                                // internalMessages 末尾被截断成非 assistant：追加，保持 USER→ASSISTANT 合法序列
+                                internalMessages + messages.last()
+                            }
+                        } else {
+                            internalMessages
+                        }
+                        messagesToSend = resumeBase + UIMessage(
+                            role = MessageRole.USER,
+                            parts = listOf(UIMessagePart.Text(buildStreamResumeInstruction())),
+                        )
+                        delay(backoffDelay(attempt))
+                        continue
+                    }
+                    // 可重试且尚未产生实质输出（未开始或刚发出空文本就断流）：指数退避后重试整轮请求
+                    if (hasMeaningfulOutput || attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
                         throw e
                     }
                     attempt++

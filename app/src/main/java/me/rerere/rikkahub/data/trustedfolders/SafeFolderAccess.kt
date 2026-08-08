@@ -120,16 +120,23 @@ class SafeFolderAccess(private val context: Context) {
         dir.listFiles()
             .mapNotNull { doc ->
                 val name = doc.name ?: return@mapNotNull null
+                val isDir = doc.isDirectory
+                // 目录不统计占用（避免大目录卡顿），只计直接子项数
                 TrustedFolderEntry(
                     name = name,
                     path = if (rel.isEmpty()) name else "$rel/$name",
-                    isDirectory = doc.isDirectory,
-                    sizeBytes = doc.length(),
+                    isDirectory = isDir,
+                    sizeBytes = if (isDir) 0L else doc.length(),
                     updatedAt = doc.lastModified(),
+                    childCount = if (isDir) directoryChildCount(doc) else 0,
                 )
             }
             .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
     }
+
+    /** 目录的直接子项数（文件+子文件夹）；轻量，仅一次 listFiles 计数，不做递归遍历 */
+    private fun directoryChildCount(dir: DocumentFile): Int =
+        dir.listFiles().count { it.name != null }
 
     /** 读文件字节。超出 [MAX_READ_BYTES] 拒绝 */
     suspend fun readBytes(uri: String, relPath: String): ByteArray = withContext(Dispatchers.IO) {

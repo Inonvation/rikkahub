@@ -90,7 +90,7 @@ fun ExtensionSelector(
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(0) }
                 },
-                text = { Text(stringResource(R.string.extension_selector_tab_quick_messages)) }
+                text = { Text(stringResource(R.string.extension_selector_tab_skills)) }
             )
             Tab(
                 selected = pagerState.currentPage == 1,
@@ -98,7 +98,7 @@ fun ExtensionSelector(
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(1) }
                 },
-                text = { Text(stringResource(R.string.extension_selector_tab_mode_injections)) }
+                text = { Text(stringResource(R.string.extension_selector_tab_quick_messages)) }
             )
             Tab(
                 selected = pagerState.currentPage == 2,
@@ -106,7 +106,7 @@ fun ExtensionSelector(
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(2) }
                 },
-                text = { Text(stringResource(R.string.extension_selector_tab_lorebooks)) }
+                text = { Text(stringResource(R.string.extension_selector_tab_mode_injections)) }
             )
             Tab(
                 selected = pagerState.currentPage == 3,
@@ -114,7 +114,7 @@ fun ExtensionSelector(
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     scope.launch { pagerState.animateScrollToPage(3) }
                 },
-                text = { Text(stringResource(R.string.extension_selector_tab_skills)) }
+                text = { Text(stringResource(R.string.extension_selector_tab_lorebooks)) }
             )
         }
 
@@ -126,6 +126,30 @@ fun ExtensionSelector(
         ) { page ->
             when (page) {
                 0 -> {
+                    if (skills.isNotEmpty()) {
+                        SkillsContent(
+                            skills = skills,
+                            enabledSkills = assistant.enabledSkills,
+                            onToggle = { name, checked ->
+                                val newSkills = if (checked) {
+                                    assistant.enabledSkills + name
+                                } else {
+                                    assistant.enabledSkills - name
+                                }
+                                onUpdate(assistant.copy(enabledSkills = newSkills))
+                            },
+                            onManage = onNavigateToSkills,
+                        )
+                    } else {
+                        ExtensionEmptyState(
+                            message = stringResource(R.string.extension_selector_skills_empty),
+                            buttonText = stringResource(R.string.extension_selector_go_to_skills),
+                            onAction = onNavigateToSkills,
+                        )
+                    }
+                }
+
+                1 -> {
                     if (settings.quickMessages.isNotEmpty()) {
                         QuickMessagesContent(
                             quickMessages = settings.quickMessages,
@@ -149,7 +173,7 @@ fun ExtensionSelector(
                     }
                 }
 
-                1 -> {
+                2 -> {
                     if (settings.modeInjections.isNotEmpty()) {
                         ModeInjectionsContent(
                             modeInjections = settings.modeInjections,
@@ -177,7 +201,7 @@ fun ExtensionSelector(
                     }
                 }
 
-                2 -> {
+                3 -> {
                     if (settings.lorebooks.isNotEmpty()) {
                         LorebooksContent(
                             lorebooks = settings.lorebooks,
@@ -201,30 +225,6 @@ fun ExtensionSelector(
                             message = stringResource(R.string.extension_selector_lorebooks_empty),
                             buttonText = stringResource(R.string.extension_selector_go_to_extensions),
                             onAction = onNavigateToPrompts,
-                        )
-                    }
-                }
-
-                3 -> {
-                    if (skills.isNotEmpty()) {
-                        SkillsContent(
-                            skills = skills,
-                            enabledSkills = assistant.enabledSkills,
-                            onToggle = { name, checked ->
-                                val newSkills = if (checked) {
-                                    assistant.enabledSkills + name
-                                } else {
-                                    assistant.enabledSkills - name
-                                }
-                                onUpdate(assistant.copy(enabledSkills = newSkills))
-                            },
-                            onManage = onNavigateToSkills,
-                        )
-                    } else {
-                        ExtensionEmptyState(
-                            message = stringResource(R.string.extension_selector_skills_empty),
-                            buttonText = stringResource(R.string.extension_selector_go_to_skills),
-                            onAction = onNavigateToSkills,
                         )
                     }
                 }

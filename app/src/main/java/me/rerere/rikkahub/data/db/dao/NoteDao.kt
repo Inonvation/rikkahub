@@ -42,9 +42,6 @@ interface NoteDao {
     @Query("SELECT * FROM study_notes WHERE archived = 0 AND (title LIKE '%' || :query || '%' OR content LIKE '%' || :query || '%') ORDER BY updated_at DESC")
     suspend fun search(query: String): List<NoteEntity>
 
-    @Query("SELECT DISTINCT category FROM study_notes ORDER BY category")
-    suspend fun getAllCategories(): List<String>
-
     @Insert
     suspend fun insert(entity: NoteEntity)
 

@@ -22,6 +22,12 @@ private val IMAGE_EXTENSIONS = setOf(
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif", "avif", "ico",
 )
 
+/** 判断文件路径是否为工作区可预览的图片（按扩展名，供文件变更点击直接预览等场景复用） */
+fun isWorkspaceImagePath(path: String): Boolean {
+    val ext = path.substringAfterLast('.', "").lowercase()
+    return ext in IMAGE_EXTENSIONS
+}
+
 /**
  * 构造 /workspace/ 图片路径 → 可加载 Uri 字符串的解析器。
  *
@@ -79,3 +85,10 @@ fun resolveWorkspaceImage(src: String): String? = resolveWorkspaceImage(src, Loc
  * 链接点击回调（非组合上下文）需在组合时捕获该引用，点击时再调用。
  */
 val LocalOpenWorkspaceImagePreview = staticCompositionLocalOf<(String) -> Unit> { { _ -> } }
+
+/**
+ * 打开工作区文件/目录的入口（非图片链接），由聊天页提供实现：
+ * 文本/可编辑文件跳转文件编辑器，目录跳转工作区详情并定位。
+ * 入参：Rootfs 相对路径（/workspace 下的相对路径）。
+ */
+val LocalOpenWorkspaceFile = staticCompositionLocalOf<(String) -> Unit> { { _ -> } }

@@ -170,8 +170,6 @@ fun darkExtendColors(): ExtendColors = ExtendColors(
 )
 
 object CustomColors {
-    var black = false
-
     val topBarColors: TopAppBarColors
         @Composable get() {
             return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(

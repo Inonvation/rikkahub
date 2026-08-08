@@ -289,8 +289,24 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
+        // DataStore 两阶段加载：settingsFlow 先发 dummy(init=true) 再发真实值。若 startScreen 在
+        // settings 就绪前就用 settings 值计算，真实值到达时 remember key 翻转，rememberNavBackStack 的
+        // rememberSaveable 会把整个 backStack 重置（退后台恢复丢页面/意外跳会话的根因）。
+        // 因此 settings 就绪前先显示启动占位，就绪后一次性确定 startScreen（remember(Unit) 不翻转）。
+        if (settings.init) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+            return@AppRoutes
+        }
+
         // remember：避免每次重组都同步读 SharedPreferences + 生成 UUID（主线程磁盘读）
-        val startScreen = remember(settings.displaySetting.createNewConversationOnStart) {
+        // 冷启动 / 进程被杀后重建：按 createNewConversationOnStart 决定新建会话或恢复上次会话。
+        // 短暂退后台（进程活着）不走这里——导航栈由 rememberNavBackStack 的 saved state 保留原界面。
+        val startScreen = remember(Unit) {
             Screen.Chat(
                 id = if (settings.displaySetting.createNewConversationOnStart) {
                     Uuid.random().toString()

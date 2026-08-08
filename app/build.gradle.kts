@@ -168,13 +168,11 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material3.adaptive)
-    implementation(libs.androidx.material3.adaptive.layout)
 
     // Navigation 3
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-    implementation(libs.androidx.material3.adaptive.navigation3)
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
@@ -302,7 +300,6 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":material3"))
     implementation(project(":workspace"))
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 
     // Leak Canary

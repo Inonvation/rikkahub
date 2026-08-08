@@ -84,6 +84,8 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.richtext.DiffAddedColor
 import me.rerere.rikkahub.ui.components.richtext.DiffRemovedColor
+import me.rerere.rikkahub.ui.components.richtext.isWorkspaceImagePath
+import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -138,6 +140,7 @@ internal fun EditedFilesList(
     val toaster = LocalToaster.current
 
     var selectedPath by remember { mutableStateOf<String?>(null) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
     var importPath by remember { mutableStateOf<String?>(null) }
 
@@ -168,10 +171,25 @@ internal fun EditedFilesList(
     val deletedSet = remember(removedFiles) { removedFiles.toSet() }
     val deletedMessage = stringResource(R.string.workspace_file_change_deleted)
     val onChipClick: (String) -> Unit = { path ->
-        if (path in deletedSet) {
-            toaster.show(deletedMessage)
-        } else {
-            selectedPath = path
+        when {
+            path in deletedSet -> toaster.show(deletedMessage)
+            // 图片直接预览：导出到缓存后弹大图，不经过操作菜单
+            isWorkspaceImagePath(path) -> {
+                scope.launch {
+                    runCatching {
+                        val (area, relativePath) = resolveWorkspacePath(path)
+                        val dir = File(context.cacheDir, "workspace_edited_preview").apply { mkdirs() }
+                        val file = File(dir, path.substringAfterLast('/'))
+                        file.outputStream().use { output ->
+                            workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+                        }
+                        previewImagePath = file.absolutePath
+                    }.onFailure {
+                        toaster.show("预览失败: ${explainErrorText(it.message)}")
+                    }
+                }
+            }
+            else -> selectedPath = path
         }
     }
 
@@ -453,6 +471,14 @@ internal fun EditedFilesList(
         }
     }
 
+    // 图片文件直接预览（点击图片变更 chip 时弹出大图）
+    previewImagePath?.let { path ->
+        ImagePreviewDialog(
+            images = listOf(path),
+            onDismissRequest = { previewImagePath = null },
+        )
+    }
+
     // 知识库选择对话框
     if (showImportDialog && importPath != null) {
         val path = importPath!!
@@ -723,7 +749,8 @@ private fun FileChangeChipGroup(
     if (paths.isEmpty()) return
 
     var expanded by remember { mutableStateOf(false) }
-    val visiblePaths = if (expanded) paths else paths.take(DEFAULT_VISIBLE_COUNT)
+    // 后变更的排前面：extractFileChanges 按工具执行顺序追加（先变更在前），此处反转展示
+    val visiblePaths = if (expanded) paths.asReversed() else paths.asReversed().take(DEFAULT_VISIBLE_COUNT)
     val hasMore = paths.size > DEFAULT_VISIBLE_COUNT
 
     Column(
@@ -929,6 +956,30 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
         .collectAsState(initial = null)
     var expanded by remember(messageId) { mutableStateOf(editedFilesExpanded[messageId] ?: false) }
     val haptic = rememberHaptic()
+    val scope = rememberCoroutineScope()
+    // 图片变更直接预览（content:// 加载大图），其余文件跳转编辑器
+    var previewImageUri by remember { mutableStateOf<String?>(null) }
+
+    fun openChangedFile(path: String) {
+        val pid = trustedActiveProjectId ?: run {
+            toaster.show("未激活信任文件夹，无法打开编辑的文件")
+            return
+        }
+        if (isWorkspaceImagePath(path)) {
+            scope.launch {
+                runCatching {
+                    trustedFolderRepository.contentUri(path, pid)
+                }.onSuccess { uri ->
+                    if (uri != null) previewImageUri = uri.toString()
+                    else toaster.show("无法预览该图片")
+                }.onFailure {
+                    toaster.show("预览失败: ${explainErrorText(it.message)}")
+                }
+            }
+        } else {
+            navController.navigate(Screen.TrustedFolderEditor(pid, path))
+        }
+    }
 
     val addedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
     val editedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
@@ -999,11 +1050,7 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
                         icon = HugeIcons.FileAdd,
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        onSelect = { path ->
-                            val pid = trustedActiveProjectId
-                            if (pid != null) navController.navigate(Screen.TrustedFolderEditor(pid, path))
-                            else toaster.show("未激活信任文件夹，无法打开编辑的文件")
-                        },
+                        onSelect = ::openChangedFile,
                     )
                     FileChangeChipGroup(
                         title = "编辑",
@@ -1011,11 +1058,7 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
                         icon = HugeIcons.Edit01,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        onSelect = { path ->
-                            val pid = trustedActiveProjectId
-                            if (pid != null) navController.navigate(Screen.TrustedFolderEditor(pid, path))
-                            else toaster.show("未激活信任文件夹，无法打开编辑的文件")
-                        },
+                        onSelect = ::openChangedFile,
                     )
                     FileChangeChipGroup(
                         title = "删除",
@@ -1028,6 +1071,14 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
                 }
             }
         }
+    }
+
+    // 图片变更直接预览（content:// 加载大图）
+    previewImageUri?.let { uri ->
+        ImagePreviewDialog(
+            images = listOf(uri),
+            onDismissRequest = { previewImageUri = null },
+        )
     }
 }
 

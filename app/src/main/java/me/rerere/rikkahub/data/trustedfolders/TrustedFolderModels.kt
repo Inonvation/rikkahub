@@ -49,6 +49,8 @@ data class TrustedFolderEntry(
     val isDirectory: Boolean,
     val sizeBytes: Long,
     val updatedAt: Long,
+    /** 目录的直接子项数（文件+子文件夹）；文件恒为 0。由列目录时统计填充，用于显示「时间丨n项丨占用」 */
+    val childCount: Int = 0,
 )
 
 /** 内容搜索结果（[path] 相对项目根，[text] 为命中的那行） */

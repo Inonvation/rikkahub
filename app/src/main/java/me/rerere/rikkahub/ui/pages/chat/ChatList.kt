@@ -105,13 +105,16 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownNewCache
 import me.rerere.rikkahub.ui.components.richtext.LocalWorkspaceImageResolver
 import me.rerere.rikkahub.ui.components.richtext.LocalOpenWorkspaceImagePreview
+import me.rerere.rikkahub.ui.components.richtext.LocalOpenWorkspaceFile
 import me.rerere.rikkahub.ui.components.richtext.workspaceImageResolver
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.components.message.LocalConversationId
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
@@ -124,6 +127,7 @@ import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.utils.ToolParseCache
 import me.rerere.rikkahub.utils.plus
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -412,10 +416,32 @@ private fun ChatListNormal(
             // preview lambda 用 remember 缓存为稳定引用：若每次重组新建，Markdown 段落 linkHandler
             // 会随引用变化而重建，破坏 annotatedString 的 remember 缓存（滚动性能）
             val openWsPreview = remember { { url: String -> workspacePreviewImage = url } }
+            val navController = LocalNavController.current
+            // 工作区文件链接（非图片 [名](/workspace/路径)）点击 → 应用内跳转：文件开编辑器，目录定位
+            val openWorkspaceFile = remember(assistant, navController) {
+                { dest: String ->
+                    val workspaceId = assistant?.workspaceId?.toString()
+                    if (workspaceId != null) {
+                        val trimmed = dest.trimEnd('/')
+                        val (area, relativePath) =
+                            if (trimmed == "/workspace" || trimmed.startsWith("/workspace/")) {
+                                WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
+                            } else {
+                                WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
+                            }
+                        if (relativePath.isBlank()) {
+                            navController.navigate(Screen.WorkspaceDetail(workspaceId, area.name, ""))
+                        } else {
+                            navController.navigate(Screen.WorkspaceFileEditor(workspaceId, area.name, relativePath))
+                        }
+                    }
+                }
+            }
             CompositionLocalProvider(
                 LocalConversationId provides conversation.id.toString(),
                 LocalWorkspaceImageResolver provides workspaceImgResolver,
                 LocalOpenWorkspaceImagePreview provides openWsPreview,
+                LocalOpenWorkspaceFile provides openWorkspaceFile,
             ) {
             LazyColumn(
                 state = state,

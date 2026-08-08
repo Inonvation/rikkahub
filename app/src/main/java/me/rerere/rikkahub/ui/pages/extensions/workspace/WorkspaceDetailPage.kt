@@ -92,6 +92,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAppLifecycleState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.fileSizeToString
+import me.rerere.rikkahub.utils.formatFileTime
 import me.rerere.rikkahub.utils.plus
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
@@ -1183,7 +1184,12 @@ private fun WorkspaceFileCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (entry.isDirectory) entry.path else "${entry.path} · ${entry.sizeBytes.fileSizeToString()}",
+                    // 文件 = 时间｜占用；文件夹 = 时间丨n项（不统计占用，避免进目录卡顿）
+                    text = if (entry.isDirectory) {
+                        "${entry.updatedAt.formatFileTime()} 丨 ${entry.childCount}项"
+                    } else {
+                        "${entry.updatedAt.formatFileTime()} ｜ ${entry.sizeBytes.fileSizeToString()}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

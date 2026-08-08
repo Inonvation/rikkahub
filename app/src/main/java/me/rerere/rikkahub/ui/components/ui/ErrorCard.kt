@@ -130,10 +130,13 @@ fun ErrorCard(
     val explained = remember(error) { error.error.toExplainedError() }
     var showDetail by remember { mutableStateOf(false) }
 
-    // 5 秒后自动消失
-    LaunchedEffect(error.id) {
-        delay(5000)
-        onDismiss()
+    // 5 秒后自动消失；详情弹窗打开期间暂停倒计时（否则 error 被移除、ErrorCard 离开组合，
+    // 已打开的 ErrorDetailDialog 会随组合销毁一起消失），关闭详情后重新计时
+    LaunchedEffect(error.id, showDetail) {
+        if (!showDetail) {
+            delay(5000)
+            onDismiss()
+        }
     }
 
     Surface(

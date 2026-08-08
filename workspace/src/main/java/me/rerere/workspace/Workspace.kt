@@ -49,6 +49,8 @@ data class WorkspaceFileEntry(
     val isDirectory: Boolean,
     val sizeBytes: Long,
     val updatedAt: Long,
+    /** 目录的直接子项数（文件+子文件夹）；文件恒为 0。由 list 时轻量统计填充，用于 UI 显示「时间丨n项」 */
+    val childCount: Int = 0,
 )
 
 data class WorkspaceSearchMatch(

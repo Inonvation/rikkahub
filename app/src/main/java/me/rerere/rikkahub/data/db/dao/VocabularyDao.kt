@@ -36,9 +36,6 @@ interface VocabularyDao {
     @Query("UPDATE vocabulary SET archived = 0 WHERE id = :id")
     suspend fun restore(id: String)
 
-    @Query("SELECT * FROM vocabulary ORDER BY review_count ASC, last_reviewed_at ASC LIMIT :limit")
-    suspend fun getDueForReview(limit: Int = 20): List<VocabularyEntity>
-
     @Insert
     suspend fun insert(entity: VocabularyEntity)
 

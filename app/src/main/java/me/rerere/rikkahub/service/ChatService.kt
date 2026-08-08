@@ -837,7 +837,12 @@ class ChatService(
     // ---- 初始化对话 ----
 
     suspend fun initializeConversation(conversationId: Uuid) {
-        getOrCreateSession(conversationId) // 确保 session 存在
+        val session = getOrCreateSession(conversationId) // 确保 session 存在
+        // 内存态已有内容时跳过 Room 覆盖：生成期间消息只存内存、尚未落库，
+        // 切回正在生成的会话若用 Room 旧快照覆盖，AI 回复/工具气泡会短暂消失，
+        // 要等下一个流式 chunk 才恢复（工具思考/审批暂停时可能长时间无内容）。
+        // 仅当 session 为空（首次进入/被 idle 回收后重建）才从 Room 加载。
+        if (session.state.value.messageNodes.isNotEmpty()) return
         val conversation = conversationRepo.getConversationById(conversationId)
         if (conversation != null) {
             updateConversation(conversationId, conversation)

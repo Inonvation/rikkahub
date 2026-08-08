@@ -15,9 +15,6 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
     fun getAll(): Flow<List<ConversationEntity>>
 
-    @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
-    fun getAllPaging(): PagingSource<Int, ConversationEntity>
-
     @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC")
     fun getConversationsOfAssistant(assistantId: String): Flow<List<ConversationEntity>>
 
@@ -74,9 +71,6 @@ interface ConversationDAO {
     @Delete
     suspend fun delete(conversation: ConversationEntity)
 
-    @Query("UPDATE conversationentity SET nodes = '[]' WHERE id = :id")
-    suspend fun resetConversationNodes(id: String)
-
     @Query("DELETE FROM conversationentity WHERE id = :id")
     suspend fun deleteById(id: String)
 
@@ -97,15 +91,4 @@ interface ConversationDAO {
 
     @Query("SELECT COUNT(*) FROM conversationentity")
     suspend fun countAll(): Int
-
-    @Query(
-        "SELECT strftime('%Y-%m-%d', create_at/1000, 'unixepoch', 'localtime') AS day, " +
-            "COUNT(*) AS count " +
-            "FROM conversationentity " +
-            "WHERE create_at >= :startMillis " +
-            "GROUP BY day"
-    )
-    suspend fun getConversationCountPerDay(startMillis: Long): List<ConversationDayCount>
 }
-
-data class ConversationDayCount(val day: String, val count: Int)

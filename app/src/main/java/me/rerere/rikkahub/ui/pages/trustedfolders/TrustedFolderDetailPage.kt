@@ -87,6 +87,8 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.fileSizeToString
+import me.rerere.rikkahub.utils.formatFileTime
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -600,7 +602,12 @@ private fun FileEntryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (entry.isDirectory) "文件夹" else "${formatSize(entry.sizeBytes)} · ${formatTime(entry.updatedAt)}",
+                // 文件 = 时间｜占用；文件夹 = 时间丨n项（不统计占用，避免进目录卡顿）
+                text = if (entry.isDirectory) {
+                    "${entry.updatedAt.formatFileTime()} 丨 ${entry.childCount}项"
+                } else {
+                    "${entry.updatedAt.formatFileTime()} ｜ ${entry.sizeBytes.fileSizeToString()}"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -693,18 +700,6 @@ private fun TrustedFolderEntry.entryIcon() = when {
     isDirectory -> HugeIcons.Folder01
     detectFileType() == TrustedFolderFileType.IMAGE -> HugeIcons.Image01
     else -> HugeIcons.File01
-}
-
-private fun formatSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-    else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
-}
-
-private fun formatTime(ts: Long): String {
-    if (ts <= 0) return ""
-    val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-    return fmt.format(java.util.Date(ts))
 }
 
 /** 最近访问文件横向条：标题 + 可点击 chips（文件名），点击重新打开，右侧 × 手动移除 */
