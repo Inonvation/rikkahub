@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.db
 
+import android.util.Log
 import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
@@ -45,6 +46,8 @@ import me.rerere.rikkahub.data.db.entity.SubAgentTaskEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_38_39
+import me.rerere.rikkahub.data.db.migrations.Migration_39_40
+import me.rerere.rikkahub.data.db.migrations.Migration_40_41
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -69,7 +72,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         SubAgentTaskEntity::class,
         GroupEntity::class,
     ],
-    version = 40,
+    version = 41,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -130,7 +133,22 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun subAgentTaskDao(): SubAgentTaskDAO
 
     abstract fun groupDao(): GroupDAO
+
+    /**
+     * 备份/同步前把未落盘的 WAL 合并进主库文件，保证导出的 .db 单文件自洽一致，
+     * 避免导出到「主库 + 未合并 wal」的不一致组合（恢复后表现为 database disk image is malformed）。
+     * checkpoint 失败不阻断操作（仍有 db/wal/shm 三件套兜底），只记日志。
+     */
+    fun checkpointWal() {
+        try {
+            openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
+        } catch (e: Exception) {
+            Log.w(TAG, "checkpointWal: WAL checkpoint failed, data may be inconsistent", e)
+        }
+    }
 }
+
+private const val TAG = "AppDatabase"
 
 object TokenUsageConverter {
     @TypeConverter

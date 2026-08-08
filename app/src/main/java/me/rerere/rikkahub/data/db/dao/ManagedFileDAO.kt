@@ -25,6 +25,12 @@ interface ManagedFileDAO {
     @Query("SELECT * FROM managed_files WHERE folder = :folder ORDER BY created_at DESC")
     fun listByFolder(folder: String): Flow<List<ManagedFileEntity>>
 
+    @Query("SELECT * FROM managed_files WHERE folder = :folder AND source = :source ORDER BY created_at DESC")
+    fun listByFolderAndSource(folder: String, source: String): Flow<List<ManagedFileEntity>>
+
+    @Query("SELECT * FROM managed_files WHERE folder = :folder AND source != :source ORDER BY created_at DESC")
+    fun listByFolderNotSource(folder: String, source: String): Flow<List<ManagedFileEntity>>
+
     @Query("DELETE FROM managed_files WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 

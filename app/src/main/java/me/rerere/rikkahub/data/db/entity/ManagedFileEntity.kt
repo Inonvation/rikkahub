@@ -29,4 +29,7 @@ data class ManagedFileEntity(
     val createdAt: Long,
     @ColumnInfo("updated_at")
     val updatedAt: Long,
+    /** 文件来源：chat=聊天附件 avatar=头像 other=其他 */
+    @ColumnInfo("source", defaultValue = "chat")
+    val source: String = "chat",
 )

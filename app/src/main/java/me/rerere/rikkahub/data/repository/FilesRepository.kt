@@ -22,6 +22,12 @@ class FilesRepository(
 
     fun listByFolder(folder: String): Flow<List<ManagedFileEntity>> = dao.listByFolder(folder)
 
+    fun listByFolderAndSource(folder: String, source: String): Flow<List<ManagedFileEntity>> =
+        dao.listByFolderAndSource(folder, source)
+
+    fun listByFolderNotSource(folder: String, source: String): Flow<List<ManagedFileEntity>> =
+        dao.listByFolderNotSource(folder, source)
+
     suspend fun deleteById(id: Long): Int = dao.deleteById(id)
 
     suspend fun deleteByPath(relativePath: String): Int = dao.deleteByPath(relativePath)
