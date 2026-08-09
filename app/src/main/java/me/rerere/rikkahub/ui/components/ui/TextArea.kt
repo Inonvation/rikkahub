@@ -48,6 +48,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.modifier.onClick
 
@@ -212,7 +213,7 @@ private fun FullScreenTextEditor(
         ) {
             Surface(
                 modifier = Modifier
-                    .widthIn(max = 800.dp)
+                    .widthIn(max = if (LocalTabletAdaptation.current) 1000.dp else 800.dp)
                     .fillMaxHeight(0.9f),
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
             ) {

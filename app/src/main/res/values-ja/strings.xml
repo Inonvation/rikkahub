@@ -183,6 +183,7 @@
   <string name="backup_page_import_from_cherry_studio">Cherry Studioからインポート</string>
   <string name="backup_page_import_from_other_app">他のアプリからインポート</string>
   <string name="backup_page_importing">インポート中...</string>
+  <string name="backup_page_analyzing_file">バックアップファイルを読み込み中...</string>
   <string name="backup_page_loading_failed">バックアップファイルの読み込み失敗: %s</string>
   <string name="backup_page_local_backup_export">ファイルにエクスポート</string>
   <string name="backup_page_local_backup_import">ファイルからインポート</string>
@@ -696,6 +697,9 @@
   <string name="setting_display_page_show_token_usage_desc">トークン使用量とメッセージ数を表示</string>
   <string name="setting_display_page_show_token_usage_title">トークンとコンテキスト統計を表示</string>
   <string name="setting_display_page_show_user_avatar_desc">チャットメッセージにユーザーアバターを表示するかどうか</string>
+  <string name="setting_page_layout">レイアウト</string>
+  <string name="setting_display_page_tablet_adaptation_title">タブレット適応モード</string>
+  <string name="setting_display_page_tablet_adaptation_desc">タブレットでは通常のインターフェースを維持しつつ、横画面に合わせて表示を最適化します（大画面ではメッセージや入力エリアを広く表示）。オフにするとスマホと同じ表示になります。</string>
   <string name="setting_display_page_show_user_avatar_title">ユーザーアバターを表示</string>
   <string name="setting_display_page_skip_crop_image_desc">画像をインポートするか写真を撮影した後、クロップ画面をスキップ</string>
   <string name="setting_display_page_skip_crop_image_title">画像編集をスキップ</string>

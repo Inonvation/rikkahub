@@ -31,7 +31,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -54,6 +56,8 @@ fun ImportExportTab(
     val context = LocalContext.current
     var isExporting by remember { mutableStateOf(false) }
     var isRestoring by remember { mutableStateOf(false) }
+    // 选中文件后、确认框弹出前的"拷贝+解析预览"阶段，用于展示进度框避免黑屏
+    var isAnalyzing by remember { mutableStateOf(false) }
     val backupProgress by vm.backupProgress.collectAsStateWithLifecycle()
 
     // 导入类型：local 为本地备份，chatbox 为 Chatbox 导入，cherry 为 Cherry Studio 导入
@@ -111,6 +115,9 @@ fun ImportExportTab(
         uri?.let { sourceUri ->
             val type = importType
             scope.launch {
+                // 先给出进度反馈，再在 IO 线程做拷贝+解析，避免大备份包阻塞主线程导致黑屏
+                isAnalyzing = true
+                vm.backupProgress.value = context.getString(R.string.backup_page_analyzing_file)
                 val extension = when (type) {
                     "local", "cherry" -> "zip"
                     "chatbox" -> "json"
@@ -119,15 +126,28 @@ fun ImportExportTab(
                 val tempFile =
                     File(context.cacheDir, "temp_restore_${System.currentTimeMillis()}.$extension")
 
-                context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                    FileOutputStream(tempFile).use { outputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                }
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
+                            FileOutputStream(tempFile).use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
 
-                vm.analyzeBackupPreview(tempFile, type)
-                pendingImportFile = tempFile
-                pendingImportType = type
+                        vm.analyzeBackupPreview(tempFile, type)
+                    }
+                    pendingImportFile = tempFile
+                    pendingImportType = type
+                }.onFailure { e ->
+                    e.printStackTrace()
+                    tempFile.delete()
+                    toaster.show(
+                        context.getString(R.string.backup_page_restore_failed, e.message ?: ""),
+                        type = ToastType.Error
+                    )
+                }
+                isAnalyzing = false
+                vm.backupProgress.value = null
             }
         }
     }
@@ -317,17 +337,17 @@ fun ImportExportTab(
         )
     }
 
-    // 导入/导出进度窗口：展示当前阶段的大致进度
+    // 导入/导出进度窗口：展示当前阶段的大致进度（含选中文件后的"解析预览"阶段）
     val currentProgress = backupProgress
-    if (currentProgress != null && (isExporting || isRestoring)) {
+    if (currentProgress != null && (isExporting || isRestoring || isAnalyzing)) {
         AlertDialog(
             onDismissRequest = {},
             title = {
                 Text(
-                    if (isExporting) {
-                        stringResource(R.string.backup_page_exporting)
-                    } else {
-                        stringResource(R.string.backup_page_importing)
+                    when {
+                        isExporting -> stringResource(R.string.backup_page_exporting)
+                        isAnalyzing -> stringResource(R.string.backup_page_analyzing_file)
+                        else -> stringResource(R.string.backup_page_importing)
                     }
                 )
             },

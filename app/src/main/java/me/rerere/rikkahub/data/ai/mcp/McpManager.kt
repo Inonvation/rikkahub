@@ -111,8 +111,15 @@ class McpManager(
     fun getAllAvailableTools(): List<Triple<Uuid, String, McpTool>> {
         val settings = settingsStore.settingsFlow.value
         val assistant = settings.getCurrentAssistant()
+        val connected = statusStore.status.value
         return settings.mcpServers
-            .filter { it.commonOptions.enable && it.id in assistant.mcpServers }
+            .filter {
+                it.commonOptions.enable &&
+                    it.id in assistant.mcpServers &&
+                    // 仅暴露当前已连接服务器的工具：缓存清单在掉线/失败后不会清空，
+                    // 若不查连接状态，AI 会感知到连不上的服务器并尝试调用导致报错。
+                    connected[it.id] is McpStatus.Connected
+            }
             .flatMap { server ->
                 server.commonOptions.tools
                     .filter { tool -> tool.enable }

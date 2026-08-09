@@ -94,6 +94,27 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
         title = stringResource(R.string.setting_page_preferences_ui),
         loading = settings.init,
     ) {
+        // Layout
+        item {
+            IosGroup(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                title = stringResource(R.string.setting_page_layout),
+            ) {
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_display_page_tablet_adaptation_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_display_page_tablet_adaptation_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = displaySetting.enableTabletAdaptation,
+                            onCheckedChange = {
+                                updateDisplaySetting(displaySetting.copy(enableTabletAdaptation = it))
+                            }
+                        )
+                    },
+                )
+            }
+        }
+
         // Message Bubbles
         item {
             IosGroup(

@@ -555,7 +555,7 @@ private fun ImageGalleryScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = GridCells.Adaptive(160.dp),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),

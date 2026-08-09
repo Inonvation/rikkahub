@@ -69,6 +69,7 @@ import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -329,6 +330,7 @@ class RouteActivity : ComponentActivity() {
                 LocalNavController provides Navigator(backStack),
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
+                LocalTabletAdaptation provides settings.displaySetting.enableTabletAdaptation,
                 LocalToaster provides toastState,
                 LocalTTSState provides tts,
                 LocalASRState provides asr,

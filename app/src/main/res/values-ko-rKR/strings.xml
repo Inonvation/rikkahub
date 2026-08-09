@@ -183,6 +183,7 @@
   <string name="backup_page_import_from_cherry_studio">Cherry Studio에서 가져오기</string>
   <string name="backup_page_import_from_other_app">다른 앱에서 가져오기</string>
   <string name="backup_page_importing">가져오는 중...</string>
+  <string name="backup_page_analyzing_file">백업 파일을 읽는 중...</string>
   <string name="backup_page_loading_failed">백업 파일 로드 실패: %s</string>
   <string name="backup_page_local_backup_export">파일로 내보내기</string>
   <string name="backup_page_local_backup_import">파일에서 가져오기</string>
@@ -696,6 +697,9 @@
   <string name="setting_display_page_show_token_usage_desc">토큰 사용량과 메시지 수를 표시합니다</string>
   <string name="setting_display_page_show_token_usage_title">토큰 및 컨텍스트 통계 표시</string>
   <string name="setting_display_page_show_user_avatar_desc">채팅 메시지에 사용자 아바타를 표시할지 여부</string>
+  <string name="setting_page_layout">레이아웃</string>
+  <string name="setting_display_page_tablet_adaptation_title">태블릿 적응 모드</string>
+  <string name="setting_display_page_tablet_adaptation_desc">태블릿에서 일반 인터페이스를 유지하면서 가로 화면에 맞게 표시를 최적화합니다(큰 화면에서 메시지와 입력 영역을 더 넓게 표시). 끄면 스마트폰과 동일한 표시가 됩니다.</string>
   <string name="setting_display_page_show_user_avatar_title">사용자 아바타 표시</string>
   <string name="setting_display_page_skip_crop_image_desc">이미지를 가져오거나 사진을 찍은 후 자르기 화면 건너뛰기</string>
   <string name="setting_display_page_skip_crop_image_title">이미지 편집 건너뛰기</string>

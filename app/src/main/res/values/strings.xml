@@ -189,6 +189,7 @@
   <string name="backup_page_import_from_cherry_studio">Import from Cherry Studio</string>
   <string name="backup_page_import_from_other_app">Import from other app</string>
   <string name="backup_page_importing">Importing...</string>
+  <string name="backup_page_analyzing_file">Reading backup file...</string>
   <string name="backup_page_loading_failed">Failed to load backup files: %s</string>
   <string name="backup_page_local_backup_export">Export to File</string>
   <string name="backup_page_local_backup_import">Import from File</string>
@@ -817,6 +818,9 @@
   <string name="setting_display_page_show_token_usage_desc">Display token usage and message count</string>
   <string name="setting_display_page_show_token_usage_title">Show Token &amp; Context Stats</string>
   <string name="setting_display_page_show_user_avatar_desc">Whether to display user avatar in chat messages</string>
+  <string name="setting_page_layout">Layout</string>
+  <string name="setting_display_page_tablet_adaptation_title">Tablet adaptation</string>
+  <string name="setting_display_page_tablet_adaptation_desc">On tablets, keep the normal interface but optimize display for landscape (e.g. wider message and input area on large screens). Disable to keep the exact phone-style layout.</string>
   <string name="setting_display_page_show_user_avatar_title">Show User Avatar</string>
   <string name="setting_display_page_skip_crop_image_desc">Skip crop interface after importing images or taking photos</string>
   <string name="setting_display_page_skip_crop_image_title">Skip Image Editing</string>

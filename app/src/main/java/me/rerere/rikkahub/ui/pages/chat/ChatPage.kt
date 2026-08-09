@@ -40,7 +40,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
@@ -244,18 +243,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val windowAdaptiveInfo = currentWindowDpSize()
-    val isBigScreen =
-        windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
-
-    // 进入大屏模式时重置抽屉状态
-    LaunchedEffect(isBigScreen) {
-        if (isBigScreen) {
-            leftDrawerOpen = false
-            rightDrawerOpen = false
-        }
-    }
-
     val inputState = vm.inputState
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -341,105 +328,45 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    when {
-        isBigScreen -> {
-            PermanentNavigationDrawer(
-                drawerContent = {
-                    ChatDrawerContent(
-                        navController = navController,
-                        current = conversation,
-                        vm = vm,
-                        settings = setting
-                    )
-                }
-            ) {
-                Row(Modifier.fillMaxSize()) {
-                    ChatPageContent(
-                        inputState = inputState,
-                        loadingJob = loadingJob,
-                        processingStatus = processingStatus,
-                        setting = setting,
-                        conversation = conversation,
-                        leftDrawerOpen = false,
-                        onLeftDrawerOpenChange = {},
-                        navController = navController,
-                        vm = vm,
-                        chatListState = chatListState,
-                        enableWebSearch = enableWebSearch,
-                        currentChatModel = currentChatModel,
-                        bigScreen = true,
-                        errors = errors,
-                        onDismissError = { vm.dismissError(it) },
-                        onClearAllErrors = { vm.clearAllErrors() },
-                        rightDrawerOpen = false,
-                        onRightDrawerOpenChange = {},
-                        modifier = Modifier.weight(1f),
-                    )
-                    // 右侧永久面板
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(280.dp),
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            bottomStart = 16.dp,
-                        ),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp,
-                    ) {
-                        val activity = LocalContext.current as ComponentActivity
-                        RightDrawerContent(
-                            navController = navController,
-                        )
-                    }
-                }
-            }
-        }
-
-        else -> {
-            DrawerScaffold(
-                leftDrawerOpen = leftDrawerOpen,
-                rightDrawerOpen = rightDrawerOpen,
-                onLeftDrawerOpenChange = { leftDrawerOpen = it },
-                onRightDrawerOpenChange = { rightDrawerOpen = it },
-                leftDrawer = {
-                    ChatDrawerContent(
-                        navController = navController,
-                        current = conversation,
-                        vm = vm,
-                        settings = setting
-                    )
-                },
-                rightDrawer = {
-                    RightDrawerContent(
-                        navController = navController,
-                    )
-                },
-            ) {
-                ChatPageContent(
-                    inputState = inputState,
-                    loadingJob = loadingJob,
-                    processingStatus = processingStatus,
-                    setting = setting,
-                    conversation = conversation,
-                    leftDrawerOpen = leftDrawerOpen,
-                    onLeftDrawerOpenChange = { leftDrawerOpen = it },
-                    navController = navController,
-                    vm = vm,
-                    chatListState = chatListState,
-                    enableWebSearch = enableWebSearch,
-                    currentChatModel = currentChatModel,
-                    bigScreen = false,
-                    errors = errors,
-                    onDismissError = { vm.dismissError(it) },
-                    onClearAllErrors = { vm.clearAllErrors() },
-                    rightDrawerOpen = rightDrawerOpen,
-                    onRightDrawerOpenChange = { rightDrawerOpen = it },
-                )
-            }
-        }
+    DrawerScaffold(
+        leftDrawerOpen = leftDrawerOpen,
+        rightDrawerOpen = rightDrawerOpen,
+        onLeftDrawerOpenChange = { leftDrawerOpen = it },
+        onRightDrawerOpenChange = { rightDrawerOpen = it },
+        leftDrawer = {
+            ChatDrawerContent(
+                navController = navController,
+                current = conversation,
+                vm = vm,
+                settings = setting
+            )
+        },
+        rightDrawer = {
+            RightDrawerContent(
+                navController = navController,
+            )
+        },
+    ) {
+        ChatPageContent(
+            inputState = inputState,
+            loadingJob = loadingJob,
+            processingStatus = processingStatus,
+            setting = setting,
+            conversation = conversation,
+            leftDrawerOpen = leftDrawerOpen,
+            onLeftDrawerOpenChange = { leftDrawerOpen = it },
+            navController = navController,
+            vm = vm,
+            chatListState = chatListState,
+            enableWebSearch = enableWebSearch,
+            currentChatModel = currentChatModel,
+            errors = errors,
+            onDismissError = { vm.dismissError(it) },
+            onClearAllErrors = { vm.clearAllErrors() },
+            rightDrawerOpen = rightDrawerOpen,
+            onRightDrawerOpenChange = { rightDrawerOpen = it },
+        )
     }
-
 }
 @OptIn(ExperimentalCoroutinesApi::class)
 @Composable
@@ -448,7 +375,6 @@ private fun ChatPageContent(
     loadingJob: Job?,
     processingStatus: String? = null,
     setting: Settings,
-    bigScreen: Boolean,
     conversation: Conversation,
     leftDrawerOpen: Boolean,
     onLeftDrawerOpenChange: (Boolean) -> Unit,
@@ -535,7 +461,6 @@ private fun ChatPageContent(
                 TopBar(
                     settings = setting,
                     conversation = conversation,
-                    bigScreen = bigScreen,
                     previewMode = previewMode,
                     onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
                     onNewChat = {
@@ -1089,7 +1014,6 @@ private fun ChatFilesPickerSheet(
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
-    bigScreen: Boolean,
     previewMode: Boolean,
     onOpenLeftDrawer: () -> Unit,
     onClickMenu: () -> Unit,
@@ -1108,15 +1032,13 @@ private fun TopBar(
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
         navigationIcon = {
-            if (!bigScreen) {
-                IconButton(
-                    onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
-                        onOpenLeftDrawer()
-                    }
-                ) {
-                    Icon(HugeIcons.Menu03, "Messages")
+            IconButton(
+                onClick = {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    onOpenLeftDrawer()
                 }
+            ) {
+                Icon(HugeIcons.Menu03, "Messages")
             }
         },
         title = {

@@ -183,6 +183,7 @@
   <string name="backup_page_import_from_cherry_studio">Импорт из Cherry Studio</string>
   <string name="backup_page_import_from_other_app">Импорт из другого приложения</string>
   <string name="backup_page_importing">Импорт…</string>
+  <string name="backup_page_analyzing_file">Чтение файла резервной копии…</string>
   <string name="backup_page_loading_failed">Не удалось загрузить файлы резервной копии: %s</string>
   <string name="backup_page_local_backup_export">Экспорт в файл</string>
   <string name="backup_page_local_backup_import">Импорт из файла</string>
@@ -696,6 +697,9 @@
   <string name="setting_display_page_show_token_usage_desc">Отображать использование токенов и количество сообщений</string>
   <string name="setting_display_page_show_token_usage_title">Показывать статистику токенов и контекста</string>
   <string name="setting_display_page_show_user_avatar_desc">Отображать аватар пользователя в сообщениях чата</string>
+  <string name="setting_page_layout">Макет</string>
+  <string name="setting_display_page_tablet_adaptation_title">Планшетный режим</string>
+  <string name="setting_display_page_tablet_adaptation_desc">На планшете сохраняется обычный интерфейс, но оптимизируется отображение для альбомной ориентации (на больших экранах сообщения и поле ввода шире). Выключите, чтобы оставить точный телефонный вид.</string>
   <string name="setting_display_page_show_user_avatar_title">Показывать аватар пользователя</string>
   <string name="setting_display_page_skip_crop_image_desc">Пропустить обрезку после импорта изображений или съёмки</string>
   <string name="setting_display_page_skip_crop_image_title">Пропустить редактирование изображения</string>

@@ -183,6 +183,7 @@
   <string name="backup_page_import_from_cherry_studio">從Cherry Studio導入</string>
   <string name="backup_page_import_from_other_app">從其他APP導入</string>
   <string name="backup_page_importing">正在恢復...</string>
+  <string name="backup_page_analyzing_file">正在讀取備份檔案...</string>
   <string name="backup_page_loading_failed">載入備份檔案失敗: %s</string>
   <string name="backup_page_local_backup_export">導出為檔案</string>
   <string name="backup_page_local_backup_import">備份檔案導入</string>
@@ -696,6 +697,9 @@
   <string name="setting_display_page_show_token_usage_desc">顯示token用量和消息數量</string>
   <string name="setting_display_page_show_token_usage_title">顯示Token和上下文統計</string>
   <string name="setting_display_page_show_user_avatar_desc">是否在聊天消息中顯示用戶頭像</string>
+  <string name="setting_page_layout">佈局</string>
+  <string name="setting_display_page_tablet_adaptation_title">平板適配模式</string>
+  <string name="setting_display_page_tablet_adaptation_desc">平板橫屏時保持普通界面，僅針對大屏優化顯示（放寬消息與輸入區域的寬度）。關閉則與手機端顯示完全一致。</string>
   <string name="setting_display_page_show_user_avatar_title">顯示用戶頭像</string>
   <string name="setting_display_page_skip_crop_image_desc">匯入圖片或拍照後跳過裁剪介面</string>
   <string name="setting_display_page_skip_crop_image_title">跳過圖片編輯</string>

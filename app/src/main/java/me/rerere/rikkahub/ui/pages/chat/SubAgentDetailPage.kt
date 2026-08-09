@@ -74,6 +74,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ai.ui.UIMessage
@@ -497,7 +498,7 @@ private fun ChatBubble(isUser: Boolean, content: @Composable () -> Unit) {
             shape = shape,
             color = if (isUser) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 460.dp),
+            modifier = Modifier.widthIn(max = if (LocalTabletAdaptation.current) 640.dp else 460.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 content()
@@ -528,7 +529,7 @@ private fun GuidanceBubble(text: String) {
         Surface(
             shape = shape,
             color = MaterialTheme.colorScheme.secondaryContainer,
-            modifier = Modifier.widthIn(max = 460.dp),
+            modifier = Modifier.widthIn(max = if (LocalTabletAdaptation.current) 640.dp else 460.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 Text(

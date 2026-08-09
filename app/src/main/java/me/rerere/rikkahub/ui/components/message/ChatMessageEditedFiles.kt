@@ -88,6 +88,7 @@ import me.rerere.rikkahub.ui.components.richtext.isWorkspaceImagePath
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.utils.explainErrorText
@@ -788,7 +789,7 @@ private fun FileChangeChipGroup(
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 200.dp),
+                            modifier = Modifier.widthIn(max = if (LocalTabletAdaptation.current) 280.dp else 200.dp),
                         )
                     }
                 }
@@ -875,7 +876,7 @@ internal fun StudyItemsList(parts: List<UIMessagePart>) {
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 200.dp),
+                        modifier = Modifier.widthIn(max = if (LocalTabletAdaptation.current) 280.dp else 200.dp),
                     )
                 }
             }

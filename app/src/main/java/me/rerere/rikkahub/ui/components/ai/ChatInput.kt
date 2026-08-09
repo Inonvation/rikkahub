@@ -127,6 +127,7 @@ import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -950,7 +951,10 @@ private fun QuickMessageButton(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier
-                .widthIn(min = 200.dp, max = 360.dp)
+                .widthIn(
+                    min = 200.dp,
+                    max = if (LocalTabletAdaptation.current) 560.dp else 360.dp,
+                )
         ) {
             quickMessages.forEach { quickMessage ->
                 Surface(
@@ -1006,7 +1010,7 @@ private fun FullScreenEditor(
         ) {
             Surface(
                 modifier = Modifier
-                    .widthIn(max = 800.dp)
+                    .widthIn(max = if (LocalTabletAdaptation.current) 1000.dp else 800.dp)
                     .fillMaxHeight(0.9f),
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
             ) {

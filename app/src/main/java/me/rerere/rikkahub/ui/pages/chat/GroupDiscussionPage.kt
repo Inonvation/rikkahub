@@ -99,6 +99,7 @@ import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.utils.isAllowedFileType
@@ -850,7 +851,7 @@ private fun ChatBubble(isUser: Boolean, content: @Composable () -> Unit) {
             shape = shape,
             color = if (isUser) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 460.dp),
+            modifier = Modifier.widthIn(max = if (LocalTabletAdaptation.current) 640.dp else 460.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 content()

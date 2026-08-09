@@ -324,7 +324,7 @@ fun SettingFilesPage(
                     verticalItemSpacing = 8.dp,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     state = gridState,
-                    columns = StaggeredGridCells.Fixed(2)
+                    columns = StaggeredGridCells.Adaptive(minSize = 160.dp)
                 ) {
                     items(files, key = { it.id }) { file ->
                         FileItem(

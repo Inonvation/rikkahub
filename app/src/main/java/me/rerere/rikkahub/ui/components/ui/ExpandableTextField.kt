@@ -35,6 +35,7 @@ import androidx.compose.ui.window.DialogProperties
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
 
 /**
  * A multi-line text input field with a fullscreen expand button.
@@ -121,7 +122,7 @@ private fun FullScreenTextEditDialog(
         ) {
             Surface(
                 modifier = Modifier
-                    .widthIn(max = 800.dp)
+                    .widthIn(max = if (LocalTabletAdaptation.current) 1000.dp else 800.dp)
                     .fillMaxHeight(0.9f),
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
             ) {

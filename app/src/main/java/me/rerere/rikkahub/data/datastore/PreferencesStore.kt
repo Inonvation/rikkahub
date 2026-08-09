@@ -858,6 +858,8 @@ data class DisplaySetting(
     val chatCustomFontName: String = "",
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
+    /** 平板适配模式：平板横屏时保持普通界面，仅针对大屏优化显示（放宽消息/输入限宽）。默认关闭以免改变手机端逻辑 */
+    val enableTabletAdaptation: Boolean = false,
 )
 
 @Serializable

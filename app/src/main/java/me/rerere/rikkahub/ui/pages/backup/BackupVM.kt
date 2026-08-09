@@ -3,11 +3,13 @@ package me.rerere.rikkahub.ui.pages.backup
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
@@ -165,26 +167,31 @@ class BackupVM(
 
     /** 解析待导入备份包的内容预览，结果写入 [backupPreview] */
     suspend fun analyzeBackupPreview(file: File, importType: String) {
-        backupPreview.value = BackupPreviewAnalyzer.analyze(file, importType)
+        backupPreview.value = withContext(Dispatchers.IO) {
+            BackupPreviewAnalyzer.analyze(file, importType)
+        }
     }
 
     suspend fun restoreFromChatBox(file: File): ChatboxRestoreResult {
         var importedConversations = 0
         var skippedExistingConversations = 0
-        val result = ChatboxImporter.importStreaming(
-            file = file,
-            assistantId = settings.value.assistantId,
-            providers = settings.value.providers,
-            onConversation = { conversation ->
-                backupProgress.value = "正在导入对话 (${importedConversations + skippedExistingConversations + 1})…"
-                if (conversationRepository.existsConversationById(conversation.id)) {
-                    skippedExistingConversations++
-                } else {
-                    conversationRepository.insertConversation(conversation)
-                    importedConversations++
+        // ChatboxImporter 内部是阻塞式 IO，切到 IO 线程避免卡主线程
+        val result = withContext(Dispatchers.IO) {
+            ChatboxImporter.importStreaming(
+                file = file,
+                assistantId = settings.value.assistantId,
+                providers = settings.value.providers,
+                onConversation = { conversation ->
+                    backupProgress.value = "正在导入对话 (${importedConversations + skippedExistingConversations + 1})…"
+                    if (conversationRepository.existsConversationById(conversation.id)) {
+                        skippedExistingConversations++
+                    } else {
+                        conversationRepository.insertConversation(conversation)
+                        importedConversations++
+                    }
                 }
-            }
-        )
+            )
+        }
 
         val targetAssistantId = settings.value.assistantId
         settingsStore.update(
@@ -215,9 +222,12 @@ class BackupVM(
         )
     }
 
-    fun restoreFromCherryStudio(file: File) {
+    suspend fun restoreFromCherryStudio(file: File) {
         backupProgress.value = "正在导入 Cherry Studio 配置…"
-        val importProviders = CherryStudioProviderImporter.importProviders(file)
+        // CherryStudioProviderImporter 内部是阻塞式 IO，切到 IO 线程避免卡主线程
+        val importProviders = withContext(Dispatchers.IO) {
+            CherryStudioProviderImporter.importProviders(file)
+        }
 
         if (importProviders.isEmpty()) {
             throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
