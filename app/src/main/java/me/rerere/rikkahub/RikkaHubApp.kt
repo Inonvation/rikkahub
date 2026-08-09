@@ -184,6 +184,9 @@ class RikkaHubApp : Application() {
     private fun startCloudSync() {
         get<AppScope>().launch(Dispatchers.IO) {
             runCatching {
+                // 进程冷启动：先清理上次可能因进程被杀/强停残留的互斥锁，
+                // 否则 syncInProgress 卡 true 会让所有同步永久 "already running"（自愈）。
+                get<me.rerere.rikkahub.data.sync.SyncStateStore>().releaseSyncLock()
                 get<me.rerere.rikkahub.data.sync.CloudSyncCoordinator>().syncIfNeeded(force = false)
             }.onFailure {
                 Log.e(TAG, "startCloudSync failed", it)

@@ -70,9 +70,13 @@ class CloudSyncCoordinator(
      * 启动时/定时触发：按 [SyncConfig] 与最小间隔决定是否执行。
      *
      * @param force 手动触发时传 true，忽略最小间隔
+     * @param onProgress 同步执行进度回调（relPath + 状态），供进度弹窗实时刷新
      * @return 本次是否实际执行了同步（false 表示未触发：未启用/未到间隔/离线/已在同步）
      */
-    suspend fun syncIfNeeded(force: Boolean = false): Boolean {
+    suspend fun syncIfNeeded(
+        force: Boolean = false,
+        onProgress: (relPath: String, status: SyncItemStatus) -> Unit = { _, _ -> },
+    ): Boolean {
         val settings = settingsStore.settingsFlow.first()
         val config = settings.syncConfig
         if (!config.enabled) return false
@@ -98,22 +102,46 @@ class CloudSyncCoordinator(
             return false
         }
         try {
-            runSync(config, settings)
-            return true
+            val result = runSync(config, settings, onProgress)
+            if (!result.success) {
+                Log.w(TAG, "syncIfNeeded: sync failed: ${result.error}")
+            }
+            return result.success
         } finally {
             stateStore.releaseSyncLock()
         }
     }
 
-    private suspend fun runSync(config: SyncConfig, settings: Settings) {
+    /**
+     * 只读检测本地与云端的差异，供手动同步前的确认弹窗使用。
+     * 不传输任何数据、不修改同步状态。
+     *
+     * @return 分组差异清单；null 表示无法检测（未启用 / 离线 / 凭据不完整 / 检测失败）。
+     */
+    suspend fun preview(): SyncPreview? {
+        val settings = settingsStore.settingsFlow.first()
+        val config = settings.syncConfig
+        if (!config.enabled) return null
+        if (!isOnline()) return null
+        val provider = buildSyncProvider(config, settings.webDavConfig, settings.s3Config, httpClient)
+            ?: return null
+        return syncManager.preview(provider, config)
+    }
+
+    private suspend fun runSync(
+        config: SyncConfig,
+        settings: Settings,
+        onProgress: (relPath: String, status: SyncItemStatus) -> Unit = { _, _ -> },
+    ): SyncResult {
         val provider = buildSyncProvider(config, settings.webDavConfig, settings.s3Config, httpClient)
         if (provider == null) {
             Log.w(TAG, "runSync: provider credentials incomplete")
             stateStore.update { it.copy(pendingSync = true) }
-            return
+            return SyncResult(success = false, error = "provider credentials incomplete")
         }
-        val result = syncManager.sync(provider, config)
+        val result = syncManager.sync(provider, config, onProgress)
         Log.i(TAG, "runSync: success=${result.success} pushed=${result.pushed} pulled=${result.pulled} conflicts=${result.conflicts} deleted=${result.deleted} err=${result.error}")
+        return result
     }
 
     /** 简单在线检测：active network 具备 INTERNET 能力即视为在线。 */

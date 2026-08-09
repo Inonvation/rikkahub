@@ -376,6 +376,15 @@ class FilesManager(
         return dir
     }
 
+    /** 聊天附件（upload）目录。 */
+    fun getUploadDir(): File {
+        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
     @OptIn(ExperimentalEncodingApi::class)
     fun createImageFileFromBase64(base64Data: String, filePath: String): File {
         val data = if (base64Data.startsWith("data:image")) {

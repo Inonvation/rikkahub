@@ -91,4 +91,23 @@ interface ConversationDAO {
 
     @Query("SELECT COUNT(*) FROM conversationentity")
     suspend fun countAll(): Int
+
+    /** 会话增量同步用的轻量清单：会话元数据 + 消息节点数。 */
+    @Query(
+        "SELECT c.id, c.sync_updated_at AS syncUpdatedAt, c.title, c.create_at AS createAt, " +
+            "c.is_pinned AS isPinned, " +
+            "(SELECT COUNT(*) FROM message_node n WHERE n.conversation_id = c.id) AS messageCount " +
+            "FROM conversationentity c"
+    )
+    suspend fun getSyncEntries(): List<ConversationSyncEntry>
 }
+
+/** 会话增量同步清单（非实体，仅映射查询结果）。 */
+data class ConversationSyncEntry(
+    val id: String,
+    val syncUpdatedAt: Long,
+    val title: String,
+    val createAt: Long,
+    val isPinned: Boolean,
+    val messageCount: Int,
+)

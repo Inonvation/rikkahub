@@ -29,6 +29,8 @@ data class Conversation(
     val createAt: Instant = Instant.now(),
     @Serializable(with = InstantSerializer::class)
     val updateAt: Instant = Instant.now(),
+    /** 会话增量同步的版本号（单调时钟）。由仓库保存时维护，内存态仅供映射与比对外部传入值。 */
+    val syncUpdatedAt: Long = 0L,
     val customSystemPrompt: String? = null,
     val modeInjectionIds: Set<Uuid> = emptySet(),
     val lorebookIds: Set<Uuid> = emptySet(),
@@ -69,7 +71,9 @@ data class Conversation(
         }
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
-        return messageNodes.firstOrNull { node -> node.messages.contains(message) }
+        // 用消息 id 定位而非 equals：UIMessage 是 data class，syncUpdatedAt 参与相等性，
+        // 而内存态消息（保存前）syncUpdatedAt=0、DB 里的有值，跨实例 equals 会失配导致重生成失效。
+        return messageNodes.firstOrNull { node -> node.messages.any { it.id == message.id } }
     }
 
     fun getMessageNodeByMessageId(messageId: Uuid): MessageNode? {

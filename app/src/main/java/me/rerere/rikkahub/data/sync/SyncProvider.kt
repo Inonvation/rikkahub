@@ -39,6 +39,14 @@ interface SyncProvider {
     /** 上传文件内容，返回远端 etag 与修改时间（可能为 null）。 */
     suspend fun upload(relPath: String, content: ByteArray): Result<UploadResult>
 
+    /**
+     * 流式上传本地文件（避免大文件整读进内存）。默认实现回退到 [upload]（整读），
+     * 支持流式传输的后端（WebDAV/S3）应 override 以显著降低大文件上传的内存与耗时。
+     */
+    suspend fun uploadFile(relPath: String, file: File): Result<UploadResult> {
+        return upload(relPath, file.readBytes())
+    }
+
     /** 下载到本地文件。 */
     suspend fun downloadToFile(relPath: String, targetFile: File): Result<Unit>
 

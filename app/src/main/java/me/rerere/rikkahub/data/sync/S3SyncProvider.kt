@@ -44,8 +44,11 @@ class S3SyncProvider(
             ).getOrThrow()
             for (obj in page.objects) {
                 if (obj.key.endsWith("/")) continue
+                val relPath = obj.key.removePrefix(keyPrefix)
+                // 会话增量同步用独立的 index.json + items 通道，不参与整树列出（避免每次拉取上千个会话文件）
+                if (relPath.startsWith("$CONVERSATION_SYNC_DIR/")) continue
                 files += RemoteFile(
-                    relPath = obj.key.removePrefix(keyPrefix),
+                    relPath = relPath,
                     etag = obj.etag,
                     lastModifiedMs = obj.lastModified?.toEpochMilli(),
                     size = obj.size,
@@ -61,6 +64,18 @@ class S3SyncProvider(
         client.putObject(fullKey(rel), content).getOrThrow()
         val meta = client.headObject(fullKey(rel)).getOrThrow()
         Log.i(TAG, "upload success: $rel")
+        UploadResult(
+            etag = meta.etag,
+            lastModifiedMs = parseLastModified(meta.lastModified),
+        )
+    }
+
+    /** 流式上传：避免大文件整读进内存（S3 用文件通道流式 PUT）。 */
+    override suspend fun uploadFile(relPath: String, file: File): Result<UploadResult> = runCatching {
+        val rel = relPath.trim('/')
+        client.putObject(fullKey(rel), file).getOrThrow()
+        val meta = client.headObject(fullKey(rel)).getOrThrow()
+        Log.i(TAG, "uploadFile success: $rel (${file.length()} bytes)")
         UploadResult(
             etag = meta.etag,
             lastModifiedMs = parseLastModified(meta.lastModified),

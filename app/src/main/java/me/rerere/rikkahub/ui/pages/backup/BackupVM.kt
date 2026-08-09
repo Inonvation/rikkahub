@@ -3,7 +3,9 @@ package me.rerere.rikkahub.ui.pages.backup
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
@@ -17,6 +19,9 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.sync.BackupPreviewAnalyzer
 import me.rerere.rikkahub.data.sync.CloudSyncCoordinator
 import me.rerere.rikkahub.data.sync.SyncConfig
+import me.rerere.rikkahub.data.sync.SyncItemStatus
+import me.rerere.rikkahub.data.sync.SyncPreview
+import me.rerere.rikkahub.data.sync.SyncProgress
 import me.rerere.rikkahub.data.sync.SyncState
 import me.rerere.rikkahub.data.sync.SyncStateStore
 import me.rerere.rikkahub.data.sync.importer.ChatboxImporter
@@ -66,6 +71,15 @@ class BackupVM(
     /** 云同步结果提示（成功/失败文案），null 表示无提示 */
     val syncMessage = MutableStateFlow<String?>(null)
 
+    /** 手动同步前的差异预览（非 null 即显示确认弹窗），null 表示无弹窗 */
+    val syncPreview = MutableStateFlow<SyncPreview?>(null)
+
+    /** 同步执行进度（确认后弹窗从预览切换为进度视图），null 表示无进度弹窗 */
+    val syncProgress = MutableStateFlow<SyncProgress?>(null)
+
+    /** 当前同步协程，用于用户取消 */
+    private var syncJob: Job? = null
+
     init {
         loadBackupFileItems()
         loadS3BackupFileItems()
@@ -84,22 +98,102 @@ class BackupVM(
         }
     }
 
-    /** 手动立即同步（force=true 忽略最小间隔）。 */
+    /** 手动同步：先只读检测本地与云端差异并弹出确认清单，用户确认后才执行（阶段一）。 */
     fun syncNow() {
         viewModelScope.launch {
             if (syncRunning.value) return@launch
             syncRunning.value = true
             syncMessage.value = null
-            runCatching {
-                if (cloudSyncCoordinator.syncIfNeeded(force = true)) {
-                    "同步完成"
-                } else {
-                    "未触发同步（未启用/离线/已在同步中）"
+            syncPreview.value = null
+            runCatching { cloudSyncCoordinator.preview() }
+                .onSuccess { preview ->
+                    when {
+                        preview == null -> syncMessage.value = "无法检测差异（未启用/离线/配置不完整）"
+                        preview.isEmpty -> syncMessage.value = "无需同步，本地与云端一致"
+                        else -> syncPreview.value = preview
+                    }
                 }
-            }.onSuccess { syncMessage.value = it }
-                .onFailure { syncMessage.value = "同步失败: ${it.message}" }
+                .onFailure { e ->
+                    syncMessage.value =
+                        if (isThrottleError(e)) THROTTLE_MESSAGE else "检测差异失败: ${e.message}"
+                }
             syncRunning.value = false
         }
+    }
+
+    /**
+     * 用户在确认弹窗中点击"确认同步"后执行（阶段二，force=true 忽略最小间隔）。
+     * 确认后弹窗不关闭，而是从差异预览切换为实时进度视图（[syncProgress]）。
+     */
+    fun confirmSync() {
+        syncJob = viewModelScope.launch {
+            // 用确认时的预览清单初始化进度项（全部为「等待中」）
+            val preview = syncPreview.value
+            syncPreview.value = null
+            if (preview != null) {
+                syncProgress.value = SyncProgress.fromPreview(preview)
+            }
+
+            if (syncRunning.value) return@launch
+            syncRunning.value = true
+            syncMessage.value = null
+            runCatching {
+                cloudSyncCoordinator.syncIfNeeded(
+                    force = true,
+                    onProgress = { relPath, status ->
+                        syncProgress.value?.let { cur ->
+                            val newMap = cur.statusByPath + (relPath to status)
+                            syncProgress.value = cur.copy(
+                                statusByPath = newMap,
+                                done = newMap.values.count {
+                                    it == SyncItemStatus.DONE || it == SyncItemStatus.FAILED
+                                },
+                            )
+                        }
+                    },
+                )
+            }.onSuccess { success ->
+                syncProgress.value?.let { cur ->
+                    syncProgress.value = cur.copy(
+                        finished = true,
+                        success = success,
+                        error = if (success) null else "同步未完成（可能未触发，或同步执行失败）",
+                    )
+                }
+                syncMessage.value =
+                    if (success) "同步完成" else "同步未完成（可能未触发，或同步执行失败）"
+            }.onFailure { e ->
+                if (e is CancellationException) {
+                    // 用户取消：进度视图显示「已取消」。注意不能重抛（否则跳过下方 syncRunning=false，
+                    // 导致按钮永久显示"同步中"无法再触发），与侧边栏一致用 return@onFailure。
+                    syncProgress.value?.let { cur ->
+                        syncProgress.value = cur.copy(finished = true, success = null, error = "已取消")
+                    }
+                    return@onFailure
+                }
+                val errorMsg = if (isThrottleError(e)) THROTTLE_MESSAGE else "同步失败: ${e.message}"
+                syncProgress.value?.let { cur ->
+                    syncProgress.value = cur.copy(finished = true, success = false, error = errorMsg)
+                }
+                syncMessage.value = errorMsg
+            }
+            syncRunning.value = false
+        }
+    }
+
+    /** 取消进行中的同步（取消传播到 SyncManager，正在上传/下载的项随之中断）。 */
+    fun cancelSync() {
+        syncJob?.cancel()
+    }
+
+    /** 关闭进度弹窗（进行中时收起后同步仍在后台继续，完成后可点击「完成」关闭）。 */
+    fun dismissSyncProgress() {
+        syncProgress.value = null
+    }
+
+    /** 关闭差异确认弹窗（不执行同步）。 */
+    fun dismissSyncPreview() {
+        syncPreview.value = null
     }
 
     fun loadBackupFileItems() {
@@ -296,6 +390,17 @@ class BackupVM(
                 )
             )
         }
+    }
+
+    /** 是否服务端限流错误（WebDAV 429/503），提示用户稍后再试而非误报失败。 */
+    private fun isThrottleError(e: Throwable): Boolean {
+        val msg = e.message ?: ""
+        return msg.contains("Throttl", ignoreCase = true) ||
+            msg.contains("429") || msg.contains("503")
+    }
+
+    companion object {
+        private const val THROTTLE_MESSAGE = "同步请求太频繁，服务器限流中，请稍等几分钟再试"
     }
 }
 

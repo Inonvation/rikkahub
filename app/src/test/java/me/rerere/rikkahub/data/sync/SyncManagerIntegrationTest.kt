@@ -24,7 +24,7 @@ import java.security.MessageDigest
  */
 class InMemorySyncProvider : SyncProvider {
     val remoteFiles = LinkedHashMap<String, ByteArray>()
-    private val remoteMtimes = HashMap<String, Long>()
+    val remoteMtimes = HashMap<String, Long>()
     private var mtimeCounter = 1000L
 
     private fun etagOf(content: ByteArray): String =
@@ -459,5 +459,78 @@ class SyncManagerIntegrationTest {
         assertTrue(result.success)
         assertEquals("material", settings.currentSettings().themeId)
         assertTrue(settings.saveCount > 0)
+    }
+
+    @Test
+    fun `disabling a data type keeps its remote files untouched`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        this@SyncManagerIntegrationTest.scope = scope
+        val store = createStore("disable-type.preferences_pb", scope)
+        val settings = FakeSettingsAccess()
+        val dbFile = File(tmpDir, "rikka_hub.db")
+        dbFile.writeBytes(byteArrayOf(1))
+
+        val uploadDir = File(filesRoot, "upload").apply { mkdirs() }
+        File(uploadDir, "a.txt").writeText("v1")
+
+        val provider = InMemorySyncProvider()
+        val manager = createManager(settings, store, dbFile)
+        // 首次全量同步，建立远端
+        manager.sync(provider, SyncConfig())
+        assertTrue(provider.remoteFiles.containsKey("upload/a.txt"))
+
+        // 关闭聊天附件同步：远端 upload 文件不应被误删，也不参与后续同步
+        val config = SyncConfig().copy(includeChatFiles = false)
+        val result = manager.sync(provider, config)
+        assertTrue(result.success)
+        assertTrue(result.deleted.isEmpty())
+        assertTrue(provider.remoteFiles.containsKey("upload/a.txt"))
+    }
+
+    @Test
+    fun `sync record stores local mtime and size for fast check`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        this@SyncManagerIntegrationTest.scope = scope
+        val store = createStore("fastcheck-record.preferences_pb", scope)
+        val settings = FakeSettingsAccess()
+        val dbFile = File(tmpDir, "rikka_hub.db")
+        dbFile.writeBytes(byteArrayOf(1))
+
+        val uploadDir = File(filesRoot, "upload").apply { mkdirs() }
+        File(uploadDir, "a.txt").writeText("hello")
+
+        val provider = InMemorySyncProvider()
+        val manager = createManager(settings, store, dbFile)
+        manager.sync(provider, SyncConfig())
+
+        val rec = store.current().syncedFiles["upload/a.txt"]
+        assertTrue(rec != null)
+        assertTrue(rec!!.localMtime > 0)
+        assertEquals(5L, rec.localSize)
+    }
+
+    @Test
+    fun `file content change with same size is still detected`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        this@SyncManagerIntegrationTest.scope = scope
+        val store = createStore("fastcheck-content.preferences_pb", scope)
+        val settings = FakeSettingsAccess()
+        val dbFile = File(tmpDir, "rikka_hub.db")
+        dbFile.writeBytes(byteArrayOf(1))
+
+        val uploadDir = File(filesRoot, "upload").apply { mkdirs() }
+        File(uploadDir, "a.txt").writeText("hello")
+
+        val provider = InMemorySyncProvider()
+        val manager = createManager(settings, store, dbFile)
+        manager.sync(provider, SyncConfig())
+
+        // 内容变但大小相同（"hello"→"world"），mtime 也变 → 快检失效回退完整 hash → 仍应检测到 push
+        Thread.sleep(5)
+        File(uploadDir, "a.txt").writeText("world")
+        val result = manager.sync(provider, SyncConfig())
+        assertTrue(result.success)
+        assertTrue(result.pushed.contains("upload/a.txt"))
+        assertEquals("world", String(provider.remoteFiles["upload/a.txt"]!!))
     }
 }

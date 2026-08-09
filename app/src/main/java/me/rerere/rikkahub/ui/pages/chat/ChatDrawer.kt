@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -53,10 +54,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.paging.compose.collectAsLazyPagingItems
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
@@ -87,10 +90,16 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.sync.CloudSyncCoordinator
+import me.rerere.rikkahub.data.sync.SyncItemStatus
+import me.rerere.rikkahub.data.sync.SyncPreview
+import me.rerere.rikkahub.data.sync.SyncProgress
+import me.rerere.rikkahub.data.sync.SyncProgressItem
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
 import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.pages.backup.components.SyncPreviewDialog
+import me.rerere.rikkahub.ui.pages.backup.components.SyncProgressDialog
 import androidx.compose.ui.draw.clip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -154,6 +163,13 @@ fun ChatDrawerContent(
             )
         )
     }
+
+    // 同步差异确认弹窗状态（侧边栏同步入口）：先只读检测差异，确认后才执行
+    var syncPreview by remember { mutableStateOf<SyncPreview?>(null) }
+    // 确认后切为实时进度视图（弹窗不关闭），null 表示无进度弹窗
+    var syncProgress by remember { mutableStateOf<SyncProgress?>(null) }
+    var syncJob by remember { mutableStateOf<Job?>(null) }
+    var syncing by remember { mutableStateOf(false) }
 
     // 移动对话状态
     var showMoveToAssistantSheet by remember { mutableStateOf(false) }
@@ -372,25 +388,52 @@ fun ChatDrawerContent(
             }
 
             DrawerAction(
-                icon = { Icon(HugeIcons.Refresh01, null) },
+                icon = {
+                    if (syncing) {
+                        // 同步进行中：图标切换为加载动画
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(HugeIcons.Refresh01, null)
+                    }
+                },
                 label = { Text(stringResource(R.string.chat_drawer_sync)) },
                 onClick = {
-                    scope.launch {
-                        runCatching {
-                            val ok = cloudSyncCoordinator.syncIfNeeded(force = true)
-                            toaster.show(
-                                context.getString(
-                                    if (ok) R.string.chat_drawer_sync_success
-                                    else R.string.chat_drawer_sync_skipped
-                                ),
-                                type = if (ok) ToastType.Success else ToastType.Warning
-                            )
-                        }.onFailure { e ->
-                            toaster.show(
-                                context.getString(R.string.chat_drawer_sync_failed, e.message ?: ""),
-                                type = ToastType.Error
-                            )
-                        }
+                    // 用 lifecycleScope 而非 rememberCoroutineScope：抽屉组合销毁后协程仍可安全完成，
+                    // 避免 "rememberCoroutineScope left the composition" 报错
+                    activity.lifecycleScope.launch {
+                        if (syncing) return@launch
+                        syncing = true
+                        runCatching { cloudSyncCoordinator.preview() }
+                            .onSuccess { preview ->
+                                when {
+                                    // 无法检测（未启用/离线/配置不完整）
+                                    preview == null -> toaster.show(
+                                        context.getString(R.string.chat_drawer_sync_skipped),
+                                        type = ToastType.Warning
+                                    )
+                                    // 无差异，无需同步
+                                    preview.isEmpty -> toaster.show(
+                                        context.getString(R.string.chat_drawer_sync_no_changes),
+                                        type = ToastType.Success
+                                    )
+                                    // 有差异 → 弹确认清单
+                                    else -> syncPreview = preview
+                                }
+                            }
+                            .onFailure { e ->
+                                if (e is kotlinx.coroutines.CancellationException) {
+                                    // 协程取消（如页面销毁），不是同步失败，不提示
+                                    return@onFailure
+                                }
+                                toaster.show(
+                                    context.getString(R.string.chat_drawer_sync_failed, e.message ?: ""),
+                                    type = ToastType.Error
+                                )
+                            }
+                        syncing = false
                     }
                 },
             )
@@ -681,6 +724,77 @@ fun ChatDrawerContent(
                 }
             }
         }
+    }
+
+    syncPreview?.let { preview ->
+        SyncPreviewDialog(
+            preview = preview,
+            onConfirm = {
+                syncPreview = null
+                // 用确认时的预览清单初始化进度项（全部「等待中」），弹窗切换为进度视图
+                syncProgress = SyncProgress.fromPreview(preview)
+                syncJob = activity.lifecycleScope.launch {
+                    if (syncing) return@launch
+                    syncing = true
+                    runCatching {
+                        val ok = cloudSyncCoordinator.syncIfNeeded(
+                            force = true,
+                            onProgress = { relPath, status ->
+                                syncProgress?.let { cur ->
+                                    val newMap = cur.statusByPath + (relPath to status)
+                                    syncProgress = cur.copy(
+                                        statusByPath = newMap,
+                                        done = newMap.values.count {
+                                            it == SyncItemStatus.DONE || it == SyncItemStatus.FAILED
+                                        },
+                                    )
+                                }
+                            },
+                        )
+                        // 结束：更新进度视图为完成态
+                        syncProgress?.let { cur ->
+                            syncProgress = cur.copy(
+                                finished = true,
+                                success = ok,
+                                error = if (ok) null else "同步未完成（可能未触发，或同步执行失败）",
+                            )
+                        }
+                        toaster.show(
+                            context.getString(
+                                if (ok) R.string.chat_drawer_sync_success
+                                else R.string.chat_drawer_sync_skipped
+                            ),
+                            type = if (ok) ToastType.Success else ToastType.Warning
+                        )
+                    }.onFailure { e ->
+                        if (e is kotlinx.coroutines.CancellationException) {
+                            // 用户取消同步：进度视图显示「已取消」
+                            syncProgress?.let { cur ->
+                                syncProgress = cur.copy(finished = true, success = null, error = "已取消")
+                            }
+                            return@onFailure
+                        }
+                        syncProgress?.let { cur ->
+                            syncProgress = cur.copy(finished = true, success = false, error = e.message)
+                        }
+                        toaster.show(
+                            context.getString(R.string.chat_drawer_sync_failed, e.message ?: ""),
+                            type = ToastType.Error
+                        )
+                    }
+                    syncing = false
+                }
+            },
+            onDismiss = { syncPreview = null },
+        )
+    }
+
+    syncProgress?.let { progress ->
+        SyncProgressDialog(
+            progress = progress,
+            onCancel = { syncJob?.cancel() },
+            onDismiss = { syncProgress = null },
+        )
     }
 }
 

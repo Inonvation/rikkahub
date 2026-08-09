@@ -28,7 +28,10 @@ data class UIMessage(
     // 群组讨论：发言者标识。普通会话恒为 null；群聊会话里为成员 Assistant id + 名称快照。
     // 新增可空字段，JSON blob 老数据缺省即反序列化为 null，向后兼容。
     val speakerId: Uuid? = null,
-    val speakerName: String? = null
+    val speakerName: String? = null,
+    // 会话增量同步的版本号（单调时钟）。由保存层在落库时维护：0 表示尚未参与同步（存量数据）。
+    // 内存态每次重建（流式/编辑）不改变该值，内容未变时保留原版本，变化/新增才推进。
+    val syncUpdatedAt: Long = 0L,
 ) {
     fun summaryAsText(maxLength: Int = Int.MAX_VALUE): String {
         val text = "[${role.name}]: " + parts.joinToString(separator = "\n") { part ->

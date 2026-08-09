@@ -15,10 +15,21 @@ data class SyncConfig(
     val intervalHours: Int = 24,
     /** 启动时自动同步 */
     val autoSyncOnLaunch: Boolean = true,
+    /** 是否同步设置白名单（不含密钥/凭据） */
+    val includeSettings: Boolean = true,
     /** 是否同步聊天数据库 */
     val includeDatabase: Boolean = true,
-    /** 是否同步托管附件（upload/skills/fonts） */
-    val includeFiles: Boolean = true,
+    /** 是否同步聊天附件（upload 目录） */
+    val includeChatFiles: Boolean = true,
+    /**
+     * 是否启用聊天增量同步（会话级文件，替代整库聊天数据上传）。
+     * 开启后聊天记录按会话拆分同步，发一条消息只传该会话的小文件。
+     */
+    val includeConversations: Boolean = true,
+    /** 是否同步技能文件（skills 目录） */
+    val includeSkills: Boolean = true,
+    /** 是否同步字体（fonts 目录） */
+    val includeFonts: Boolean = true,
 )
 
 @Serializable

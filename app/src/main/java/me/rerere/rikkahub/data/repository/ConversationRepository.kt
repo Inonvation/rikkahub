@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
@@ -28,6 +29,16 @@ import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.DiscussionConfig
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.sync.ConversationIndexEntry
+import me.rerere.rikkahub.data.sync.ConversationNode
+import me.rerere.rikkahub.data.sync.ConversationSyncAccess
+import me.rerere.rikkahub.data.sync.ConversationSyncItem
+import me.rerere.rikkahub.data.sync.ConversationTombstone
+import me.rerere.rikkahub.data.sync.SyncStateStore
+import me.rerere.rikkahub.data.sync.buildConversationItem
+import me.rerere.rikkahub.data.sync.conversationItemPath
+import me.rerere.rikkahub.data.sync.encodeConversationItem
+import me.rerere.rikkahub.data.sync.mapRemoteUrlsToLocal
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
@@ -42,13 +53,129 @@ class ConversationRepository(
     private val todoStorage: TodoStorage,
     private val subAgentUsageDAO: SubAgentUsageDAO,
     private val subAgentTaskDAO: SubAgentTaskDAO,
+    /** 会话增量同步的单调时钟来源（版本号生成）。 */
+    private val syncStateStore: SyncStateStore,
     /** Lazy 注入打破循环依赖：SubAgentRunner 依赖本 Repository，本类依赖它（删会话级联取消子代理）。
      *  lazy 延迟解析，首次访问时才从 Koin 取实例，避免构造期死锁。 */
     private val subAgentRunner: kotlin.Lazy<me.rerere.rikkahub.data.ai.subagent.SubAgentRunner>,
-) {
+) : ConversationSyncAccess {
     companion object {
         private const val PAGE_SIZE = 20
         private const val INITIAL_LOAD_SIZE = 40
+
+        /** 解析一段 messages JSON，得到每条消息 (syncUpdatedAt, contentKey)；损坏则跳过该段。 */
+        internal fun parseMessageSyncState(json: String): Map<String, Pair<Long, String>> =
+            runCatching {
+                JsonInstant.decodeFromString<List<UIMessage>>(json)
+                    .associate { message ->
+                        message.id.toString() to (message.syncUpdatedAt to contentKeyOf(message))
+                    }
+            }.getOrElse { emptyMap() }
+
+        /** 排除 syncUpdatedAt 的内容签名：统一置 0 再序列化，确保版本字段不参与内容比对。 */
+        internal fun contentKeyOf(message: UIMessage): String =
+            JsonInstant.encodeToString(message.copy(syncUpdatedAt = 0L))
+
+        /** 每条消息的内容签名，与 [nodes] 逐节点对应。 */
+        internal fun messageContentKeys(nodes: List<MessageNode>): List<List<String>> =
+            nodes.map { node -> node.messages.map { message -> contentKeyOf(message) } }
+
+        /** 需要推进版本的消息数：新消息 / 内容变化 / 旧版本为 0（存量未参与同步）。 */
+        internal fun countPendingSyncVersions(
+            nodes: List<MessageNode>,
+            oldState: Map<String, Map<String, Pair<Long, String>>>,
+            messageKeys: List<List<String>>,
+        ): Int = nodes.indices.sumOf { i ->
+            val oldMessages = oldState[nodes[i].id.toString()] ?: emptyMap()
+            nodes[i].messages.indices.count { j ->
+                val messageId = nodes[i].messages[j].id.toString()
+                val old = oldMessages[messageId]
+                old == null || old.first <= 0L || old.second != messageKeys[i][j]
+            }
+        }
+
+        /**
+         * 为每个节点分配消息版本（纯函数，决策与入库分离便于单测）：
+         * 内容未变且旧版本有效 → 保留原版本；否则从 [base] 起递增分配新版本。
+         */
+        internal fun assignSyncVersions(
+            nodes: List<MessageNode>,
+            oldState: Map<String, Map<String, Pair<Long, String>>>,
+            messageKeys: List<List<String>>,
+            base: Long,
+        ): List<List<UIMessage>> {
+            var next = base
+            return nodes.mapIndexed { index, node ->
+                val oldMessages = oldState[node.id.toString()] ?: emptyMap()
+                node.messages.mapIndexed { j, message ->
+                    val messageId = message.id.toString()
+                    val old = oldMessages[messageId]
+                    val syncUpdatedAt = if (old != null && old.first > 0L && old.second == messageKeys[index][j]) {
+                        old.first
+                    } else {
+                        next++
+                        next
+                    }
+                    message.copy(syncUpdatedAt = syncUpdatedAt)
+                }
+            }
+        }
+
+        /**
+         * 消息级合并（纯函数，下载方向）：墓碑优先 + 按消息 id union + syncUpdatedAt 大者胜（平局按内容签名）。
+         * 本地节点顺序为骨架，同 id 远端节点消息并入；远端独有节点追加；空节点剔除。不丢任何一方的消息。
+         */
+        internal fun mergeConversationMessages(
+            localNodes: List<MessageNode>,
+            remoteNodes: List<ConversationNode>,
+            deletedMessageIds: Set<String>,
+        ): List<MessageNode> {
+            val remoteByNodeId = remoteNodes.associateBy { it.id }
+            val result = mutableListOf<MessageNode>()
+            val usedNodeIds = mutableSetOf<String>()
+
+            for (localNode in localNodes) {
+                val nodeId = localNode.id.toString()
+                usedNodeIds += nodeId
+                val remoteNode = remoteByNodeId[nodeId]
+                val localMessages = filterDeleted(localNode.messages, deletedMessageIds)
+                val messages = if (remoteNode == null) {
+                    localMessages
+                } else {
+                    mergeMessageLists(localMessages, filterDeleted(remoteNode.messages, deletedMessageIds))
+                }
+                result += localNode.copy(messages = messages)
+            }
+            for (remoteNode in remoteNodes) {
+                if (remoteNode.id in usedNodeIds) continue
+                val nodeId = runCatching { Uuid.parse(remoteNode.id) }.getOrNull() ?: continue
+                result += MessageNode(
+                    id = nodeId,
+                    messages = filterDeleted(remoteNode.messages, deletedMessageIds),
+                    selectIndex = remoteNode.selectIndex,
+                )
+            }
+            return result.filter { it.messages.isNotEmpty() }
+        }
+
+        /** 两条消息列表按 id union，syncUpdatedAt 大者胜；平局按内容签名比较取大者。 */
+        internal fun mergeMessageLists(a: List<UIMessage>, b: List<UIMessage>): List<UIMessage> {
+            val byId = LinkedHashMap<String, UIMessage>()
+            for (m in a) byId[m.id.toString()] = m
+            for (m in b) {
+                val id = m.id.toString()
+                val existing = byId[id]
+                if (existing == null || m.syncUpdatedAt > existing.syncUpdatedAt) {
+                    byId[id] = m
+                } else if (m.syncUpdatedAt == existing.syncUpdatedAt) {
+                    if (contentKeyOf(m) > contentKeyOf(existing)) byId[id] = m
+                }
+            }
+            return byId.values.toList()
+        }
+
+        private fun filterDeleted(messages: List<UIMessage>, deleted: Set<String>): List<UIMessage> =
+            messages.filterNot { it.id.toString() in deleted }
     }
 
     suspend fun getRecentConversations(assistantId: Uuid, limit: Int = 10): List<Conversation> {
@@ -313,10 +440,21 @@ class ConversationRepository(
 
     suspend fun insertConversation(conversation: Conversation) {
         database.withTransaction {
+            // 先建会话（FK：节点引用会话必须先存在），用临时时钟值，随后统一为消息最大版本
+            val initialSyncAt = syncStateStore.nextSyncClock()
             conversationDAO.insert(
-                conversationToConversationEntity(conversation)
+                conversationToConversationEntity(conversation).copy(syncUpdatedAt = initialSyncAt)
             )
-            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            val maxVersion = saveMessageNodes(
+                conversation.id.toString(),
+                conversation.messageNodes,
+                deleteExisting = false,
+            )
+            if (maxVersion > initialSyncAt) {
+                conversationDAO.update(
+                    conversationToConversationEntity(conversation).copy(syncUpdatedAt = maxVersion)
+                )
+            }
         }
         messageFtsManager.indexConversation(conversation)
     }
@@ -332,17 +470,41 @@ class ConversationRepository(
                     "updateConversation: refusing to wipe ${conversation.id} history with empty messageNodes"
                 )
             }
-            conversationDAO.update(
-                conversationToConversationEntity(conversation)
+            val newEntity = conversationToConversationEntity(conversation)
+            val oldEntity = conversationDAO.getConversationById(conversation.id.toString())
+            // 删除旧的节点，插入新的节点（saveMessageNodes 内部处理，并维护消息/会话版本）
+            val maxMsgVersion = saveMessageNodes(
+                conversation.id.toString(),
+                conversation.messageNodes,
+                deleteExisting = true,
             )
-            // 删除旧的节点，插入新的节点
-            messageNodeDAO.deleteByConversation(conversation.id.toString())
-            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            // 会话版本 = max(消息版本, 元数据变化时的时钟)。仅消息变化而元数据未变时不额外推进，
+            // 避免「整会话重插」把没变化的会话也标记为需要重传。
+            val syncUpdatedAt = if (oldEntity != null && conversationMetaChanged(oldEntity, newEntity)) {
+                maxOf(maxMsgVersion, syncStateStore.nextSyncClock())
+            } else {
+                maxMsgVersion
+            }
+            conversationDAO.update(newEntity.copy(syncUpdatedAt = syncUpdatedAt))
         }
         messageFtsManager.indexConversation(conversation)
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
+        // 记录会话墓碑（增量同步传播删除到云端），幂等去重。失败不阻断删除本身。
+        runCatching {
+            val deletedAt = syncStateStore.nextSyncClock()
+            syncStateStore.update { state ->
+                if (state.deletedConversations.any { it.id == conversation.id.toString() }) {
+                    state
+                } else {
+                    state.copy(
+                        deletedConversations = state.deletedConversations +
+                            ConversationTombstone(conversation.id.toString(), deletedAt)
+                    )
+                }
+            }
+        }
         // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
         val fullConversation = if (conversation.messageNodes.isEmpty()) {
             getConversationById(conversation.id) ?: conversation
@@ -364,6 +526,165 @@ class ConversationRepository(
         }
         filesManager.deleteChatFilesPermanently(fullConversation.files)
         todoStorage.delete(conversation.id.toString())
+    }
+
+    // ------------------------------------------------------------------
+    // ConversationSyncAccess（会话增量同步）
+    // ------------------------------------------------------------------
+
+    override suspend fun listLocalIndexEntries(): List<ConversationIndexEntry> {
+        return conversationDAO.getSyncEntries().map { e ->
+            ConversationIndexEntry(
+                id = e.id,
+                syncUpdatedAt = e.syncUpdatedAt,
+                title = e.title,
+                createAt = e.createAt,
+                isPinned = e.isPinned,
+                messageCount = e.messageCount,
+                path = conversationItemPath(e.id),
+            )
+        }
+    }
+
+    override suspend fun exportConversation(id: String): ConversationSyncItem? {
+        val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return null
+        ensureConversationVersion(id)
+        val conversation = getConversationById(uuid) ?: return null
+        return buildConversationItem(conversation, filesRoot = deviceFilesRoot())
+    }
+
+    override suspend fun localDeletedTombstones(): List<ConversationTombstone> =
+        syncStateStore.current().deletedConversations
+
+    override suspend fun conversationSize(id: String): Long? {
+        val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return null
+        val conversation = getConversationById(uuid) ?: return null
+        return encodeConversationItem(
+            buildConversationItem(conversation, filesRoot = deviceFilesRoot())
+        ).size.toLong()
+    }
+
+    /** 本机 files 目录绝对路径，用于导出时脱敏设备路径。 */
+    private fun deviceFilesRoot(): String =
+        filesManager.getUploadDir().parentFile?.absolutePath ?: ""
+
+    override suspend fun mergeConversation(item: ConversationSyncItem): Boolean {
+        val uuid = runCatching { Uuid.parse(item.id) }.getOrNull() ?: return false
+        // 读 local + 合并计算 + 写 放在同一个事务内：避免与 updateConversation（用户发消息）并发时，
+        // 基于过期快照整会话覆盖，丢失用户刚入库的新消息（TOCTOU）。
+        val merged = database.withTransaction {
+            val localEntity = conversationDAO.getConversationById(item.id)
+            val localNodes = if (localEntity != null) loadMessageNodes(item.id) else emptyList()
+            val local = localEntity?.let { conversationEntityToConversation(it, localNodes) }
+            val deletedIds = item.deletedMessageIds.map { it.id }.toSet()
+
+            // 消息级合并：墓碑优先 + 按消息 id union + LWW（syncUpdatedAt 大者胜）
+            val mergedNodes = mergeConversationMessages(localNodes, item.nodes, deletedIds)
+
+            // 附件引用下载方向映射：upload/<name> -> 本地 file:// 路径
+            val uploadDir = filesManager.getUploadDir().absolutePath
+            val nodesWithLocalRefs = mergedNodes.map { node ->
+                node.copy(
+                    messages = node.messages.map { message ->
+                        message.copy(parts = mapRemoteUrlsToLocal(message.parts, uploadDir))
+                    },
+                )
+            }
+
+            // 会话元数据 LWW：syncUpdatedAt 大者胜
+            val remoteWins = local == null || item.syncUpdatedAt >= local.syncUpdatedAt
+            val maxMsgVersion = nodesWithLocalRefs.maxOfOrNull { n ->
+                n.messages.maxOfOrNull { it.syncUpdatedAt } ?: 0L
+            } ?: 0L
+            // 合并结果版本：全新会话取云端版本；参与合并则推进 +1，保证下次同步把合并结果上传回云端
+            val newVersion = if (local == null) {
+                item.syncUpdatedAt
+            } else {
+                maxOf(item.syncUpdatedAt, local.syncUpdatedAt, maxMsgVersion) + 1L
+            }
+
+            val mergedConversation = Conversation(
+                id = uuid,
+                assistantId = runCatching { Uuid.parse(item.assistantId) }
+                    .getOrElse { local?.assistantId ?: DEFAULT_ASSISTANT_ID },
+                title = if (remoteWins) item.title else local!!.title,
+                messageNodes = nodesWithLocalRefs,
+                createAt = local?.createAt ?: Instant.ofEpochMilli(item.createAt),
+                updateAt = local?.updateAt ?: Instant.now(),
+                isPinned = if (remoteWins) item.isPinned else local!!.isPinned,
+                chatSuggestions = local?.chatSuggestions ?: emptyList(),
+                customSystemPrompt = if (remoteWins) item.customSystemPrompt else local!!.customSystemPrompt,
+                modeInjectionIds = local?.modeInjectionIds ?: emptySet(),
+                lorebookIds = local?.lorebookIds ?: emptySet(),
+                workspaceCwd = if (remoteWins) item.workspaceCwd else local!!.workspaceCwd,
+                folderId = local?.folderId,
+                discussion = local?.discussion,
+                groupId = local?.groupId,
+                syncUpdatedAt = newVersion,
+            )
+
+            val entity = conversationToConversationEntity(mergedConversation)
+            if (local == null) {
+                conversationDAO.insert(entity)
+            } else {
+                conversationDAO.update(entity)
+            }
+            messageNodeDAO.deleteByConversation(item.id)
+            messageNodeDAO.insertAll(
+                nodesWithLocalRefs.mapIndexed { index, node ->
+                    MessageNodeEntity(
+                        id = node.id.toString(),
+                        conversationId = item.id,
+                        nodeIndex = index,
+                        messages = JsonInstant.encodeToString(node.messages),
+                        selectIndex = node.selectIndex,
+                    )
+                }
+            )
+            mergedConversation
+        }
+        messageFtsManager.indexConversation(merged)
+        // 吸收远端版本进本地单调时钟：设备时钟落后远端时，本地下一次编辑仍能产出更大版本（LWW 不输）
+        runCatching { syncStateStore.observeSyncClock(item.syncUpdatedAt) }
+        return true
+    }
+
+    override suspend fun deleteRemoteConversation(id: String) {
+        val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return
+        val conversation = getConversationById(uuid) ?: return
+        // 应用云端删除：与本地删除不同，不重复记录墓碑（云端 index.deleted 已是权威）
+        messageFtsManager.deleteConversation(id)
+        database.withTransaction {
+            conversationDAO.delete(conversationToConversationEntity(conversation))
+            subAgentUsageDAO.deleteByConversation(id)
+            subAgentTaskDAO.deleteByConversation(id)
+        }
+        filesManager.deleteChatFilesPermanently(conversation.files)
+        todoStorage.delete(id)
+        // 从本地待传播墓碑中移除（已确认删除）
+        syncStateStore.update { state ->
+            state.copy(deletedConversations = state.deletedConversations.filterNot { it.id == id })
+        }
+    }
+
+    override suspend fun clearLocalTombstones(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        syncStateStore.update { state ->
+            state.copy(deletedConversations = state.deletedConversations.filterNot { it.id in ids })
+        }
+    }
+
+    /** 存量会话（syncUpdatedAt==0）初始化版本：给消息补版本并写回，保证导出条目版本稳定。 */
+    private suspend fun ensureConversationVersion(conversationId: String): Long {
+        val entity = conversationDAO.getConversationById(conversationId) ?: return 0L
+        if (entity.syncUpdatedAt > 0L) return entity.syncUpdatedAt
+        val conversation = getConversationById(Uuid.parse(conversationId)) ?: return 0L
+        return database.withTransaction {
+            val maxMsgVersion = saveMessageNodes(conversationId, conversation.messageNodes, deleteExisting = false)
+            val newVersion = maxOf(maxMsgVersion, syncStateStore.nextSyncClock())
+            conversationDAO.update(conversationToConversationEntity(conversation).copy(syncUpdatedAt = newVersion))
+            newVersion
+        }
     }
 
     /** 某会话的子代理用量明细流（任务终态落库后触发），供聊天底部栏并入缓存/费用统计。 */
@@ -402,6 +723,7 @@ class ConversationRepository(
             nodes = "[]",  // nodes 现在存储在单独的表中
             createAt = conversation.createAt.toEpochMilli(),
             updateAt = conversation.updateAt.toEpochMilli(),
+            syncUpdatedAt = conversation.syncUpdatedAt,
             assistantId = conversation.assistantId.toString(),
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
             isPinned = conversation.isPinned,
@@ -425,6 +747,7 @@ class ConversationRepository(
             messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
             createAt = Instant.ofEpochMilli(conversationEntity.createAt),
             updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
+            syncUpdatedAt = conversationEntity.syncUpdatedAt,
             assistantId = Uuid.parse(conversationEntity.assistantId),
             chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
             isPinned = conversationEntity.isPinned,
@@ -526,18 +849,67 @@ class ConversationRepository(
         }
     }
 
-    private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {
-        val entities = nodes.mapIndexed { index, node ->
+    /**
+     * 保存会话的全部节点，并维护会话增量同步的消息版本号。
+     *
+     * 关键约束：`updateConversation` 是「整会话删旧重插」。若每次重插都推进所有消息版本，
+     * 同步引擎会误判「全部消息都变了」导致整会话重传（增量失效）。因此这里：
+     * - 消息 id 已存在、旧版本有效（>0）且内容（排除 syncUpdatedAt 的签名）未变 → 保留原版本
+     * - 新消息 / 内容变化 / 旧版本为 0（存量未参与同步）→ 分配单调时钟新版本
+     *
+     * @param deleteExisting 是否先删除该会话旧节点（update 场景 true；insert 场景 false，无旧节点）
+     * @return 本会话新的 syncUpdatedAt = max(所有消息版本)，供会话列写入
+     */
+    private suspend fun saveMessageNodes(
+        conversationId: String,
+        nodes: List<MessageNode>,
+        deleteExisting: Boolean,
+    ): Long {
+        // 读取旧节点的消息版本与内容签名：nodeId -> messageId -> (version, contentKey)
+        val oldState: Map<String, Map<String, Pair<Long, String>>> = runCatching {
+            messageNodeDAO.getNodesOfConversation(conversationId)
+                .associate { node -> node.id to parseMessageSyncState(node.messages) }
+        }.getOrElse { emptyMap() }
+
+        // 版本分配为纯函数（可单测）：内容签名只算一遍，推进数量一次批量分配时钟
+        val messageKeys = messageContentKeys(nodes)
+        val pendingCount = countPendingSyncVersions(nodes, oldState, messageKeys)
+        val base = if (pendingCount > 0) syncStateStore.nextSyncClock(pendingCount) else 0L
+        val messageLists = assignSyncVersions(nodes, oldState, messageKeys, base)
+
+        var maxVersion = 0L
+        for (list in messageLists) for (m in list) if (m.syncUpdatedAt > maxVersion) maxVersion = m.syncUpdatedAt
+
+        val entities = messageLists.mapIndexed { index, messages ->
             MessageNodeEntity(
-                id = node.id.toString(),
+                id = nodes[index].id.toString(),
                 conversationId = conversationId,
                 nodeIndex = index,
-                messages = JsonInstant.encodeToString(node.messages),
-                selectIndex = node.selectIndex
+                messages = JsonInstant.encodeToString(messages),
+                selectIndex = nodes[index].selectIndex
             )
         }
+
+        if (deleteExisting) {
+            messageNodeDAO.deleteByConversation(conversationId)
+        }
         messageNodeDAO.insertAll(entities)
+        return maxVersion
     }
+
+    /** 会话元数据（除消息节点与 sync 版本外）是否有变化，驱动会话版本推进。 */
+    private fun conversationMetaChanged(old: ConversationEntity, new: ConversationEntity): Boolean =
+        old.assistantId != new.assistantId ||
+            old.title != new.title ||
+            old.chatSuggestions != new.chatSuggestions ||
+            old.isPinned != new.isPinned ||
+            old.customSystemPrompt != new.customSystemPrompt ||
+            old.modeInjectionIds != new.modeInjectionIds ||
+            old.lorebookIds != new.lorebookIds ||
+            old.workspaceCwd != new.workspaceCwd ||
+            old.folderId != new.folderId ||
+            old.discussionJson != new.discussionJson ||
+            old.groupId != new.groupId
 }
 
 /**
