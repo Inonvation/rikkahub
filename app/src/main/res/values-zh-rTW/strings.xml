@@ -226,6 +226,9 @@
   <string name="cancel">取消</string>
   <string name="cancel_edit">取消編輯</string>
   <string name="chain_of_thought_collapse">收合</string>
+  <string name="chain_of_thought_show_all_steps">顯示全部步驟</string>
+  <string name="chain_of_thought_processed_min_sec">已處理 %1$d分%2$d秒</string>
+  <string name="chain_of_thought_processed_sec">已處理 %d秒</string>
   <string name="chain_of_thought_show_more_steps">顯示更多 %d 個步驟</string>
   <string name="chat_input_placeholder">輸入訊息與AI聊天</string>
   <string name="chat_input_placeholder_guidance">子代理執行中——發送的訊息將作為引導</string>
@@ -640,6 +643,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">在暗色主題中使用純黑背景，適合 AMOLED 螢幕</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED 暗色模式</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">思考完成自動折疊思考內容</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">AI 思考完成後自動折疊所有步驟</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">AI 輸出最終內容前，自動折疊之前的思維過程與工具調用步驟</string>
   <string name="setting_display_page_auto_collapse_thinking_title">自動折疊思考</string>
   <string name="setting_display_page_auto_play_tts_desc">助理訊息產生完成後自動播放語音</string>
   <string name="setting_display_page_auto_play_tts_title">產生後自動播放 TTS</string>

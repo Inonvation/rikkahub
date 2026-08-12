@@ -226,6 +226,9 @@
   <string name="cancel">キャンセル</string>
   <string name="cancel_edit">編集をキャンセル</string>
   <string name="chain_of_thought_collapse">折りたたむ</string>
+  <string name="chain_of_thought_show_all_steps">すべてのステップを表示</string>
+  <string name="chain_of_thought_processed_min_sec">処理時間 %1$d分%2$d秒</string>
+  <string name="chain_of_thought_processed_sec">処理時間 %d秒</string>
   <string name="chain_of_thought_show_more_steps">あと %d ステップを表示</string>
   <string name="chat_input_placeholder">AIとチャットするメッセージを入力</string>
   <string name="chat_input_placeholder_guidance">サブエージェント実行中——送信したメッセージはガイダンスになります</string>
@@ -640,6 +643,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">ダークテーマで純粋な黒色背景を使用、AMOLED画面に適しています</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED ダークモード</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">思考が完了したら思考内容を自動的に折りたたむ</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">思考完了後にすべてのステップを自動的に折りたたむ</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">AI が最終的な回答を出力する前に、思考プロセスとツール呼び出しのステップを自動的に折りたたみます</string>
   <string name="setting_display_page_auto_collapse_thinking_title">思考を自動折りたたむ</string>
   <string name="setting_display_page_auto_play_tts_desc">アシスタントのメッセージ生成完了後にTTSを自動再生</string>
   <string name="setting_display_page_auto_play_tts_title">生成後にTTSを自動再生</string>

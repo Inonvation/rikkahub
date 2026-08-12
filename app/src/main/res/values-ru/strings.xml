@@ -226,6 +226,9 @@
   <string name="cancel">Отмена</string>
   <string name="cancel_edit">Отменить редактирование</string>
   <string name="chain_of_thought_collapse">Свернуть</string>
+  <string name="chain_of_thought_show_all_steps">Показать все шаги</string>
+  <string name="chain_of_thought_processed_min_sec">Обработано %1$d мин %2$d сек</string>
+  <string name="chain_of_thought_processed_sec">Обработано %d сек</string>
   <string name="chain_of_thought_show_more_steps">Показать ещё %d шагов</string>
   <string name="chat_input_placeholder">Общайтесь с ИИ</string>
   <string name="chat_input_placeholder_guidance">Суб-агенты работают — отправленное сообщение будет директивой</string>
@@ -640,6 +643,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">Использовать чёрный фон в тёмной теме, подходит для AMOLED-экранов</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED-тёмная тема</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">Автоматически сворачивать блок мышления после его завершения</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">Автоматически сворачивать все шаги</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">Автоматически сворачивать все шаги мышления и вызова инструментов перед показом финального ответа</string>
   <string name="setting_display_page_auto_collapse_thinking_title">Автоматически сворачивать мысли</string>
   <string name="setting_display_page_auto_play_tts_desc">Автоматически воспроизводить TTS после завершения генерации ответа ассистента</string>
   <string name="setting_display_page_auto_play_tts_title">Автовоспроизведение TTS после генерации</string>

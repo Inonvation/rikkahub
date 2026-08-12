@@ -5,7 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -73,6 +76,8 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Video01
@@ -99,7 +104,14 @@ import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
+import kotlin.time.Clock
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 
 @Composable
 fun ChatMessage(
@@ -183,6 +195,8 @@ fun ChatMessage(
                 loading = loading,
                 model = model,
                 nodeId = node.id.toString(),
+                messageCreatedAt = message.createdAt,
+                messageFinishedAt = message.finishedAt,
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
@@ -298,6 +312,8 @@ private fun MessagePartsBlock(
     annotations: List<UIMessageAnnotation>,
     loading: Boolean,
     nodeId: String,
+    messageCreatedAt: LocalDateTime,
+    messageFinishedAt: LocalDateTime?,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
@@ -317,6 +333,50 @@ private fun MessagePartsBlock(
     val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
+
+    // 思考链"已处理"时长：消息创建到完成（AI 处理这条请求的总耗时），用于折叠态标题统计
+    // 实时"已处理"时长：生成中每秒刷新，完成后固定为消息创建到完成
+    var nowTick by remember { mutableStateOf(Clock.System.now()) }
+    LaunchedEffect(loading) {
+        if (loading) {
+            while (true) {
+                nowTick = Clock.System.now()
+                delay(1.seconds)
+            }
+        }
+    }
+    val processedDuration: Duration? = remember(messageCreatedAt, messageFinishedAt, nowTick) {
+        val start = messageCreatedAt.toInstant(TimeZone.currentSystemDefault())
+        val end = messageFinishedAt?.toInstant(TimeZone.currentSystemDefault()) ?: nowTick
+        (end - start).coerceAtLeast(Duration.ZERO)
+    }
+    // 折叠态控制条文案："已处理 n分m秒"（不足一分钟显示秒，负值钳制为 0）
+    val processedLabel: String? = processedDuration?.let { d ->
+        val totalSeconds = d.inWholeSeconds
+        if (totalSeconds >= 60) {
+            stringResource(
+                R.string.chain_of_thought_processed_min_sec,
+                totalSeconds / 60,
+                totalSeconds % 60,
+            )
+        } else {
+            stringResource(R.string.chain_of_thought_processed_sec, totalSeconds)
+        }
+    }
+
+    // 消息级兜底：AI 生成完成时，若开启"自动折叠所有步骤"，强制折叠本消息全部工具调用气泡。
+    // 流式中工具执行完成事件若与调用同批到达，step 级折叠可能漏触发，此处兜底保证一定生效。
+    var prevLoading by remember(nodeId) { mutableStateOf(loading) }
+    LaunchedEffect(loading, settings.displaySetting.autoCollapseAllSteps) {
+        if (!loading && prevLoading && settings.displaySetting.autoCollapseAllSteps) {
+            parts.forEach { part ->
+                if (part is UIMessagePart.Tool && part.isExecuted) {
+                    toolBubbleExpanded[part.toolCallId] = false
+                }
+            }
+        }
+        prevLoading = loading
+    }
 
     val handleClickCitation: (String) -> Unit = remember {
         handler@{ citationId ->
@@ -350,7 +410,24 @@ private fun MessagePartsBlock(
 
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
-    groupedParts.fastForEach { block ->
+    // 最终输出起点：最后一个 ContentBlock 之前的内容（思考链 + 中间输出）视为"过程"，可整体折叠
+    val finalOutputStart = groupedParts.indexOfLast { it is MessagePartBlock.ContentBlock }
+    val autoCollapseAll = settings.displaySetting.autoCollapseAllSteps
+    val hasThinkingSteps = parts.any {
+        it is UIMessagePart.Reasoning || it is UIMessagePart.Tool || it is UIMessagePart.ServerTool
+    }
+    val hasProcessContent = finalOutputStart > 0 || hasThinkingSteps
+    // 整体折叠：开启开关且消息完成后，过程内容折叠成"已处理 n分m秒"卡片，只保留最终输出
+    var chainCollapsed by remember(nodeId, autoCollapseAll) {
+        mutableStateOf(autoCollapseAll && !loading && hasProcessContent)
+    }
+    // 生成中强制展开（含重新生成场景，避免残留折叠态导致过程不可见），完成后自动折叠
+    LaunchedEffect(loading, autoCollapseAll) {
+        chainCollapsed = autoCollapseAll && !loading && hasProcessContent
+    }
+
+    // 渲染单个块（思考链或内容块），过程区与最终输出区复用
+    val renderBlock: @Composable (MessagePartBlock) -> Unit = { block ->
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
@@ -640,6 +717,54 @@ private fun MessagePartsBlock(
             }
         }
     }
+
+    // 过程块（最终输出之前的思考链 + 中间输出）与最终输出块
+    val processBlocks = if (finalOutputStart >= 0) groupedParts.subList(0, finalOutputStart) else groupedParts
+    val finalBlocks = if (finalOutputStart >= 0) groupedParts.subList(finalOutputStart, groupedParts.size) else emptyList()
+
+    // 折叠控制卡：有过程内容时显示在消息顶部，点击展开/收起全部过程（带动画）
+    if (autoCollapseAll && hasProcessContent) {
+        Card(
+            onClick = { chainCollapsed = !chainCollapsed },
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+            ),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (chainCollapsed) HugeIcons.ArrowDown01 else HugeIcons.ArrowUp01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = processedLabel ?: stringResource(R.string.chain_of_thought_show_all_steps),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+    }
+
+    // 过程内容：展开/折叠带动画（思考链 + 中间输出）
+    AnimatedVisibility(
+        visible = !chainCollapsed,
+        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+    ) {
+        Column {
+            processBlocks.fastForEach { block -> renderBlock(block) }
+        }
+    }
+
+    // 最终输出：始终显示
+    finalBlocks.fastForEach { block -> renderBlock(block) }
 
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {

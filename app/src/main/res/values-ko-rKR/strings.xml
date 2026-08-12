@@ -226,6 +226,9 @@
   <string name="cancel">취소</string>
   <string name="cancel_edit">편집 취소</string>
   <string name="chain_of_thought_collapse">접기</string>
+  <string name="chain_of_thought_show_all_steps">모든 단계 표시</string>
+  <string name="chain_of_thought_processed_min_sec">처리 %1$d분%2$d초</string>
+  <string name="chain_of_thought_processed_sec">처리 %d초</string>
   <string name="chain_of_thought_show_more_steps">%d단계 더 보기</string>
   <string name="chat_input_placeholder">AI와 채팅하기</string>
   <string name="chat_input_placeholder_guidance">하위 에이전트 실행 중 — 보낸 메시지는 가이드로 처리됩니다</string>
@@ -640,6 +643,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">다크 테마에서 순수 검정 배경 사용, AMOLED 화면에 적합</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED 다크 모드</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">사고 완료 후 자동으로 사고 내용 접기</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">사고 완료 후 모든 단계 자동 접기</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">AI가 최종 답변을 출력하기 전에 사고 과정과 도구 호출 단계를 자동으로 접습니다</string>
   <string name="setting_display_page_auto_collapse_thinking_title">사고 자동 접기</string>
   <string name="setting_display_page_auto_play_tts_desc">어시스턴트 메시지 생성 완료 후 TTS 자동 재생</string>
   <string name="setting_display_page_auto_play_tts_title">생성 후 TTS 자동 재생</string>

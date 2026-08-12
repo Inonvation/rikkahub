@@ -66,6 +66,7 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
@@ -92,7 +93,7 @@ private fun isCollapsedByDefaultTool(toolName: String): Boolean =
  * 只要 App 进程存活，任何导航路径都能保持用户对工具气泡的展开/折叠意图。
  * toolCallId 全局唯一（UUID），天然隔离不同会话/消息，不串状态。
  */
-private val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
+internal val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
 
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
@@ -136,6 +137,15 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         return
     }
 
+    // AI 思考完成后自动折叠所有步骤：工具执行完成（流式中 false→true）时按开关折叠气泡
+    val settings = LocalSettings.current
+    var wasExecuted by remember(tool.toolCallId) { mutableStateOf(tool.isExecuted) }
+    LaunchedEffect(tool.isExecuted) {
+        if (tool.isExecuted && !wasExecuted && settings.displaySetting.autoCollapseAllSteps) {
+            toolBubbleExpanded[tool.toolCallId] = false
+        }
+        wasExecuted = tool.isExecuted
+    }
     val navController = LocalNavController.current
     val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
     // 折叠类工具：点击优先展开/收起内联摘要，而不是直接弹 BottomSheet

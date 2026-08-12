@@ -234,6 +234,9 @@
   <string name="cancel">Cancel</string>
   <string name="cancel_edit">Cancel Edit</string>
   <string name="chain_of_thought_collapse">Collapse</string>
+  <string name="chain_of_thought_show_all_steps">Show all steps</string>
+  <string name="chain_of_thought_processed_min_sec">Processed %1$d min %2$d sec</string>
+  <string name="chain_of_thought_processed_sec">Processed %d sec</string>
   <string name="chain_of_thought_show_more_steps">Show %d more steps</string>
   <string name="chat_input_placeholder">Chat with AI</string>
   <string name="chat_input_placeholder_guidance">Sub-agents running — send a guidance message</string>
@@ -752,6 +755,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">Use pure black background in dark theme, suitable for AMOLED screens</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED Dark Mode</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">Automatically collapse thinking content after thinking is complete</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">Auto Collapse All Steps</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">Automatically collapse all thinking and tool call steps before the final answer is shown</string>
   <string name="setting_display_page_auto_collapse_thinking_title">Auto Collapse Thinking</string>
   <string name="setting_display_page_auto_play_tts_desc">Automatically play TTS after assistant message generation completes</string>
   <string name="setting_display_page_auto_play_tts_title">Auto-play TTS After Generation</string>

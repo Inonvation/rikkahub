@@ -228,6 +228,9 @@
   <string name="cancel">取消</string>
   <string name="cancel_edit">取消编辑</string>
   <string name="chain_of_thought_collapse">收起</string>
+  <string name="chain_of_thought_show_all_steps">显示全部步骤</string>
+  <string name="chain_of_thought_processed_min_sec">已处理 %1$d分%2$d秒</string>
+  <string name="chain_of_thought_processed_sec">已处理 %d秒</string>
   <string name="chain_of_thought_show_more_steps">再显示 %d 步</string>
   <string name="chat_input_placeholder">输入消息与AI聊天</string>
   <string name="chat_input_placeholder_guidance">子代理运行中——发送的消息将作为引导</string>
@@ -727,6 +730,8 @@
   <string name="setting_display_page_amoled_dark_mode_desc">在暗色主题中使用纯黑背景，适合 AMOLED 屏幕</string>
   <string name="setting_display_page_amoled_dark_mode_title">AMOLED 暗色模式</string>
   <string name="setting_display_page_auto_collapse_thinking_desc">思考完成自动折叠思考内容</string>
+  <string name="setting_display_page_auto_collapse_all_steps_title">AI思考完成后自动折叠所有步骤</string>
+  <string name="setting_display_page_auto_collapse_all_steps_desc">AI 输出最终内容前，自动折叠之前的思维过程与工具调用步骤</string>
   <string name="setting_display_page_auto_collapse_thinking_title">自动折叠思考</string>
   <string name="setting_display_page_auto_play_tts_desc">助手消息生成完成后自动播放TTS</string>
   <string name="setting_display_page_auto_play_tts_title">生成后自动播放TTS</string>

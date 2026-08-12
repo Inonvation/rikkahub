@@ -256,6 +256,18 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                         )
                     },
                 )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_all_steps_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_all_steps_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = displaySetting.autoCollapseAllSteps,
+                            onCheckedChange = {
+                                updateDisplaySetting(displaySetting.copy(autoCollapseAllSteps = it))
+                            }
+                        )
+                    },
+                )
             }
         }
 

@@ -115,7 +115,7 @@ private fun rememberReasoningState(
             state.scrollState.animateScrollTo(state.scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
-                state.expandState = if (settings.displaySetting.autoCloseThinking) {
+                state.expandState = if (settings.displaySetting.autoCollapseAllSteps || settings.displaySetting.autoCloseThinking) {
                     ReasoningCardState.Collapsed
                 } else {
                     ReasoningCardState.Expanded

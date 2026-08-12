@@ -834,6 +834,8 @@ data class DisplaySetting(
     val showTokenUsage: Boolean = true,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
+    /** AI 思考/工具调用完成后，自动折叠消息中所有思维过程与工具调用步骤（默认关） */
+    val autoCollapseAllSteps: Boolean = false,
     val doubleTapCollapseThinking: Boolean = true,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
