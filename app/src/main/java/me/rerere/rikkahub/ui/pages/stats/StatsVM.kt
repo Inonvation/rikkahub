@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.db.dao.getAssistantUsage
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
 data class AppStats(
@@ -128,26 +129,36 @@ class StatsVM(
 
         val launchCount = settingsStore.settingsFlow.value.launchCount
 
-        // 三个聚合查询并行执行（IO 线程，避免串行等待）
-        val (trendByModel, modelUsage, assistantUsage) = coroutineScope {
+        // 五个聚合查询并行执行（IO 线程，避免串行等待）：主聊天 + 子代理用量
+        val trendStartDate = today.minusYears(1).toString()
+        val trendStartMillis = today.minusYears(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val trendByModel: List<DayModelUsage>
+        val modelUsage: List<ModelUsageEntry>
+        val assistantUsage: List<AssistantUsageEntry>
+        val subTrendByModel: List<DayModelUsage>
+        val subModelUsage: List<ModelUsageEntry>
+        coroutineScope {
             // 趋势只取最近一年（12 周 / 6 个月粒度均覆盖）
-            val trendDeferred = async(Dispatchers.IO) {
-                messageNodeDAO.getTrendByModel(today.minusYears(1).toString())
-            }
+            val trendDeferred = async(Dispatchers.IO) { messageNodeDAO.getTrendByModel(trendStartDate) }
             val modelDeferred = async(Dispatchers.IO) { messageNodeDAO.getModelUsage() }
             val assistantDeferred = async(Dispatchers.IO) { messageNodeDAO.getAssistantUsage() }
-            Triple(
-                trendDeferred.await(),
-                modelDeferred.await(),
-                assistantDeferred.await(),
-            )
+            val subTrendDeferred = async(Dispatchers.IO) { subAgentUsageDAO.getTrendByModel(trendStartMillis) }
+            val subModelDeferred = async(Dispatchers.IO) { subAgentUsageDAO.getModelUsage() }
+            trendByModel = trendDeferred.await()
+            modelUsage = modelDeferred.await()
+            assistantUsage = assistantDeferred.await()
+            subTrendByModel = subTrendDeferred.await()
+            subModelUsage = subModelDeferred.await()
         }
 
         // 模型/助手显示名映射（id -> 名称），UI 侧排行榜用于展示
         val settings = settingsStore.settingsFlow.value
-        val modelDisplayNames = settings.providers
+        val rawModelDisplayNames = settings.providers
             .flatMap { it.models }
             .associate { it.id.toString() to it.displayName.ifBlank { it.modelId } }
+        // 不同供应商可能配置同名模型（Uuid 不同、显示名相同）：统计按显示名合并后，
+        // 条目的 modelId 即显示名，这里补自映射让 UI 侧能直接解析，不再显示为「未知模型」
+        val modelDisplayNames = rawModelDisplayNames + rawModelDisplayNames.values.associateWith { it }
         val assistantDisplayNames = settings.assistants
             .associate { it.id.toString() to it.name }
 
@@ -160,8 +171,8 @@ class StatsVM(
             totalCachedTokens = tokenStats.cachedTokens + subStats.cachedTokens,
             conversationsPerDay = conversationsPerDay,
             launchCount = launchCount,
-            trendByModel = trendByModel,
-            modelUsage = modelUsage,
+            trendByModel = mergeTrendByDisplayName(trendByModel + subTrendByModel, rawModelDisplayNames),
+            modelUsage = mergeModelUsageByDisplayName(modelUsage + subModelUsage, rawModelDisplayNames),
             assistantUsage = assistantUsage,
             modelDisplayNames = modelDisplayNames,
             assistantDisplayNames = assistantDisplayNames,

@@ -21,6 +21,28 @@ interface SubAgentUsageDAO {
     )
     suspend fun getTokenStats(): SubAgentTokenStats
 
+    /** 子代理用量按模型聚合（次数 + prompt+completion token），由高到低。model_id 为空（继承主模型）保留空串，由 UI 归入「其他」。 */
+    @Query(
+        "SELECT COALESCE(model_id, '') AS modelId, " +
+            "COUNT(*) AS count, " +
+            "COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens " +
+            "FROM subagent_task_usage " +
+            "GROUP BY modelId ORDER BY count DESC"
+    )
+    suspend fun getModelUsage(): List<ModelUsageEntry>
+
+    /** 子代理用量按日 + 模型聚合，供趋势图合并；created_at 为 epoch 毫秒，转本地日期与主聊天对齐。 */
+    @Query(
+        "SELECT substr(datetime(created_at / 1000, 'unixepoch', 'localtime'), 1, 10) AS day, " +
+            "COALESCE(model_id, '') AS modelId, " +
+            "COUNT(*) AS count, " +
+            "COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens " +
+            "FROM subagent_task_usage " +
+            "WHERE created_at >= :startMillis " +
+            "GROUP BY day, modelId"
+    )
+    suspend fun getTrendByModel(startMillis: Long): List<DayModelUsage>
+
     /** 某会话的子代理用量明细（每任务一行），供会话费用/缓存统计逐条按实际模型计费。 */
     @Query("SELECT * FROM subagent_task_usage WHERE conversation_id = :conversationId")
     fun observeByConversation(conversationId: String): Flow<List<SubAgentUsageEntity>>
