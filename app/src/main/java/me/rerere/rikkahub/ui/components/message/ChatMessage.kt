@@ -722,49 +722,54 @@ private fun MessagePartsBlock(
     val processBlocks = if (finalOutputStart >= 0) groupedParts.subList(0, finalOutputStart) else groupedParts
     val finalBlocks = if (finalOutputStart >= 0) groupedParts.subList(finalOutputStart, groupedParts.size) else emptyList()
 
-    // 折叠控制卡：有过程内容时显示在消息顶部，点击展开/收起全部过程（带动画）
-    if (autoCollapseAll && hasProcessContent) {
-        Card(
-            onClick = { chainCollapsed = !chainCollapsed },
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-            ),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    // 消息内容区：折叠卡 + 过程区 + 最终输出，块间统一 4.dp 间距（与外层一致，避免气泡粘连）
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // 折叠控制卡：有过程内容时显示在消息顶部，点击展开/收起全部过程（带动画）
+        if (autoCollapseAll && hasProcessContent) {
+            Card(
+                onClick = { chainCollapsed = !chainCollapsed },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(
-                    imageVector = if (chainCollapsed) HugeIcons.ArrowDown01 else HugeIcons.ArrowUp01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = processedLabel ?: stringResource(R.string.chain_of_thought_show_all_steps),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (chainCollapsed) HugeIcons.ArrowDown01 else HugeIcons.ArrowUp01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = processedLabel ?: stringResource(R.string.chain_of_thought_show_all_steps),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
             }
         }
-    }
 
-    // 过程内容：展开/折叠带动画（思考链 + 中间输出）
-    AnimatedVisibility(
-        visible = !chainCollapsed,
-        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-    ) {
-        Column {
-            processBlocks.fastForEach { block -> renderBlock(block) }
+        // 过程内容：展开/折叠带动画（思考链 + 中间输出）
+        AnimatedVisibility(
+            visible = !chainCollapsed,
+            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                processBlocks.fastForEach { block -> renderBlock(block) }
+            }
+        }
+
+        // 最终输出：始终显示
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            finalBlocks.fastForEach { block -> renderBlock(block) }
         }
     }
-
-    // 最终输出：始终显示
-    finalBlocks.fastForEach { block -> renderBlock(block) }
 
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {
