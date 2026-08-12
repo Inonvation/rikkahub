@@ -109,6 +109,7 @@ import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.service.PendingGuidanceItem
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
@@ -160,10 +161,14 @@ fun ChatInput(
     /** 活跃子代理任务数（用于图标右上角数量角标，并行多个子代理时显示） */
     subAgentActiveCount: Int = 0,
     onOpenSubAgentPanel: (() -> Unit)? = null,
-    /** 排队中的引导消息（生成中发送后挂载在输入框右上侧，等 AI 回合结束自动注入） */
-    pendingGuidance: String? = null,
+    /** 排队中的引导消息列表（生成中发送后以独立气泡显示在输入框上方右对齐，等 AI 回合结束依次自动注入） */
+    pendingGuidance: List<PendingGuidanceItem> = emptyList(),
+    /** 排队引导旁的「立即发送」：直接在当前回合下一轮边界注入该条 */
+    onSendPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
     /** 取消排队中的引导 */
-    onCancelPendingGuidance: (() -> Unit)? = null,
+    onCancelPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
+    /** 点击气泡文本编辑：取消排队并把文本回填输入框 */
+    onEditPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -237,6 +242,26 @@ fun ChatInput(
                 .animateContentSize(animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // 排队中的引导：独立于输入框的气泡，位于输入框上方、右对齐（对齐 Codex 样式）
+            if (pendingGuidance.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    pendingGuidance.forEach { item ->
+                        PendingGuidanceBubble(
+                            text = item.text,
+                            onSendNow = { onSendPendingGuidance?.invoke(item) },
+                            onCancel = { onCancelPendingGuidance?.invoke(item) },
+                            onEdit = { onEditPendingGuidance?.invoke(item) },
+                        )
+                    }
+                }
+            }
+
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -262,16 +287,6 @@ fun ChatInput(
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
-                    }
-
-                    pendingGuidance?.let { guidance ->
-                        PendingGuidanceChip(
-                            text = guidance,
-                            onCancel = { onCancelPendingGuidance?.invoke() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
                     }
 
                     TextInputRow(
@@ -516,33 +531,50 @@ fun ChatInput(
 }
 
 /**
- * 「引导已排入」胶囊：生成中发送的消息先挂在这里，等 AI 当前回合自然结束
- * 注入为 user_guidance 气泡后再清除（pendingGuidance 变 null）。可手动取消。
+ * 「引导已排入」气泡：独立于输入框，显示在输入框上方、右对齐（对齐 Codex 样式）。
+ * 默认等 AI 回合输出完成后由 ChatService 依次自动注入（气泡自动消失）；点发送按钮则
+ * 立即在当前回合下一轮边界注入；点文本可回填输入框编辑；点取消则丢弃这条排队引导。
  */
 @Composable
-private fun PendingGuidanceChip(
+private fun PendingGuidanceBubble(
     text: String,
+    onSendNow: () -> Unit,
     onCancel: () -> Unit,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
+        shadowElevation = 2.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "引导已排入：$text",
+                text = stringResource(R.string.pending_guidance_queued, text),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .clickable(onClick = onEdit),
             )
+            IconButton(
+                onClick = onSendNow,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.ArrowUp02,
+                    contentDescription = stringResource(R.string.send),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
             IconButton(
                 onClick = onCancel,
                 modifier = Modifier.size(24.dp),

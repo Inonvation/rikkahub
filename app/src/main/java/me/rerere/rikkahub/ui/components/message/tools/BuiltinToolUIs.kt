@@ -956,7 +956,7 @@ object GuidanceToolUI : ToolUIRenderer {
     override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Compass01
 
     @Composable
-    override fun title(context: ToolUIContext): String = "用户引导"
+    override fun title(context: ToolUIContext): String = stringResource(R.string.user_guidance_title)
 
     private fun guidanceText(context: ToolUIContext): String? =
         context.content.getStringContent("text")

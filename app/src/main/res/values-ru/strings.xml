@@ -1305,5 +1305,7 @@
   <string name="assistant_page_context_message_limit_unlimited">Неограниченные сообщения контекста</string>
   <string name="assistant_page_context_message_limit_warning">Ограничение контекста аннулирует кэш промпта каждый раз, когда контекст усекается. Больший лимит усекает реже; безлимитный не усекает никогда и сохраняет кэш полностью нетронутым.</string>
   <string name="chat_drawer_sync_no_changes">Нет изменений для синхронизации</string>
+  <string name="pending_guidance_queued">Ожидание подсказки: %1$s</string>
+  <string name="user_guidance_title">Подсказка пользователя</string>
 </resources>
 

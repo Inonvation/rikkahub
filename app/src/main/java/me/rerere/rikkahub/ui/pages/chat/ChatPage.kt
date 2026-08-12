@@ -408,7 +408,7 @@ private fun ChatPageContent(
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
     val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
-    // 排队中的引导消息（生成中发送后挂载在输入框右上侧，等 AI 回合结束注入后由 VM 清除）
+    // 排队中的引导消息列表（生成中发送后以独立气泡显示在输入框上方右对齐，等 AI 回合结束依次注入）
     val pendingGuidance by vm.pendingGuidance.collectAsStateWithLifecycle()
 
     // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）。
@@ -559,7 +559,6 @@ private fun ChatPageContent(
                                 vm.sendMessageQueued(contents)
                             } else {
                                 val guidanceText = inputState.textContent.text.toString()
-                                vm.setPendingGuidance(guidanceText)
                                 vm.sendGuidance(guidanceText)
                             }
                             scope.launch {
@@ -632,7 +631,15 @@ private fun ChatPageContent(
                     subAgentActive = subAgentActiveCount > 0,
                     subAgentActiveCount = subAgentActiveCount,
                     pendingGuidance = pendingGuidance,
-                    onCancelPendingGuidance = { vm.clearPendingGuidance() },
+                    onSendPendingGuidance = { item ->
+                        vm.sendGuidanceImmediate(item.id)
+                    },
+                    onCancelPendingGuidance = { item ->
+                        vm.cancelPendingGuidance(item.id)
+                    },
+                    onEditPendingGuidance = { item ->
+                        vm.editPendingGuidance(item.id, item.text)
+                    },
                     onOpenSubAgentPanel = {
                         navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))
                     },

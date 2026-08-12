@@ -231,11 +231,10 @@ class GenerationHandler(
          *  "用消息不用 prompt 编辑"的做法）。只进 internalMessages（发送列表），不落持久化列表，
          *  因此不会触发 handleMessageChunk 分段。默认 null 不影响普通生成。 */
         resumeContext: String? = null,
-        /** steering 信号：会话级待注入引导。非空时在下一轮边界（工具调用/输出完成）消费，
-         *  注入为 user_guidance 气泡 + 续答指令，不打断当前流式输出。 */
-        steeringSignal: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
-        /** steering 被消费回调（UI 清「引导已排入」chip） */
-        onSteeringConsumed: (() -> Unit)? = null,
+        /** steering 队列：会话级待注入引导（FIFO）。immediate=true 的项在下一轮边界
+         *  （工具调用/输出完成）消费并注入 user_guidance 气泡 + 续答指令，不打断当前流式；
+         *  其余项排队不消费，等回合结束后由 ChatService 依次自动注入。 */
+        steeringQueue: kotlinx.coroutines.flow.MutableStateFlow<List<PendingSteering>>? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -250,20 +249,21 @@ class GenerationHandler(
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
-            // steering：本轮边界消费待注入引导（上一个工具调用/输出完成后的自然边界），
-            // 注入可见 user_guidance 气泡并作为本轮续答指令——不打断上一轮已完成的输出，
-            // 因此不用等整个回合结束才进入引导。无待注入引导时沿用外部 resumeContext。
-            val pendingSteering = steeringSignal?.value
-            val effectiveResumeContext = if (!pendingSteering.isNullOrBlank()) {
-                steeringSignal?.value = null
-                onSteeringConsumed?.invoke()
+            // steering：仅消费「立即发送」模式的引导（用户点了对应气泡的发送按钮）——
+            // 在下一轮边界（上一个工具调用/输出完成后的自然边界）注入可见 user_guidance 气泡
+            // 并作为本轮续答指令，不打断上一轮已完成的输出。默认排队项不在轮内消费，
+            // 保留在队列中，等整个回合输出结束后由 ChatService 依次自动注入。
+            val queue = steeringQueue
+            val pendingSteering = queue?.value?.firstOrNull { it.immediate }
+            val effectiveResumeContext = if (pendingSteering != null) {
+                queue!!.value = queue.value.filterNot { it.id == pendingSteering.id }
                 val guidancePart = UIMessagePart.Tool(
                     toolCallId = Uuid.random().toString(),
                     toolName = "user_guidance",
                     input = "{}",
                     output = listOf(
                         UIMessagePart.Text(
-                            buildJsonObject { put("text", JsonPrimitive(pendingSteering)) }.toString()
+                            buildJsonObject { put("text", JsonPrimitive(pendingSteering.text)) }.toString()
                         )
                     ),
                     approvalState = ToolApprovalState.Approved,
@@ -278,7 +278,7 @@ class GenerationHandler(
                     messages + UIMessage(role = MessageRole.ASSISTANT, parts = listOf(guidancePart))
                 }
                 emit(GenerationChunk.Messages(messages))
-                buildGuidanceInstruction(pendingSteering)
+                buildGuidanceInstruction(pendingSteering.text)
             } else {
                 resumeContext
             }

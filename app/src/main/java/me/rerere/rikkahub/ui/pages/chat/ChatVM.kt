@@ -39,6 +39,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.PendingGuidanceItem
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatDraftStore
 import me.rerere.rikkahub.ui.hooks.ChatInputState
@@ -197,29 +198,33 @@ class ChatVM(
         chatService.sendMessageQueued(_conversationId, content)
     }
 
-    /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条 */
+    /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条。
+     *  默认排队，等当前回合输出完成后自动引导。 */
     fun sendGuidance(text: String) {
         if (text.isBlank()) return
-        chatService.sendGuidance(_conversationId, text) {
-            // 引导处理结束，清除「引导已排入」chip。只清除与本次引导一致的文本——
-            // 避免连续发送多条时，前一条注入完成就把后一条还排队的 chip 一起清掉。
-            if (_pendingGuidance.value == text) {
-                _pendingGuidance.value = null
-            }
-        }
+        chatService.sendGuidance(_conversationId, text, immediate = false)
     }
 
-    /** 排队中的引导消息：发送后先挂载在输入框右上侧，等 AI 回合自然结束注入后再清除 */
-    private val _pendingGuidance = MutableStateFlow<String?>(null)
-    val pendingGuidance = _pendingGuidance.asStateFlow()
-
-    fun setPendingGuidance(text: String) {
-        _pendingGuidance.value = text
+    /** 排队引导旁的「立即发送」：把对应引导标记为立即注入，GenerationHandler 在下一轮边界消费 */
+    fun sendGuidanceImmediate(itemId: Uuid) {
+        chatService.sendGuidanceImmediate(_conversationId, itemId)
     }
 
-    fun clearPendingGuidance() {
-        _pendingGuidance.value = null
+    /** 取消排队中的引导：从队列移除指定项 */
+    fun cancelPendingGuidance(itemId: Uuid) {
+        chatService.cancelPendingGuidance(_conversationId, itemId)
     }
+
+    /** 点击气泡文本编辑：取消该条排队引导并把文本回填输入框，编辑后重新发送 */
+    fun editPendingGuidance(itemId: Uuid, text: String) {
+        chatService.cancelPendingGuidance(_conversationId, itemId)
+        inputState.setMessageText(text)
+    }
+
+    /** 排队中的引导消息列表（订阅会话 steering 队列，逐条渲染气泡） */
+    val pendingGuidance: StateFlow<List<PendingGuidanceItem>> =
+        chatService.getPendingGuidanceFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
         if (parts.isEmptyInputMessage()) return

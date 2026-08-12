@@ -71,6 +71,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -1027,6 +1028,12 @@ class ChatService(
      * 向主 AI 发送引导消息：不新增独立用户消息，而是把引导文本以可见工具气泡合并进
      * 最后一条 assistant 消息，并注入 AI 上下文让它按引导继续生成（并入同一个气泡）。
      *
+     * AI 正在生成时按 [immediate] 分两种模式：
+     * - immediate=false（默认）：引导进入 steering 队列，等当前回合输出完成后由
+     *   drain 依次自动注入并续答（自动引导）。
+     * - immediate=true（排队引导旁的「立即发送」）：把该项标记为立即注入，
+     *   GenerationHandler 在下一轮边界（工具调用完成/输出结束）消费注入。
+     *
      * 实现复用 [handleMessageComplete] 的 resumeContext 续答机制：resumeContext 追加为
      * provider 看到的最后一条 USER 消息、不落持久化列表，handleMessageChunk 仍并入上一条
      * assistant 消息——正好满足"引导合并进 AI 气泡、不单独成条、继续生成"。
@@ -1037,48 +1044,24 @@ class ChatService(
     fun sendGuidance(
         conversationId: Uuid,
         text: String,
-        /** 引导处理结束回调（注入完成或失败，UI 用它清除「引导已排入」chip） */
-        onInjected: (() -> Unit)? = null,
+        /** true = 排队引导旁的「立即发送」，GenerationHandler 在下一轮边界立即注入；
+         *  false = 默认排队，等当前回合输出完成后依次自动注入。 */
+        immediate: Boolean = false,
     ) {
         if (text.isBlank()) return
         val session = getOrCreateSession(conversationId)
         if (session.state.value.isGroupDiscussion) return
 
-        val guidanceInstruction = buildGuidanceInstruction(text)
-
         val runningJob = session.getJob()
         // AI 正在生成：不打断当前流式请求（打断会触发 OkHttp "stream was reset: CANCEL"，
-        // 且被迫从头重生成反应慢）。把引导写入 steering 信号，GenerationHandler 会在
-        // 当前轮次（工具调用完成/输出结束）的边界消费，作为下一轮续答指令注入——
-        // 引导在"完成了这次工具调用/输出后"就进入，无需等整个回合跑完。
+        // 且被迫从头重生成反应慢）。把引导写入 steering 队列：immediate=true 由
+        // GenerationHandler 在下一轮边界消费；其余排队等当前回合结束后由 drain 依次注入。
         if (runningJob != null && runningJob.isActive) {
-            session.onSteeringHandled = onInjected
-            session.steeringSignal.value = text
-            // 兜底：若生成在 GenerationHandler 消费前就结束（信号残留），job 完成后补一次空闲注入
-            appScope.launch {
-                try {
-                    runCatching { runningJob.join() }
-                    // 用户手动停止了生成（job 被取消）：引导没被消费也不该重启生成——
-                    // 否则用户刚点停止，又幽灵般自动开始一次新生成（#14）。
-                    if (runningJob.isCancelled) {
-                        onInjected?.invoke()
-                        return@launch
-                    }
-                    if (session.steeringSignal.value == text) {
-                        session.steeringSignal.value = null
-                        appendGuidancePart(conversationId, text)
-                        onInjected?.invoke()
-                        val resumeJob = appScope.launch {
-                            handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
-                        }
-                        session.setJob(resumeJob)
-                    }
-                } catch (e: Exception) {
-                    onInjected?.invoke()
-                    if (e is CancellationException) throw e
-                    addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
-                }
-            }
+            session.steeringQueue.value = session.steeringQueue.value + PendingSteering(
+                text = text,
+                immediate = immediate,
+            )
+            ensureSteeringDrain(session, conversationId)
             return
         }
 
@@ -1086,15 +1069,83 @@ class ChatService(
         val job = appScope.launch {
             try {
                 appendGuidancePart(conversationId, text)
-                onInjected?.invoke()
-                handleMessageComplete(conversationId, resumeContext = guidanceInstruction)
+                handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(text))
             } catch (e: Exception) {
-                onInjected?.invoke()
                 if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
             }
         }
         session.setJob(job)
+    }
+
+    /** 排队引导旁的「立即发送」：把指定项标记为立即注入，GenerationHandler 在下一轮边界消费 */
+    fun sendGuidanceImmediate(conversationId: Uuid, itemId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        session.steeringQueue.value = session.steeringQueue.value.map {
+            if (it.id == itemId) it.copy(immediate = true) else it
+        }
+    }
+
+    /** 取消排队中的引导：从队列移除指定项（UI 气泡随之消失） */
+    fun cancelPendingGuidance(conversationId: Uuid, itemId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        session.steeringQueue.value = session.steeringQueue.value.filterNot { it.id == itemId }
+    }
+
+    /** 订阅会话的排队引导队列（UI 渲染气泡用），按入队顺序排列 */
+    fun getPendingGuidanceFlow(conversationId: Uuid): Flow<List<PendingGuidanceItem>> {
+        val session = getOrCreateSession(conversationId)
+        return session.steeringQueue.map { list ->
+            list.map { PendingGuidanceItem(id = it.id, text = it.text) }
+        }
+    }
+
+    /** 确保 steering 队列被串行消费：生成中每次入队后调用；已有 drain 在跑则跳过 */
+    private fun ensureSteeringDrain(session: ConversationSession, conversationId: Uuid) {
+        if (session.steeringDrainJob?.isActive == true) return
+        session.steeringDrainJob = appScope.launch {
+            drainSteeringQueue(conversationId, session)
+        }
+    }
+
+    /**
+     * 串行消费 steering 队列：等当前回合（job）结束后取队首注入为 user_guidance 气泡并续答，
+     * 注入产生的下一回合结束后再取下一个，直到队列清空。用户停止生成时丢弃剩余排队项，
+     * 避免幽灵重启生成（#14）。
+     */
+    private suspend fun drainSteeringQueue(conversationId: Uuid, session: ConversationSession) {
+        try {
+            while (true) {
+                val currentJob = session.getJob()
+                currentJob?.join()
+                if (currentJob?.isCancelled == true) {
+                    // 用户手动停止生成：丢弃剩余排队引导
+                    session.steeringQueue.value = emptyList()
+                    break
+                }
+                val item = session.steeringQueue.value.firstOrNull() ?: break
+                session.steeringQueue.value = session.steeringQueue.value.drop(1)
+                appendGuidancePart(conversationId, item.text)
+                val job = appScope.launch {
+                    runCatching {
+                        handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(item.text))
+                    }
+                }
+                session.setJob(job)
+                job.join()
+                if (job.isCancelled) {
+                    // 注入产生的回合被用户停止：丢弃剩余排队引导
+                    session.steeringQueue.value = emptyList()
+                    break
+                }
+            }
+        } finally {
+            session.steeringDrainJob = null
+        }
+        // 兜底：drain 退出瞬间若又有新项入队（竞态窗口），补拉一轮
+        if (session.steeringQueue.value.isNotEmpty()) {
+            ensureSteeringDrain(session, conversationId)
+        }
     }
 
     /**
@@ -1380,8 +1431,7 @@ class ChatService(
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversation.id.toString(),
                 resumeContext = resumeContext,
-                steeringSignal = session.steeringSignal,
-                onSteeringConsumed = { session.onSteeringHandled?.invoke() },
+                steeringQueue = session.steeringQueue,
                 memories = loadMemoriesForGeneration(
                     assistant = assistant,
                     messages = messagesToGenerate,
@@ -2537,3 +2587,9 @@ class ChatService(
         subAgentRunner.cancelByConversation(conversationId)
     }
 }
+
+/** 排队中的引导消息（UI 气泡用）：id 用于定位「立即发送 / 取消 / 编辑」，text 为引导内容 */
+data class PendingGuidanceItem(
+    val id: Uuid,
+    val text: String,
+)

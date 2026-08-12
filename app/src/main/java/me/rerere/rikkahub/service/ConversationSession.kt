@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.model.Conversation
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
@@ -31,13 +32,14 @@ class ConversationSession(
     // 处理状态（如 OCR 识别中）
     val processingStatus = MutableStateFlow<String?>(null)
 
-    // steering：生成中待注入的引导信号。非空时 GenerationHandler 在下一轮边界
-    // （工具调用完成/输出结束）消费，注入为 user_guidance 气泡 + 续答指令，不打断当前流式。
-    val steeringSignal = MutableStateFlow<String?>(null)
+    // steering：生成中待注入的引导队列（FIFO）。immediate=true 的项由 GenerationHandler 在
+    // 下一轮边界（工具调用完成/输出结束）立即注入；其余项排队不动，等回合结束后由
+    // ChatService 的 drain 依次自动注入为 user_guidance 气泡 + 续答指令。UI 直接订阅本队列渲染气泡。
+    val steeringQueue = MutableStateFlow<List<PendingSteering>>(emptyList())
 
-    // steering 消费后清除「引导已排入」chip 的回调（由 sendGuidance 设置，GenerationHandler 消费时调用）
+    // steering 队列的串行消费任务（防止并发重复拉起 drain）
     @Volatile
-    var onSteeringHandled: (() -> Unit)? = null
+    var steeringDrainJob: Job? = null
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
