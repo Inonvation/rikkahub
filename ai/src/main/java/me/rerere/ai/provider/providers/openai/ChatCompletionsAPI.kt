@@ -45,6 +45,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
+import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
@@ -708,18 +709,22 @@ class ChatCompletionsAPI(
                     "text"
                 )?.jsonPrimitiveOrNull?.contentOrNull
             }
+        val reasoningMetadata = jsonObject["reasoning_details"]?.jsonArrayOrNull?.let {
+            OpenRouterReasoningMetadata(reasoningDetails = it).toMetadata()
+        }
         val toolCalls = jsonObject["tool_calls"] as? JsonArray ?: JsonArray(emptyList())
         val images = jsonObject["images"] as? JsonArray ?: JsonArray(emptyList())
 
         return UIMessage(
             role = role,
             parts = buildList {
-                if (!reasoning.isNullOrEmpty()) {
+                if (!reasoning.isNullOrEmpty() || reasoningMetadata != null) {
                     add(
                         UIMessagePart.Reasoning(
-                            reasoning = reasoning,
+                            reasoning = reasoning.orEmpty(),
                             createdAt = Clock.System.now(),
-                            finishedAt = null
+                            finishedAt = null,
+                            metadata = reasoningMetadata,
                         )
                     )
                 }
@@ -747,8 +752,7 @@ class ChatCompletionsAPI(
                     if (type != "image_url") return@forEach
                     val url = imageObject["image_url"]?.jsonObjectOrNull?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
-                    // 按 ;base64, 通用切分，避免硬编码 png 导致 jpeg/webp 保留前缀（二次包裹损坏）
-                    add(UIMessagePart.Image(url.substringAfter(";base64,")))
+                    add(UIMessagePart.Image(url))
                 }
             },
             annotations = parseAnnotations(

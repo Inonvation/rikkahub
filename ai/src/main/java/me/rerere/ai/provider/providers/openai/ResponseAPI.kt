@@ -44,7 +44,6 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
-import me.rerere.ai.ui.resolvedProtocol
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
@@ -471,7 +470,7 @@ class ResponseAPI(
 
     private fun JsonArrayBuilder.addServerToolItem(tool: UIMessagePart.ServerTool) {
         val metadata = tool.metadataAs<ServerToolMetadata>()
-        val protocol = metadata?.resolvedProtocol()
+        val protocol = metadata?.protocol
         if (protocol != null && protocol != ServerToolProtocol.OPENAI_RESPONSES) return
 
         val rawCall = metadata?.call.takeIf { protocol == ServerToolProtocol.OPENAI_RESPONSES }
@@ -552,6 +551,7 @@ class ResponseAPI(
                         reasoningId = output["id"]?.jsonPrimitive?.contentOrNull,
                         encryptedContent = output["encrypted_content"]?.jsonPrimitive?.contentOrNull,
                     ).toMetadata()
+                    val reasoningPartStart = parts.size
                     output["summary"]?.jsonArray.orEmpty().map { it.jsonObject }.forEach { part ->
                         val partType = part["type"]?.jsonPrimitive?.content ?: error("part type not found")
                         when (partType) {
@@ -581,6 +581,17 @@ class ResponseAPI(
                                 )
                             )
                         }
+                    }
+                    if (parts.size == reasoningPartStart) {
+                        parts.add(
+                            UIMessagePart.Reasoning(
+                                reasoning = "",
+                                createdAt = Clock.System.now(),
+                                finishedAt = Clock.System.now(),
+                                metadata = reasoningMetadata,
+                                reasoningType = ReasoningType.REASONING_TEXT,
+                            )
+                        )
                     }
                 }
 
