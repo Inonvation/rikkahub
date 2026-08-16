@@ -421,9 +421,11 @@ private fun MessagePartsBlock(
     var chainCollapsed by remember(nodeId, autoCollapseAll) {
         mutableStateOf(autoCollapseAll && !loading && hasProcessContent)
     }
-    // 生成中强制展开（含重新生成场景，避免残留折叠态导致过程不可见），完成后自动折叠
+    // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态
     LaunchedEffect(loading, autoCollapseAll) {
-        chainCollapsed = autoCollapseAll && !loading && hasProcessContent
+        if (autoCollapseAll) {
+            chainCollapsed = !loading && hasProcessContent
+        }
     }
 
     // 渲染单个块（思考链或内容块），过程区与最终输出区复用
@@ -724,8 +726,8 @@ private fun MessagePartsBlock(
 
     // 消息内容区：折叠卡 + 过程区 + 最终输出，块间统一 4.dp 间距（与外层一致，避免气泡粘连）
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // 折叠控制卡：有过程内容时显示在消息顶部，点击展开/收起全部过程（带动画）
-        if (autoCollapseAll && hasProcessContent) {
+        // 折叠控制卡：有过程内容时始终显示（手动折叠/展开与开关无关），开关只决定完成后是否自动收起
+        if (hasProcessContent) {
             Card(
                 onClick = { chainCollapsed = !chainCollapsed },
                 colors = CardDefaults.cardColors(
