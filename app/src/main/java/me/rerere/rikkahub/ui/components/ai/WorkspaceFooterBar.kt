@@ -30,6 +30,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import me.rerere.ai.core.TokenUsage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Codesandbox
@@ -118,14 +120,23 @@ fun WorkspaceFooterBar(
         settings.costCurrency, settings.costUsdCnyRate, settings.modelPricingOverrides,
     ) {
         val messages = conversation.currentMessages
-        fun costFor(modelId: Uuid?, usage: TokenUsage?): Double {
+        fun costFor(modelId: Uuid?, usage: TokenUsage?, timeMillis: Long?): Double {
             val resolved = modelId?.let { settings.findModelById(it) } ?: settings.getCurrentChatModel()
             return when (settings.costCurrency) {
-                CostCurrency.USD -> CostCalculator.costUsd(resolved?.modelId, usage, settings.modelPricingOverrides)
-                CostCurrency.RMB -> CostCalculator.costCny(resolved?.modelId, usage, settings.modelPricingOverrides, settings.costUsdCnyRate)
+                CostCurrency.USD -> CostCalculator.costUsd(
+                    resolved?.modelId, usage, settings.modelPricingOverrides, timeMillis,
+                )
+                CostCurrency.RMB -> CostCalculator.costCny(
+                    resolved?.modelId, usage, settings.modelPricingOverrides, settings.costUsdCnyRate, timeMillis,
+                )
             }
         }
-        val mainCost = messages.sumOf { costFor(it.modelId, it.usage) }
+        val mainCost = messages.sumOf { message ->
+            val timeMillis = message.createdAt
+                .toInstant(TimeZone.currentSystemDefault())
+                .toEpochMilliseconds()
+            costFor(message.modelId, message.usage, timeMillis)
+        }
         val subCost = subAgentUsages.sumOf { u ->
             val uuid = u.modelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
             costFor(
@@ -135,7 +146,8 @@ fun WorkspaceFooterBar(
                     completionTokens = u.completionTokens.toInt(),
                     cachedTokens = u.cachedTokens.toInt(),
                     cacheWriteTokens = u.cacheWriteTokens.toInt(),
-                )
+                ),
+                u.createdAt,
             )
         }
         mainCost + subCost

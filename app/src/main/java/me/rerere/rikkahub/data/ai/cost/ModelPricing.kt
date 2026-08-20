@@ -1,7 +1,11 @@
 package me.rerere.rikkahub.data.ai.cost
 
 import kotlinx.serialization.Serializable
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import me.rerere.ai.core.TokenUsage
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /** 单模型定价配置。美元单价单位：USD / 每 1M tokens；人民币单价单位：CNY / 每 1M tokens */
 @Serializable
@@ -14,6 +18,8 @@ data class ModelPricingConfig(
     val inputPriceCny: Double = 0.0,
     val outputPriceCny: Double = 0.0,
     val cachedInputPriceCny: Double = 0.0,
+    /** 按 DeepSeek 高峰/空闲自动计价时，基础价视为空闲价，高峰价为基础价 × 2。 */
+    val timeAware: Boolean = false,
     /** 费用倍率，用于代理/中转渠道按官方价上浮或打折（默认 1.0） */
     val multiplier: Double = 1.0,
 )
@@ -34,10 +40,19 @@ enum class CostCurrency {
  * 其中 uncached_input = promptTokens - cachedTokens（各家 provider 的 promptTokens 都已含缓存部分）。
  */
 object CostCalculator {
+    private val BEIJING_TIME_ZONE = TimeZone.of("Asia/Shanghai")
+
+    /** 北京时间 09:00-12:00、14:00-18:00 为 DeepSeek 高峰时段，其余为空闲时段。 */
+    fun isPeakTime(timeMillis: Long? = null): Boolean {
+        val instant = timeMillis?.let { Instant.fromEpochMilliseconds(it) } ?: Clock.System.now()
+        val hour = instant.toLocalDateTime(BEIJING_TIME_ZONE).hour
+        return hour in 9..11 || hour in 14..17
+    }
+
     /**
      * 预置表，条目按「更具体在前」排列（resolve 用 contains 子串匹配，第一个命中生效）。
      *
-     * 数据来源（2026-08-04 查证）：
+     * 数据来源（2026-08-20 查证）：
      * - Anthropic platform.claude.com/docs/en/about-claude/pricing（Base input / Output / Cache Hits）
      * - OpenAI developers.openai.com/api/docs/pricing（短上下文标准价）
      * - Gemini ai.google.dev/gemini-api/docs/pricing（≤200k 标准价）
@@ -89,9 +104,25 @@ object CostCalculator {
         ModelPricingConfig("gemini", 1.25, 10.0, 0.125),
 
         // ---- DeepSeek ----
-        ModelPricingConfig("deepseek-v4-flash", 0.14, 0.28, 0.0028),
-        ModelPricingConfig("deepseek-v4-pro", 0.435, 0.87, 0.003625),
-        ModelPricingConfig("deepseek", 0.14, 0.28, 0.0028),
+        // 2026-08-17 起分高峰/空闲计价；内置价按空闲时段，timeAware 开启后高峰自动 ×2。
+        ModelPricingConfig(
+            "deepseek-v4-flash",
+            0.22, 0.66, 0.007,
+            inputPriceCny = 1.5, outputPriceCny = 4.5, cachedInputPriceCny = 0.05,
+            timeAware = true,
+        ),
+        ModelPricingConfig(
+            "deepseek-v4-pro",
+            0.66, 1.98, 0.022,
+            inputPriceCny = 4.5, outputPriceCny = 13.5, cachedInputPriceCny = 0.15,
+            timeAware = true,
+        ),
+        ModelPricingConfig(
+            "deepseek",
+            0.22, 0.66, 0.007,
+            inputPriceCny = 1.5, outputPriceCny = 4.5, cachedInputPriceCny = 0.05,
+            timeAware = true,
+        ),
     )
 
     private const val DEFAULT_CNY_RATE = 7.2
@@ -104,16 +135,22 @@ object CostCalculator {
     }
 
     /** 单条 usage 折算为美元；未知模型返回 0.0。 */
-    fun costUsd(modelId: String?, usage: TokenUsage?, overrides: List<ModelPricingConfig>): Double {
+    fun costUsd(
+        modelId: String?,
+        usage: TokenUsage?,
+        overrides: List<ModelPricingConfig>,
+        timeMillis: Long? = null,
+    ): Double {
         if (usage == null) return 0.0
         val pricing = resolve(modelId, overrides) ?: return 0.0
+        val factor = if (pricing.timeAware && isPeakTime(timeMillis)) 2.0 else 1.0
         val cached = usage.cachedTokens.toDouble()
         val uncachedInput = (usage.promptTokens.toDouble() - cached).coerceAtLeast(0.0)
         val output = usage.completionTokens.toDouble()
         val usd = (uncachedInput * pricing.inputPriceUsd +
             cached * pricing.cachedInputPriceUsd +
             output * pricing.outputPriceUsd) / 1_000_000.0
-        return usd * pricing.multiplier
+        return usd * pricing.multiplier * factor
     }
 
     /**
@@ -141,9 +178,11 @@ object CostCalculator {
         usage: TokenUsage?,
         overrides: List<ModelPricingConfig>,
         rate: Double = DEFAULT_CNY_RATE,
+        timeMillis: Long? = null,
     ): Double {
         if (usage == null) return 0.0
         val pricing = resolve(modelId, overrides) ?: return 0.0
+        val factor = if (pricing.timeAware && isPeakTime(timeMillis)) 2.0 else 1.0
         val effectiveRate = if (rate > 0) rate else DEFAULT_CNY_RATE
         val cached = usage.cachedTokens.toDouble()
         val uncachedInput = (usage.promptTokens.toDouble() - cached).coerceAtLeast(0.0)
@@ -151,7 +190,7 @@ object CostCalculator {
         val cny = (uncachedInput * cnyUnit(pricing.inputPriceCny, pricing.inputPriceUsd, effectiveRate) +
             cached * cnyUnit(pricing.cachedInputPriceCny, pricing.cachedInputPriceUsd, effectiveRate) +
             output * cnyUnit(pricing.outputPriceCny, pricing.outputPriceUsd, effectiveRate)) / 1_000_000.0
-        return cny * pricing.multiplier
+        return cny * pricing.multiplier * factor
     }
 
     /** 某模型在指定货币下的三个单价（输入 / 输出 / 缓存输入，每 1M），无人民币官方价时按汇率换算。 */

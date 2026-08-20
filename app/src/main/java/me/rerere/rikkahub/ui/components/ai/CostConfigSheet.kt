@@ -15,6 +15,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
@@ -75,6 +76,7 @@ fun CostConfigSheet(
     var cachedStr by remember(currency, existing) {
         mutableStateOf(seedPrice(CostCalculator.unitPrices(currentModelId, settings.modelPricingOverrides, currency, effectiveRate(rateStr))?.third))
     }
+    var timeAware by remember(currentModelId) { mutableStateOf(existing?.timeAware ?: false) }
     var multiplierStr by remember { mutableStateOf(existing?.multiplier?.toString() ?: "1") }
 
     fun parsePositive(text: String): Double = (text.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
@@ -138,10 +140,33 @@ fun CostConfigSheet(
 
             if (currentModelId != null) {
                 val unitLabel = if (currency == CostCurrency.USD) "USD / 1M tokens" else "RMB ¥ / 1M tokens"
-                PriceField("输入价（$unitLabel）", inputStr) { inputStr = it }
-                PriceField("输出价（$unitLabel）", outputStr) { outputStr = it }
-                PriceField("缓存输入价（$unitLabel）", cachedStr) { cachedStr = it }
+                if (currentModelId.contains("deepseek", ignoreCase = true)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "按高峰/空闲自动计价（高峰 = 空闲 × 2）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = timeAware,
+                            onCheckedChange = { timeAware = it },
+                        )
+                    }
+                }
+                val inputLabel = if (timeAware) "空闲输入价（$unitLabel）" else "输入价（$unitLabel）"
+                val outputLabel = if (timeAware) "空闲输出价（$unitLabel）" else "输出价（$unitLabel）"
+                val cachedLabel = if (timeAware) "空闲缓存输入价（$unitLabel）" else "缓存输入价（$unitLabel）"
+                PriceField(inputLabel, inputStr) { inputStr = it }
+                PriceField(outputLabel, outputStr) { outputStr = it }
+                PriceField(cachedLabel, cachedStr) { cachedStr = it }
                 PriceField("费用倍率（代理上浮/打折，默认 1.0）", multiplierStr) { multiplierStr = it }
+                if (timeAware) {
+                    Text(
+                        text = "高峰时段为北京时间 09:00-12:00、14:00-18:00，单价按空闲 × 2 计算。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
                     text = "仅影响使用该模型 id 的所有会话，全局永久生效；人民币价无官方公布值时按汇率换算。",
                     style = MaterialTheme.typography.labelSmall,
@@ -183,6 +208,7 @@ fun CostConfigSheet(
                             outputPriceCny = if (editingCny) parsePositive(outputStr) else (base?.outputPriceCny ?: 0.0),
                             cachedInputPriceCny = if (editingCny) parsePositive(cachedStr) else (base?.cachedInputPriceCny ?: 0.0),
                             multiplier = multiplier,
+                            timeAware = timeAware,
                         )
                     }
                     // 先完成写盘再关弹窗：rememberCoroutineScope 随弹窗移除而取消，
