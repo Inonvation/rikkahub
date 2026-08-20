@@ -721,6 +721,13 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
             supportEncryptedContent = false
         )
 
+        // DeepSeek /responses 不支持 include（reasoning.encrypted_content）与 reasoning.summary，
+        // 不发送 include 避免依赖"静默忽略"行为。
+        "api.deepseek.com" -> ResponseProviderCapabilities(
+            supportsReasoningSummary = false,
+            supportEncryptedContent = false
+        )
+
         else -> ResponseProviderCapabilities()
     }
 }

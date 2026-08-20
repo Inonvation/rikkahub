@@ -101,6 +101,9 @@ object SettingsSyncCodec {
         "enableAgentBehaviorPrompt",
         // 费用
         "costCurrency",
+        // 能力模式
+        "defaultMode",
+        "customModes",
         "costUsdCnyRate",
         "modelPricingOverrides",
     )

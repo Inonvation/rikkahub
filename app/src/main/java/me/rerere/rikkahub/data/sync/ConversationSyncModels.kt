@@ -104,6 +104,8 @@ data class ConversationSyncItem(
     val modeInjectionIds: Set<String>,
     val lorebookIds: Set<String>,
     val workspaceCwd: String?,
+    /** 会话能力模式快照（内置枚举名或 custom:<id>），本地优先合并 */
+    val mode: String? = null,
     val folderId: String?,
     val groupId: String?,
     val nodes: List<ConversationNode>,
@@ -164,6 +166,7 @@ internal fun buildConversationItem(
         lorebookIds = conversation.lorebookIds.map { it.toString() }.toSet(),
         // workspaceCwd 是本机工作区绝对路径，跨设备无意义且含设备路径，不导出
         workspaceCwd = null,
+        mode = conversation.mode,
         folderId = conversation.folderId?.toString(),
         groupId = conversation.groupId?.toString(),
         nodes = conversation.messageNodes.map { node ->

@@ -791,8 +791,8 @@
   <string name="setting_display_page_show_message_jumper_title">消息导航按钮</string>
   <string name="setting_display_page_show_model_name_desc">是否在聊天消息中显示模型名称</string>
   <string name="setting_display_page_show_model_name_title">显示模型名称</string>
-  <string name="setting_display_page_double_tap_collapse_thinking_desc">双击展开的思考内容即可折叠</string>
-  <string name="setting_display_page_double_tap_collapse_thinking_title">双击折叠思考</string>
+  <string name="setting_display_page_thinking_frozen_bar_desc">思考头部吸顶冻结在顶栏下方，随时折叠或展开</string>
+  <string name="setting_display_page_thinking_frozen_bar_title">思考冻结栏</string>
   <string name="setting_display_page_show_thinking_content_desc">是否在生成过程中默认展开并显示思考过程</string>
   <string name="setting_display_page_show_thinking_content_title">显示思考内容</string>
   <string name="setting_display_page_show_token_usage_desc">显示token用量和消息数量</string>

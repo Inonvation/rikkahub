@@ -438,6 +438,10 @@ class ConversationRepository(
         return conversationDAO.countAll()
     }
 
+    suspend fun countConversationsByMode(modeRef: String): Int {
+        return conversationDAO.countByMode(modeRef)
+    }
+
     suspend fun insertConversation(conversation: Conversation) {
         database.withTransaction {
             // 先建会话（FK：节点引用会话必须先存在），用临时时钟值，随后统一为消息最大版本
@@ -617,6 +621,8 @@ class ConversationRepository(
                 modeInjectionIds = local?.modeInjectionIds ?: emptySet(),
                 lorebookIds = local?.lorebookIds ?: emptySet(),
                 workspaceCwd = if (remoteWins) item.workspaceCwd else local!!.workspaceCwd,
+                // 模式本地优先（与 modeInjectionIds 一致），云端仅在本地缺失时补位
+                mode = local?.mode ?: item.mode,
                 folderId = local?.folderId,
                 discussion = local?.discussion,
                 groupId = local?.groupId,
@@ -728,6 +734,7 @@ class ConversationRepository(
             chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
             isPinned = conversation.isPinned,
             customSystemPrompt = conversation.customSystemPrompt ?: "",
+            mode = conversation.mode ?: "",
             modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
             lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
             workspaceCwd = conversation.workspaceCwd ?: "",
@@ -752,6 +759,7 @@ class ConversationRepository(
             chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
             isPinned = conversationEntity.isPinned,
             customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
+            mode = conversationEntity.mode.ifEmpty { null },
             modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
             lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
             workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
@@ -904,6 +912,7 @@ class ConversationRepository(
             old.chatSuggestions != new.chatSuggestions ||
             old.isPinned != new.isPinned ||
             old.customSystemPrompt != new.customSystemPrompt ||
+            old.mode != new.mode ||
             old.modeInjectionIds != new.modeInjectionIds ||
             old.lorebookIds != new.lorebookIds ||
             old.workspaceCwd != new.workspaceCwd ||

@@ -37,6 +37,8 @@ data class Assistant(
     val quickMessageIds: Set<Uuid> = emptySet(),
     val regexes: List<AssistantRegex> = emptyList(),
     val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
+    /** 默认能力模式引用（内置枚举名或 custom:<id>），null = 跟随全局默认（含升级兼容规则） */
+    val defaultMode: String? = null,
     val maxTokens: Int? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),

@@ -20,6 +20,7 @@ import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Model
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
@@ -36,6 +37,7 @@ import me.rerere.common.http.await
 import me.rerere.common.http.getByKey
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -124,7 +126,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> = if (providerSetting.useResponseApi) {
+    ): Flow<StreamChunk> = if (useResponsesApiFor(providerSetting, params.model)) {
         responseAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
@@ -142,7 +144,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = if (providerSetting.useResponseApi) {
+    ): TextGenerationResult = if (useResponsesApiFor(providerSetting, params.model)) {
         responseAPI.generateText(
             providerSetting = providerSetting,
             messages = messages,
@@ -154,6 +156,26 @@ class OpenAIProvider(
             messages = messages,
             params = params
         )
+    }
+
+    /**
+     * 决定该模型是否走 Responses API。
+     *
+     * DeepSeek 官方 Responses API 目前仅确认 deepseek-v4-flash 可用，其他模型
+     * （deepseek-chat / deepseek-reasoner / v3.x / v4-pro）在 /responses 端点会报错，
+     * 自动回退到 Chat Completions，避免提示词优化、标题生成、建议、压缩、翻译等
+     * 后台场景因 responseAPI 开关而全部失败。其余 provider 保持开关原语义。
+     */
+    private fun useResponsesApiFor(
+        providerSetting: ProviderSetting.OpenAI,
+        model: Model,
+    ): Boolean {
+        if (!providerSetting.useResponseApi) return false
+        val host = providerSetting.baseUrl.toHttpUrlOrNull()?.host
+        if (host == "api.deepseek.com") {
+            return ModelRegistry.DEEPSEEK_RESPONSES.match(model.modelId)
+        }
+        return true
     }
 
     override suspend fun generateEmbedding(

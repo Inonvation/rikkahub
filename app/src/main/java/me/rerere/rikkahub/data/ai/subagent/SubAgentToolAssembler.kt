@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.ai.provider.Provider
@@ -62,7 +63,8 @@ class SubAgentToolAssembler(
 
             // MCP 工具：复用 ChatService 的封装模式（mcp__{server}__{tool}）
             if (SubAgentCapability.MCP in def.capabilities) {
-                mcpManager.getAllAvailableTools().forEach { (serverId, serverName, tool) ->
+                val mcpAssistant = parentAssistant ?: settings.getCurrentAssistant()
+                mcpManager.getAllAvailableTools(mcpAssistant).forEach { (serverId, serverName, tool) ->
                     // 校验服务器名，非法名跳过（与 ChatService 一致），避免 mcp____tool 畸形工具名
                     if (serverName.isEmpty() || !serverName.all {
                             it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9'

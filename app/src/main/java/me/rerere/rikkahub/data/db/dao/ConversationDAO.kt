@@ -92,6 +92,9 @@ interface ConversationDAO {
     @Query("SELECT COUNT(*) FROM conversationentity")
     suspend fun countAll(): Int
 
+    @Query("SELECT COUNT(*) FROM conversationentity WHERE mode = :modeRef")
+    suspend fun countByMode(modeRef: String): Int
+
     /** 会话增量同步用的轻量清单：会话元数据 + 消息节点数。 */
     @Query(
         "SELECT c.id, c.sync_updated_at AS syncUpdatedAt, c.title, c.create_at AS createAt, " +

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -215,11 +216,13 @@ internal fun FilesPicker(
                 },
         )
 
-        // Workspace
+        // Workspace：点击进入对应工作区文件目录页；长按切换工作目录（未绑定时点击/长按均引导绑定）
         var showWorkspaceSheet by remember { mutableStateOf(false) }
-        val boundWorkspaceEntry = remember(workspaces, assistant.workspaceId) {
+        var showCwdSheet by remember { mutableStateOf(false) }
+        val boundWorkspace = remember(workspaces, assistant.workspaceId) {
             workspaces.find { it.id == assistant.workspaceId?.toString() }
         }
+        val workspaceReady = boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name
         ListItem(
             leadingContent = {
                 Icon(
@@ -230,30 +233,32 @@ internal fun FilesPicker(
             headlineContent = {
                 Text(stringResource(R.string.assistant_page_workspace))
             },
+            supportingContent = {
+                Text(
+                    text = when {
+                        boundWorkspace == null -> stringResource(R.string.assistant_page_workspace_unbound)
+                        workspaceReady -> conversation.workspaceCwd ?: "/workspace"
+                        else -> "工作区环境未就绪"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
             trailingContent = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = boundWorkspaceEntry?.name
-                            ?: stringResource(R.string.assistant_page_workspace_unbound),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    // 工作区设置入口：进入当前所选工作区设置界面，同时关闭外层弹窗
-                    if (boundWorkspaceEntry != null) {
-                        IconButton(
-                            onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                                onDismiss()
-                                navController.navigate(Screen.WorkspaceDetail(boundWorkspaceEntry.id))
-                            },
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Settings03,
-                                contentDescription = stringResource(R.string.assistant_page_workspace_settings),
-                            )
-                        }
+                if (boundWorkspace != null) {
+                    IconButton(
+                        onClick = {
+                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            onDismiss()
+                            navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
+                        },
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Settings03,
+                            contentDescription = stringResource(R.string.assistant_page_workspace_settings),
+                        )
                     }
                 }
             },
@@ -262,14 +267,21 @@ internal fun FilesPicker(
             ),
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
-                .clickable {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
-                    if (workspaces.isEmpty()) {
-                        navController.navigate(Screen.Workspaces)
-                    } else {
-                        showWorkspaceSheet = true
-                    }
-                },
+                .combinedClickable(
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        if (boundWorkspace != null) {
+                            onDismiss()
+                            navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
+                        } else {
+                            showWorkspaceSheet = true
+                        }
+                    },
+                    onLongClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        if (workspaceReady) showCwdSheet = true else showWorkspaceSheet = true
+                    },
+                ),
         )
         if (showWorkspaceSheet) {
             WorkspaceSelectSheet(
@@ -299,42 +311,17 @@ internal fun FilesPicker(
                 },
             )
         }
-
-        // Workspace CWD
-        val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-            workspaces.find { it.id == assistant.workspaceId?.toString() }
-        }
-        if (boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name) {
-            var showCwdSheet by remember { mutableStateOf(false) }
-            TextButton(
-                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showCwdSheet = true },
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Folder01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = conversation.workspaceCwd ?: "/workspace",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (showCwdSheet) {
-                WorkspaceCwdPickerSheet(
-                    workspaceId = boundWorkspace.id,
-                    currentCwd = conversation.workspaceCwd,
-                    onSelectCwd = { newCwd ->
-                        onUpdateConversation(conversation.copy(workspaceCwd = newCwd))
-                        // 同步保存为助手的默认工作目录，新对话沿用
-                        onUpdateAssistant(assistant.copy(defaultWorkspaceCwd = newCwd))
-                    },
-                    onDismiss = { showCwdSheet = false },
-                )
-            }
+        if (showCwdSheet && workspaceReady) {
+            WorkspaceCwdPickerSheet(
+                workspaceId = boundWorkspace!!.id,
+                currentCwd = conversation.workspaceCwd,
+                onSelectCwd = { newCwd ->
+                    onUpdateConversation(conversation.copy(workspaceCwd = newCwd))
+                    // 同步保存为助手的默认工作目录，新对话沿用
+                    onUpdateAssistant(assistant.copy(defaultWorkspaceCwd = newCwd))
+                },
+                onDismiss = { showCwdSheet = false },
+            )
         }
     }
 

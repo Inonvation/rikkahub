@@ -49,6 +49,20 @@ class ModelRegistryTest {
     }
 
     @Test
+    fun testDeepSeekResponsesSupported() {
+        // DeepSeek 官方 Responses API 目前仅确认 deepseek-v4-flash 可用，
+        // 其余模型应回退到 Chat Completions
+        assertTrue(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-v4-flash"))
+        assertTrue(ModelRegistry.DEEPSEEK_RESPONSES.match("DeepSeek-V4-Flash"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-v4-pro"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-chat"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-reasoner"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-v3"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("deepseek-v3.1"))
+        assertFalse(ModelRegistry.DEEPSEEK_RESPONSES.match("gpt-5"))
+    }
+
+    @Test
     fun testSpecificityPriority() {
         assertEquals(
             listOf(Modality.TEXT, Modality.IMAGE),

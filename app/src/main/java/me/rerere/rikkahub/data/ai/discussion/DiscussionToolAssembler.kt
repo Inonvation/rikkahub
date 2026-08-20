@@ -49,7 +49,7 @@ class DiscussionToolAssembler(
         }
 
         // MCP 工具
-        mcpManager.getAllAvailableTools().forEach { (serverId, serverName, tool) ->
+        mcpManager.getAllAvailableTools(assistant).forEach { (serverId, serverName, tool) ->
             if (serverName.isEmpty() || !serverName.all {
                     it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9'
                 }

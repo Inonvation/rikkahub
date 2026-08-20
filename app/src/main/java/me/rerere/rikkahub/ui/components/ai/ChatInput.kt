@@ -93,6 +93,7 @@ import dev.chrisbanes.haze.blur.materials.HazeMaterials
 import dev.chrisbanes.haze.hazeEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -521,8 +522,12 @@ fun ChatInput(
                 assistant = assistant,
                 conversation = conversation,
                 settings = settings,
-                onUpdateAssistant = onUpdateAssistant,
-                onUpdateConversation = onUpdateConversation,
+                // 会话无消息且未生成中时可切换模式；首条消息发送后锁定，仅展示
+                // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
+                modeSwitchEnabled = !loading && conversation.currentMessages.none { it.role == MessageRole.USER },
+                onSwitchMode = { ref ->
+                    onUpdateConversation(conversation.copy(mode = ref))
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
 

@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.prompts
 
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 
 /**
  * 主代理行为层提示词：系统提示词末尾追加的决策/工具/子代理/提问准则。
@@ -9,15 +10,20 @@ import me.rerere.ai.core.Tool
  * 每条规则一个短句，写清"何时用 / 何时不用"优于"必须做 X"。
  * 英文编写（主流模型对英文指令理解更充分），与其它内置 prompt 一致。
  */
-internal fun buildAgentBehaviorPrompt(tools: List<Tool>): String {
+internal fun buildAgentBehaviorPrompt(
+    tools: List<Tool>,
+    profile: AgentBehaviorProfile = AgentBehaviorProfile.STANDARD,
+): String {
     val toolGroups = groupToolsForPrompt(tools)
     return buildString {
         appendLine("## Agent Behavior")
         appendLine()
+        appendLine(modeGuidanceSection(profile))
+        appendLine()
         appendLine(DECISION_MAKING_SECTION)
         appendLine()
         appendLine(TOOL_USAGE_SECTION)
-        if (toolGroups.isNotBlank()) {
+        if (toolGroups.isNotBlank() && profile != AgentBehaviorProfile.MINIMAL) {
             appendLine()
             append(toolGroups)
         }
@@ -29,6 +35,46 @@ internal fun buildAgentBehaviorPrompt(tools: List<Tool>): String {
         }
     }
 }
+
+private fun modeGuidanceSection(profile: AgentBehaviorProfile): String = when (profile) {
+    AgentBehaviorProfile.STANDARD -> MODE_STANDARD_SECTION
+    AgentBehaviorProfile.WORKSPACE -> MODE_WORKSPACE_SECTION
+    AgentBehaviorProfile.MANAGEMENT -> MODE_MANAGEMENT_SECTION
+    AgentBehaviorProfile.MINIMAL -> MODE_MINIMAL_SECTION
+}
+
+private val MODE_STANDARD_SECTION = """
+    ## Mode: Balanced
+    - You are in balanced mode: the full standard toolset is available, but tool access is optional.
+    - Finish each request in as few turns as possible; do not pause between independent steps just to narrate progress.
+    - Match the user's working style: answer directly when enough context exists, use tools only when they add concrete value.
+""".trimIndent()
+
+private val MODE_WORKSPACE_SECTION = """
+    ## Mode: Workspace
+    - You are in workspace mode: treat the bound workspace and trusted folders as your working context.
+    - Plan multi-step file work before starting, then execute continuously in the same turn: read, edit, verify, and move on.
+    - Batch independent operations in one reply; do not stop to ask after every file change.
+    - After edits, verify the result and report concrete outcomes, not a play-by-play of each call.
+    - Prefer workspace tools over pasting file contents into chat. If no workspace is configured, fall back to balanced behavior.
+""".trimIndent()
+
+private val MODE_MANAGEMENT_SECTION = """
+    ## Mode: Management
+    - You are in management mode: your work targets the assistant's own skills, MCP servers, providers, modes, logs, and environment.
+    - Inspect first and diagnose before changing anything; prefer read-only tool calls until the problem is understood.
+    - Before a write, state the affected scope and expected effect, and wait for approval whenever the tool requires it.
+    - Prefer reversible changes; include a rollback or verification plan when modifying persistent configuration.
+    - Call out explicitly when an action affects global settings, other assistants, or running conversations.
+    - For file work in the workspace, keep workspace behavior: plan, execute continuously, and verify before reporting; management writes remain approval-gated.
+""".trimIndent()
+
+private val MODE_MINIMAL_SECTION = """
+    ## Mode: Minimal
+    - You are in minimal mode: do not call tools unless the user explicitly asks for that capability.
+    - Answer from knowledge and reasoning first; when in doubt, prefer no tool call.
+    - If a tool is genuinely necessary, keep it single-purpose and explain why.
+""".trimIndent()
 
 private val DECISION_MAKING_SECTION = """
     ## Decision-Making

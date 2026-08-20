@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
@@ -212,6 +213,8 @@ class SettingsStore(
         // 会话费用
         val MODEL_PRICING = stringPreferencesKey("model_pricing")
         val COST_CURRENCY = stringPreferencesKey("cost_currency")
+        val DEFAULT_MODE = stringPreferencesKey("default_mode")
+        val CUSTOM_MODES = stringPreferencesKey("custom_modes")
         val COST_USD_CNY_RATE = doublePreferencesKey("cost_usd_cny_rate")
 
         // 远端同步
@@ -349,6 +352,10 @@ class SettingsStore(
                 costCurrency = preferences[COST_CURRENCY]?.let {
                     runCatching { CostCurrency.valueOf(it) }.getOrNull()
                 } ?: CostCurrency.RMB,
+                defaultMode = preferences[DEFAULT_MODE],
+                customModes = preferences[CUSTOM_MODES]?.let {
+                    runCatching { JsonInstant.decodeFromString<List<CustomModeConfig>>(it) }.getOrNull()
+                } ?: emptyList(),
                 costUsdCnyRate = preferences[COST_USD_CNY_RATE]?.takeIf { it > 0 } ?: 7.2,
                 modelPricingOverrides = preferences[MODEL_PRICING]?.let {
                     runCatching { JsonInstant.decodeFromString<List<ModelPricingConfig>>(it) }.getOrNull()
@@ -572,6 +579,9 @@ class SettingsStore(
             preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] = settings.enableAgentBehaviorPrompt
             preferences[TODO_LIST_ENABLED] = settings.enableTodoList
             preferences[COST_CURRENCY] = settings.costCurrency.name
+            settings.defaultMode?.let { preferences[DEFAULT_MODE] = it }
+                ?: preferences.remove(DEFAULT_MODE)
+            preferences[CUSTOM_MODES] = JsonInstant.encodeToString(settings.customModes)
             preferences[COST_USD_CNY_RATE] = settings.costUsdCnyRate.coerceAtLeast(1.0)
             preferences[MODEL_PRICING] = JsonInstant.encodeToString(settings.modelPricingOverrides)
             preferences[SYNC_CONFIG] = JsonInstant.encodeToString(settings.syncConfig)
@@ -626,6 +636,24 @@ class SettingsStore(
                 }
             )
         }
+    }
+
+    suspend fun updateAssistantDefaultMode(assistantId: Uuid, mode: String?) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(defaultMode = mode)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
+    suspend fun updateCustomModes(modes: List<CustomModeConfig>) {
+        update { settings -> settings.copy(customModes = modes) }
     }
 
     suspend fun updateAssistantWebSearch(assistantId: Uuid, enabled: Boolean) {
@@ -789,6 +817,10 @@ data class Settings(
     val enableAgentBehaviorPrompt: Boolean = true,
     /** 会话费用显示货币（默认人民币，用户可在费用配置窗修改，全局持久化） */
     val costCurrency: CostCurrency = CostCurrency.RMB,
+    /** 全局默认能力模式引用（内置枚举名或 custom:<id>），null = 未显式配置 */
+    val defaultMode: String? = null,
+    /** 管理模式生成的自定义能力模式 */
+    val customModes: List<CustomModeConfig> = emptyList(),
     /** RMB 显示时的美元→人民币汇率 */
     val costUsdCnyRate: Double = 7.2,
     /** 用户自定的模型定价覆盖（精确 modelId 匹配，优先于内置预置表） */
@@ -837,6 +869,8 @@ data class DisplaySetting(
     /** AI 思考/工具调用完成后，自动折叠消息中所有思维过程与工具调用步骤（默认关） */
     val autoCollapseAllSteps: Boolean = false,
     val doubleTapCollapseThinking: Boolean = true,
+    /** 思考折叠按钮被顶栏遮挡时，在下方悬浮冻结条（用户半成品功能补全） */
+    val thinkingFrozenBar: Boolean = false,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,

@@ -32,6 +32,8 @@ data class Conversation(
     /** 会话增量同步的版本号（单调时钟）。由仓库保存时维护，内存态仅供映射与比对外部传入值。 */
     val syncUpdatedAt: Long = 0L,
     val customSystemPrompt: String? = null,
+    /** 会话能力模式快照：内置模式存枚举名，自定义模式存 `custom:<id>`；null = 生成期按助手/全局解析 */
+    val mode: String? = null,
     val modeInjectionIds: Set<Uuid> = emptySet(),
     val lorebookIds: Set<Uuid> = emptySet(),
     // Absolute path inside the workspace rootfs

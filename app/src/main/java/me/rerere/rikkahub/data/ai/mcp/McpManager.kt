@@ -23,6 +23,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.utils.JsonInstant
@@ -108,9 +109,9 @@ class McpManager(
 
     fun getStatus(config: McpServerConfig): Flow<McpStatus> = sessionRegistry.getStatus(config.id)
 
-    fun getAllAvailableTools(): List<Triple<Uuid, String, McpTool>> {
+    fun getAllAvailableTools(assistant: Assistant): List<Triple<Uuid, String, McpTool>> {
         val settings = settingsStore.settingsFlow.value
-        val assistant = settings.getCurrentAssistant()
+        // 使用当前对话的 assistant 过滤 MCP 工具可见性，避免隐式依赖全局当前助手
         val connected = statusStore.status.value
         return settings.mcpServers
             .filter {

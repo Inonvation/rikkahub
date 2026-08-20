@@ -280,6 +280,17 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    /**
+     * DeepSeek 官方 Responses API 支持的模型。
+     *
+     * 官方文档确认 deepseek-v4-flash 支持 /responses 端点，deepseek-chat /
+     * deepseek-reasoner / v3.x / v4-pro 等模型在 /responses 端点会报错，
+     * 需要回退到 Chat Completions（该端点对所有 DeepSeek 模型可用）。
+     */
+    val DEEPSEEK_RESPONSES = defineGroup {
+        add(DEEPSEEK_V4_FLASH)
+    }
+
     private val DEEPSEEK_R1 = defineGroup {
         add(DEEPSEEK_R1_MODEL, DEEPSEEK_REASONER)
     }

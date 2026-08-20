@@ -35,7 +35,11 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.ChatMode
+import me.rerere.rikkahub.data.model.CustomModeConfig
+import me.rerere.rikkahub.data.model.ModeRefs
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ai.modeRefDisplayName
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -63,6 +67,7 @@ fun AssistantBasicPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val tags by vm.tags.collectAsStateWithLifecycle()
     val workspaces by vm.workspaces.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -84,6 +89,7 @@ fun AssistantBasicPage(id: String) {
             providers = providers,
             tags = tags,
             workspaces = workspaces,
+            customModes = settings.customModes,
             onUpdate = { vm.update(it) },
             vm = vm
         )
@@ -97,6 +103,7 @@ internal fun AssistantBasicContent(
     providers: List<me.rerere.ai.provider.ProviderSetting>,
     tags: List<DataTag>,
     workspaces: List<WorkspaceEntity>,
+    customModes: List<CustomModeConfig>,
     onUpdate: (Assistant) -> Unit,
     vm: AssistantDetailVM
 ) {
@@ -255,6 +262,28 @@ internal fun AssistantBasicContent(
                         )
                     }
                 )
+                HorizontalDivider()
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_default_mode))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_default_mode_desc))
+                    },
+                ) {
+                    Select(
+                        options = listOf<String?>(null) +
+                            ChatMode.entries.map { it.name } +
+                            customModes.map { ModeRefs.custom(it.id) },
+                        selectedOption = assistant.defaultMode,
+                        onOptionSelected = { mode ->
+                            onUpdate(assistant.copy(defaultMode = mode))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        optionToString = { mode -> modeRefDisplayName(mode, customModes) },
+                    )
+                }
                 HorizontalDivider()
                 FormItem(
                     modifier = Modifier.padding(8.dp),

@@ -816,8 +816,8 @@
   <string name="setting_display_page_show_message_jumper_title">Show Message Jumper</string>
   <string name="setting_display_page_show_model_name_desc">Whether to display model names in chat messages</string>
   <string name="setting_display_page_show_model_name_title">Show Model Name</string>
-  <string name="setting_display_page_double_tap_collapse_thinking_desc">Double-tap the expanded thinking content to collapse it</string>
-  <string name="setting_display_page_double_tap_collapse_thinking_title">Double-tap to Collapse Thinking</string>
+  <string name="setting_display_page_thinking_frozen_bar_desc">When scrolling up, pin the thinking header below the top bar so it stays in place for quick collapse/expand</string>
+  <string name="setting_display_page_thinking_frozen_bar_title">Frozen Thinking Bar</string>
   <string name="setting_display_page_show_thinking_content_desc">Whether to expand and show the thinking process by default during generation</string>
   <string name="setting_display_page_show_thinking_content_title">Show Thinking Content</string>
   <string name="setting_display_page_show_token_usage_desc">Display token usage and message count</string>
@@ -951,6 +951,39 @@
   <string name="setting_page_data_settings">数据设置</string>
   <string name="setting_page_default_model">默认模型和提示词</string>
   <string name="setting_page_default_model_desc">设置各个功能的默认模型</string>
+  <string name="setting_page_default_mode">默认模式</string>
+  <string name="setting_mode_page_title">默认模式</string>
+  <string name="setting_mode_page_group_intro">模式说明</string>
+  <string name="chat_mode_standard">标准模式</string>
+  <string name="chat_mode_standard_desc">通用模式，功能完整，遵循助手设置中的工具，不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置</string>
+  <string name="chat_mode_ptc">工作区模式</string>
+  <string name="chat_mode_ptc_desc">在标准模式基础上启用信任文件夹与工作区工具，适合以项目文件为中心的连续任务（未配置时自动降级）</string>
+  <string name="chat_mode_minimal">极简模式</string>
+  <string name="chat_mode_minimal_desc">以用户自定义提示词为主，保留本地工具、联网搜索与附件解析，不注入 MCP 与外部工具声明，默认不主动调用工具</string>
+  <string name="chat_mode_creative">管理模式</string>
+  <string name="chat_mode_creative_desc">包含工作区模式全部能力，并开放 skill/MCP 感知配置、环境与日志读取、提供商与新模式管理（写操作需审批）</string>
+  <string name="chat_mode_follow_global">跟随全局</string>
+  <string name="chat_mode_follow_global_desc">未显式配置时，绑定工作区或存在激活信任文件夹的助手默认工作区模式，其余默认标准</string>
+  <string name="mode_deleted">已删除模式</string>
+  <string name="mode_picker_title">切换模式</string>
+  <string name="chat_mode_locked_desc">会话已发送消息，模式已锁定；新建会话后可重新选择</string>
+  <string name="setting_mode_page_delete_custom">删除此模式</string>
+  <string name="setting_mode_page_edit">编辑模式</string>
+  <string name="setting_mode_page_duplicate">复制模式</string>
+  <string name="setting_mode_page_export">导出模式</string>
+  <string name="setting_mode_page_import">导入模式</string>
+  <string name="setting_mode_page_move_up">上移</string>
+  <string name="setting_mode_page_move_down">下移</string>
+  <string name="setting_mode_page_edit_title">编辑自定义模式</string>
+  <string name="setting_mode_page_mode_name">模式名称</string>
+  <string name="setting_mode_page_mode_desc">模式描述</string>
+  <string name="setting_mode_page_duplicate_name">已存在同名模式</string>
+  <string name="setting_mode_page_capabilities">能力清单</string>
+  <string name="setting_mode_page_save">保存</string>
+  <string name="setting_mode_page_cancel">取消</string>
+  <string name="setting_mode_page_delete_title">删除自定义模式</string>
+  <string name="setting_mode_page_delete_no_ref">没有会话引用此模式。删除后无法恢复。</string>
+  <string name="setting_mode_page_delete_warning">此模式正被 %1$d 个会话引用，删除后这些会话会回退到标准模式。</string>
   <string name="setting_page_display_setting">显示设置</string>
   <string name="setting_page_display_setting_desc">管理显示设置</string>
   <string name="setting_page_preferences">偏好设置</string>
@@ -1353,6 +1386,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_include_history_reasoning">Include History Reasoning</string>
   <string name="assistant_page_gradient_background">渐变背景</string>
   <string name="assistant_page_gradient_background_desc">在聊天页面使用动态渐变背景</string>
+  <string name="assistant_page_default_mode">默认模式</string>
+  <string name="assistant_page_default_mode_desc">该助手新建对话时的默认能力模式；跟随全局表示使用全局默认</string>
   <string name="assistant_page_workspace">工作区</string>
   <string name="assistant_page_workspace_desc">绑定后，Agent 可以使用此工作区的文件和沙盒功能</string>
   <string name="assistant_page_workspace_unbound">未绑定</string>
@@ -1520,4 +1555,3 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="pending_guidance_queued">Guidance queued: %1$s</string>
   <string name="user_guidance_title">User guidance</string>
 </resources>
-

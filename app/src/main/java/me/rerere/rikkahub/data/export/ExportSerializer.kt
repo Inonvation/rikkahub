@@ -11,6 +11,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDateTime
 import kotlin.uuid.Uuid
@@ -182,6 +183,51 @@ object LorebookSerializer : ExportSerializer<Lorebook> {
             4 -> InjectionPosition.AT_DEPTH    // @Depth 模式
             else -> InjectionPosition.AFTER_SYSTEM_PROMPT
         }
+    }
+}
+
+object CustomModeSerializer : ExportSerializer<CustomModeConfig> {
+    override val type = "custom_mode"
+
+    override fun getExportFileName(data: CustomModeConfig): String {
+        return "${data.name.ifBlank { type }}.json"
+    }
+
+    override fun export(data: CustomModeConfig): ExportData {
+        return ExportData(
+            type = type,
+            data = ExportSerializer.DefaultJson.encodeToJsonElement(data)
+        )
+    }
+
+    override fun import(context: Context, uri: Uri): Result<CustomModeConfig> {
+        return runCatching {
+            val json = readUri(context, uri)
+            tryImportNative(json)
+                ?: tryImportRaw(json)
+                ?: throw IllegalArgumentException("Unsupported format")
+        }
+    }
+
+    private fun tryImportNative(json: String): CustomModeConfig? {
+        return runCatching {
+            val exportData = ExportSerializer.DefaultJson.decodeFromString(
+                ExportData.serializer(),
+                json
+            )
+            if (exportData.type != type) return null
+            ExportSerializer.DefaultJson
+                .decodeFromJsonElement<CustomModeConfig>(exportData.data)
+                .copy(id = Uuid.random().toString())
+        }.getOrNull()
+    }
+
+    private fun tryImportRaw(json: String): CustomModeConfig? {
+        return runCatching {
+            ExportSerializer.DefaultJson
+                .decodeFromString<CustomModeConfig>(json)
+                .copy(id = Uuid.random().toString())
+        }.getOrNull()
     }
 }
 

@@ -63,6 +63,8 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.AgentBehaviorProfile
+import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
@@ -225,6 +227,8 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
+        policy: ChatModePolicy? = null,
         conversationId: String? = null,
         /** 续答唤醒指令（子代理完成时注入）。追加为 provider 看到的**最后一条 USER 消息**，
          *  不写进 system（保持 system 前缀字节不变 → prompt cache 命中，对齐 Claude Code
@@ -285,7 +289,7 @@ class GenerationHandler(
 
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
-                if (assistant?.enableMemory == true) {
+                if ((policy?.allowMemory ?: true) && assistant?.enableMemory == true) {
                     val memoryAssistantId = if (assistant.useGlobalMemory) {
                         MemoryRepository.GLOBAL_MEMORY_ID
                     } else {
@@ -353,6 +357,7 @@ class GenerationHandler(
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
+                    policy = policy,
                     conversationId = conversationId,
                     resumeContext = effectiveResumeContext,
                 )
@@ -514,6 +519,8 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
+        policy: ChatModePolicy? = null,
         conversationId: String? = null,
         resumeContext: String? = null,
     ) {
@@ -530,19 +537,26 @@ class GenerationHandler(
                 }
 
                 // 记忆
-                if (assistant.enableMemory) {
+                if ((policy?.allowMemory ?: true) && assistant.enableMemory) {
                     appendLine()
                     append(buildMemoryPrompt(memories = memories))
                 }
                 // 工具prompt
-                tools.forEach { tool ->
-                    appendLine()
-                    append(tool.systemPrompt(model, messages))
+                if (policy?.includeToolSystemPrompt ?: true) {
+                    tools.forEach { tool ->
+                        appendLine()
+                        append(tool.systemPrompt(model, messages))
+                    }
                 }
                 // 行为层：决策/工具/子代理/提问准则（默认开，可关）。放末尾，不覆盖用户自定义提示词
-                if (settings.enableAgentBehaviorPrompt) {
+                if ((policy?.includeAgentBehaviorPrompt ?: true) && settings.enableAgentBehaviorPrompt) {
                     appendLine()
-                    append(buildAgentBehaviorPrompt(tools))
+                    append(
+                        buildAgentBehaviorPrompt(
+                            tools = tools,
+                            profile = policy?.behaviorProfile ?: AgentBehaviorProfile.STANDARD,
+                        )
+                    )
                 }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))

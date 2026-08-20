@@ -75,6 +75,7 @@ import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.createCreativeTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -117,6 +118,9 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.ChatModePolicy
+import me.rerere.rikkahub.data.model.resolveConversationPolicy
+import me.rerere.rikkahub.data.model.resolveModeRef
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.tool.EmbeddingConfig
@@ -861,7 +865,15 @@ class ChatService(
                 newConversation = true
             )
                 // 新对话继承助手上次选择的默认工作目录
-                .copy(workspaceCwd = assistant.defaultWorkspaceCwd)
+                .copy(
+                    workspaceCwd = assistant.defaultWorkspaceCwd,
+                    // 固化并记录模式快照，避免后续修改全局/助手默认时改变已有会话的能力配置
+                    mode = resolveModeRef(
+                        assistant = assistant,
+                        settings = currentSettings,
+                        trustedFolderActive = trustedFolderRepository.currentSettings().activeProjectId != null,
+                    ),
+                )
                 .updateCurrentMessages(assistant.presetMessages)
             updateConversation(conversationId, newConversation)
         }
@@ -1392,7 +1404,7 @@ class ChatService(
 
             // memory tool
             if (!model.abilities.contains(ModelAbility.TOOL)) {
-                if (assistant.enableWebSearch || mcpManager.getAllAvailableTools().isNotEmpty()) {
+                if (assistant.enableWebSearch || mcpManager.getAllAvailableTools(assistant).isNotEmpty()) {
                     addError(
                         IllegalStateException(context.getString(R.string.tools_warning)),
                         conversationId,
@@ -1404,6 +1416,13 @@ class ChatService(
             // check invalid messages
             checkInvalidMessages(conversationId)
             val conversation = getConversationFlow(conversationId).value
+            // 会话级能力模式策略：决定本次生成的工具族/提示词片段/环境说明注入
+            val modePolicy = resolveConversationPolicy(
+                conversation = conversation,
+                assistant = assistant,
+                settings = settings,
+                trustedFolderActive = trustedFolderRepository.currentSettings().activeProjectId != null,
+            )
 
             // start generating
             val session = getOrCreateSession(conversationId)
@@ -1430,6 +1449,7 @@ class ChatService(
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversation.id.toString(),
+                policy = modePolicy,
                 resumeContext = resumeContext,
                 steeringQueue = session.steeringQueue,
                 memories = loadMemoriesForGeneration(
@@ -1437,21 +1457,26 @@ class ChatService(
                     messages = messagesToGenerate,
                 ),
                 inputTransformers = buildList {
-                    addAll(inputTransformers)
+                    if (modePolicy.includeReminders) add(TimeReminderTransformer)
+                    if (modePolicy.includePromptInjection) add(PromptInjectionTransformer)
+                    add(PlaceholderTransformer)
+                    if (modePolicy.allowDocument) add(DocumentAsPromptTransformer)
+                    if (modePolicy.allowDocument) add(OcrTransformer)
+                    if (modePolicy.includeReminders) add(todoReminderTransformer)
                     add(templateTransformer)
-                    add(workspaceReminderTransformer)
-                    add(trustedFolderReminderTransformer)
-                    add(knowledgeBaseReminderTransformer)
+                    if (modePolicy.allowWorkspace) add(workspaceReminderTransformer)
+                    if (modePolicy.allowTrustedFolder) add(trustedFolderReminderTransformer)
+                    if (modePolicy.allowKnowledge) add(knowledgeBaseReminderTransformer)
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
-                    if (settings.enableTodoList) {
+                    if (modePolicy.allowTodo && settings.enableTodoList) {
                         add(createTodoTool(conversation.id.toString(), todoStorage))
                     }
-                    if (settings.enableSubAgent) {
+                    if (modePolicy.allowSubAgent && settings.enableSubAgent) {
                         addAll(createSubAgentTools(subAgentRunner, conversation.id))
                     }
-                    if (assistant.enabledStudyTools.isNotEmpty()) {
+                    if (modePolicy.allowStudy && assistant.enabledStudyTools.isNotEmpty()) {
                         addAll(studyTools.getTools(
                             enabledTools = assistant.enabledStudyTools,
                             conversationId = conversation.id.toString(),
@@ -1460,15 +1485,21 @@ class ChatService(
                             permissions = StudyToolPermissions.fromSettings(settings),
                         ))
                     }
-                    if (assistant.enableWebSearch) {
+                    if (modePolicy.allowSearch && assistant.enableWebSearch) {
                         addAll(createSearchTools(settings))
                     }
-                    addAll(localTools.getTools(assistant.localTools))
-                    if (assistant.enableRecentChatsReference) {
+                    if (modePolicy.allowLocalTools) {
+                        addAll(localTools.getTools(assistant.localTools))
+                    }
+                    if (modePolicy.allowHistory && assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))
                     }
-                    addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
-                    addAll(createTrustedFolderTools(trustedFolderRepository))
+                    if (modePolicy.allowWorkspace) {
+                        addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
+                    }
+                    if (modePolicy.allowTrustedFolder) {
+                        addAll(createTrustedFolderTools(trustedFolderRepository))
+                    }
                     val allSkills = skillManager.listSkills()
                     if (allSkills.isNotEmpty()) {
                         addAll(
@@ -1478,18 +1509,24 @@ class ChatService(
                                 setEnabledSkills = { skills ->
                                     settingsStore.updateAssistantSkills(assistant.id, skills)
                                 },
-                            )
+                            ).filter { tool ->
+                                // 标准/工作区仅保留 use_skill（已启用 skill 的使用），管理模式额外开放 skill_admin_*
+                                if (tool.name == "use_skill") modePolicy.allowSkillUse else modePolicy.allowSkillAdmin
+                            }
                         )
                     }
-                    addAll(
-                        createMcpManagerTools(
+                    if (modePolicy.allowMcpAdmin) {
+                        addAll(
+                            createMcpManagerTools(
                             mcpManager = mcpManager,
                             settingsStore = settingsStore,
                             assistant = assistant,
                             isEnabled = settings.enableMcpManager,
                         )
                     )
-                    mcpManager.getAllAvailableTools().also { allTools ->
+                    }
+                    if (modePolicy.allowMcpUse) {
+                        mcpManager.getAllAvailableTools(assistant).also { allTools ->
                         val invalidNames = allTools
                             .map { it.second }
                             .distinct()
@@ -1520,8 +1557,20 @@ class ChatService(
                             )
                         )
                     }
+                    }
+                    // 管理模式专属工具：环境/日志只读感知 + 提供商/新模式写入（需审批）
+                    if (modePolicy.allowCreativeTools) {
+                        addAll(
+                            createCreativeTools(
+                                context = context,
+                                settingsStore = settingsStore,
+                                assistant = assistant,
+                                conversationRepository = conversationRepo,
+                            )
+                        )
+                    }
                     // Knowledge base tools
-                    if (assistant.knowledgeBaseIds.isNotEmpty()) {
+                    if (modePolicy.allowKnowledge && assistant.knowledgeBaseIds.isNotEmpty()) {
                         val kbTools = createKnowledgeBaseTools(
                             settings = settings,
                             assistant = assistant,
@@ -2302,7 +2351,8 @@ class ChatService(
 
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
         val exists = conversationRepo.existsConversationById(conversation.id)
-        if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
+        // 空会话不落库，但显式配置了模式（mode 非空）的空会话也保存，避免切换模式后重进丢失
+        if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty() && conversation.mode == null) {
             return // 新会话且为空时不保存
         }
 

@@ -7,6 +7,10 @@ import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.WebDavConfig
+import me.rerere.rikkahub.data.model.Capability
+import me.rerere.rikkahub.data.model.ChatModePolicy
+import me.rerere.rikkahub.data.model.CustomModeConfig
+import me.rerere.rikkahub.data.model.ModeRefs
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import kotlin.uuid.Uuid
 import me.rerere.rikkahub.utils.JsonInstant
@@ -150,5 +154,25 @@ class SettingsSyncCodecTest {
         val provider = restored.providers.first { it.id == settings.providers[0].id }
         assertEquals("My OpenAI", provider.name)
         assertNotEquals(settings.webDavConfig, restored.webDavConfig)
+    }
+
+    @Test
+    fun syncsCustomModesWithDefaultRef() {
+        val custom = CustomModeConfig(
+            id = "sync-custom",
+            name = "同步自定义模式",
+            policy = ChatModePolicy(capabilities = setOf(Capability.WORKSPACE)),
+        )
+        val settings = sampleSettings().copy(
+            defaultMode = ModeRefs.custom(custom.id),
+            customModes = listOf(custom),
+        )
+        val restored = SettingsSyncCodec.fromSyncableJson(
+            SettingsSyncCodec.toSyncableJson(settings),
+            Settings(),
+        )
+
+        assertEquals(settings.defaultMode, restored.defaultMode)
+        assertEquals(settings.customModes, restored.customModes)
     }
 }

@@ -29,6 +29,8 @@ data class ConversationEntity(
     val isPinned: Boolean,
     @ColumnInfo("custom_system_prompt", defaultValue = "")
     val customSystemPrompt: String = "",
+    @ColumnInfo("mode", defaultValue = "")
+    val mode: String = "",
     @ColumnInfo("mode_injection_ids", defaultValue = "[]")
     val modeInjectionIds: String = "[]",
     @ColumnInfo("lorebook_ids", defaultValue = "[]")
