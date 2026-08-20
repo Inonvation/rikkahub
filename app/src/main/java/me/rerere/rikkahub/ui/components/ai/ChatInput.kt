@@ -78,6 +78,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -87,10 +88,11 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.blurEffect
-import dev.chrisbanes.haze.blur.materials.HazeMaterials
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import me.rerere.ai.core.MessageRole
@@ -144,7 +146,7 @@ fun ChatInput(
     settings: Settings,
     hazeState: HazeState,
     enableSearch: Boolean,
-    onToggleSearch: (Boolean) -> Unit,
+    onUpdateSearchMode: (SearchMode) -> Unit,
     modifier: Modifier = Modifier,
     conversation: Conversation,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
@@ -174,7 +176,9 @@ fun ChatInput(
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
     val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val inputHazeStyle = HazeMaterials.thin(containerColor = hazeTintColor)
+    val inputHazeStyle = HazeBlurStyle.Material3 {
+        blurRadius(12.dp)
+    }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -268,13 +272,10 @@ fun ChatInput(
                     .fillMaxWidth()
                     .clip(MaterialTheme.shapes.largeIncreased)
                     .then(
-                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeEffect(
-                            state = hazeState
-                        ) {
-                            blurEffect {
-                                style = inputHazeStyle
-                            }
-                        }
+                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeBlur(
+                            input = HazeInput.Sources(hazeState),
+                            style = inputHazeStyle,
+                        )
                         else Modifier
                     ),
                 shape = MaterialTheme.shapes.largeIncreased,
@@ -333,8 +334,9 @@ fun ChatInput(
                             SearchPickerButton(
                                 enableSearch = enableSearch,
                                 settings = settings,
-                                onToggleSearch = { enabled ->
-                                    onToggleSearch(enabled)
+                                onUpdateSearchMode = { mode ->
+                                    onUpdateSearchMode(mode)
+                                    val enabled = mode != SearchMode.OFF
                                     toaster.show(
                                         message = if (enabled) enableSearchMsg else disableSearchMsg,
                                         duration = 1.seconds,
@@ -799,6 +801,7 @@ private fun TextInputRow(
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
                 imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
             ),
             onKeyboardAction = {
@@ -1076,6 +1079,9 @@ private fun FullScreenEditor(
                         placeholder = {
                             Text(stringResource(R.string.chat_input_placeholder))
                         },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                        ),
                         colors = TextFieldDefaults.colors().copy(
                             unfocusedIndicatorColor = Color.Transparent,
                             focusedIndicatorColor = Color.Transparent,

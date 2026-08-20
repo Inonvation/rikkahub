@@ -113,6 +113,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
@@ -154,6 +155,7 @@ import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
+import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
@@ -553,17 +555,33 @@ private fun ChatPageContent(
                         vm.stopGeneration()
                     },
                     enableSearch = enableWebSearch,
-                    onToggleSearch = {
+                    onUpdateSearchMode = { mode ->
                         val current = setting.getCurrentAssistant()
+                        val model = setting.getCurrentChatModel()
                         vm.updateSettings(
                             setting.copy(
                                 assistants = setting.assistants.map { assistant ->
                                     if (assistant.id == current.id) {
-                                        assistant.copy(enableWebSearch = !enableWebSearch)
+                                        assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
                                     } else {
                                         assistant
                                     }
-                                }
+                                },
+                                providers = if (model == null) {
+                                    setting.providers
+                                } else {
+                                    setting.providers.map { provider ->
+                                        provider.editModel(
+                                            model.copy(
+                                                tools = if (mode == SearchMode.BUILT_IN) {
+                                                    model.tools + BuiltInTools.Search
+                                                } else {
+                                                    model.tools - BuiltInTools.Search
+                                                }
+                                            )
+                                        )
+                                    }
+                                },
                             )
                         )
                     },

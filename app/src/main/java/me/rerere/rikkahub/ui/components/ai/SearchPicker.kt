@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
-import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.AiSearch02
@@ -51,6 +51,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -60,12 +61,18 @@ import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
 import me.rerere.search.SearchServiceOptions
 import org.koin.compose.koinInject
 
+enum class SearchMode {
+    OFF,
+    LOCAL,
+    BUILT_IN,
+}
+
 @Composable
 fun SearchPickerButton(
     enableSearch: Boolean,
     settings: Settings,
     modifier: Modifier = Modifier,
-    onToggleSearch: (Boolean) -> Unit,
+    onUpdateSearchMode: (SearchMode) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     model: Model?,
     compact: Boolean = false,
@@ -148,7 +155,7 @@ fun SearchPickerButton(
                 SearchPicker(
                     enableSearch = enableSearch,
                     settings = settings,
-                    onToggleSearch = onToggleSearch,
+                    onUpdateSearchMode = onUpdateSearchMode,
                     onUpdateSearchService = { index ->
                         onUpdateSearchService(index)
                     },
@@ -171,21 +178,25 @@ private fun SearchPicker(
     settings: Settings,
     model: Model?,
     modifier: Modifier = Modifier,
-    onToggleSearch: (Boolean) -> Unit,
+    onUpdateSearchMode: (SearchMode) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     val navBackStack = LocalNavController.current
 
+    val provider = model?.findProvider(settings.providers)
     // 模型是否支持内置搜索
-    val supportsBuiltInSearch = model != null &&
-        (ModelRegistry.GEMINI_SERIES.match(model.modelId) || model.modelId.contains("gpt-"))
+    val supportsBuiltInSearch = provider is ProviderSetting.Google ||
+        (provider is ProviderSetting.OpenAI && provider.useResponseApi)
     // 模型是否已开启内置搜索（可能是不支持的模型残留的孤儿状态）
     val hasBuiltInSearchEnabled = model?.tools?.contains(BuiltInTools.Search) == true
 
     // 模型支持内置搜索，或已开启内置搜索（后者保证残留状态也能被关闭）时显示开关
     if (model != null && (supportsBuiltInSearch || hasBuiltInSearchEnabled)) {
-        BuiltInSearchSetting(model = model)
+        BuiltInSearchSetting(
+            model = model,
+            onUpdateSearchMode = onUpdateSearchMode,
+        )
     }
 
     // 如果没有开启内置搜索，显示搜索服务选择
@@ -194,7 +205,7 @@ private fun SearchPicker(
             enableSearch = enableSearch,
             onDismiss = onDismiss,
             navBackStack = navBackStack,
-            onToggleSearch = onToggleSearch,
+            onUpdateSearchMode = onUpdateSearchMode,
             modifier = modifier,
             settings = settings,
             onUpdateSearchService = onUpdateSearchService
@@ -207,7 +218,7 @@ private fun AppSearchSettings(
     enableSearch: Boolean,
     onDismiss: () -> Unit,
     navBackStack: Navigator,
-    onToggleSearch: (Boolean) -> Unit,
+    onUpdateSearchMode: (SearchMode) -> Unit,
     modifier: Modifier,
     settings: Settings,
     onUpdateSearchService: (Int) -> Unit
@@ -253,7 +264,9 @@ private fun AppSearchSettings(
             }
             Switch(
                 checked = enableSearch,
-                onCheckedChange = onToggleSearch
+                onCheckedChange = { checked ->
+                    onUpdateSearchMode(if (checked) SearchMode.LOCAL else SearchMode.OFF)
+                }
             )
         }
     }
@@ -326,9 +339,10 @@ private fun AppSearchSettings(
 }
 
 @Composable
-private fun BuiltInSearchSetting(model: Model) {
-    val settingsStore = koinInject<SettingsStore>()
-    val scope = rememberCoroutineScope()
+private fun BuiltInSearchSetting(
+    model: Model,
+    onUpdateSearchMode: (SearchMode) -> Unit,
+) {
     Card {
         Row(
             modifier = Modifier
@@ -356,20 +370,7 @@ private fun BuiltInSearchSetting(model: Model) {
             Switch(
                 checked = model.tools.contains(BuiltInTools.Search),
                 onCheckedChange = { checked ->
-                    val settings = settingsStore.settingsFlow.value
-                    scope.launch {
-                        settingsStore.update(
-                            settings.copy(
-                                providers = settings.providers.map { providerSetting ->
-                                    providerSetting.editModel(
-                                        model.copy(
-                                            tools = if (checked) model.tools + BuiltInTools.Search else model.tools - BuiltInTools.Search
-                                        )
-                                    )
-                                }
-                            )
-                        )
-                    }
+                    onUpdateSearchMode(if (checked) SearchMode.BUILT_IN else SearchMode.OFF)
                 }
             )
         }
