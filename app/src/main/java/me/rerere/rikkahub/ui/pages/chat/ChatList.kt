@@ -26,6 +26,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -253,6 +254,7 @@ private fun ChatListNormal(
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val isUserDragging by state.interactionSource.collectIsDraggedAsState()
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -285,9 +287,11 @@ private fun ChatListNormal(
     fun List<LazyListItemInfo>.isAtBottom(): Boolean {
         val lastItem = lastOrNull() ?: return false
         val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        return lastPos <= inputPos - 8
+        return isChatListAtBottom(
+            lastItemEnd = lastItem.offset + lastItem.size,
+            viewportEnd = state.layoutInfo.viewportEndOffset,
+            bottomInsetPx = inputBarHeight.roundToInt(),
+        )
     }
 
     // 是否已滚到真正的底部（视口底边贴近内容末尾，8px 容差内）：
@@ -296,10 +300,13 @@ private fun ChatListNormal(
     // (viewportEnd - lastPos) >= afterContentPadding - 8 即可精确判定贴底，无底部留白死区。
     fun List<LazyListItemInfo>.isPinnedToBottom(): Boolean {
         val lastItem = lastOrNull() ?: return false
-        val lastPos = lastItem.offset + lastItem.size
-        val viewportEnd = state.layoutInfo.viewportEndOffset
-        val afterPadding = state.layoutInfo.afterContentPadding
-        return (viewportEnd - lastPos) >= (afterPadding - 8)
+        return isChatListPinnedToBottom(
+            totalItemsCount = state.layoutInfo.totalItemsCount,
+            lastVisibleIndex = lastItem.index,
+            lastItemEnd = lastItem.offset + lastItem.size,
+            viewportEnd = state.layoutInfo.viewportEndOffset,
+            afterContentPadding = state.layoutInfo.afterContentPadding,
+        )
     }
 
     // 自动跟随键盘滚动
@@ -363,32 +370,41 @@ private fun ChatListNormal(
                 var lastOff = state.firstVisibleItemScrollOffset
                 var userScrolledUp = false
                 snapshotFlow {
-                    Triple(
-                        state.layoutInfo.visibleItemsInfo,
-                        state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset,
-                        state.isScrollInProgress,
+                    Pair(
+                        Triple(
+                            state.layoutInfo.visibleItemsInfo,
+                            state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset,
+                            state.isScrollInProgress,
+                        ),
+                        isUserDragging,
                     )
-                }.collect { (visibleItemsInfo, pos, inProgress) ->
+                }.collect { (scrollInfo, dragging) ->
+                    val (visibleItemsInfo, pos, inProgress) = scrollInfo
                     val idx = pos.first
                     val off = pos.second
                     // 悬浮条折叠/展开是程序滚动，不是用户手势：
                     // 滚动期间保持锁定，防止折叠动画刚结束就被拉回底部。
                     val programmaticScroll = freezeState?.scrollingByProgram == true
+                    val totalItems = state.layoutInfo.totalItemsCount
+                    val lastMessageFinished =
+                        conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.finishedAt != null
                     // 1) 用户在滚动中上滑 → 锁定，暂停自动跟随
-                    if (inProgress && !programmaticScroll) {
+                    if (dragging || (inProgress && !programmaticScroll)) {
                         val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
-                        if (movedUp) userScrolledUp = true
+                        if (dragging || movedUp) userScrolledUp = true
                     }
                     if (programmaticScroll) {
                         userScrolledUp = true
                     }
                     // 2) 滚回真正底部 → 解除锁定，恢复跟随
-                    if (!programmaticScroll && visibleItemsInfo.isPinnedToBottom()) {
+                    if (!dragging && !inProgress && !programmaticScroll && visibleItemsInfo.isPinnedToBottom()) {
                         userScrolledUp = false
                     }
                     // 3) 跟随输出：仅当用户未滚动、在底部、且未主动上滑时
-                    if (!programmaticScroll && !inProgress && loadingState && !userScrolledUp && visibleItemsInfo.isAtBottom()) {
-                        state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
+                    if (!dragging && !inProgress && !programmaticScroll && loadingState && !lastMessageFinished &&
+                        !userScrolledUp && visibleItemsInfo.isAtBottom() && totalItems > 0
+                    ) {
+                        state.requestScrollToItem(totalItems - 1)
                     }
                     lastIdx = idx
                     lastOff = off

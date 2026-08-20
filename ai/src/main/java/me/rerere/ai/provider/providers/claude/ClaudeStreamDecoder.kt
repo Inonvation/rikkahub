@@ -5,6 +5,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.common.http.jsonArrayOrNull
+import me.rerere.common.http.jsonObjectOrNull
+import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
@@ -34,26 +37,26 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
             throw (dataJson["error"] ?: dataJson).parseErrorDetail()
         }
 
-        dataJson["message"]?.jsonObject?.let { message ->
-            responseId = message["id"]?.jsonPrimitive?.contentOrNull ?: responseId
-            responseModel = message["model"]?.jsonPrimitive?.contentOrNull ?: responseModel
+        dataJson["message"]?.jsonObjectOrNull?.let { message ->
+            responseId = message["id"]?.jsonPrimitiveOrNull?.contentOrNull ?: responseId
+            responseModel = message["model"]?.jsonPrimitiveOrNull?.contentOrNull ?: responseModel
         }
-        dataJson["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNull?.let {
+        dataJson["delta"]?.jsonObjectOrNull?.get("stop_reason")?.jsonPrimitiveOrNull?.contentOrNull?.let {
             finishReason = it
         }
 
         val chunks = buildList {
             parseTokenUsage(dataJson)?.let { add(StreamChunk.Usage(it)) }
-            val index = dataJson["index"]?.jsonPrimitive?.intOrNull
-            val contentBlock = dataJson["content_block"]?.jsonObject
+            val index = dataJson["index"]?.jsonPrimitiveOrNull?.intOrNull
+            val contentBlock = dataJson["content_block"]?.jsonObjectOrNull
 
             if (event.event == "content_block_start" && index != null && contentBlock != null) {
-                val kind = contentBlock["type"]?.jsonPrimitive?.contentOrNull ?: ""
-                val blockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull
-                    ?: contentBlock["tool_use_id"]?.jsonPrimitive?.contentOrNull
+                val kind = contentBlock["type"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+                val blockId = contentBlock["id"]?.jsonPrimitiveOrNull?.contentOrNull
+                    ?: contentBlock["tool_use_id"]?.jsonPrimitiveOrNull?.contentOrNull
                     ?: "${responseId ?: event.id ?: "response"}:block-$index"
                 val metadata = when (kind) {
-                    "thinking" -> contentBlock["signature"]?.jsonPrimitive?.contentOrNull?.let {
+                    "thinking" -> contentBlock["signature"]?.jsonPrimitiveOrNull?.contentOrNull?.let {
                         ClaudeReasoningMetadata(signature = it).toMetadata()
                     }
                     else -> null
@@ -65,9 +68,9 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
                     "tool_use" -> {
                         add(StreamChunk.ToolCallStart(
                             id = blockId,
-                            toolName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                            toolName = contentBlock["name"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                         ))
-                        val input = contentBlock["input"]?.jsonObject
+                        val input = contentBlock["input"]?.jsonObjectOrNull
                         if (input != null && input.isNotEmpty()) {
                             add(StreamChunk.ToolCallDelta(
                                 id = blockId,
@@ -78,7 +81,7 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
                     else -> if (kind.isClaudeServerToolUseType()) {
                         add(StreamChunk.ServerToolStart(
                             id = blockId,
-                            toolName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                            toolName = contentBlock["name"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                             input = contentBlock["input"],
                             metadata = ServerToolMetadata(
                                 protocol = ServerToolProtocol.ANTHROPIC_MESSAGES,
@@ -108,26 +111,26 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
 
             if (event.event == "content_block_delta" && index != null) {
                 val block = blocks[index] ?: error("Unknown content block index: $index")
-                val delta = dataJson["delta"]?.jsonObject ?: JsonObject(emptyMap())
-                when (delta["type"]?.jsonPrimitive?.contentOrNull) {
+                val delta = dataJson["delta"]?.jsonObjectOrNull ?: JsonObject(emptyMap())
+                when (delta["type"]?.jsonPrimitiveOrNull?.contentOrNull) {
                     "text_delta" -> add(StreamChunk.TextDelta(
                         block.id,
-                        delta["text"]?.jsonPrimitive?.contentOrNull ?: "",
+                        delta["text"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                     ))
                     "thinking_delta" -> add(StreamChunk.ReasoningDelta(
                         block.id,
-                        delta["thinking"]?.jsonPrimitive?.contentOrNull ?: "",
+                        delta["thinking"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                         block.metadata,
                     ))
                     "signature_delta" -> {
-                        val metadata = delta["signature"]?.jsonPrimitive?.contentOrNull?.let {
+                        val metadata = delta["signature"]?.jsonPrimitiveOrNull?.contentOrNull?.let {
                             ClaudeReasoningMetadata(signature = it).toMetadata()
                         }
                         blocks[index] = block.copy(metadata = metadata ?: block.metadata)
                         add(StreamChunk.ReasoningDelta(block.id, "", metadata))
                     }
                     "input_json_delta" -> {
-                        val partialJson = delta["partial_json"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val partialJson = delta["partial_json"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
                         if (block.kind.isClaudeServerToolUseType()) {
                             add(StreamChunk.ServerToolInputDelta(block.id, partialJson))
                         } else {
@@ -174,13 +177,13 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
     }
 
     private fun parseTokenUsage(bodyJson: JsonObject): TokenUsage? {
-        val usageJson = bodyJson["usage"]?.jsonObject
-            ?: bodyJson["message"]?.jsonObject?.get("usage")?.jsonObject
+        val usageJson = bodyJson["usage"]?.jsonObjectOrNull
+            ?: bodyJson["message"]?.jsonObjectOrNull?.get("usage")?.jsonObjectOrNull
             ?: return null
-        val inputTokens = usageJson["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-        val cachedInputTokens = usageJson["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-        val cachedCreationTokens = usageJson["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-        val completionTokens = usageJson["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+        val inputTokens = usageJson["input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
+        val cachedInputTokens = usageJson["cache_read_input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
+        val cachedCreationTokens = usageJson["cache_creation_input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
+        val completionTokens = usageJson["output_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
         val promptTokens = inputTokens + cachedInputTokens + cachedCreationTokens
         return TokenUsage(
             promptTokens = promptTokens,

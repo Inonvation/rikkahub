@@ -19,6 +19,8 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
+import me.rerere.common.http.jsonArrayOrNull
+import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import kotlin.time.Clock
 
@@ -36,15 +38,15 @@ internal class GoogleStreamDecoder(
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
         val jsonData = json.parseToJsonElement(event.data).jsonObject
-        val blockedReason = jsonData["promptFeedback"]?.jsonObject
+        val blockedReason = jsonData["promptFeedback"]?.jsonObjectOrNull
             ?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
         if (blockedReason != null) error("Prompt feedback: $blockedReason")
 
         val chunks = buildList {
             parseUsage(jsonData["usageMetadata"] as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
-            val candidate = jsonData["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@buildList
-            candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
-            val content = candidate["content"]?.jsonObject ?: return@buildList
+            val candidate = jsonData["candidates"]?.jsonArrayOrNull?.firstOrNull()?.jsonObjectOrNull ?: return@buildList
+            candidate["finishReason"]?.jsonPrimitiveOrNull?.contentOrNull?.let { finishReason = it }
+            val content = candidate["content"]?.jsonObjectOrNull ?: return@buildList
             val message = parseMessage(content, candidate["groundingMetadata"] as? JsonObject)
             addAll(streamState.append(message, responseId))
         }
@@ -61,42 +63,42 @@ internal class GoogleStreamDecoder(
 
     private fun parseMessage(content: JsonObject, groundingMetadata: JsonObject?): UIMessage = UIMessage(
         role = MessageRole.ASSISTANT,
-        parts = content["parts"]?.jsonArray?.map { parsePart(it.jsonObject) }.orEmpty(),
+        parts = content["parts"]?.jsonArrayOrNull?.map { parsePart(it.jsonObject) }.orEmpty(),
         annotations = parseAnnotations(groundingMetadata),
     )
 
     private fun parsePart(part: JsonObject): UIMessagePart = when {
         part.containsKey("text") -> {
-            val text = part["text"]?.jsonPrimitive?.contentOrNull ?: ""
-            if (part["thought"]?.jsonPrimitive?.booleanOrNull == true) {
+            val text = part["text"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+            if (part["thought"]?.jsonPrimitiveOrNull?.booleanOrNull == true) {
                 UIMessagePart.Reasoning(text, Clock.System.now(), null)
             } else {
                 UIMessagePart.Text(text)
             }
         }
         part.containsKey("functionCall") -> {
-            val functionCall = part["functionCall"]!!.jsonObject
+            val functionCall = part["functionCall"]?.jsonObjectOrNull ?: error("functionCall is missing")
             UIMessagePart.Tool(
                 toolCallId = "$responseId:tool-${++toolSequence}",
-                toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                toolName = functionCall["name"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                 input = functionCall["args"]?.let(json::encodeToString) ?: "",
                 output = emptyList(),
                 metadata = GoogleThoughtMetadata(
-                    thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
+                    thoughtSignature = part["thoughtSignature"]?.jsonPrimitiveOrNull?.contentOrNull,
                 ).toMetadata(),
             )
         }
         part.containsKey("inlineData") -> {
-            val inlineData = part["inlineData"]!!.jsonObject
-            val mimeType = inlineData["mimeType"]?.jsonPrimitive?.contentOrNull ?: "image/png"
+            val inlineData = part["inlineData"]?.jsonObjectOrNull ?: error("inlineData is missing")
+            val mimeType = inlineData["mimeType"]?.jsonPrimitiveOrNull?.contentOrNull ?: "image/png"
             require(mimeType.startsWith("image/")) { "Only image mime type is supported" }
-            if (part["thought"]?.jsonPrimitive?.booleanOrNull == true) {
+            if (part["thought"]?.jsonPrimitiveOrNull?.booleanOrNull == true) {
                 UIMessagePart.Reasoning("[Draft Image]\n", Clock.System.now(), null)
             } else {
                 UIMessagePart.Image(
-                    url = "data:$mimeType;base64,${inlineData["data"]?.jsonPrimitive?.contentOrNull ?: ""}",
+                    url = "data:$mimeType;base64,${inlineData["data"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""}",
                     metadata = GoogleThoughtMetadata(
-                        thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
+                        thoughtSignature = part["thoughtSignature"]?.jsonPrimitiveOrNull?.contentOrNull,
                     ).toMetadata(),
                 )
             }
@@ -105,10 +107,10 @@ internal class GoogleStreamDecoder(
     }
 
     private fun parseAnnotations(metadata: JsonObject?): List<UIMessageAnnotation> =
-        metadata?.get("groundingChunks")?.jsonArray.orEmpty().mapNotNull { chunk ->
-            val web = chunk.jsonObject["web"]?.jsonObject ?: return@mapNotNull null
-            val url = web["uri"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val title = web["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        metadata?.get("groundingChunks")?.jsonArrayOrNull.orEmpty().mapNotNull { chunk ->
+            val web = chunk.jsonObject["web"]?.jsonObjectOrNull ?: return@mapNotNull null
+            val url = web["uri"]?.jsonPrimitiveOrNull?.contentOrNull ?: return@mapNotNull null
+            val title = web["title"]?.jsonPrimitiveOrNull?.contentOrNull ?: return@mapNotNull null
             UIMessageAnnotation.UrlCitation(title, url)
         }
 

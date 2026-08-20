@@ -7,6 +7,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.common.http.jsonArrayOrNull
+import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
@@ -28,7 +30,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         if (event.data == "[DONE]") return DecodeResult(state.finish(), completed = true)
 
         val payload = json.parseToJsonElement(event.data).jsonObject
-        val eventType = payload["type"]?.jsonPrimitive?.contentOrNull
+        val eventType = payload["type"]?.jsonPrimitiveOrNull?.contentOrNull
         val chunks = parseEvent(payload)
         val completed = eventType == "response.completed" || eventType == "response.incomplete" ||
             event.event == "response.completed" || event.event == "response.incomplete"
@@ -38,10 +40,10 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     override fun onClosed(): List<StreamChunk> = state.finish()
 
     private fun parseEvent(payload: JsonObject): List<StreamChunk> {
-        val chunkType = payload["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-        val itemId = payload["item_id"]?.jsonPrimitive?.contentOrNull
-        val contentIndex = payload["content_index"]?.jsonPrimitive?.intOrNull ?: 0
-        val summaryIndex = payload["summary_index"]?.jsonPrimitive?.intOrNull ?: contentIndex
+        val chunkType = payload["type"]?.jsonPrimitiveOrNull?.content ?: error("chunk type not found")
+        val itemId = payload["item_id"]?.jsonPrimitiveOrNull?.contentOrNull
+        val contentIndex = payload["content_index"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
+        val summaryIndex = payload["summary_index"]?.jsonPrimitiveOrNull?.intOrNull ?: contentIndex
         val textId = itemId?.let { "$it:text:$contentIndex" }
         val summaryReasoningId = itemId?.let { "$it:reasoning:summary:$summaryIndex" }
         val contentReasoningId = itemId?.let { "$it:reasoning:content:$contentIndex" }
@@ -49,23 +51,23 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         return when (chunkType) {
             "response.output_text.delta" -> state.textDelta(
                 textId ?: error("item_id not found"),
-                payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                payload["delta"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
             )
             "response.reasoning_summary_text.delta" -> state.reasoningDelta(
                 summaryReasoningId ?: error("item_id not found"),
-                payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                payload["delta"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                 state.reasoningMetadata[itemId],
                 ReasoningType.SUMMARY_TEXT,
             )
             "response.reasoning_text.delta" -> state.reasoningDelta(
                 contentReasoningId ?: error("item_id not found"),
-                payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                payload["delta"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                 state.reasoningMetadata[itemId],
                 ReasoningType.REASONING_TEXT,
             )
             "response.content_part.added" -> {
-                val part = payload["part"]?.jsonObject ?: return emptyList()
-                if (part["type"]?.jsonPrimitive?.contentOrNull == "output_text") {
+                val part = payload["part"]?.jsonObjectOrNull ?: return emptyList()
+                if (part["type"]?.jsonPrimitiveOrNull?.contentOrNull == "output_text") {
                     state.startText(textId ?: error("item_id not found"))
                 } else emptyList()
             }
@@ -80,24 +82,24 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             "response.reasoning_summary_text.done",
             "response.reasoning_text.done" -> emptyList()
             "response.output_item.added" -> {
-                val item = payload["item"]?.jsonObject ?: error("chunk item not found")
-                val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
+                val item = payload["item"]?.jsonObjectOrNull ?: error("chunk item not found")
+                val type = item["type"]?.jsonPrimitiveOrNull?.content ?: error("chunk type not found")
+                val id = item["id"]?.jsonPrimitiveOrNull?.content ?: error("chunk id not found")
                 when (type) {
                     "function_call" -> {
-                        val callId = item["call_id"]?.jsonPrimitive?.contentOrNull ?: id
+                        val callId = item["call_id"]?.jsonPrimitiveOrNull?.contentOrNull ?: id
                         state.toolCallIdsByItemId[id] = callId
                         state.startTool(
                             id = callId,
-                            name = item["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                            initialInput = item["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                            name = item["name"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
+                            initialInput = item["arguments"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                         )
                     }
                     "image_generation_call" -> state.startImage(id)
                     "reasoning" -> {
                         state.reasoningMetadata[id] = OpenAIReasoningMetadata(
                             reasoningId = id,
-                            encryptedContent = item["encrypted_content"]?.jsonPrimitive?.contentOrNull,
+                            encryptedContent = item["encrypted_content"]?.jsonPrimitiveOrNull?.contentOrNull,
                         ).toMetadata()
                         emptyList()
                     }
@@ -107,21 +109,21 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 }
             }
             "response.output_item.done" -> {
-                val item = payload["item"]?.jsonObject ?: error("chunk item not found")
-                val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
+                val item = payload["item"]?.jsonObjectOrNull ?: error("chunk item not found")
+                val type = item["type"]?.jsonPrimitiveOrNull?.content ?: error("chunk type not found")
+                val id = item["id"]?.jsonPrimitiveOrNull?.content ?: error("chunk id not found")
                 when (type) {
                     "reasoning" -> {
                         val metadata = OpenAIReasoningMetadata(
                             reasoningId = id,
-                            encryptedContent = item["encrypted_content"]?.jsonPrimitive?.contentOrNull,
+                            encryptedContent = item["encrypted_content"]?.jsonPrimitiveOrNull?.contentOrNull,
                         ).toMetadata()
                         state.reasoningMetadata[id] = metadata
                         state.endReasoningItem(id, metadata)
                     }
                     "image_generation_call" -> buildList {
                         addAll(state.startImage(id))
-                        item["result"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotEmpty)?.let {
+                        item["result"]?.jsonPrimitiveOrNull?.contentOrNull?.takeIf(String::isNotEmpty)?.let {
                             add(StreamChunk.ImageSnapshot(id, it))
                         }
                         addAll(state.endImage(id))
@@ -144,7 +146,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 val requiredItemId = itemId ?: error("item_id not found")
                 state.toolDelta(
                     state.toolCallIdsByItemId[requiredItemId] ?: requiredItemId,
-                    payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                    payload["delta"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                 )
             }
             "response.function_call_arguments.done" -> {
@@ -154,7 +156,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                     if (toolCallId !in state.toolIdsWithInput) {
                         addAll(state.toolDelta(
                             toolCallId,
-                            payload["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                            payload["arguments"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                         ))
                     }
                     addAll(state.endTool(toolCallId))
@@ -166,7 +168,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                     addAll(state.startImage(requiredItemId))
                     add(StreamChunk.ImageSnapshot(
                         requiredItemId,
-                        payload["partial_image_b64"]?.jsonPrimitive?.contentOrNull ?: "",
+                        payload["partial_image_b64"]?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                     ))
                 }
             }
@@ -178,11 +180,11 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     }
 
     private fun parseTerminalResponse(payload: JsonObject): List<StreamChunk> {
-        val response = payload["response"]?.jsonObject
-        val status = response?.get("status")?.jsonPrimitive?.contentOrNull
-            ?: payload["type"]?.jsonPrimitive?.contentOrNull?.removePrefix("response.")
+        val response = payload["response"]?.jsonObjectOrNull
+        val status = response?.get("status")?.jsonPrimitiveOrNull?.contentOrNull
+            ?: payload["type"]?.jsonPrimitiveOrNull?.contentOrNull?.removePrefix("response.")
         val incompleteReason = response?.get("incomplete_details")?.jsonObjectOrNull
-            ?.get("reason")?.jsonPrimitive?.contentOrNull
+            ?.get("reason")?.jsonPrimitiveOrNull?.contentOrNull
         val finishReason = if (status == "incomplete" && incompleteReason != null) {
             "$status:$incompleteReason"
         } else {
@@ -193,14 +195,14 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             parseUsage(response?.get("usage") as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             addAll(state.finish(
                 finishReason = finishReason,
-                responseId = response?.get("id")?.jsonPrimitive?.contentOrNull,
-                model = response?.get("model")?.jsonPrimitive?.contentOrNull,
+                responseId = response?.get("id")?.jsonPrimitiveOrNull?.contentOrNull,
+                model = response?.get("model")?.jsonPrimitiveOrNull?.contentOrNull,
             ))
         }
     }
 
     private fun failWithResponseError(payload: JsonObject): Nothing {
-        val response = payload["response"]?.jsonObject
+        val response = payload["response"]?.jsonObjectOrNull
         return failWithError(response?.get("error")?.takeUnless { it is JsonNull }
             ?: response
             ?: payload)
@@ -228,11 +230,11 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     private fun parseUsage(usage: JsonObject?): TokenUsage? {
         if (usage == null) return null
         return TokenUsage(
-            promptTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            completionTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            totalTokens = usage["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            promptTokens = usage["input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            completionTokens = usage["output_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            totalTokens = usage["total_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
             cachedTokens = usage["input_tokens_details"]?.jsonObjectOrNull
-                ?.get("cached_tokens")?.jsonPrimitive?.intOrNull ?: 0,
+                ?.get("cached_tokens")?.jsonPrimitiveOrNull?.intOrNull ?: 0,
         )
     }
 

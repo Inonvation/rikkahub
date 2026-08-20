@@ -7,7 +7,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
@@ -45,30 +44,30 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
             event.data.trim().split("\n").filter(String::isNotBlank).forEach { line ->
                 val payload = json.parseToJsonElement(line).jsonObject
                 payload["error"]?.let { throw it.parseErrorDetail() }
-                responseId = payload["id"]?.jsonPrimitive?.contentOrNull ?: responseId
-                responseModel = payload["model"]?.jsonPrimitive?.contentOrNull ?: responseModel
+                responseId = payload["id"]?.jsonPrimitiveOrNull?.contentOrNull ?: responseId
+                responseModel = payload["model"]?.jsonPrimitiveOrNull?.contentOrNull ?: responseModel
 
-                payload["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.let { choice ->
+                payload["choices"]?.jsonArrayOrNull?.firstOrNull()?.jsonObject?.let { choice ->
                     (choice["delta"]?.jsonObject ?: choice["message"]?.jsonObject)?.let { message ->
                         val messageWithoutTools = JsonObject(message.filterKeys { it != "tool_calls" })
                         addAll(streamState.append(parseMessage(messageWithoutTools), responseId))
 
-                        message["tool_calls"]?.jsonArray?.forEachIndexed { fallbackIndex, element ->
+                        message["tool_calls"]?.jsonArrayOrNull?.forEachIndexed { fallbackIndex, element ->
                             val toolCall = element.jsonObject
-                            val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
-                            val toolId = toolCall["id"]?.jsonPrimitive?.contentOrNull
+                            val index = toolCall["index"]?.jsonPrimitiveOrNull?.intOrNull ?: fallbackIndex
+                            val toolId = toolCall["id"]?.jsonPrimitiveOrNull?.contentOrNull
                                 ?.also { toolIdsByIndex[index] = it }
                                 ?: toolIdsByIndex.getOrPut(index) {
                                     "${responseId ?: "response"}:tool-$index"
                                 }
-                            val function = toolCall["function"]?.jsonObject
+                            val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
                                 UIMessage(
                                     role = MessageRole.ASSISTANT,
                                     parts = listOf(UIMessagePart.Tool(
                                         toolCallId = toolId,
-                                        toolName = function?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
-                                        input = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: "",
+                                        toolName = function?.get("name")?.jsonPrimitiveOrNull?.contentOrNull ?: "",
+                                        input = function?.get("arguments")?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                                         output = emptyList(),
                                     )),
                                 ),
@@ -76,7 +75,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                             ))
                         }
                     }
-                    choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
+                    choice["finish_reason"]?.jsonPrimitiveOrNull?.contentOrNull?.let { finishReason = it }
                 }
                 parseUsage(payload["usage"] as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             }
@@ -94,7 +93,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
 
     private fun parseMessage(payload: JsonObject): UIMessage {
         val role = MessageRole.valueOf(
-            payload["role"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "ASSISTANT"
+            payload["role"]?.jsonPrimitiveOrNull?.contentOrNull?.uppercase() ?: "ASSISTANT"
         )
         val content = payload["content"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
         val reasoning = payload["reasoning_content"]?.jsonPrimitiveOrNull?.contentOrNull
@@ -121,9 +120,9 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                 if (content.isNotEmpty()) add(UIMessagePart.Text(content))
                 images.forEach { image ->
                     val imageObject = image.jsonObjectOrNull ?: return@forEach
-                    if (imageObject["type"]?.jsonPrimitive?.contentOrNull != "image_url") return@forEach
+                    if (imageObject["type"]?.jsonPrimitiveOrNull?.contentOrNull != "image_url") return@forEach
                     val url = imageObject["image_url"]?.jsonObjectOrNull
-                        ?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
+                        ?.get("url")?.jsonPrimitiveOrNull?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
                     // 按 ;base64, 通用切分，避免硬编码 png 导致 jpeg/webp 保留前缀（二次包裹损坏）
                     add(UIMessagePart.Image(url.substringAfter(";base64,")))
@@ -137,7 +136,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         if (details == null) return null
         details.forEachIndexed { fallbackIndex, element ->
             val incoming = element.jsonObject
-            val index = incoming["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
+            val index = incoming["index"]?.jsonPrimitiveOrNull?.intOrNull ?: fallbackIndex
             reasoningDetailsByIndex[index] = mergeReasoningDetail(reasoningDetailsByIndex[index], incoming)
         }
         return OpenRouterReasoningMetadata(
@@ -159,13 +158,13 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     }
 
     private fun parseAnnotations(array: JsonArray): List<UIMessageAnnotation> = array.map { element ->
-        val type = element.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: error("type is null")
+        val type = element.jsonObject["type"]?.jsonPrimitiveOrNull?.contentOrNull ?: error("type is null")
         when (type) {
             "url_citation" -> UIMessageAnnotation.UrlCitation(
                 title = element.jsonObject["url_citation"]?.jsonObject
-                    ?.get("title")?.jsonPrimitive?.contentOrNull ?: "",
+                    ?.get("title")?.jsonPrimitiveOrNull?.contentOrNull ?: "",
                 url = element.jsonObject["url_citation"]?.jsonObject
-                    ?.get("url")?.jsonPrimitive?.contentOrNull ?: "",
+                    ?.get("url")?.jsonPrimitiveOrNull?.contentOrNull ?: "",
             )
             else -> error("unknown annotation type: $type")
         }
@@ -174,13 +173,13 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private fun parseUsage(usage: JsonObject?): TokenUsage? {
         if (usage == null) return null
         return TokenUsage(
-            promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            completionTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            totalTokens = usage["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            promptTokens = usage["prompt_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            completionTokens = usage["completion_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            totalTokens = usage["total_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
             cachedTokens = usage["prompt_tokens_details"]?.jsonObjectOrNull
-                ?.get("cached_tokens")?.jsonPrimitive?.intOrNull
-                ?: usage["cached_tokens"]?.jsonPrimitive?.intOrNull
-                ?: usage["prompt_cache_hit_tokens"]?.jsonPrimitive?.intOrNull
+                ?.get("cached_tokens")?.jsonPrimitiveOrNull?.intOrNull
+                ?: usage["cached_tokens"]?.jsonPrimitiveOrNull?.intOrNull
+                ?: usage["prompt_cache_hit_tokens"]?.jsonPrimitiveOrNull?.intOrNull
                 ?: 0,
         )
     }

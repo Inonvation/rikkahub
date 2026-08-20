@@ -107,13 +107,13 @@ class ChatCompletionsAPI(
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息
-        val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
-        val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
+        val id = bodyJson["id"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val model = bodyJson["model"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val choice = bodyJson["choices"]?.jsonArrayOrNull?.get(0)?.jsonObjectOrNull ?: error("choices is null")
 
-        val message = choice["message"]?.jsonObject ?: throw Exception("message is null")
+        val message = choice["message"]?.jsonObjectOrNull ?: throw Exception("message is null")
         val finishReason = choice["finish_reason"]
-            ?.jsonPrimitive
+            ?.jsonPrimitiveOrNull
             ?.content
             ?: "unknown"
         val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
@@ -695,7 +695,7 @@ class ChatCompletionsAPI(
 
     private fun parseMessage(jsonObject: JsonObject): UIMessage {
         val role = MessageRole.valueOf(
-            jsonObject["role"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "ASSISTANT"
+            jsonObject["role"]?.jsonPrimitiveOrNull?.contentOrNull?.uppercase() ?: "ASSISTANT"
         )
 
         // 也许支持其他模态的输出content?
@@ -705,7 +705,7 @@ class ChatCompletionsAPI(
             ?: jsonObject["content"]?.takeIf { it is JsonArray }?.let { arr ->
                 // Mistral接口
                 // {"id":"","object":"chat.completion.chunk","created":1772351733,"model":"magistral-medium-2509","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"好的"}]}]},"finish_reason":null}]}
-                arr.jsonArrayOrNull?.getOrNull(0)?.jsonObject?.get("thinking")?.jsonArrayOrNull?.getOrNull(0)?.jsonObjectOrNull?.get(
+                arr.jsonArrayOrNull?.getOrNull(0)?.jsonObjectOrNull?.get("thinking")?.jsonArrayOrNull?.getOrNull(0)?.jsonObjectOrNull?.get(
                     "text"
                 )?.jsonPrimitiveOrNull?.contentOrNull
             }
@@ -729,13 +729,13 @@ class ChatCompletionsAPI(
                     )
                 }
                 toolCalls.forEach { toolCalls ->
-                    val type = toolCalls.jsonObject["type"]?.jsonPrimitive?.contentOrNull
+                    val type = toolCalls.jsonObject["type"]?.jsonPrimitiveOrNull?.contentOrNull
                     if (!type.isNullOrEmpty() && type != "function") error("tool call type not supported: $type")
-                    val toolCallId = toolCalls.jsonObject["id"]?.jsonPrimitive?.contentOrNull
+                    val toolCallId = toolCalls.jsonObject["id"]?.jsonPrimitiveOrNull?.contentOrNull
                     val toolName =
-                        toolCalls.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+                        toolCalls.jsonObject["function"]?.jsonObjectOrNull?.get("name")?.jsonPrimitiveOrNull?.contentOrNull
                     val arguments =
-                        toolCalls.jsonObject["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.contentOrNull
+                        toolCalls.jsonObject["function"]?.jsonObjectOrNull?.get("arguments")?.jsonPrimitiveOrNull?.contentOrNull
                     add(
                         UIMessagePart.Tool(
                             toolCallId = toolCallId ?: "",
@@ -748,9 +748,9 @@ class ChatCompletionsAPI(
                 if (content.isNotEmpty()) add(UIMessagePart.Text(content))
                 images.forEach { image ->
                     val imageObject = image.jsonObjectOrNull ?: return@forEach
-                    val type = imageObject["type"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    val type = imageObject["type"]?.jsonPrimitiveOrNull?.contentOrNull ?: return@forEach
                     if (type != "image_url") return@forEach
-                    val url = imageObject["image_url"]?.jsonObjectOrNull?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    val url = imageObject["image_url"]?.jsonObjectOrNull?.get("url")?.jsonPrimitiveOrNull?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
                     add(UIMessagePart.Image(url))
                 }
@@ -766,13 +766,13 @@ class ChatCompletionsAPI(
     private fun parseAnnotations(jsonArray: JsonArray): List<UIMessageAnnotation> {
         return jsonArray.map { element ->
             val type =
-                element.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: error("type is null")
+                element.jsonObject["type"]?.jsonPrimitiveOrNull?.contentOrNull ?: error("type is null")
             when (type) {
                 "url_citation" -> {
                     UIMessageAnnotation.UrlCitation(
-                        title = element.jsonObject["url_citation"]?.jsonObject?.get("title")?.jsonPrimitive?.contentOrNull
+                        title = element.jsonObject["url_citation"]?.jsonObjectOrNull?.get("title")?.jsonPrimitiveOrNull?.contentOrNull
                             ?: "",
-                        url = element.jsonObject["url_citation"]?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+                        url = element.jsonObject["url_citation"]?.jsonObjectOrNull?.get("url")?.jsonPrimitiveOrNull?.contentOrNull
                             ?: "",
                     )
                 }
@@ -785,14 +785,14 @@ class ChatCompletionsAPI(
     private fun parseTokenUsage(jsonObject: JsonObject?): TokenUsage? {
         if (jsonObject == null) return null
         return TokenUsage(
-            promptTokens = jsonObject["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            completionTokens = jsonObject["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            totalTokens = jsonObject["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            promptTokens = jsonObject["prompt_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            completionTokens = jsonObject["completion_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
+            totalTokens = jsonObject["total_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0,
             // 各 provider 汇报缓存命中的字段形状不统一，按方言兜底解析（#1576）：
             // OpenAI 嵌套 -> Moonshot 顶层 cached_tokens -> DeepSeek prompt_cache_hit_tokens
-            cachedTokens = jsonObject["prompt_tokens_details"]?.jsonObjectOrNull?.get("cached_tokens")?.jsonPrimitive?.intOrNull
-                ?: jsonObject["cached_tokens"]?.jsonPrimitive?.intOrNull
-                ?: jsonObject["prompt_cache_hit_tokens"]?.jsonPrimitive?.intOrNull
+            cachedTokens = jsonObject["prompt_tokens_details"]?.jsonObjectOrNull?.get("cached_tokens")?.jsonPrimitiveOrNull?.intOrNull
+                ?: jsonObject["cached_tokens"]?.jsonPrimitiveOrNull?.intOrNull
+                ?: jsonObject["prompt_cache_hit_tokens"]?.jsonPrimitiveOrNull?.intOrNull
                 ?: 0
         )
     }

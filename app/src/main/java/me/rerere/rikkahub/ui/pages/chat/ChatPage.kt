@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -109,8 +109,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
@@ -319,7 +321,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatListState = rememberLazyListState()
+    val chatListState = remember(conversation.id) { LazyListState() }
+    val chatListUserDragging by chatListState.interactionSource.collectIsDraggedAsState()
     // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次。
     // 消息是异步加载的：若加载完成前用户已开始滑动（列表离开初始位置，或正在滚动中），
     // 不再强制拉回底部——避免"切换历史会话后一滑动就被 requestScrollToItem 拽回底部"的跳变。
@@ -328,13 +331,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
-                    chatListState.scrollToItem(index)
+                    chatListState.scrollToItemWhenReady(index, chatListUserDragging)
                 }
-            } else if (!chatListState.isScrollInProgress &&
-                chatListState.firstVisibleItemIndex == 0 &&
-                chatListState.firstVisibleItemScrollOffset == 0
-            ) {
-                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+            } else {
+                if (loadingJob == null) {
+                    chatListState.scrollToItemWhenReady(
+                        conversation.messageNodes.lastIndex,
+                        chatListUserDragging,
+                    )
+                } else {
+                    chatListState.scrollToSafeBottom(userDragging = chatListUserDragging)
+                }
             }
             vm.chatListInitialized = true
         }
@@ -403,6 +410,8 @@ private fun ChatPageContent(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val isUserDragging by chatListState.interactionSource.collectIsDraggedAsState()
+    var pendingScrollAfterSend by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
@@ -424,6 +433,13 @@ private fun ChatPageContent(
 
     // 排队中的引导消息列表（生成中发送后以独立气泡显示在输入框上方右对齐，等 AI 回合结束依次注入）
     val pendingGuidance by vm.pendingGuidance.collectAsStateWithLifecycle()
+
+    LaunchedEffect(pendingScrollAfterSend, conversation.messageNodes.size) {
+        if (pendingScrollAfterSend) {
+            chatListState.scrollToSafeBottom(userDragging = isUserDragging)
+            pendingScrollAfterSend = false
+        }
+    }
 
     // 当前会话活跃子代理任务数（运行时输入框左侧显示子代理图标 + 数量角标）。
     // distinctUntilChanged：只在计数变化时通知（0→N→0），子代理流式更新期间
@@ -575,14 +591,10 @@ private fun ChatPageContent(
                                 val guidanceText = inputState.textContent.text.toString()
                                 vm.sendGuidance(guidanceText)
                             }
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
+                            pendingScrollAfterSend = true
                         } else {
                             vm.handleMessageSend(inputState.getContents())
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
+                            pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
                         vm.clearDraft()
@@ -595,9 +607,7 @@ private fun ChatPageContent(
                             )
                         } else {
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
+                            pendingScrollAfterSend = true
                         }
                         inputState.clearInput()
                         vm.clearDraft()
@@ -676,7 +686,7 @@ private fun ChatPageContent(
                     // 提供滚动折叠：吸顶条点击时按像素量平滑滚动列表（上滚收起思考 / 下滚解除吸顶）。
                     // 挂起函数，调用方在协程中调用并等待完成（如"先滚到位再折叠"的顺序执行）。
                     LocalScrollThinkingHeaderToPin provides { delta ->
-                        scrollListByDelta(chatListState, delta)
+                        scrollListByDelta(chatListState, delta, isUserDragging)
                     },
                 ) {
                 Box(
@@ -1488,7 +1498,44 @@ private fun TodoItemRow(item: TodoItem) {
  * 此前用"首可见 item offset - delta"锚点换算 animateScrollToItem，
  * 折叠时 item 高度变化会换锚点，方向和落点都会失真；直接 scrollBy 不受锚点影响。
  */
-private suspend fun scrollListByDelta(state: LazyListState, delta: Float) {
+private suspend fun scrollListByDelta(
+    state: LazyListState,
+    delta: Float,
+    userDragging: Boolean = false,
+) {
     if (delta == 0f) return
+    if (userDragging || state.isScrollInProgress) {
+        return
+    }
     state.scrollBy(delta)
+}
+
+private suspend fun LazyListState.scrollToItemWhenReady(
+    index: Int,
+    userDragging: Boolean = false,
+) {
+    if (userDragging) return
+    withTimeoutOrNull(1_000) {
+        snapshotFlow { layoutInfo.totalItemsCount }.first { it > 0 }
+        scrollToItem(index)
+    }
+}
+
+private suspend fun LazyListState.scrollToSafeBottom(
+    requireInitialPosition: Boolean = false,
+    userDragging: Boolean = false,
+) {
+    if (userDragging) return
+    withTimeoutOrNull(1_000) {
+        snapshotFlow { layoutInfo.totalItemsCount }.first { it > 0 }
+        if (isScrollInProgress) {
+            snapshotFlow { isScrollInProgress }.first { !it }
+        }
+        val userMoved = requireInitialPosition &&
+            (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0)
+        if (!userMoved && !isScrollInProgress) {
+            val target = layoutInfo.totalItemsCount - 1
+            scrollToItem(target)
+        }
+    }
 }
