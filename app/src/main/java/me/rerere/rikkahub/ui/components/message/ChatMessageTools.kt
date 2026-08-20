@@ -125,35 +125,6 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
 }
 
 @Composable
-fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
-    val loading = !tool.isFinished
-    ChainOfThoughtStep(
-        icon = {
-            if (loading) {
-                DotLoading(size = 10.dp)
-            } else {
-                Icon(
-                    imageVector = HugeIcons.Tools,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = LocalContentColor.current.copy(alpha = 0.7f),
-                )
-            }
-        },
-        label = {
-            Text(
-                text = stringResource(R.string.chat_message_tool_call_generic, tool.toolName),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-    )
-}
-
-@Composable
 fun ChainOfThoughtScope.ChatMessageToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean = false,
