@@ -48,11 +48,12 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.message.ReasoningFoldArrow
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
-private val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
+internal val LocalCardColor = staticCompositionLocalOf { Color.Unspecified }
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。
@@ -216,6 +217,9 @@ interface ChainOfThoughtScope {
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
+        modifier: Modifier = Modifier,
+        /** 应用到步骤头部行的修饰符（思考步骤用它实现滚动吸顶冻结） */
+        headerModifier: Modifier = Modifier,
         content: (@Composable () -> Unit)? = null,
     )
 
@@ -243,6 +247,9 @@ interface ChainOfThoughtScope {
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
+        modifier: Modifier = Modifier,
+        /** 应用到步骤头部行的修饰符（思考步骤用它实现滚动吸顶冻结） */
+        headerModifier: Modifier = Modifier,
         contentVisible: Boolean = expanded,
         content: (@Composable () -> Unit)? = null,
     )
@@ -256,6 +263,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
+        modifier: Modifier,
+        headerModifier: Modifier,
         content: @Composable (() -> Unit)?
     ) {
         var expanded by remember { mutableStateOf(false) }
@@ -265,6 +274,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             extra = extra,
             onClick = onClick,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
+            modifier = modifier,
+            headerModifier = headerModifier,
             expanded = expanded,
             onExpandedChange = { expanded = it },
             contentVisible = expanded,
@@ -281,6 +292,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
+        modifier: Modifier,
+        headerModifier: Modifier,
         contentVisible: Boolean,
         content: @Composable (() -> Unit)?
     ) {
@@ -290,6 +303,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             extra = extra,
             onClick = onClick,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
+            modifier = modifier,
+            headerModifier = headerModifier,
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
@@ -304,6 +319,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
+        modifier: Modifier,
+        headerModifier: Modifier,
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
@@ -314,7 +331,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         val hapticController = rememberHaptic()
 
         Column(
-            modifier = Modifier.then(
+            modifier = modifier.then(
                 if (shouldFillMaxWidth) {
                     Modifier.fillMaxWidth()
                 } else {
@@ -324,7 +341,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         ) {
             // Label 行：Icon + Label + Extra + 指示器
             Row(
-                modifier = Modifier
+                modifier = headerModifier.then(
+                    Modifier
                     .then(
                         if (shouldFillMaxWidth) {
                             Modifier.fillMaxWidth()
@@ -335,17 +353,18 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     .then(
                         if (onClick != null) {
                             Modifier
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() }
                         } else if (hasContent) {
                             Modifier
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onExpandedChange(!expanded) }
                         } else {
                             Modifier
                         }
                     )
-                    .padding(vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -405,11 +424,9 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (hasContent) {
-                    Icon(
-                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ReasoningFoldArrow(
+                        contentVisible = contentVisible,
+                        folded = false,
                     )
                 }
             }

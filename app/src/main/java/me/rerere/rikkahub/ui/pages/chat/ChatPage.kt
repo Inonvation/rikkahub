@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,8 +60,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -70,6 +69,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,6 +86,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -102,6 +104,7 @@ import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -154,6 +157,10 @@ import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
+import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
+import me.rerere.rikkahub.ui.components.message.LocalScrollThinkingHeaderToPin
+import me.rerere.rikkahub.ui.components.message.ThinkingFreezeState
+import me.rerere.rikkahub.ui.components.message.ThinkingFrozenBar
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -313,7 +320,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val chatListState = rememberLazyListState()
-    // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次
+    // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次。
+    // 消息是异步加载的：若加载完成前用户已开始滑动（列表离开初始位置，或正在滚动中），
+    // 不再强制拉回底部——避免"切换历史会话后一滑动就被 requestScrollToItem 拽回底部"的跳变。
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
             if (nodeId != null) {
@@ -321,7 +330,10 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 if (index >= 0) {
                     chatListState.scrollToItem(index)
                 }
-            } else {
+            } else if (!chatListState.isScrollInProgress &&
+                chatListState.firstVisibleItemIndex == 0 &&
+                chatListState.firstVisibleItemScrollOffset == 0
+            ) {
                 chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
             }
             vm.chatListInitialized = true
@@ -399,6 +411,8 @@ private fun ChatPageContent(
     // 点击助手名称弹出助手选择器（切换助手后新开聊天窗口）
     var showAssistantPicker by remember { mutableStateOf(false) }
     val hazeState = rememberHazeState()
+    // 思考冻结栏：折叠按钮被顶栏遮住时，在顶栏下方悬浮显示便于折叠
+    val thinkingFreezeState = remember { ThinkingFreezeState() }
     val assistant = setting.getCurrentAssistant()
     // 订阅本会话 todo 状态（TodoStorage 是唯一状态源，写入时实时刷新 banner）
     val todolist by todoStorage.loadAsFlow(conversation.id.toString())
@@ -657,7 +671,21 @@ private fun ChatPageContent(
                     .padding(innerPadding),
             ) {
                 // 消息列表区：Column 已应用 innerPadding，ChatList 不再自己加 padding
-                Box(modifier = Modifier.weight(1f)) {
+                CompositionLocalProvider(
+                    LocalThinkingFreezeState provides thinkingFreezeState,
+                    // 提供滚动折叠：吸顶条点击时按像素量平滑滚动列表（上滚收起思考 / 下滚解除吸顶）。
+                    // 挂起函数，调用方在协程中调用并等待完成（如"先滚到位再折叠"的顺序执行）。
+                    LocalScrollThinkingHeaderToPin provides { delta ->
+                        scrollListByDelta(chatListState, delta)
+                    },
+                ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onGloballyPositioned { coords ->
+                            thinkingFreezeState.topBarBottomY = coords.positionInWindow().y.roundToInt()
+                        }
+                ) {
                 AnimatedContent(
                     targetState = conversation.id,
                     transitionSpec = {
@@ -745,6 +773,13 @@ private fun ChatPageContent(
             )
             }
 
+            // 悬浮吸顶条：绘制于列表之上，顶部对齐列表区（顶栏正下方，无间距）。
+            // 只由 activeSection（注册的思考步骤中头部滚入冻结区的那个）驱动显隐。
+            ThinkingFrozenBar(
+                state = thinkingFreezeState,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+
             if (showAssistantPicker) {
                 AssistantPickerSheet(
                     settings = setting,
@@ -761,6 +796,7 @@ private fun ChatPageContent(
                 )
             }
 
+            }
             }
             }
         }
@@ -1445,3 +1481,14 @@ private fun TodoItemRow(item: TodoItem) {
     }
 }
 
+
+/**
+ * 按像素量平滑滚动 LazyListState。
+ * 正数向上滚（内容上移），负数向下滚（内容下移）。
+ * 此前用"首可见 item offset - delta"锚点换算 animateScrollToItem，
+ * 折叠时 item 高度变化会换锚点，方向和落点都会失真；直接 scrollBy 不受锚点影响。
+ */
+private suspend fun scrollListByDelta(state: LazyListState, delta: Float) {
+    if (delta == 0f) return
+    state.scrollBy(delta)
+}

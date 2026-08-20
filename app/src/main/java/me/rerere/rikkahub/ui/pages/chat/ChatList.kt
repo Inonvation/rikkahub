@@ -12,10 +12,12 @@ import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -107,6 +109,7 @@ import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownNewCache
@@ -276,13 +279,27 @@ private fun ChatListNormal(
     // workspace 图片/链接点击 → 应用内预览（ImagePreviewDialog）
     var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
 
-    // 判断当前是否在列表底部（含输入栏高度修正），用于自动滚动跟随
+    // 判断当前是否在列表底部（含输入栏高度修正），用于自动滚动跟随。
+    // 注意：这是"最后一项完整可见"判定，底部 contentPadding(32dp) 留白范围内上滑仍会误报为贴底——
+    // 因此真正的"是否已滚到最大位置"用 isPinnedToBottom 精确判定，本函数仅用于跟随触发的宽容判定。
     fun List<LazyListItemInfo>.isAtBottom(): Boolean {
         val lastItem = lastOrNull() ?: return false
         val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
         val lastPos = lastItem.offset + lastItem.size
         val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
         return lastPos <= inputPos - 8
+    }
+
+    // 是否已滚到真正的底部（视口底边贴近内容末尾，8px 容差内）：
+    // 视口滚到最大位置时，最后一项底边距内容末尾恰为底部 contentPadding(afterContentPadding)，
+    // 上滑 d 像素后该距离变为 afterContentPadding - d，因此用
+    // (viewportEnd - lastPos) >= afterContentPadding - 8 即可精确判定贴底，无底部留白死区。
+    fun List<LazyListItemInfo>.isPinnedToBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        val lastPos = lastItem.offset + lastItem.size
+        val viewportEnd = state.layoutInfo.viewportEndOffset
+        val afterPadding = state.layoutInfo.afterContentPadding
+        return (viewportEnd - lastPos) >= (afterPadding - 8)
     }
 
     // 自动跟随键盘滚动
@@ -329,6 +346,7 @@ private fun ChatListNormal(
     val currentOnToggleFavorite = rememberUpdatedState(onToggleFavorite)
     val currentOnAssistantNameClick = rememberUpdatedState(onAssistantNameClick)
     val currentConversation = rememberUpdatedState(conversation)
+    val freezeState = LocalThinkingFreezeState.current
 
     Box(
         modifier = Modifier
@@ -336,14 +354,44 @@ private fun ChatListNormal(
     ) {
         // 自动滚动到底部：生成加载中且用户在底部时，跟随输出滚动。
         // requestScrollToItem 内部有去抖，避免频繁触发重布局。
+        // 上滑锁定：用户一旦主动上滑（哪怕仍在底部留白死区内，isAtBottom 仍为 true），
+        // 立即暂停跟随，直到用户重新滚回真正的底部（isPinnedToBottom）才解除——
+        // 修复"生成收尾阶段 loading 仍为 true 的窗口期，刚上滑一点就被瞬间拉回底部"的跳变。
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                        }
+                var lastIdx = state.firstVisibleItemIndex
+                var lastOff = state.firstVisibleItemScrollOffset
+                var userScrolledUp = false
+                snapshotFlow {
+                    Triple(
+                        state.layoutInfo.visibleItemsInfo,
+                        state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset,
+                        state.isScrollInProgress,
+                    )
+                }.collect { (visibleItemsInfo, pos, inProgress) ->
+                    val idx = pos.first
+                    val off = pos.second
+                    // 悬浮条折叠/展开是程序滚动，不是用户手势：
+                    // 滚动期间保持锁定，防止折叠动画刚结束就被拉回底部。
+                    val programmaticScroll = freezeState?.scrollingByProgram == true
+                    // 1) 用户在滚动中上滑 → 锁定，暂停自动跟随
+                    if (inProgress && !programmaticScroll) {
+                        val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
+                        if (movedUp) userScrolledUp = true
                     }
+                    if (programmaticScroll) {
+                        userScrolledUp = true
+                    }
+                    // 2) 滚回真正底部 → 解除锁定，恢复跟随
+                    if (!programmaticScroll && visibleItemsInfo.isPinnedToBottom()) {
+                        userScrolledUp = false
+                    }
+                    // 3) 跟随输出：仅当用户未滚动、在底部、且未主动上滑时
+                    if (!programmaticScroll && !inProgress && loadingState && !userScrolledUp && visibleItemsInfo.isAtBottom()) {
+                        state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
+                    }
+                    lastIdx = idx
+                    lastOff = off
                 }
             }
         }
@@ -545,8 +593,14 @@ private fun ChatListNormal(
                 }
             }
 
-            if (loading) {
-                item(LoadingIndicatorKey) {
+            // 常驻 item + 高度收缩动画：生成结束时加载行平滑收起，
+            // 避免整 item 瞬时移除导致列表末尾高度突变（贴底时 LazyColumn 锚点修正表现为跳变）
+            item(LoadingIndicatorKey) {
+                AnimatedVisibility(
+                    visible = loading,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
                     Row(
                         modifier = Modifier.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
