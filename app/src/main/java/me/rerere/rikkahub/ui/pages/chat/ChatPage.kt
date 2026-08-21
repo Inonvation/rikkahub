@@ -657,6 +657,9 @@ private fun ChatPageContent(
                     onUpdateChatModel = {
                         vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
                     },
+                    onOpenProviderSettings = {
+                        navController.navigate(Screen.SettingProvider)
+                    },
                     onUpdateAssistant = {
                         vm.updateSettings(
                             setting.copy(

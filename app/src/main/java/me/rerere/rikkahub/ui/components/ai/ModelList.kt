@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -167,6 +168,7 @@ fun ModelSelector(
     modifier: Modifier = Modifier,
     onlyIcon: Boolean = false,
     allowClear: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onSelect: (Model) -> Unit
 ) {
     val state = rememberModelListState(
@@ -217,12 +219,20 @@ fun ModelSelector(
             }
         }
     } else {
-        IconButton(
-            onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
-                state.open()
-            },
-            modifier = Modifier.size(40.dp),
+        val interactionSource = remember { MutableInteractionSource() }
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        state.open()
+                    },
+                    onLongClick = onLongClick,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
             if (model != null) {
                 AutoAIIcon(

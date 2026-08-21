@@ -158,6 +158,7 @@ fun ChatInput(
     conversation: Conversation,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
     onUpdateChatModel: (Model) -> Unit,
+    onOpenProviderSettings: () -> Unit = {},
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
@@ -313,7 +314,7 @@ fun ChatInput(
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
-                        horizontalAlignment = Alignment.Start,
+                        horizontalAlignment = Alignment.End,
                     ) {
                         pendingSends.forEach { item ->
                             PendingSendBubble(
@@ -382,6 +383,7 @@ fun ChatInput(
                                 },
                                 type = ModelType.CHAT,
                                 onlyIcon = true,
+                                onLongClick = onOpenProviderSettings,
                                 modifier = Modifier,
                             )
 
