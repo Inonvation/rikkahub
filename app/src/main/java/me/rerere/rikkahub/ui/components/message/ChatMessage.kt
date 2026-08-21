@@ -407,7 +407,8 @@ private fun MessagePartsBlock(
     val hasThinkingSteps = parts.any {
         it is UIMessagePart.Reasoning || it is UIMessagePart.Tool || it is UIMessagePart.ServerTool
     }
-    val hasProcessContent = finalOutputStart > 0 || hasThinkingSteps
+    val hasProcessContent =
+        role == MessageRole.ASSISTANT && (finalOutputStart > 0 || hasThinkingSteps)
     // 整体折叠：开启开关且消息完成后，过程内容折叠成"已处理 n分m秒"卡片，只保留最终输出
     var chainCollapsed by remember(nodeId, autoCollapseAll) {
         mutableStateOf(autoCollapseAll && !loading && hasProcessContent)
