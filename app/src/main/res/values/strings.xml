@@ -1357,6 +1357,15 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="translation_language_selection_title">Select Translation Language</string>
   <string name="translation_text">Translation</string>
   <string name="translator_page_cancel">Cancel</string>
+  <string name="translator_page_auto_detect">Auto-detect</string>
+  <string name="translator_page_source_title">Source</string>
+  <string name="translator_page_paste">Paste</string>
+  <string name="translator_page_clear">Clear</string>
+  <string name="translator_page_swap">Swap languages</string>
+  <string name="translator_page_clipboard_detected_title">Clipboard content detected</string>
+  <string name="translator_page_clipboard_detected_desc">Fill the detected text into the source and translate it now?</string>
+  <string name="translator_page_clipboard_confirm">Fill and translate</string>
+  <string name="translator_page_clipboard_dismiss">Not now</string>
   <string name="translator_page_input_placeholder">Enter text to translate...</string>
   <string name="translator_page_result_placeholder">Translation result will be shown here</string>
   <string name="translator_page_title">Translator</string>

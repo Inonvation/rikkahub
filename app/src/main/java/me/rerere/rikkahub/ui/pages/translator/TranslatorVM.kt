@@ -39,6 +39,10 @@ class TranslatorVM(
     private val _targetLanguage = MutableStateFlow(Locale.SIMPLIFIED_CHINESE)
     val targetLanguage: StateFlow<Locale> = _targetLanguage
 
+    // 源语言，null 表示自动检测
+    private val _sourceLanguage = MutableStateFlow<Locale?>(null)
+    val sourceLanguage: StateFlow<Locale?> = _sourceLanguage
+
     // 错误流
     val errorFlow = MutableSharedFlow<Throwable>()
 
@@ -52,11 +56,36 @@ class TranslatorVM(
     }
 
     fun updateInputText(text: String) {
+        if (_inputText.value == text) return
+        currentJob?.cancel()
+        _translating.value = false
         _inputText.value = text
+        _translatedText.value = ""
     }
 
     fun updateTargetLanguage(language: Locale) {
         _targetLanguage.value = language
+    }
+
+    fun updateSourceLanguage(language: Locale?) {
+        _sourceLanguage.value = language
+    }
+
+    fun swapLanguages() {
+        val source = _sourceLanguage.value
+        val target = _targetLanguage.value
+        _sourceLanguage.value = target
+        _targetLanguage.value = if (source != null) {
+            source
+        } else if (target.language == "zh") {
+            Locale.ENGLISH
+        } else {
+            Locale.getDefault()
+        }
+    }
+
+    fun clearInput() {
+        updateInputText("")
     }
 
     fun translate() {
@@ -78,7 +107,7 @@ class TranslatorVM(
                     targetLanguage = targetLanguage.value
                 ) { translatedText ->
                     // Update translation in real-time
-                    _translatedText.value = translatedText
+                    _translatedText.value = translatedText.trim()
                 }.collect { /* Final translation already handled in onStreamUpdate */ }
             }.onFailure {
                 it.printStackTrace()
