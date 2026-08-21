@@ -154,6 +154,8 @@ import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.resolveContextTokenLimit
+import me.rerere.rikkahub.ui.components.ai.autoCompressResetThreshold
+import me.rerere.rikkahub.ui.components.ai.autoCompressShouldTrigger
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
@@ -438,11 +440,25 @@ private fun ChatPageContent(
     // 思考冻结栏：折叠按钮被顶栏遮住时，在顶栏下方悬浮显示便于折叠
     val thinkingFreezeState = remember { ThinkingFreezeState() }
     val assistant = setting.getCurrentAssistant()
+    val modelContextTokenLimit = setting.getCurrentChatModel()?.modelId?.let {
+        ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
+    }
+    val effectiveContextTokenLimit = resolveContextTokenLimit(
+        modelContextTokenLimit = modelContextTokenLimit,
+        assistantContextTokenLimit = assistant.contextTokenLimit,
+    )
+    val totalTokens = conversation.currentMessages.sumOf { it.usage?.totalTokens ?: 0 }
+    val usagePercent = if (effectiveContextTokenLimit > 0) {
+        totalTokens / effectiveContextTokenLimit.toFloat()
+    } else {
+        0f
+    }
     // 订阅本会话 todo 状态（TodoStorage 是唯一状态源，写入时实时刷新 banner）
     val todolist by todoStorage.loadAsFlow(conversation.id.toString())
         .collectAsStateWithLifecycle(initialValue = null)
     var showFilesSheet by remember { mutableStateOf(false) }
     var showCompressDialog by remember { mutableStateOf(false) }
+    var autoCompressPrompted by remember(conversation.id) { mutableStateOf(false) }
     var showPromptOptimizeSheet by remember { mutableStateOf(false) }
     val promptOptimizeVM: PromptOptimizeVM = koinViewModel()
 
@@ -485,6 +501,33 @@ private fun ChatPageContent(
     }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+
+    LaunchedEffect(
+        conversation.id,
+        conversation.version,
+        setting.autoCompressEnabled,
+        setting.autoCompressThreshold,
+        loadingJob?.isActive,
+        usagePercent,
+    ) {
+        if (autoCompressShouldTrigger(
+                totalTokens = totalTokens,
+                contextTokenLimit = effectiveContextTokenLimit,
+                thresholdPercent = setting.autoCompressThreshold,
+                enabled = setting.autoCompressEnabled,
+            ) && loadingJob?.isActive != true && !autoCompressPrompted
+        ) {
+            autoCompressPrompted = true
+            vm.handleCompressContext(
+                additionalPrompt = "",
+                targetTokens = (effectiveContextTokenLimit / 2).coerceAtLeast(1),
+                keepRecentMessages = 32,
+            )
+        }
+        if (usagePercent * 100f < autoCompressResetThreshold(setting.autoCompressThreshold)) {
+            autoCompressPrompted = false
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Surface(
@@ -861,6 +904,16 @@ private fun ChatPageContent(
             CompressContextDialog(
                 contextTokenLimit = assistant.contextTokenLimit,
                 modelContextTokenLimit = modelContextTokenLimit,
+                autoCompressEnabled = setting.autoCompressEnabled,
+                autoCompressThreshold = setting.autoCompressThreshold,
+                onAutoCompressEnabledChange = { enabled ->
+                    vm.updateSettings(setting.copy(autoCompressEnabled = enabled))
+                },
+                onAutoCompressThresholdChange = { threshold ->
+                    vm.updateSettings(
+                        setting.copy(autoCompressThreshold = threshold.coerceIn(1, 100))
+                    )
+                },
                 onSaveContextTokenLimit = { newLimit ->
                     val effectiveLimit = newLimit.takeIf { it > 0 } ?: 128_000
                     vm.updateSettings(

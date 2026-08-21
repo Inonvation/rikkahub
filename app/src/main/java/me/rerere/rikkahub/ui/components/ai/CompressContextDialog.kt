@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,10 +43,27 @@ internal fun resolveContextTokenLimit(
     ?: assistantContextTokenLimit.takeIf { it > 0 }
     ?: DEFAULT_CONTEXT_TOKEN_LIMIT
 
+internal fun autoCompressShouldTrigger(
+    totalTokens: Int,
+    contextTokenLimit: Int,
+    thresholdPercent: Int,
+    enabled: Boolean,
+): Boolean {
+    if (!enabled || totalTokens <= 0 || contextTokenLimit <= 0) return false
+    return totalTokens.toFloat() / contextTokenLimit * 100f >= thresholdPercent.coerceIn(1, 100)
+}
+
+internal fun autoCompressResetThreshold(thresholdPercent: Int): Int =
+    (thresholdPercent - 10).coerceAtLeast(1)
+
 @Composable
 fun CompressContextDialog(
     contextTokenLimit: Int,
     modelContextTokenLimit: Int? = null,
+    autoCompressEnabled: Boolean,
+    autoCompressThreshold: Int,
+    onAutoCompressEnabledChange: (Boolean) -> Unit,
+    onAutoCompressThresholdChange: (Int) -> Unit,
     onSaveContextTokenLimit: (Int) -> Unit,
     onDismiss: () -> Unit,
     onCompress: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job
@@ -100,6 +118,30 @@ fun CompressContextDialog(
                     }
                 } else {
                     Text(stringResource(R.string.chat_page_compress_context_desc))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.chat_page_compress_auto_enable),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Switch(
+                            checked = autoCompressEnabled,
+                            onCheckedChange = onAutoCompressEnabledChange,
+                        )
+                    }
+
+                    if (autoCompressEnabled) {
+                        OutlinedNumberInput(
+                            value = autoCompressThreshold,
+                            onValueChange = { onAutoCompressThresholdChange(it.coerceIn(1, 100)) },
+                            label = stringResource(R.string.chat_page_compress_auto_threshold),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
 
                     // Context token limit input (for top bar indicator)
                     OutlinedNumberInput(

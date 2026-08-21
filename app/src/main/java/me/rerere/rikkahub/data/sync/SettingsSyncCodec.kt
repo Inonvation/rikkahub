@@ -45,6 +45,8 @@ object SettingsSyncCodec {
         "ocrPrompt",
         "compressModelId",
         "compressPrompt",
+        "autoCompressEnabled",
+        "autoCompressThreshold",
         "embeddingModelId",
         "rerankModelId",
         "promptOptimizeModelId",

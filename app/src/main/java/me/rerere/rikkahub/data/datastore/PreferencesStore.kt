@@ -126,6 +126,8 @@ class SettingsStore(
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
+        val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
+        val AUTO_COMPRESS_THRESHOLD = intPreferencesKey("auto_compress_threshold")
         val EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
         val RERANK_MODEL = stringPreferencesKey("rerank_model")
         val PROMPT_OPTIMIZE_MODEL = stringPreferencesKey("prompt_optimize_model")
@@ -260,6 +262,8 @@ class SettingsStore(
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+                autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] != false,
+                autoCompressThreshold = (preferences[AUTO_COMPRESS_THRESHOLD] ?: 80).coerceIn(1, 100),
                 embeddingModelId = preferences[EMBEDDING_MODEL]?.let { Uuid.parse(it) },
                 rerankModelId = preferences[RERANK_MODEL]?.let { Uuid.parse(it) },
                 promptOptimizeModelId = preferences[PROMPT_OPTIMIZE_MODEL]?.let { Uuid.parse(it) },
@@ -514,6 +518,8 @@ class SettingsStore(
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
+            preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
+            preferences[AUTO_COMPRESS_THRESHOLD] = settings.autoCompressThreshold.coerceIn(1, 100)
             settings.embeddingModelId?.let { preferences[EMBEDDING_MODEL] = it.toString() }
             settings.rerankModelId?.let { preferences[RERANK_MODEL] = it.toString() }
             settings.promptOptimizeModelId?.let { preferences[PROMPT_OPTIMIZE_MODEL] = it.toString() }
@@ -857,6 +863,8 @@ data class Settings(
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
+    val autoCompressEnabled: Boolean = true,
+    val autoCompressThreshold: Int = 80,
     val embeddingModelId: Uuid? = null,
     val rerankModelId: Uuid? = null,
     val promptOptimizeModelId: Uuid? = null,
