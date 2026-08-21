@@ -63,4 +63,11 @@ class ToolDurationFormatTest {
         assertTrue(toolFailed(tool))
         assertEquals(2, toolExitCode(tool))
     }
+
+    @Test
+    fun `failure prefers nonzero exit code from later segment`() {
+        val tool = toolWithOutput("""{"exitCode":0,"stdout":"ok"}""", """{"exitCode":7,"stderr":"boom"}""")
+        assertTrue(toolFailed(tool))
+        assertEquals(7, toolExitCode(tool))
+    }
 }

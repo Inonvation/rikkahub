@@ -58,7 +58,9 @@
     "ask_user_submit": "Submit",
     "ask_user_answered": "Answered",
     "running_duration": "Running {{duration}}",
-    "completed_duration": "Completed · {{duration}}"
+    "completed_duration": "Completed · {{duration}}",
+    "failed_duration": "Failed · {{duration}} (exit {{exitCode}})",
+    "failed_duration_generic": "Failed · {{duration}}"
   },
   "media_part": {
     "video_load_failed": "Failed to load video: {{url}}",

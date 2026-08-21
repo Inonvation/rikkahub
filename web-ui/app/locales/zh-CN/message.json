@@ -58,7 +58,9 @@
     "ask_user_submit": "提交",
     "ask_user_answered": "已回答",
     "running_duration": "执行中 {{duration}}",
-    "completed_duration": "完成 · {{duration}}"
+    "completed_duration": "完成 · {{duration}}",
+    "failed_duration": "失败 · {{duration}} (exit {{exitCode}})",
+    "failed_duration_generic": "失败 · {{duration}}"
   },
   "media_part": {
     "video_load_failed": "加载视频失败：{{url}}",

@@ -145,11 +145,14 @@ internal fun toolTextParts(tool: UIMessagePart.Tool): List<String> =
     tool.output.filterIsInstance<UIMessagePart.Text>().map { it.text }
 
 internal fun toolExitCode(tool: UIMessagePart.Tool): Int? {
+    var zeroCode: Int? = null
     for (text in toolTextParts(tool)) {
         val json = runCatching { JsonInstant.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: continue
-        json["exitCode"]?.jsonPrimitive?.intOrNull?.let { return it }
+        val code = json["exitCode"]?.jsonPrimitive?.intOrNull ?: continue
+        if (code != 0) return code
+        zeroCode = code
     }
-    return null
+    return zeroCode
 }
 
 internal fun toolFailed(tool: UIMessagePart.Tool): Boolean {

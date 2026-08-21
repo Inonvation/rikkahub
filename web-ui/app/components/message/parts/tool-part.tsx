@@ -152,34 +152,106 @@ function parseInstant(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function formatDuration(ms: number): string {
-  return `${(ms / 1000).toFixed(1)}s`;
+function parseMs(value: number | string | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatToolDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${(ms / 1000).toFixed(1)}s`;
+  if (minutes < 60) return `${minutes}m${String(seconds).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m${String(seconds).padStart(2, "0")}s`;
+}
+
+function toolTextParts(tool: UIToolPart): string[] {
+  return tool.output
+    .filter((part): part is UITextPart => part.type === "text")
+    .map((part) => part.text);
+}
+
+function getToolExitCode(tool: UIToolPart): number | undefined {
+  let zeroCode: number | undefined;
+  for (const text of toolTextParts(tool)) {
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown> | null;
+      if (parsed && typeof parsed.exitCode === "number") {
+        if (parsed.exitCode !== 0) return parsed.exitCode;
+        zeroCode = parsed.exitCode;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return zeroCode;
+}
+
+function hasErrorOutput(tool: UIToolPart): boolean {
+  for (const text of toolTextParts(tool)) {
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown> | null;
+      if (parsed) {
+        const error = parsed.error;
+        if (error !== undefined && error !== null && error !== "") return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 function ToolDurationLabel({ tool, loading }: { tool: UIToolPart; loading?: boolean }) {
   const { t } = useTranslation("message");
-  const started = React.useMemo(() => parseInstant(tool.startedAt), [tool.startedAt]);
-  const finished = React.useMemo(() => parseInstant(tool.finishedAt), [tool.finishedAt]);
+  const startedMs = React.useMemo(() => parseMs(tool.startedAtMs), [tool.startedAtMs]);
+  const finishedMs = React.useMemo(() => parseMs(tool.finishedAtMs), [tool.finishedAtMs]);
+  const startedAt = React.useMemo(() => parseInstant(tool.startedAt), [tool.startedAt]);
+  const finishedAt = React.useMemo(() => parseInstant(tool.finishedAt), [tool.finishedAt]);
   const [now, setNow] = React.useState<number>(Date.now());
+  const showTimer =
+    (startedMs !== null || startedAt !== null) &&
+    (finishedMs !== null || finishedAt !== null || loading);
 
   React.useEffect(() => {
-    if (finished !== null) return;
+    if (!showTimer || finishedMs !== null || finishedAt !== null) return;
     const timer = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(timer);
-  }, [finished]);
+  }, [showTimer, finishedMs, finishedAt]);
 
-  if (started === null) return null;
-  if (finished !== null) {
-    return (
-      <span className="text-muted-foreground text-xs">
-        {t("tool_part.completed_duration", { duration: formatDuration(finished - started) })}
-      </span>
-    );
+  if (!showTimer) return null;
+
+  const durationMs =
+    startedMs !== null && finishedMs !== null
+      ? finishedMs - startedMs
+      : startedAt !== null
+        ? (finishedAt ?? now) - startedAt
+        : startedMs !== null
+          ? (finishedMs ?? now) - startedMs
+          : 0;
+  const exitCode = getToolExitCode(tool);
+  const failed = (exitCode !== undefined && exitCode !== 0) || hasErrorOutput(tool);
+  const className = failed
+    ? "text-destructive text-xs shrink-0"
+    : "text-muted-foreground text-xs shrink-0";
+
+  if (finishedMs !== null || finishedAt !== null) {
+    const duration = formatToolDuration(durationMs);
+    const label = failed
+      ? exitCode !== undefined
+        ? t("tool_part.failed_duration", { duration, exitCode })
+        : t("tool_part.failed_duration_generic", { duration })
+      : t("tool_part.completed_duration", { duration });
+    return <span className={className}>{label}</span>;
   }
-  if (!loading) return null;
   return (
-    <span className="text-muted-foreground text-xs">
-      {t("tool_part.running_duration", { duration: formatDuration(now - started) })}
+    <span className={className}>
+      {t("tool_part.running_duration", { duration: formatToolDuration(durationMs) })}
     </span>
   );
 }
@@ -583,8 +655,10 @@ export function ToolPart({
           )
         }
         label={
-          <span className="flex min-w-0 flex-col">
-            <span className="text-foreground line-clamp-2 text-sm font-medium">{title}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="text-foreground line-clamp-2 min-w-0 flex-1 text-sm font-medium">
+              {title}
+            </span>
             <ToolDurationLabel tool={tool} loading={loading} />
           </span>
         }

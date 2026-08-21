@@ -56,6 +56,8 @@ export interface ToolPart extends BaseMessagePart {
   approvalState: ToolApprovalState;
   startedAt?: string | null;
   finishedAt?: string | null;
+  startedAtMs?: number | null;
+  finishedAtMs?: number | null;
 }
 
 /**
