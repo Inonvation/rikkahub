@@ -133,6 +133,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.resolveConversationPolicy
 import me.rerere.rikkahub.data.model.resolveModeRef
@@ -205,6 +206,23 @@ internal fun backgroundTextGenerationParams(
     customHeaders = model.customHeaders,
     customBody = model.customBodies,
 )
+
+/** 生成器回写的消息包含压缩摘要等 provider 专用消息，这里映射回展示历史：按 id 更新，新助手消息才追加。 */
+internal fun displayMessagesForChunk(
+    displayMessages: List<UIMessage>,
+    chunkMessages: List<UIMessage>,
+): List<UIMessage> {
+    val result = displayMessages.toMutableList()
+    chunkMessages.forEach { message ->
+        val index = result.indexOfFirst { it.id == message.id }
+        if (index >= 0) {
+            result[index] = message
+        } else if (message.role == MessageRole.ASSISTANT) {
+            result.add(message)
+        }
+    }
+    return result
+}
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -1535,12 +1553,13 @@ class ChatService(
             val session = getOrCreateSession(conversationId)
             var hasEmittedGenerationStarted = false
             // 生成用消息（重生成时是 messageRange 子序列）
-            val messagesToGenerate = conversation.currentMessages.let { msgs ->
-                if (messageRange != null) {
-                    msgs.subList(messageRange.start, messageRange.endInclusive + 1)
-                } else {
-                    msgs
-                }
+            val messagesToGenerate = if (messageRange != null) {
+                conversation.currentMessages.subList(
+                    messageRange.start,
+                    messageRange.endInclusive + 1,
+                )
+            } else {
+                conversation.effectiveMessages()
             }
             generationHandler.generateText(
                 settings = settings,
@@ -1820,8 +1839,14 @@ class ChatService(
                                 AppEvent.ChatGenerationStarted(conversationId = conversationId)
                             )
                         }
-                        val updatedConversation = getConversationFlow(conversationId).value
-                            .updateCurrentMessages(chunk.messages)
+                        val currentConversation = getConversationFlow(conversationId).value
+                        val updatedConversation = currentConversation
+                            .updateCurrentMessages(
+                                displayMessagesForChunk(
+                                    displayMessages = currentConversation.currentMessages,
+                                    chunkMessages = chunk.messages,
+                                )
+                            )
                         // 流式 chunk 只追加/更新消息内容，不会移除消息或附件，
                         // 跳过 checkFilesDelete 的全表文件扫描（每 chunk O(n)→O(1)）。
                         updateConversation(conversationId, updatedConversation, checkFiles = false)
@@ -2419,7 +2444,7 @@ class ChatService(
         val providerHandler = providerManager.getProviderByType(provider)
 
         val maxMessagesPerChunk = 256
-        val allMessages = conversation.currentMessages
+        val allMessages = conversation.effectiveMessages()
 
         // Split messages into those to compress and those to keep
         val messagesToCompress: List<UIMessage>
@@ -2471,15 +2496,19 @@ class ChatService(
                 .awaitAll()
         }
 
-        // Create new conversation with compressed history as multiple user messages + kept messages
-        val newMessageNodes = buildList {
+        // 只替换 AI 请求用的上下文快照，messageNodes 保留完整历史用于展示
+        val compressedContextMessages = buildList {
             compressedSummaries.forEach { summary ->
-                add(UIMessage.user(summary).toMessageNode())
+                add(UIMessage.user(summary))
             }
-            addAll(messagesToKeep.map { it.toMessageNode() })
+            addAll(messagesToKeep)
         }
         val newConversation = conversation.copy(
-            messageNodes = newMessageNodes,
+            compressedHistory = CompressedHistory(
+                messages = compressedContextMessages,
+                lastOriginalMessageId = conversation.currentMessages.lastOrNull()?.id,
+                summaryText = compressedSummaries.joinToString("\n\n"),
+            ),
             chatSuggestions = emptyList(),
         )
 

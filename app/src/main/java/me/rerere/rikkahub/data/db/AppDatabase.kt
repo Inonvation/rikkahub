@@ -51,6 +51,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_38_39
 import me.rerere.rikkahub.data.db.migrations.Migration_39_40
 import me.rerere.rikkahub.data.db.migrations.Migration_40_41
 import me.rerere.rikkahub.data.db.migrations.Migration_43_44
+import me.rerere.rikkahub.data.db.migrations.Migration_44_45
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -76,7 +77,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         GroupEntity::class,
         ManagementAuditEntity::class,
     ],
-    version = 44,
+    version = 45,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

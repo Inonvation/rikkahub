@@ -43,4 +43,6 @@ data class ConversationEntity(
     val discussionJson: String = "",
     @ColumnInfo("group_id", defaultValue = "")
     val groupId: String = "",
+    @ColumnInfo("compressed_json", defaultValue = "")
+    val compressedJson: String = "",
 )

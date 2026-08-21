@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.DiscussionConfig
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.sync.ConversationIndexEntry
@@ -626,6 +627,7 @@ class ConversationRepository(
                 folderId = local?.folderId,
                 discussion = local?.discussion,
                 groupId = local?.groupId,
+                compressedHistory = local?.compressedHistory,
                 syncUpdatedAt = newVersion,
             )
 
@@ -741,6 +743,9 @@ class ConversationRepository(
             folderId = conversation.folderId?.toString() ?: "",
             discussionJson = conversation.discussion?.let { JsonInstant.encodeToString(it) } ?: "",
             groupId = conversation.groupId?.toString() ?: "",
+            compressedJson = conversation.compressedHistory?.let {
+                JsonInstant.encodeToString(it)
+            } ?: "",
         )
     }
 
@@ -767,6 +772,9 @@ class ConversationRepository(
             discussion = conversationEntity.discussionJson.ifEmpty { null }
                 ?.let { runCatching { JsonInstant.decodeFromString<DiscussionConfig>(it) }.getOrNull() },
             groupId = conversationEntity.groupId.ifEmpty { null }?.let { Uuid.parse(it) },
+            compressedHistory = conversationEntity.compressedJson.ifEmpty { null }?.let {
+                runCatching { JsonInstant.decodeFromString<CompressedHistory>(it) }.getOrNull()
+            },
         )
     }
 

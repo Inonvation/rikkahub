@@ -45,6 +45,8 @@ data class Conversation(
     // 所属 AI 群组（多会话）。null = 非群组会话。
     // 群组会话的配置在 Group.config，discussion 字段已废弃（迁移后恒为 null）
     val groupId: Uuid? = null,
+    /** 压缩后的有效上下文快照；UI 仍显示完整 messageNodes，AI 请求优先使用 effectiveMessages() */
+    val compressedHistory: CompressedHistory? = null,
     @Transient
     val newConversation: Boolean = false
 ) {
@@ -71,6 +73,20 @@ data class Conversation(
                 }
             }
         }
+
+    /** AI 请求使用的消息：有压缩快照时用“摘要 + 保留消息 + 压缩后新增消息”，否则用完整历史。 */
+    fun effectiveMessages(): List<UIMessage> {
+        val compressed = compressedHistory ?: return currentMessages
+        val result = compressed.messages.toMutableList()
+        val lastOriginalMessageId = compressed.lastOriginalMessageId
+        if (lastOriginalMessageId != null) {
+            val index = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }
+            if (index >= 0) {
+                result += currentMessages.drop(index + 1)
+            }
+        }
+        return result
+    }
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
         // 用消息 id 定位而非 equals：UIMessage 是 data class，syncUpdatedAt 参与相等性，
@@ -135,6 +151,14 @@ data class Conversation(
         )
     }
 }
+
+/** 压缩后的上下文快照：摘要消息 + 保留的最近消息，lastOriginalMessageId 标记压缩时的最后一条原消息。 */
+@Serializable
+data class CompressedHistory(
+    val messages: List<UIMessage> = emptyList(),
+    val lastOriginalMessageId: Uuid? = null,
+    val summaryText: String = "",
+)
 
 @Serializable
 data class MessageNode(
