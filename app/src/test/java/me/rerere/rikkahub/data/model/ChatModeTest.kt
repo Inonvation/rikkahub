@@ -12,7 +12,13 @@ class ChatModeTest {
     private fun settings(
         defaultMode: String? = null,
         customModes: List<CustomModeConfig> = emptyList(),
-    ) = Settings(init = true, defaultMode = defaultMode, customModes = customModes)
+        builtinModeOverrides: Map<ChatMode, ChatModePolicy> = emptyMap(),
+    ) = Settings(
+        init = true,
+        defaultMode = defaultMode,
+        customModes = customModes,
+        builtinModeOverrides = builtinModeOverrides,
+    )
 
     private fun assistant(
         workspaceId: String? = null,
@@ -29,7 +35,7 @@ class ChatModeTest {
     fun standardPolicyMatchesMatrix() {
         val p = ChatMode.STANDARD.policy()
         assertTrue(p.allowMcpUse)
-        assertTrue(p.allowSkillUse)
+        assertFalse(p.allowSkillUse)
         assertTrue(p.allowMemory)
         assertTrue(p.allowTodo)
         assertTrue(p.allowSubAgent)
@@ -89,6 +95,36 @@ class ChatModeTest {
     }
 
     @Test
+    fun behaviorPromptIsIndependentFromToolSystemPrompt() {
+        val toolPromptOnly = ChatModePolicy(capabilities = setOf(Capability.TOOL_SYSTEM_PROMPT))
+        assertTrue(toolPromptOnly.includeToolSystemPrompt)
+        assertFalse(toolPromptOnly.includeAgentBehaviorPrompt)
+
+        val behaviorPromptOnly = ChatModePolicy(capabilities = setOf(Capability.AGENT_BEHAVIOR_PROMPT))
+        assertFalse(behaviorPromptOnly.includeToolSystemPrompt)
+        assertTrue(behaviorPromptOnly.includeAgentBehaviorPrompt)
+    }
+
+    @Test
+    fun minimalKeepsMinimalProfileWhenCapabilitiesChange() {
+        val override = ChatModePolicy(
+            capabilities = setOf(
+                Capability.LOCAL_TOOLS,
+                Capability.SEARCH,
+                Capability.DOCUMENT,
+                Capability.MCP_USE,
+            ),
+            behaviorProfileOverride = AgentBehaviorProfile.MINIMAL,
+        )
+        val p = ChatMode.MINIMAL.effectivePolicy(
+            settings(builtinModeOverrides = mapOf(ChatMode.MINIMAL to override))
+        )
+
+        assertEquals(AgentBehaviorProfile.MINIMAL, p.behaviorProfile)
+        assertTrue(p.includeAgentBehaviorPrompt)
+    }
+
+    @Test
     fun managementModeOpensAdminAndCreativeTools() {
         val p = ChatMode.CREATIVE.policy()
         assertTrue(p.allowWorkspace)
@@ -110,10 +146,10 @@ class ChatModeTest {
     @Test
     fun capabilityListMatchesModes() {
         assertEquals(
-            ChatModePolicy.DEFAULT_CAPABILITIES + Capability.SKILL_USE,
+            ChatModePolicy.DEFAULT_CAPABILITIES,
             ChatMode.STANDARD.policy().capabilities,
         )
-        assertTrue(Capability.SKILL_USE in ChatMode.STANDARD.policy().capabilities)
+        assertFalse(Capability.SKILL_USE in ChatMode.STANDARD.policy().capabilities)
         assertTrue(Capability.WORKSPACE in ChatMode.PTC.policy().capabilities)
         assertTrue(Capability.TRUSTED_FOLDER in ChatMode.PTC.policy().capabilities)
         assertEquals(
@@ -214,6 +250,29 @@ class ChatModeTest {
         assertEquals(
             ChatMode.STANDARD.policy(),
             resolveConversationPolicy(conversation(null), assistantCustom, settings(), false),
+        )
+    }
+
+    @Test
+    fun builtinOverridesTakeEffectInConversationResolution() {
+        val override = ChatModePolicy(capabilities = setOf(Capability.LOCAL_TOOLS, Capability.SEARCH))
+        val settingsWithOverride = settings(
+            defaultMode = ChatMode.STANDARD.name,
+            builtinModeOverrides = mapOf(ChatMode.STANDARD to override),
+        )
+
+        assertEquals(
+            override,
+            resolveConversationPolicy(conversation(null), assistant(), settingsWithOverride, false),
+        )
+        assertEquals(
+            override,
+            resolveConversationPolicy(
+                conversation(ChatMode.STANDARD.name),
+                assistant(),
+                settingsWithOverride,
+                false,
+            ),
         )
     }
 }

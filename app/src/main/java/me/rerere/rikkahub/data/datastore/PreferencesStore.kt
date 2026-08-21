@@ -49,7 +49,11 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.ChatMode
+import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
+import me.rerere.rikkahub.data.model.ModeRefs
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
@@ -86,7 +90,7 @@ private val Context.settingsStore by preferencesDataStore(
 )
 
 class SettingsStore(
-    context: Context,
+    private val context: Context,
     scope: AppScope,
 ) : KoinComponent {
     companion object {
@@ -215,6 +219,7 @@ class SettingsStore(
         val COST_CURRENCY = stringPreferencesKey("cost_currency")
         val DEFAULT_MODE = stringPreferencesKey("default_mode")
         val CUSTOM_MODES = stringPreferencesKey("custom_modes")
+        val BUILTIN_MODE_OVERRIDES = stringPreferencesKey("builtin_mode_overrides")
         val COST_USD_CNY_RATE = doublePreferencesKey("cost_usd_cny_rate")
 
         // 远端同步
@@ -356,6 +361,9 @@ class SettingsStore(
                 customModes = preferences[CUSTOM_MODES]?.let {
                     runCatching { JsonInstant.decodeFromString<List<CustomModeConfig>>(it) }.getOrNull()
                 } ?: emptyList(),
+                builtinModeOverrides = preferences[BUILTIN_MODE_OVERRIDES]?.let {
+                    runCatching { JsonInstant.decodeFromString<Map<ChatMode, ChatModePolicy>>(it) }.getOrNull()
+                } ?: emptyMap(),
                 costUsdCnyRate = preferences[COST_USD_CNY_RATE]?.takeIf { it > 0 } ?: 7.2,
                 modelPricingOverrides = preferences[MODEL_PRICING]?.let {
                     runCatching { JsonInstant.decodeFromString<List<ModelPricingConfig>>(it) }.getOrNull()
@@ -582,6 +590,7 @@ class SettingsStore(
             settings.defaultMode?.let { preferences[DEFAULT_MODE] = it }
                 ?: preferences.remove(DEFAULT_MODE)
             preferences[CUSTOM_MODES] = JsonInstant.encodeToString(settings.customModes)
+            preferences[BUILTIN_MODE_OVERRIDES] = JsonInstant.encodeToString(settings.builtinModeOverrides)
             preferences[COST_USD_CNY_RATE] = settings.costUsdCnyRate.coerceAtLeast(1.0)
             preferences[MODEL_PRICING] = JsonInstant.encodeToString(settings.modelPricingOverrides)
             preferences[SYNC_CONFIG] = JsonInstant.encodeToString(settings.syncConfig)
@@ -652,8 +661,93 @@ class SettingsStore(
         }
     }
 
-    suspend fun updateCustomModes(modes: List<CustomModeConfig>) {
-        update { settings -> settings.copy(customModes = modes) }
+    fun isModeNameTaken(name: String, excludingId: String? = null): Boolean {
+        val builtinNames = ChatMode.entries.flatMap { mode ->
+            listOf(
+                mode.name,
+                context.getString(
+                    when (mode) {
+                        ChatMode.STANDARD -> R.string.chat_mode_standard
+                        ChatMode.PTC -> R.string.chat_mode_ptc
+                        ChatMode.MINIMAL -> R.string.chat_mode_minimal
+                        ChatMode.CREATIVE -> R.string.chat_mode_creative
+                    }
+                ),
+            )
+        }
+        return name.isBlank() ||
+            builtinNames.any { it.equals(name, ignoreCase = true) } ||
+            settingsFlow.value.customModes.any { it.id != excludingId && it.name.equals(name, ignoreCase = true) }
+    }
+
+    suspend fun upsertCustomMode(mode: CustomModeConfig) {
+        update { settings ->
+            val updated = if (settings.customModes.any { it.id == mode.id }) {
+                settings.customModes.map { if (it.id == mode.id) mode else it }
+            } else {
+                settings.customModes + mode
+            }
+            settings.copy(customModes = updated)
+        }
+    }
+
+    suspend fun duplicateCustomMode(mode: CustomModeConfig) {
+        update { settings ->
+            val baseName = mode.name.ifBlank { "自定义模式" }
+            var name = "${baseName} 副本"
+            var index = 2
+            while (settings.customModes.any { it.name == name }) {
+                name = "${baseName} 副本 $index"
+                index++
+            }
+            val copy = mode.copy(
+                id = Uuid.random().toString(),
+                name = name,
+            )
+            settings.copy(customModes = settings.customModes + copy)
+        }
+    }
+
+    suspend fun importCustomMode(mode: CustomModeConfig) {
+        update { settings ->
+            val baseName = mode.name.ifBlank { "自定义模式" }
+            var name = baseName
+            var index = 2
+            while (settings.customModes.any { it.name == name }) {
+                name = "$baseName $index"
+                index++
+            }
+            val imported = mode.copy(
+                id = Uuid.random().toString(),
+                name = name,
+            )
+            settings.copy(customModes = settings.customModes + imported)
+        }
+    }
+
+    suspend fun deleteCustomMode(id: String) {
+        val ref = ModeRefs.custom(id)
+        update { settings ->
+            settings.copy(
+                customModes = settings.customModes.filterNot { it.id == id },
+                defaultMode = settings.defaultMode?.takeUnless { it == ref },
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.defaultMode == ref) assistant.copy(defaultMode = null) else assistant
+                },
+            )
+        }
+    }
+
+    suspend fun upsertBuiltinMode(mode: ChatMode, policy: ChatModePolicy) {
+        update { settings ->
+            settings.copy(builtinModeOverrides = settings.builtinModeOverrides + (mode to policy))
+        }
+    }
+
+    suspend fun resetBuiltinMode(mode: ChatMode) {
+        update { settings ->
+            settings.copy(builtinModeOverrides = settings.builtinModeOverrides - mode)
+        }
     }
 
     suspend fun updateAssistantWebSearch(assistantId: Uuid, enabled: Boolean) {
@@ -821,6 +915,8 @@ data class Settings(
     val defaultMode: String? = null,
     /** 管理模式生成的自定义能力模式 */
     val customModes: List<CustomModeConfig> = emptyList(),
+    /** 内置能力模式的用户覆盖（键为内置枚举名，值为生效策略） */
+    val builtinModeOverrides: Map<ChatMode, ChatModePolicy> = emptyMap(),
     /** RMB 显示时的美元→人民币汇率 */
     val costUsdCnyRate: Double = 7.2,
     /** 用户自定的模型定价覆盖（精确 modelId 匹配，优先于内置预置表） */

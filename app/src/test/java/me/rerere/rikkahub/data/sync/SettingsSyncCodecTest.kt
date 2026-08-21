@@ -8,6 +8,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.model.Capability
+import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.ModeRefs
@@ -174,5 +175,19 @@ class SettingsSyncCodecTest {
 
         assertEquals(settings.defaultMode, restored.defaultMode)
         assertEquals(settings.customModes, restored.customModes)
+    }
+
+    @Test
+    fun syncsBuiltinModeOverrides() {
+        val override = ChatModePolicy(capabilities = setOf(Capability.LOCAL_TOOLS, Capability.SEARCH))
+        val settings = sampleSettings().copy(
+            builtinModeOverrides = mapOf(ChatMode.STANDARD to override),
+        )
+        val restored = SettingsSyncCodec.fromSyncableJson(
+            SettingsSyncCodec.toSyncableJson(settings),
+            Settings(),
+        )
+
+        assertEquals(settings.builtinModeOverrides, restored.builtinModeOverrides)
     }
 }

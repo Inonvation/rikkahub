@@ -41,7 +41,6 @@ import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.ImageUpload
-import me.rerere.hugeicons.stroke.Layers02
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
@@ -51,6 +50,7 @@ import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.SlidersVertical
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
@@ -137,7 +137,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModes) },
-                        leadingContent = { Icon(HugeIcons.Layers02, null) },
+                        leadingContent = { Icon(HugeIcons.SlidersVertical, null) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_mode)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     )

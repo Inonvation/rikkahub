@@ -954,8 +954,11 @@
   <string name="setting_page_default_mode">默认模式</string>
   <string name="setting_mode_page_title">默认模式</string>
   <string name="setting_mode_page_group_intro">模式说明</string>
+  <string name="setting_mode_page_new_mode_title">新建模式</string>
+  <string name="setting_mode_page_new_mode_desc">点击后用当前助手新建会话并切换到管理模式，自动预填创建引导，按发送即可开始</string>
+  <string name="setting_mode_page_new_mode_starter">请帮我新建一个自定义能力模式。先调用 mode_list 查看现有模式，再说明你计划的模式名称、描述和能力清单，确认后调用 mode_create。</string>
   <string name="chat_mode_standard">标准模式</string>
-  <string name="chat_mode_standard_desc">通用模式，功能完整，遵循助手设置中的工具，不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置</string>
+  <string name="chat_mode_standard_desc">通用模式，功能完整，遵循助手设置中的工具，默认不注入 use_skill，不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置</string>
   <string name="chat_mode_ptc">工作区模式</string>
   <string name="chat_mode_ptc_desc">在标准模式基础上启用信任文件夹与工作区工具，适合以项目文件为中心的连续任务（未配置时自动降级）</string>
   <string name="chat_mode_minimal">极简模式</string>
@@ -965,6 +968,7 @@
   <string name="chat_mode_follow_global">跟随全局</string>
   <string name="chat_mode_follow_global_desc">未显式配置时，绑定工作区或存在激活信任文件夹的助手默认工作区模式，其余默认标准</string>
   <string name="mode_deleted">已删除模式</string>
+  <string name="mode_modified_suffix">（已修改）</string>
   <string name="mode_picker_title">切换模式</string>
   <string name="chat_mode_locked_desc">会话已发送消息，模式已锁定；新建会话后可重新选择</string>
   <string name="setting_mode_page_delete_custom">删除此模式</string>
@@ -972,6 +976,12 @@
   <string name="setting_mode_page_duplicate">复制模式</string>
   <string name="setting_mode_page_export">导出模式</string>
   <string name="setting_mode_page_import">导入模式</string>
+  <string name="setting_mode_page_preset">预设</string>
+  <string name="setting_mode_page_preset_modified">预设（已修改）</string>
+  <string name="setting_mode_page_custom">自定义</string>
+  <string name="setting_mode_page_reset">恢复默认</string>
+  <string name="setting_mode_page_edit_preset_title">编辑预设模式</string>
+  <string name="setting_mode_page_builtin_edit_hint">修改预设会影响所有使用该预设的会话</string>
   <string name="setting_mode_page_move_up">上移</string>
   <string name="setting_mode_page_move_down">下移</string>
   <string name="setting_mode_page_edit_title">编辑自定义模式</string>
@@ -979,6 +989,13 @@
   <string name="setting_mode_page_mode_desc">模式描述</string>
   <string name="setting_mode_page_duplicate_name">已存在同名模式</string>
   <string name="setting_mode_page_capabilities">能力清单</string>
+  <string name="setting_mode_page_behavior">行为风格</string>
+  <string name="mode_behavior_standard">标准</string>
+  <string name="mode_behavior_workspace">工作区</string>
+  <string name="mode_behavior_management">管理</string>
+  <string name="mode_behavior_minimal">极简</string>
+  <string name="setting_mode_page_dependency_warning">已自动补全依赖能力：skill 管理与 MCP 管理会同时开启对应使用能力</string>
+  <string name="setting_mode_page_restricted_hint">当前受助手或全局设置限制，未实际生效：%1$s</string>
   <string name="setting_mode_page_save">保存</string>
   <string name="setting_mode_page_cancel">取消</string>
   <string name="setting_mode_page_delete_title">删除自定义模式</string>

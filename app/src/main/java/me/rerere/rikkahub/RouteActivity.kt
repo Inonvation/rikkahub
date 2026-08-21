@@ -382,7 +382,8 @@ class RouteActivity : ComponentActivity() {
                                     id = Uuid.parse(key.id),
                                     text = key.text,
                                     files = key.files.map { it.toUri() },
-                                    nodeId = key.nodeId?.let { Uuid.parse(it) }
+                                    nodeId = key.nodeId?.let { Uuid.parse(it) },
+                                    mode = key.mode,
                                 )
                             }
 
@@ -736,7 +737,8 @@ sealed interface Screen : NavKey {
         val id: String,
         val text: String? = null,
         val files: List<String> = emptyList(),
-        val nodeId: String? = null
+        val nodeId: String? = null,
+        val mode: String? = null,
     ) : Screen
 
     @Serializable
@@ -843,6 +845,7 @@ sealed interface Screen : NavKey {
     @Serializable
     data object SettingModels : Screen
 
+    @Serializable
     data object SettingModes : Screen
 
     @Serializable

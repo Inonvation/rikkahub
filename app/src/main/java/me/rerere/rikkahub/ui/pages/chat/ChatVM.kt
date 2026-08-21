@@ -51,6 +51,7 @@ private const val TAG = "ChatVM"
 
 class ChatVM(
     id: String,
+    private val initialMode: String? = null,
     private val context: Application,
     private val settingsStore: SettingsStore,
     private val conversationRepo: ConversationRepository,
@@ -96,7 +97,7 @@ class ChatVM(
 
         // 初始化对话
         viewModelScope.launch {
-            chatService.initializeConversation(_conversationId)
+            chatService.initializeConversation(_conversationId, initialMode)
         }
 
         // 记住对话ID, 方便下次启动恢复

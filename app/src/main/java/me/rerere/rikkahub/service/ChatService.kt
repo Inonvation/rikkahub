@@ -145,6 +145,11 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
+internal fun filterSkillToolsByMode(tools: List<Tool>, policy: ChatModePolicy): List<Tool> =
+    tools.filter { tool ->
+        if (tool.name == "use_skill") policy.allowSkillUse else policy.allowSkillAdmin
+    }
+
 private const val TAG = "ChatService"
 
 /**
@@ -844,7 +849,7 @@ class ChatService(
 
     // ---- 初始化对话 ----
 
-    suspend fun initializeConversation(conversationId: Uuid) {
+    suspend fun initializeConversation(conversationId: Uuid, initialMode: String? = null) {
         val session = getOrCreateSession(conversationId) // 确保 session 存在
         // 内存态已有内容时跳过 Room 覆盖：生成期间消息只存内存、尚未落库，
         // 切回正在生成的会话若用 Room 旧快照覆盖，AI 回复/工具气泡会短暂消失，
@@ -871,7 +876,7 @@ class ChatService(
                 .copy(
                     workspaceCwd = assistant.defaultWorkspaceCwd,
                     // 固化并记录模式快照，避免后续修改全局/助手默认时改变已有会话的能力配置
-                    mode = resolveModeRef(
+                    mode = initialMode ?: resolveModeRef(
                         assistant = assistant,
                         settings = currentSettings,
                         trustedFolderActive = trustedFolderRepository.currentSettings().activeProjectId != null,
@@ -1586,20 +1591,19 @@ class ChatService(
                     if (modePolicy.allowTrustedFolder) {
                         addAll(createTrustedFolderTools(trustedFolderRepository))
                     }
-                    val allSkills = skillManager.listSkills()
-                    if (allSkills.isNotEmpty()) {
-                        addAll(
-                            createSkillTools(
-                                enabledSkills = assistant.enabledSkills,
-                                allSkills = allSkills,
-                                setEnabledSkills = { skills ->
-                                    settingsStore.updateAssistantSkills(assistant.id, skills)
-                                },
-                            ).filter { tool ->
-                                // 标准/工作区仅保留 use_skill（已启用 skill 的使用），管理模式额外开放 skill_admin_*
-                                if (tool.name == "use_skill") modePolicy.allowSkillUse else modePolicy.allowSkillAdmin
-                            }
-                        )
+                    if (modePolicy.allowSkillUse || modePolicy.allowSkillAdmin) {
+                        val allSkills = skillManager.listSkills()
+                        if (allSkills.isNotEmpty()) {
+                            addAll(
+                                createSkillTools(
+                                    enabledSkills = assistant.enabledSkills,
+                                    allSkills = allSkills,
+                                    setEnabledSkills = { skills ->
+                                        settingsStore.updateAssistantSkills(assistant.id, skills)
+                                    },
+                                ).let { filterSkillToolsByMode(it, modePolicy) }
+                            )
+                        }
                     }
                     if (modePolicy.allowMcpAdmin) {
                         addAll(

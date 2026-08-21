@@ -36,6 +36,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.ChatMode
+import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.ModeRefs
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
@@ -90,6 +91,7 @@ fun AssistantBasicPage(id: String) {
             tags = tags,
             workspaces = workspaces,
             customModes = settings.customModes,
+            builtinModeOverrides = settings.builtinModeOverrides,
             onUpdate = { vm.update(it) },
             vm = vm
         )
@@ -104,6 +106,7 @@ internal fun AssistantBasicContent(
     tags: List<DataTag>,
     workspaces: List<WorkspaceEntity>,
     customModes: List<CustomModeConfig>,
+    builtinModeOverrides: Map<ChatMode, ChatModePolicy>,
     onUpdate: (Assistant) -> Unit,
     vm: AssistantDetailVM
 ) {
@@ -281,7 +284,9 @@ internal fun AssistantBasicContent(
                             onUpdate(assistant.copy(defaultMode = mode))
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        optionToString = { mode -> modeRefDisplayName(mode, customModes) },
+                        optionToString = { mode ->
+                            modeRefDisplayName(mode, customModes, builtinModeOverrides)
+                        },
                     )
                 }
                 HorizontalDivider()

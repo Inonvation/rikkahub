@@ -14,7 +14,7 @@ import kotlin.uuid.Uuid
  */
 @Serializable
 enum class ChatMode {
-    /** 标准：功能完整，遵循助手设置中的工具，但不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置。 */
+    /** 标准：功能完整，遵循助手设置中的工具，默认不注入 use_skill，可在设置中按需开启；不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置。 */
     STANDARD,
 
     /** PTC（UI 显示「工作区模式」）：包含标准全部能力，并启用信任文件夹与工作区的所有工具能力（未配置时自动降级）。 */
@@ -28,15 +28,23 @@ enum class ChatMode {
 
     fun policy(): ChatModePolicy = when (this) {
         STANDARD -> ChatModePolicy.STANDARD
-        PTC -> ChatModePolicy(capabilities = ChatModePolicy.STANDARD.capabilities + Capability.WORKSPACE + Capability.TRUSTED_FOLDER)
+        PTC -> ChatModePolicy(
+            capabilities = ChatModePolicy.STANDARD.capabilities +
+                Capability.SKILL_USE + Capability.WORKSPACE + Capability.TRUSTED_FOLDER
+        )
         MINIMAL -> ChatModePolicy.MINIMAL
         CREATIVE -> ChatModePolicy(
             capabilities = ChatModePolicy.STANDARD.capabilities +
+                Capability.SKILL_USE +
                 Capability.WORKSPACE + Capability.TRUSTED_FOLDER +
                 Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS
         )
     }
 }
+
+/** 内置模式生效策略：用户覆盖优先，否则使用出厂默认。 */
+fun ChatMode.effectivePolicy(settings: Settings): ChatModePolicy =
+    settings.builtinModeOverrides[this] ?: policy()
 
 /**
  * 能力项：一个工具族或提示词片段的门控单元。模式即一份能力清单（[ChatModePolicy.capabilities]），
@@ -96,14 +104,18 @@ enum class Capability {
     /** 时间提醒/todo 提醒 */
     REMINDERS,
 
-    /** tool.systemPrompt 循环 + agent behavior 提示词 */
+    /** tool.systemPrompt 循环 */
     TOOL_SYSTEM_PROMPT,
+
+    /** agent behavior 行为层提示词（独立于 tool.systemPrompt） */
+    AGENT_BEHAVIOR_PROMPT,
 
     /** env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete */
     CREATIVE_TOOLS,
 }
 
 /** 行为风格：由能力清单派生的执行准则，决定 agent behavior 提示词注入哪一段模式指导。 */
+@Serializable
 enum class AgentBehaviorProfile {
     /** 通用：工具齐全，但按需使用，不主动扩大任务范围。 */
     STANDARD,
@@ -126,6 +138,8 @@ enum class AgentBehaviorProfile {
 data class ChatModePolicy(
     /** 该模式允许注入的能力清单 */
     val capabilities: Set<Capability> = DEFAULT_CAPABILITIES,
+    /** 显式行为风格；null = 按能力清单自动推导 */
+    val behaviorProfileOverride: AgentBehaviorProfile? = null,
 ) {
     val allowWorkspace: Boolean get() = Capability.WORKSPACE in capabilities
     val allowTrustedFolder: Boolean get() = Capability.TRUSTED_FOLDER in capabilities
@@ -147,19 +161,20 @@ data class ChatModePolicy(
     val allowSearch: Boolean get() = Capability.SEARCH in capabilities
     val allowDocument: Boolean get() = Capability.DOCUMENT in capabilities
     val behaviorProfile: AgentBehaviorProfile
-        get() = when {
+        get() = behaviorProfileOverride ?: when {
             allowCreativeTools || allowSkillAdmin || allowMcpAdmin -> AgentBehaviorProfile.MANAGEMENT
             allowWorkspace || allowTrustedFolder -> AgentBehaviorProfile.WORKSPACE
             capabilities == MINIMAL_CAPABILITIES -> AgentBehaviorProfile.MINIMAL
             else -> AgentBehaviorProfile.STANDARD
         }
 
-    /** 是否注入 agent behavior 提示词：工具提示词开启时随主链路注入，极简模式单独保留一段行为准则。 */
+    /** 是否注入 agent behavior 提示词：独立能力开关，极简模式默认保留一段行为准则。 */
     val includeAgentBehaviorPrompt: Boolean
-        get() = includeToolSystemPrompt || behaviorProfile == AgentBehaviorProfile.MINIMAL
+        get() = Capability.AGENT_BEHAVIOR_PROMPT in capabilities ||
+            behaviorProfile == AgentBehaviorProfile.MINIMAL
 
     companion object {
-        /** 默认能力（标准模式基础）：本地工具/搜索/附件解析/MCP/记忆/扩展工具/提示词注入/提醒/工具提示词 */
+        /** 默认能力（标准模式基础）：本地工具/搜索/附件解析/MCP/记忆/扩展工具/提示词注入/提醒/工具提示词/行为层提示词 */
         val DEFAULT_CAPABILITIES: Set<Capability> = setOf(
             Capability.LOCAL_TOOLS,
             Capability.SEARCH,
@@ -174,17 +189,21 @@ data class ChatModePolicy(
             Capability.PROMPT_INJECTION,
             Capability.REMINDERS,
             Capability.TOOL_SYSTEM_PROMPT,
+            Capability.AGENT_BEHAVIOR_PROMPT,
         )
 
-        /** 标准模式策略：默认能力 + 已启用 skill 的使用 */
-        val STANDARD = ChatModePolicy(capabilities = DEFAULT_CAPABILITIES + Capability.SKILL_USE)
+        /** 标准模式策略：默认能力，不注入 use_skill */
+        val STANDARD = ChatModePolicy(capabilities = DEFAULT_CAPABILITIES)
 
         /** 极简模式能力清单：本地工具/搜索/附件解析 */
         val MINIMAL_CAPABILITIES: Set<Capability> =
             setOf(Capability.LOCAL_TOOLS, Capability.SEARCH, Capability.DOCUMENT)
 
         /** 极简模式策略：不注入工具声明，但仍保留一段「默认不主动调用工具」的行为准则 */
-        val MINIMAL = ChatModePolicy(capabilities = MINIMAL_CAPABILITIES)
+        val MINIMAL = ChatModePolicy(
+            capabilities = MINIMAL_CAPABILITIES,
+            behaviorProfileOverride = AgentBehaviorProfile.MINIMAL,
+        )
     }
 }
 
@@ -236,7 +255,7 @@ fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
         val custom = settings.customModes.find { it.id == ref.removePrefix(ModeRefs.CUSTOM_PREFIX) }
         return custom?.policy
     }
-    return ModeRefs.parseBuiltin(ref)?.policy()
+    return ModeRefs.parseBuiltin(ref)?.effectivePolicy(settings)
 }
 
 /**
@@ -254,7 +273,7 @@ fun resolveConversationPolicy(
         return resolveModePolicy(
             ref = resolveModeRef(assistant, settings, trustedFolderActive),
             settings = settings,
-        ) ?: ChatMode.STANDARD.policy()
+        ) ?: ChatMode.STANDARD.effectivePolicy(settings)
     }
-    return resolveModePolicy(ref = modeStr, settings = settings) ?: ChatMode.STANDARD.policy()
+    return resolveModePolicy(ref = modeStr, settings = settings) ?: ChatMode.STANDARD.effectivePolicy(settings)
 }

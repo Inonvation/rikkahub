@@ -104,6 +104,7 @@ object SettingsSyncCodec {
         // 能力模式
         "defaultMode",
         "customModes",
+        "builtinModeOverrides",
         "costUsdCnyRate",
         "modelPricingOverrides",
     )

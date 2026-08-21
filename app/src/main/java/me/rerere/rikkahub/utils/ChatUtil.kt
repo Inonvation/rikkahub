@@ -16,6 +16,7 @@ fun navigateToChatPage(
     initText: String? = null,
     initFiles: List<Uri> = emptyList(),
     nodeId: Uuid? = null,
+    mode: String? = null,
 ) {
     Log.i(TAG, "navigateToChatPage: navigate to $chatId")
     navigator.navigate(
@@ -24,6 +25,7 @@ fun navigateToChatPage(
             text = initText,
             files = initFiles.map { it.toString() },
             nodeId = nodeId?.toString(),
+            mode = mode,
         )
     )
 }

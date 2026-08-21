@@ -6,9 +6,11 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -17,12 +19,15 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 import me.rerere.rikkahub.data.model.Capability
 import me.rerere.rikkahub.data.model.ChatMode
+import me.rerere.rikkahub.data.model.effectivePolicy
 import me.rerere.rikkahub.data.model.ModeRefs
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
@@ -48,6 +53,24 @@ private fun Settings.findCustomMode(ref: String): CustomModeConfig? {
     val id = ref.removePrefix(ModeRefs.CUSTOM_PREFIX)
     return customModes.find { it.id == id || it.id == ref }
 }
+
+private fun Context.modeDisplayName(mode: ChatMode): String = getString(
+    when (mode) {
+        ChatMode.STANDARD -> R.string.chat_mode_standard
+        ChatMode.PTC -> R.string.chat_mode_ptc
+        ChatMode.MINIMAL -> R.string.chat_mode_minimal
+        ChatMode.CREATIVE -> R.string.chat_mode_creative
+    }
+)
+
+private fun Context.modeDescription(mode: ChatMode): String = getString(
+    when (mode) {
+        ChatMode.STANDARD -> R.string.chat_mode_standard_desc
+        ChatMode.PTC -> R.string.chat_mode_ptc_desc
+        ChatMode.MINIMAL -> R.string.chat_mode_minimal_desc
+        ChatMode.CREATIVE -> R.string.chat_mode_creative_desc
+    }
+)
 
 private fun JsonElement.stringContentOrNull(): String? = (this as? JsonPrimitive)?.contentOrNull
 
@@ -85,6 +108,9 @@ fun createCreativeTools(
                     appendLine("android_api_level: ${Build.VERSION.SDK_INT}")
                     appendLine("assistant: " + (assistant.name.ifBlank { "(unnamed)" }))
                     appendLine("workspace: $workspaceSummary")
+                    appendLine("default_mode: " + (settings.defaultMode ?: "(compatibility fallback)"))
+                    appendLine("custom_modes: ${settings.customModes.size}")
+                    appendLine("modified_presets: ${settings.builtinModeOverrides.size}")
                     appendLine("enabled_mcp_servers: $mcpCount")
                     appendLine("enabled_skills: $skillsText")
                     appendLine("knowledge_bases: ${assistant.knowledgeBaseIds.size}")
@@ -169,8 +195,62 @@ fun createCreativeTools(
             },
         ),
         Tool(
+            name = "mode_list",
+            description = "Read-only: list all capability modes. Built-in modes show their effective capabilities and whether they have a user override; custom modes show their stored capabilities. Returns ref values usable with mode_update/mode_delete. Set brief=true to return only ref, name and override status.",
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("brief", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "If true, omit descriptions and capability lists.")
+                        })
+                    }
+                )
+            },
+            execute = { input ->
+                val brief = (input as? JsonObject)?.get("brief")?.jsonPrimitive?.booleanOrNull == true
+                val current = settingsStore.settingsFlow.value
+                val text = buildString {
+                    appendLine("## Built-in modes")
+                    ChatMode.entries.forEach { mode ->
+                        val policy = mode.effectivePolicy(current)
+                        val modified = mode in current.builtinModeOverrides
+                        if (brief) {
+                            appendLine(
+                                "- ${ModeRefs.builtin(mode)} | ${context.modeDisplayName(mode)} | " +
+                                    (if (modified) "modified" else "default")
+                            )
+                        } else {
+                            appendLine(
+                                "- ${ModeRefs.builtin(mode)} | ${context.modeDisplayName(mode)} | " +
+                                    context.modeDescription(mode) + " | " +
+                                    policy.capabilities.sortedBy { it.name }.joinToString(",") +
+                                    (if (modified) " | modified" else " | default")
+                            )
+                        }
+                    }
+                    appendLine("## Custom modes")
+                    if (current.customModes.isEmpty()) {
+                        appendLine("(none)")
+                    } else {
+                        current.customModes.forEach { custom ->
+                            if (brief) {
+                                appendLine("- ${ModeRefs.custom(custom.id)} | ${custom.name.ifBlank { custom.id }}")
+                            } else {
+                                appendLine(
+                                    "- ${ModeRefs.custom(custom.id)} | ${custom.name.ifBlank { custom.id }} | " +
+                                        custom.policy.capabilities.sortedBy { it.name }.joinToString(",")
+                                )
+                            }
+                        }
+                    }
+                }
+                listOf(UIMessagePart.Text(text))
+            },
+        ),
+        Tool(
             name = "mode_create",
-            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode (built-in name or custom mode id). Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, CREATIVE_TOOLS. Omit everything to start from the standard base. Requires user approval. The new mode appears at the end of the mode picker and in Settings.",
+            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode (built-in name or custom mode id). Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS. Omit everything to start from the standard base. Requires user approval. The new mode appears at the end of the mode picker and in Settings.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -198,6 +278,10 @@ fun createCreativeTools(
                             put("type", JsonPrimitive("array"))
                             put("description", JsonPrimitive("Capability names to remove from base"))
                         })
+                        put("behavior", buildJsonObject {
+                            put("type", JsonPrimitive("string"))
+                            put("description", JsonPrimitive("Optional behavior style: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL"))
+                        })
                     },
                     required = listOf("name"),
                 )
@@ -211,8 +295,8 @@ fun createCreativeTools(
                     return@Tool listOf(UIMessagePart.Text("Error: name is required."))
                 }
                 val current = settingsStore.settingsFlow.value
-                if (current.customModes.any { it.name.equals(name, ignoreCase = true) }) {
-                    return@Tool listOf(UIMessagePart.Text("Error: custom mode with name \"" + name + "\" already exists. Delete it in Settings > 默认模式 first or pick another name."))
+                if (settingsStore.isModeNameTaken(name)) {
+                    return@Tool listOf(UIMessagePart.Text("Error: mode name \"" + name + "\" is already used by a built-in or custom mode. Pick another name."))
                 }
                 val capabilitiesElement = input["capabilities"]
                 if (capabilitiesElement != null && capabilitiesElement !is JsonArray) {
@@ -233,6 +317,18 @@ fun createCreativeTools(
                 val removeNames = input.stringArrayOrNull("remove")
                     ?.mapNotNull { it.stringContentOrNull() } ?: emptyList()
                 val baseName = input.str("base")?.trim().orEmpty()
+                val behaviorName = input.str("behavior")?.trim().orEmpty()
+                val behavior = if (behaviorName.isNotEmpty()) {
+                    runCatching { AgentBehaviorProfile.valueOf(behaviorName) }.getOrNull()
+                        ?: return@Tool listOf(
+                            UIMessagePart.Text(
+                                "Error: unknown behavior \"" + behaviorName + "\". Valid names: " +
+                                    AgentBehaviorProfile.entries.joinToString(", ") { it.name }
+                            )
+                        )
+                } else {
+                    null
+                }
                 val allNames = requested + addNames + removeNames
                 val unknown = allNames.filterNot { runCatching { Capability.valueOf(it) }.isSuccess }
                 if (unknown.isNotEmpty()) {
@@ -243,49 +339,52 @@ fun createCreativeTools(
                         )
                     )
                 }
+                val basePolicy = when {
+                    baseName.isBlank() -> ChatMode.STANDARD.effectivePolicy(current)
+                    else -> {
+                        val builtin = runCatching { ChatMode.valueOf(baseName) }.getOrNull()
+                        val customBase = current.customModes.firstOrNull {
+                            it.id == baseName ||
+                                it.id == baseName.removePrefix(ModeRefs.CUSTOM_PREFIX)
+                        }
+                        builtin?.effectivePolicy(current)
+                            ?: customBase?.policy
+                            ?: return@Tool listOf(
+                                UIMessagePart.Text(
+                                    "Error: base mode \"" + baseName + "\" not found. Use a built-in name (STANDARD/PTC/MINIMAL/CREATIVE) or an existing custom mode id."
+                                )
+                            )
+                    }
+                }
                 val capabilities = if (capabilitiesElement != null) {
                     // 完整清单优先，忽略 base/add/remove
                     requested.map { Capability.valueOf(it) }.toSet()
                 } else {
-                    val baseCaps = when {
-                        baseName.isBlank() -> ChatMode.STANDARD.policy().capabilities
-                        else -> {
-                            val builtin = runCatching { ChatMode.valueOf(baseName) }.getOrNull()
-                            val customBase = current.customModes.firstOrNull {
-                                it.id == baseName ||
-                                    it.id == baseName.removePrefix(ModeRefs.CUSTOM_PREFIX)
-                            }
-                            builtin?.policy()?.capabilities
-                                ?: customBase?.policy?.capabilities
-                                ?: return@Tool listOf(
-                                    UIMessagePart.Text(
-                                        "Error: base mode \"" + baseName + "\" not found. Use a built-in name (STANDARD/PTC/MINIMAL/CREATIVE) or an existing custom mode id."
-                                    )
-                                )
-                        }
-                    }
-                    baseCaps + addNames.map { Capability.valueOf(it) } - removeNames.map { Capability.valueOf(it) }
+                    basePolicy.capabilities + addNames.map { Capability.valueOf(it) } - removeNames.map { Capability.valueOf(it) }
                 }
-                val policy = ChatModePolicy(capabilities = capabilities)
+                val policy = ChatModePolicy(
+                    capabilities = capabilities,
+                    behaviorProfileOverride = behavior ?: basePolicy.behaviorProfileOverride,
+                )
                 val custom = CustomModeConfig(
                     id = Uuid.random().toString(),
                     name = name,
                     description = input.str("description") ?: "",
                     policy = policy,
                 )
-                settingsStore.updateCustomModes(current.customModes + custom)
+                settingsStore.upsertCustomMode(custom)
                 listOf(UIMessagePart.Text("Custom mode \"" + custom.name + "\" created (id=" + custom.id + "). Select it from the mode picker in the chat input footer or Settings. This write required user approval."))
             },
         ),
         Tool(
             name = "mode_update",
-            description = "Update an existing custom capability mode. Required: id (custom mode id or custom:<id>). Optional: name, description, capabilities (full list) OR add/remove to adjust the current capability list. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, CREATIVE_TOOLS. Requires user approval. Existing conversations keep referencing this mode id.",
+            description = "Update an existing capability mode. id can be a custom mode id, custom:<id>, or built-in name (STANDARD/PTC/MINIMAL/CREATIVE). For custom modes: name, description, capabilities (full list) OR add/remove. For built-in modes: only capabilities/add/remove/behavior; name and description are fixed. Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS. Requires user approval. Existing conversations keep referencing this mode id.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
                         put("id", buildJsonObject {
                             put("type", JsonPrimitive("string"))
-                            put("description", JsonPrimitive("Custom mode id or custom:<id>"))
+                            put("description", JsonPrimitive("Custom mode id, custom:<id>, or built-in mode name"))
                         })
                         put("name", buildJsonObject {
                             put("type", JsonPrimitive("string"))
@@ -307,6 +406,10 @@ fun createCreativeTools(
                             put("type", JsonPrimitive("array"))
                             put("description", JsonPrimitive("Capability names to remove from the current list"))
                         })
+                        put("behavior", buildJsonObject {
+                            put("type", JsonPrimitive("string"))
+                            put("description", JsonPrimitive("Optional behavior style: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL"))
+                        })
                     },
                     required = listOf("id"),
                 )
@@ -320,8 +423,11 @@ fun createCreativeTools(
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
                 }
                 val current = settingsStore.settingsFlow.value
+                val builtin = ModeRefs.parseBuiltin(ref)
                 val target = current.findCustomMode(ref)
-                    ?: return@Tool listOf(UIMessagePart.Text("Error: custom mode \"$ref\" not found."))
+                if (builtin == null && target == null) {
+                    return@Tool listOf(UIMessagePart.Text("Error: mode \"$ref\" not found. Use mode_list to see valid refs."))
+                }
                 val name = input.str("name")?.trim().orEmpty()
                 val description = input.str("description")
                 val capabilitiesElement = input["capabilities"]
@@ -342,11 +448,28 @@ fun createCreativeTools(
                     ?.mapNotNull { it.stringContentOrNull() } ?: emptyList()
                 val removeNames = input.stringArrayOrNull("remove")
                     ?.mapNotNull { it.stringContentOrNull() } ?: emptyList()
+                val behaviorName = input.str("behavior")?.trim().orEmpty()
+                val behavior = if (behaviorName.isNotEmpty()) {
+                    runCatching { AgentBehaviorProfile.valueOf(behaviorName) }.getOrNull()
+                        ?: return@Tool listOf(
+                            UIMessagePart.Text(
+                                "Error: unknown behavior \"" + behaviorName + "\". Valid names: " +
+                                    AgentBehaviorProfile.entries.joinToString(", ") { it.name }
+                            )
+                        )
+                } else {
+                    null
+                }
                 if (name.isEmpty() && description == null &&
-                    capabilitiesElement == null && addElement == null && removeElement == null
+                    capabilitiesElement == null && addElement == null && removeElement == null && behaviorName.isEmpty()
                 ) {
                     return@Tool listOf(
-                        UIMessagePart.Text("Error: provide at least one field to update: name, description, capabilities, add or remove.")
+                        UIMessagePart.Text("Error: provide at least one field to update: name, description, capabilities, add, remove or behavior.")
+                    )
+                }
+                if (builtin != null && (name.isNotEmpty() || description != null)) {
+                    return@Tool listOf(
+                        UIMessagePart.Text("Error: built-in mode name and description are fixed; update capabilities/add/remove/behavior only.")
                     )
                 }
                 val allNames = requested + addNames + removeNames
@@ -359,41 +482,50 @@ fun createCreativeTools(
                         )
                     )
                 }
-                val updatedName = name.ifEmpty { target.name }
-                if (current.customModes.any { it.id != target.id && it.name.equals(updatedName, ignoreCase = true) }) {
-                    return@Tool listOf(UIMessagePart.Text("Error: custom mode with name \"$updatedName\" already exists."))
+                val currentPolicy = builtin?.effectivePolicy(current) ?: target!!.policy
+                val updatedName = if (builtin != null) builtin.name else name.ifEmpty { target!!.name }
+                if (builtin == null) {
+                    if (settingsStore.isModeNameTaken(updatedName, excludingId = target!!.id)) {
+                        return@Tool listOf(UIMessagePart.Text("Error: mode name \"$updatedName\" is already used by a built-in or custom mode."))
+                    }
                 }
                 val capabilities = if (capabilitiesElement != null) {
                     requested.map { Capability.valueOf(it) }.toSet()
                 } else {
-                    target.policy.capabilities +
+                    currentPolicy.capabilities +
                         addNames.map { Capability.valueOf(it) } -
                         removeNames.map { Capability.valueOf(it) }
                 }
-                val updated = target.copy(
-                    name = updatedName,
-                    description = description?.let { it.trim() } ?: target.description,
-                    policy = ChatModePolicy(capabilities = capabilities),
+                val updatedPolicy = ChatModePolicy(
+                    capabilities = capabilities,
+                    behaviorProfileOverride = behavior ?: currentPolicy.behaviorProfileOverride,
                 )
-                settingsStore.update { settings ->
-                    settings.copy(
-                        customModes = settings.customModes.map {
-                            if (it.id == target.id) updated else it
-                        }
+                if (builtin != null) {
+                    settingsStore.upsertBuiltinMode(builtin, updatedPolicy)
+                    return@Tool listOf(
+                        UIMessagePart.Text(
+                            "Built-in mode \"" + context.modeDisplayName(builtin) + "\" updated. This write required user approval."
+                        )
                     )
                 }
+                val updated = target!!.copy(
+                    name = updatedName,
+                    description = description?.let { it.trim() } ?: target.description,
+                    policy = updatedPolicy,
+                )
+                settingsStore.upsertCustomMode(updated)
                 listOf(UIMessagePart.Text("Custom mode \"" + updated.name + "\" updated (id=" + updated.id + "). This write required user approval."))
             },
         ),
         Tool(
             name = "mode_delete",
-            description = "Delete an existing custom capability mode. Required: id (custom mode id or custom:<id>). Counts conversations referencing the mode first; those conversations fall back to the standard mode after deletion. Global and assistant defaults pointing to this mode are cleared. Requires user approval.",
+            description = "Delete an existing custom capability mode, or remove the user override of a built-in mode. Required: id (custom mode id, custom:<id>, or built-in name). For custom modes: counts conversations referencing the mode first; those conversations fall back to the standard mode after deletion, and global/assistant defaults pointing to this mode are cleared. For built-in modes: restores the factory default. Requires user approval.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
                         put("id", buildJsonObject {
                             put("type", JsonPrimitive("string"))
-                            put("description", JsonPrimitive("Custom mode id or custom:<id>"))
+                            put("description", JsonPrimitive("Custom mode id, custom:<id>, or built-in mode name"))
                         })
                     },
                     required = listOf("id"),
@@ -408,19 +540,29 @@ fun createCreativeTools(
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
                 }
                 val current = settingsStore.settingsFlow.value
+                val builtin = ModeRefs.parseBuiltin(ref)
                 val target = current.findCustomMode(ref)
-                    ?: return@Tool listOf(UIMessagePart.Text("Error: custom mode \"$ref\" not found."))
-                val modeRef = ModeRefs.custom(target.id)
-                val conversationCount = conversationRepository.countConversationsByMode(modeRef)
-                settingsStore.update { settings ->
-                    settings.copy(
-                        customModes = settings.customModes.filterNot { it.id == target.id },
-                        defaultMode = settings.defaultMode?.takeUnless { it == modeRef },
-                        assistants = settings.assistants.map { assistant ->
-                            if (assistant.defaultMode == modeRef) assistant.copy(defaultMode = null) else assistant
-                        },
+                if (builtin == null && target == null) {
+                    return@Tool listOf(UIMessagePart.Text("Error: mode \"$ref\" not found. Use mode_list to see valid refs."))
+                }
+                if (builtin != null) {
+                    if (builtin !in current.builtinModeOverrides) {
+                        return@Tool listOf(
+                            UIMessagePart.Text(
+                                "Built-in mode \"" + context.modeDisplayName(builtin) + "\" already uses its factory default; nothing to delete."
+                            )
+                        )
+                    }
+                    settingsStore.resetBuiltinMode(builtin)
+                    return@Tool listOf(
+                        UIMessagePart.Text(
+                            "Built-in mode \"" + context.modeDisplayName(builtin) + "\" restored to factory default. This write required user approval."
+                        )
                     )
                 }
+                val modeRef = ModeRefs.custom(target!!.id)
+                val conversationCount = conversationRepository.countConversationsByMode(modeRef)
+                settingsStore.deleteCustomMode(target.id)
                 listOf(
                     UIMessagePart.Text(
                         "Custom mode \"" + target.name + "\" deleted (id=" + target.id + "). " +

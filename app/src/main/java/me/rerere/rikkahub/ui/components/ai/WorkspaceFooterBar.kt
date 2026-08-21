@@ -34,7 +34,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import me.rerere.ai.core.TokenUsage
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Layers02
+import me.rerere.hugeicons.stroke.SlidersVertical
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
 import me.rerere.rikkahub.data.ai.cost.CostCurrency
@@ -138,7 +138,7 @@ fun WorkspaceFooterBar(
             settings = settings,
             trustedFolderActive = activeTrustedProject != null,
         )
-    val modeLabel = modeRefDisplayName(effectiveModeRef, settings.customModes)
+    val modeLabel = modeRefDisplayName(effectiveModeRef, settings.customModes, settings.builtinModeOverrides)
     val effectivePolicy = resolveConversationPolicy(
         conversation = conversation,
         assistant = assistant,
@@ -178,7 +178,7 @@ fun WorkspaceFooterBar(
                     .alpha(if (modeSwitchEnabled) 1f else 0.6f),
             ) {
                 Icon(
-                    imageVector = HugeIcons.Layers02,
+                    imageVector = HugeIcons.SlidersVertical,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -232,6 +232,7 @@ fun WorkspaceFooterBar(
         ModePickerSheet(
             selectedRef = conversation.mode,
             customModes = settings.customModes,
+            builtinModeOverrides = settings.builtinModeOverrides,
             showFollowGlobal = true,
             onSelect = { ref ->
                 showModePicker = false

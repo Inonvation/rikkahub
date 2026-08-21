@@ -23,32 +23,37 @@ import me.rerere.hugeicons.stroke.CheckmarkCircle01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Capability
 import me.rerere.rikkahub.data.model.ChatMode
+import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.ModeRefs
 
 @Composable
-fun ChatMode.displayName(): String = stringResource(
-    when (this) {
-        ChatMode.STANDARD -> R.string.chat_mode_standard
-        ChatMode.PTC -> R.string.chat_mode_ptc
-        ChatMode.MINIMAL -> R.string.chat_mode_minimal
-        ChatMode.CREATIVE -> R.string.chat_mode_creative
-    }
-)
+fun ChatMode.displayName(): String = stringResource(displayNameRes())
+
+fun ChatMode.displayNameRes(): Int = when (this) {
+    ChatMode.STANDARD -> R.string.chat_mode_standard
+    ChatMode.PTC -> R.string.chat_mode_ptc
+    ChatMode.MINIMAL -> R.string.chat_mode_minimal
+    ChatMode.CREATIVE -> R.string.chat_mode_creative
+}
 
 @Composable
-fun ChatMode.description(): String = stringResource(
-    when (this) {
-        ChatMode.STANDARD -> R.string.chat_mode_standard_desc
-        ChatMode.PTC -> R.string.chat_mode_ptc_desc
-        ChatMode.MINIMAL -> R.string.chat_mode_minimal_desc
-        ChatMode.CREATIVE -> R.string.chat_mode_creative_desc
-    }
-)
+fun ChatMode.description(): String = stringResource(descriptionRes())
+
+fun ChatMode.descriptionRes(): Int = when (this) {
+    ChatMode.STANDARD -> R.string.chat_mode_standard_desc
+    ChatMode.PTC -> R.string.chat_mode_ptc_desc
+    ChatMode.MINIMAL -> R.string.chat_mode_minimal_desc
+    ChatMode.CREATIVE -> R.string.chat_mode_creative_desc
+}
 
 /** 把模式引用显示为名字：内置枚举名、自定义模式名或原始引用。 */
 @Composable
-fun modeRefDisplayName(ref: String?, customModes: List<CustomModeConfig>): String {
+fun modeRefDisplayName(
+    ref: String?,
+    customModes: List<CustomModeConfig>,
+    builtinModeOverrides: Map<ChatMode, ChatModePolicy> = emptyMap(),
+): String {
     if (ref.isNullOrBlank()) return stringResource(R.string.chat_mode_follow_global)
     if (ref.startsWith(ModeRefs.CUSTOM_PREFIX)) {
         return customModes.find { it.id == ref.removePrefix(ModeRefs.CUSTOM_PREFIX) }
@@ -56,7 +61,10 @@ fun modeRefDisplayName(ref: String?, customModes: List<CustomModeConfig>): Strin
             ?.ifBlank { ref }
             ?: stringResource(R.string.mode_deleted)
     }
-    return ModeRefs.parseBuiltin(ref)?.displayName() ?: ref
+    return ModeRefs.parseBuiltin(ref)?.let { mode ->
+        val name = mode.displayName()
+        if (mode in builtinModeOverrides) name + stringResource(R.string.mode_modified_suffix) else name
+    } ?: ref
 }
 
 /** 能力项中文注释：设置页「组装内容」与管理模式展示用。 */
@@ -78,7 +86,8 @@ fun Capability.note(): String = when (this) {
     Capability.KNOWLEDGE -> "知识库检索"
     Capability.PROMPT_INJECTION -> "模式注入/lorebook 提示词注入"
     Capability.REMINDERS -> "时间提醒/todo 提醒"
-    Capability.TOOL_SYSTEM_PROMPT -> "tool.systemPrompt 循环 + agent behavior 提示词"
+    Capability.TOOL_SYSTEM_PROMPT -> "tool.systemPrompt 循环"
+    Capability.AGENT_BEHAVIOR_PROMPT -> "agent behavior 行为层提示词"
     Capability.CREATIVE_TOOLS -> "env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete"
 }
 
@@ -90,6 +99,7 @@ fun Capability.note(): String = when (this) {
 fun ModePickerSheet(
     selectedRef: String?,
     customModes: List<CustomModeConfig>,
+    builtinModeOverrides: Map<ChatMode, ChatModePolicy> = emptyMap(),
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
     showFollowGlobal: Boolean = false,
@@ -115,8 +125,13 @@ fun ModePickerSheet(
                 )
             }
             ChatMode.entries.forEach { mode ->
+                val modified = mode in builtinModeOverrides
                 ModeOptionRow(
-                    name = mode.displayName(),
+                    name = if (modified) {
+                        mode.displayName() + stringResource(R.string.mode_modified_suffix)
+                    } else {
+                        mode.displayName()
+                    },
                     description = mode.description(),
                     selected = selectedRef == mode.name,
                     onClick = { onSelect(ModeRefs.builtin(mode)) },
