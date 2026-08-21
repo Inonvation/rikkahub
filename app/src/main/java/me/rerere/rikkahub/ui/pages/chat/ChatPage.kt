@@ -208,7 +208,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
-    val errors by vm.errors.collectAsStateWithLifecycle()
+    val errors by vm.conversationErrors.collectAsStateWithLifecycle()
 
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
     // 侧边栏状态保存在 ChatVM 中，导航到子页面返回后仍保持展开
@@ -325,7 +325,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val chatListState = remember(conversation.id) { LazyListState() }
     val chatListUserDragging by chatListState.interactionSource.collectIsDraggedAsState()
-    // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次。
+    // 导航到其他页面时 ChatPage 组合会被销毁重建，但 ChatVM 仍存活；
+    // 在销毁时重置定位标记，返回后才会按“生成中→底部 / 已生成→最后一条消息开头”重新定位。
+    DisposableEffect(conversation.id) {
+        onDispose {
+            vm.chatListInitialized = false
+        }
+    }
+    // 首次进入/导航返回定位：只在 chatListInitialized 从 false→true 时执行一次；
+    // 导航离开时上面的 DisposableEffect 会把标记重置，返回后按生成状态重新定位。
     // 消息是异步加载的：若加载完成前用户已开始滑动（列表离开初始位置，或正在滚动中），
     // 不再强制拉回底部——避免"切换历史会话后一滑动就被 requestScrollToItem 拽回底部"的跳变。
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
@@ -336,7 +344,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     chatListState.scrollToItemWhenReady(index, chatListUserDragging)
                 }
             } else {
-                if (loadingJob == null) {
+                if (loadingJob?.isActive != true) {
                     chatListState.scrollToItemWhenReady(
                         conversation.messageNodes.lastIndex,
                         chatListUserDragging,
@@ -435,6 +443,8 @@ private fun ChatPageContent(
 
     // 排队中的引导消息列表（生成中发送后以独立气泡显示在输入框上方右对齐，等 AI 回合结束依次注入）
     val pendingGuidance by vm.pendingGuidance.collectAsStateWithLifecycle()
+    // 排队中的待发送消息（生成中发附件/仅追加消息时显示卡片，等 AI 回合结束依次发送）
+    val pendingSends by vm.pendingSends.collectAsStateWithLifecycle()
 
     LaunchedEffect(pendingScrollAfterSend, conversation.messageNodes.size) {
         if (pendingScrollAfterSend) {
@@ -546,7 +556,7 @@ private fun ChatPageContent(
 
                     ChatInput(
                     state = inputState,
-                    loading = loadingJob != null,
+                    loading = loadingJob?.isActive == true,
                     settings = setting,
                     hazeState = hazeState,
                     conversation = conversation,
@@ -595,10 +605,10 @@ private fun ChatPageContent(
                                 parts = inputState.getContents(),
                                 messageId = inputState.editingMessage!!,
                             )
-                        } else if (loadingJob != null || subAgentActiveCount > 0) {
+                        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
                             // 生成中（主 AI 正在生成 或 子代理运行中）：主输入框发送走引导逻辑——
-                            // 不打断当前流式，先把消息挂到输入框右上侧（引导已排入），等当前回合
-                            // 自然结束再注入为 user_guidance 气泡续答。有附件时回退普通发送，避免静默丢附件。
+                            // 没有排队引导时默认排队，等当前回合自然结束再注入；已有排队引导时
+                            // 再次发送视为打断当前任务，直接注入最新引导。有附件时回退普通发送，避免静默丢附件。
                             val contents = inputState.getContents()
                             val hasAttachment = contents.any { it !is UIMessagePart.Text }
                             if (hasAttachment) {
@@ -607,7 +617,11 @@ private fun ChatPageContent(
                                 vm.sendMessageQueued(contents)
                             } else {
                                 val guidanceText = inputState.textContent.text.toString()
-                                vm.sendGuidance(guidanceText)
+                                if (pendingGuidance.isNotEmpty()) {
+                                    vm.sendGuidanceInterrupt(guidanceText)
+                                } else {
+                                    vm.sendGuidance(guidanceText)
+                                }
                             }
                             pendingScrollAfterSend = true
                         } else {
@@ -623,6 +637,10 @@ private fun ChatPageContent(
                                 parts = inputState.getContents(),
                                 messageId = inputState.editingMessage!!,
                             )
+                        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
+                            // 生成中长按发送：只追加消息不回复，但不打断当前任务，先排队。
+                            vm.sendMessageQueued(inputState.getContents(), answer = false)
+                            pendingScrollAfterSend = true
                         } else {
                             vm.handleMessageSend(content = inputState.getContents(), answer = false)
                             pendingScrollAfterSend = true
@@ -673,11 +691,15 @@ private fun ChatPageContent(
                     subAgentActive = subAgentActiveCount > 0,
                     subAgentActiveCount = subAgentActiveCount,
                     pendingGuidance = pendingGuidance,
+                    pendingSends = pendingSends,
                     onSendPendingGuidance = { item ->
-                        vm.sendGuidanceImmediate(item.id)
+                        vm.sendGuidanceInterrupt(item.text)
                     },
                     onCancelPendingGuidance = { item ->
                         vm.cancelPendingGuidance(item.id)
+                    },
+                    onCancelPendingSend = { item ->
+                        vm.cancelPendingSend(item.id)
                     },
                     onEditPendingGuidance = { item ->
                         vm.editPendingGuidance(item.id, item.text)
@@ -725,7 +747,7 @@ private fun ChatPageContent(
                     innerPadding = PaddingValues(0.dp),
                     conversation = conversation,
                 state = chatListState,
-                loading = loadingJob != null,
+                loading = loadingJob?.isActive == true,
                 processingStatus = processingStatus,
                 previewMode = previewMode,
                 settings = setting,
@@ -747,7 +769,7 @@ private fun ChatPageContent(
                     }
                 },
                 onDelete = {
-                    if (loadingJob != null) {
+                    if (loadingJob?.isActive == true) {
                         vm.showDeleteBlockedWhileGeneratingError()
                     } else {
                         vm.deleteMessage(it)
@@ -1554,6 +1576,9 @@ private suspend fun LazyListState.scrollToSafeBottom(
         if (!userMoved && !isScrollInProgress) {
             val target = layoutInfo.totalItemsCount - 1
             scrollToItem(target)
+            // 最后一条消息高于视口时，scrollToItem 只把消息顶部对齐视口；
+            // 再按可滚动终点补一次，确保真正停在底部。
+            scrollBy(Float.MAX_VALUE)
         }
     }
 }

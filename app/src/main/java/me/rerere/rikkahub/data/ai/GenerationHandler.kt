@@ -249,9 +249,14 @@ class GenerationHandler(
         // prevRoundFingerprints = 上一轮工具调用指纹集合；identicalCallRounds = 连续完全相同调用轮数
         var prevRoundFingerprints: Set<String>? = null
         var identicalCallRounds = 0
+        var generationEnded = false
+        var waitingForUser = false
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
+            // 进入新一轮生成前清掉上一轮流式结束时写入的 finishedAt：
+            // 工具循环仍在同一回合内，消息并未真正完成，UI 不应提前显示完成状态。
+            messages = messages.markLastAssistantFinished(false)
 
             // steering：仅消费「立即发送」模式的引导（用户点了对应气泡的发送按钮）——
             // 在下一轮边界（上一个工具调用/输出完成后的自然边界）注入可见 user_guidance 气泡
@@ -333,17 +338,16 @@ class GenerationHandler(
                             settings = settings,
                             conversationId = conversationId,
                         )
-                        emit(
-                            GenerationChunk.Messages(
-                                messages.visualTransforms(
-                                    transformers = outputTransformers,
-                                    context = context,
-                                    model = model,
-                                    assistant = assistant,
-                                    settings = settings
-                                )
-                            )
+                        val visualMessages = messages.visualTransforms(
+                            transformers = outputTransformers,
+                            context = context,
+                            model = model,
+                            assistant = assistant,
+                            settings = settings
                         )
+                        // 流式 chunk 的 Finish 会写入 finishedAt，但工具循环还没结束，
+                        // 这里统一清掉，避免 UI 在回合中途提前显示“完成”。
+                        emit(GenerationChunk.Messages(visualMessages.markLastAssistantFinished(false)))
                     },
                     transformers = inputTransformers,
                     model = model,
@@ -375,19 +379,19 @@ class GenerationHandler(
                     assistant = assistant,
                     settings = settings
                 )
-                messages = messages.slice(0 until messages.lastIndex) + messages.last().copy(
-                    finishedAt = Clock.System.now()
-                        .toLocalDateTime(TimeZone.currentSystemDefault())
-                )
-                emit(GenerationChunk.Messages(messages))
 
                 val tools = messages.last().getTools().filter { !it.isExecuted }
                 if (tools.isEmpty()) {
                     // 母代理这轮纯文本没调工具，正常结束。
                     // 若仍有已派发但未取结果的子代理，交给完成事件流异步唤醒续答，
                     // 不再强制续轮干等（见 ChatService.resumeAfterSubAgent）。
+                    messages = messages.markLastAssistantFinished(true)
+                    emit(GenerationChunk.Messages(messages))
+                    generationEnded = true
                     break
                 }
+                messages = messages.markLastAssistantFinished(false)
+                emit(GenerationChunk.Messages(messages))
 
                 // Check for tools that need approval
                 var hasPendingApproval = false
@@ -427,6 +431,7 @@ class GenerationHandler(
                 // If there are pending approvals, break and wait for user
                 if (hasPendingApproval) {
                     Log.i(TAG, "generateText: waiting for tool approval")
+                    waitingForUser = true
                     break
                 }
 
@@ -452,6 +457,7 @@ class GenerationHandler(
 
             if (executedTools.isEmpty()) {
                 // No results to add (all tools were pending)
+                waitingForUser = true
                 break
             }
 
@@ -495,9 +501,18 @@ class GenerationHandler(
                 messages = messages.dropLast(1) + lastMsg.copy(
                     parts = lastMsg.parts + UIMessagePart.Text(AUTO_STOP_NOTICE)
                 )
+                messages = messages.markLastAssistantFinished(true)
                 emit(GenerationChunk.Messages(messages))
+                generationEnded = true
                 break
             }
+        }
+
+        // maxSteps 耗尽属于生成自然结束，补一次最终完成标记；
+        // 等待用户审批/工具未就绪时保持未完成，避免 UI 提前显示“已结束”。
+        if (!generationEnded && !waitingForUser) {
+            messages = messages.markLastAssistantFinished(true)
+            emit(GenerationChunk.Messages(messages))
         }
 
     }.flowOn(Dispatchers.IO)
@@ -942,4 +957,20 @@ class GenerationHandler(
             }
         }
     }.flowOn(Dispatchers.IO)
+}
+
+/**
+ * 给最后一条 assistant 消息设置/清除 finishedAt。
+ * 整个生成回合（含工具循环）结束前应保持 null，结束后才写入时间。
+ */
+private fun List<UIMessage>.markLastAssistantFinished(finished: Boolean): List<UIMessage> {
+    val last = lastOrNull() ?: return this
+    if (last.role != MessageRole.ASSISTANT) return this
+    return dropLast(1) + last.copy(
+        finishedAt = if (finished) {
+            Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        } else {
+            null
+        }
+    )
 }

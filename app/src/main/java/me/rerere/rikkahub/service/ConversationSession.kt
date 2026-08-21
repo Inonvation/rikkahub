@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.model.Conversation
 import java.util.concurrent.atomic.AtomicInteger
@@ -57,10 +56,13 @@ class ConversationSession(
 
     /**
      * 生成中排队的待发送消息（带附件时不能走 steering 文本引导，只能排队等回合结束再发）。
-     * 回合正常结束后由 ChatService 取出并作为普通新消息发送；被取消时不自动发（保留）。
+     * 支持多条排队，UI 订阅本队列渲染待发送卡片；被取消时不自动发（保留给用户处理）。
      */
+    val pendingSendQueue = MutableStateFlow<List<PendingSendItem>>(emptyList())
+
+    // 待发送队列的串行消费任务（防止回合结束与用户新发送之间重复拉起 drain）
     @Volatile
-    var pendingSendContents: List<UIMessagePart>? = null
+    var pendingSendDrainJob: Job? = null
 
     // 空闲检查任务
     private var idleCheckJob: Job? = null

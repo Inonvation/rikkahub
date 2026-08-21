@@ -99,6 +99,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -107,12 +108,15 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.service.PendingGuidanceItem
+import me.rerere.rikkahub.service.PendingSendItem
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
@@ -166,10 +170,14 @@ fun ChatInput(
     onOpenSubAgentPanel: (() -> Unit)? = null,
     /** 排队中的引导消息列表（生成中发送后以独立气泡显示在输入框上方右对齐，等 AI 回合结束依次自动注入） */
     pendingGuidance: List<PendingGuidanceItem> = emptyList(),
-    /** 排队引导旁的「立即发送」：直接在当前回合下一轮边界注入该条 */
+    /** 排队中的待发送消息（生成中发附件/仅追加消息时显示卡片，等 AI 回合结束依次发送） */
+    pendingSends: List<PendingSendItem> = emptyList(),
+    /** 排队引导旁的「打断并发送」：中断当前生成，立即注入该条引导 */
     onSendPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
     /** 取消排队中的引导 */
     onCancelPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
+    /** 取消排队中的待发送消息 */
+    onCancelPendingSend: ((PendingSendItem) -> Unit)? = null,
     /** 点击气泡文本编辑：取消排队并把文本回填输入框 */
     onEditPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
 ) {
@@ -249,20 +257,58 @@ fun ChatInput(
         ) {
             // 排队中的引导：独立于输入框的气泡，位于输入框上方、右对齐（对齐 Codex 样式）
             if (pendingGuidance.isNotEmpty()) {
-                Column(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    horizontalAlignment = Alignment.End,
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                    shadowElevation = 1.dp,
                 ) {
-                    pendingGuidance.forEach { item ->
-                        PendingGuidanceBubble(
-                            text = item.text,
-                            onSendNow = { onSendPendingGuidance?.invoke(item) },
-                            onCancel = { onCancelPendingGuidance?.invoke(item) },
-                            onEdit = { onEditPendingGuidance?.invoke(item) },
-                        )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        pendingGuidance.forEach { item ->
+                            PendingGuidanceBubble(
+                                text = item.text,
+                                onSendNow = { onSendPendingGuidance?.invoke(item) },
+                                onCancel = { onCancelPendingGuidance?.invoke(item) },
+                                onEdit = { onEditPendingGuidance?.invoke(item) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 排队中的待发送消息：独立于输入框，显示在输入框上方，等 AI 回合结束按序发送
+            if (pendingSends.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                    shadowElevation = 1.dp,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        pendingSends.forEach { item ->
+                            PendingSendBubble(
+                                item = item,
+                                onCancel = { onCancelPendingSend?.invoke(item) },
+                            )
+                        }
                     }
                 }
             }
@@ -540,7 +586,7 @@ fun ChatInput(
 /**
  * 「引导已排入」气泡：独立于输入框，显示在输入框上方、右对齐（对齐 Codex 样式）。
  * 默认等 AI 回合输出完成后由 ChatService 依次自动注入（气泡自动消失）；点发送按钮则
- * 立即在当前回合下一轮边界注入；点文本可回填输入框编辑；点取消则丢弃这条排队引导。
+ * 打断当前生成并立即注入；点编辑按钮/文本可回填输入框编辑；点取消则丢弃这条排队引导。
  */
 @Composable
 private fun PendingGuidanceBubble(
@@ -568,7 +614,7 @@ private fun PendingGuidanceBubble(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .widthIn(max = 280.dp)
+                    .widthIn(max = 200.dp)
                     .clickable(onClick = onEdit),
             )
             IconButton(
@@ -578,6 +624,17 @@ private fun PendingGuidanceBubble(
                 Icon(
                     imageVector = HugeIcons.ArrowUp02,
                     contentDescription = stringResource(R.string.send),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Edit01,
+                    contentDescription = stringResource(R.string.edit),
                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.size(14.dp)
                 )
@@ -594,6 +651,71 @@ private fun PendingGuidanceBubble(
                 )
             }
         }
+    }
+}
+
+/**
+ * 「待发送已排入」气泡：生成中发附件/仅追加消息时显示，等 AI 回合结束后按序发送。
+ * 点叉取消这条排队消息。
+ */
+@Composable
+private fun PendingSendBubble(
+    item: PendingSendItem,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shadowElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Files02,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = item.previewText(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 260.dp),
+            )
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = stringResource(R.string.stop),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun PendingSendItem.previewText(): String {
+    val text = content.filterIsInstance<UIMessagePart.Text>()
+        .joinToString(" ") { it.text }
+        .trim()
+    val attachmentCount = content.count { it !is UIMessagePart.Text }
+    return buildString {
+        if (text.isNotBlank()) append(text)
+        if (attachmentCount > 0) {
+            if (isNotBlank()) append(" · ")
+            append("$attachmentCount 个附件")
+        }
+        if (isBlank()) append("待发送消息")
     }
 }
 

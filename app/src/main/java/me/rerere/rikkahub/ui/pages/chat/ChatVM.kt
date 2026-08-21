@@ -40,6 +40,7 @@ import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.PendingGuidanceItem
+import me.rerere.rikkahub.service.PendingSendItem
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatDraftStore
 import me.rerere.rikkahub.ui.hooks.ChatInputState
@@ -133,6 +134,14 @@ class ChatVM(
     // 错误状态
     val errors: StateFlow<List<ChatError>> = chatService.errors
 
+    /** 只展示当前会话的错误；无会话归属的全局错误仍显示 */
+    val conversationErrors: StateFlow<List<ChatError>> =
+        chatService.errors
+            .map { list ->
+                list.filter { it.conversationId == null || it.conversationId == _conversationId }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
@@ -193,9 +202,14 @@ class ChatVM(
     }
 
     /** 生成中发送消息（带附件走此路径）：正在生成则排队，回合正常结束后自动发送，不打断当前流式（#17） */
-    fun sendMessageQueued(content: List<UIMessagePart>) {
+    fun sendMessageQueued(content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
-        chatService.sendMessageQueued(_conversationId, content)
+        chatService.sendMessageQueued(_conversationId, content, answer = answer)
+    }
+
+    /** 取消排队中的待发送消息（附件卡片点叉） */
+    fun cancelPendingSend(itemId: Uuid) {
+        chatService.cancelPendingSend(_conversationId, itemId)
     }
 
     /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条。
@@ -205,9 +219,10 @@ class ChatVM(
         chatService.sendGuidance(_conversationId, text, immediate = false)
     }
 
-    /** 排队引导旁的「立即发送」：把对应引导标记为立即注入，GenerationHandler 在下一轮边界消费 */
-    fun sendGuidanceImmediate(itemId: Uuid) {
-        chatService.sendGuidanceImmediate(_conversationId, itemId)
+    /** 排队引导旁的「打断并发送」：清空排队，中断当前生成，立即注入该引导 */
+    fun sendGuidanceInterrupt(text: String) {
+        if (text.isBlank()) return
+        chatService.sendGuidanceInterrupt(_conversationId, text)
     }
 
     /** 取消排队中的引导：从队列移除指定项 */
@@ -224,6 +239,11 @@ class ChatVM(
     /** 排队中的引导消息列表（订阅会话 steering 队列，逐条渲染气泡） */
     val pendingGuidance: StateFlow<List<PendingGuidanceItem>> =
         chatService.getPendingGuidanceFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** 排队中的待发送消息列表（订阅会话 pendingSendQueue，逐条渲染卡片） */
+    val pendingSends: StateFlow<List<PendingSendItem>> =
+        chatService.getPendingSendFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {

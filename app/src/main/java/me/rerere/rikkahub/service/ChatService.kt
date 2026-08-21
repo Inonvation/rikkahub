@@ -31,6 +31,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -886,35 +889,78 @@ class ChatService(
      * 当前回合正常结束后自动发送；空闲时直接发送。带附件消息无法走 steering 文本引导，
      * 只能走这个排队机制——避免「生成中发图片静默取消当前回复」（#17）。
      */
-    fun sendMessageQueued(conversationId: Uuid, content: List<UIMessagePart>) {
+    fun sendMessageQueued(
+        conversationId: Uuid,
+        content: List<UIMessagePart>,
+        answer: Boolean = true,
+    ) {
         if (content.isEmptyInputMessage()) return
         val session = getOrCreateSession(conversationId)
         if (session.isGenerating) {
-            session.pendingSendContents = content
+            session.pendingSendQueue.value =
+                session.pendingSendQueue.value + PendingSendItem(content = content, answer = answer)
         } else {
-            sendMessage(conversationId, content)
+            sendMessage(conversationId, content, answer = answer)
         }
     }
 
     /** 回合正常结束后自动发送排队的待发消息（join 当前 job 确保其彻底结束，避免 setJob 取消正在收尾的 job） */
     private fun scheduleDrainPendingSend(conversationId: Uuid) {
         val session = sessions[conversationId] ?: return
-        if (session.pendingSendContents == null) return
-        appScope.launch {
-            session.getJob()?.join()
-            // 等待期间用户若发起了新操作，sendMessage 会清掉 pending → 这里拿到 null 就不发，避免抢占
-            val pending = session.pendingSendContents ?: return@launch
-            session.pendingSendContents = null
-            sendMessage(conversationId, pending)
+        if (session.pendingSendQueue.value.isEmpty()) return
+        if (session.pendingSendDrainJob?.isActive == true) return
+        session.pendingSendDrainJob = appScope.launch {
+            try {
+                session.getJob()?.join()
+                // 等待期间用户若发起了新操作，sendMessage 会清空队列 → 这里拿到空就退出，避免抢占
+                while (true) {
+                    // 先等引导 drain 结束，避免两条 drain 互相 setJob 取消对方刚启动的生成。
+                    while (session.steeringDrainJob?.isActive == true) {
+                        session.steeringDrainJob?.join()
+                    }
+                    // 等待期间用户可能已发送新消息/取消排队，重新取队首，避免发送已失效的条目。
+                    val item = session.pendingSendQueue.value.firstOrNull() ?: break
+                    session.pendingSendQueue.value = session.pendingSendQueue.value.drop(1)
+                    sendMessage(
+                        conversationId = conversationId,
+                        content = item.content,
+                        answer = item.answer,
+                        clearPendingQueue = false,
+                    )
+                    val job = session.getJob()
+                    job?.join()
+                    if (job?.isCancelled == true) break
+                }
+            } finally {
+                session.pendingSendDrainJob = null
+            }
         }
     }
 
-    fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
+    /** 取消一条排队中的待发送消息（UI 卡片点叉时调用） */
+    fun cancelPendingSend(conversationId: Uuid, itemId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        session.pendingSendQueue.value = session.pendingSendQueue.value.filterNot { it.id == itemId }
+    }
+
+    /** 订阅会话的待发送消息队列（UI 渲染卡片用），按入队顺序排列 */
+    fun getPendingSendFlow(conversationId: Uuid): Flow<List<PendingSendItem>> {
+        val session = getOrCreateSession(conversationId)
+        return session.pendingSendQueue
+    }
+
+    fun sendMessage(
+        conversationId: Uuid,
+        content: List<UIMessagePart>,
+        answer: Boolean = true,
+        clearPendingQueue: Boolean = true,
+    ) {
         if (content.isEmptyInputMessage()) return
 
         val session = getOrCreateSession(conversationId)
-        // 新发送覆盖旧的未送达排队消息（如用户停止后残留的 pending）
-        session.pendingSendContents = null
+        // 用户主动新发送覆盖旧的未送达排队消息（如用户停止后残留的 pending）；
+        // drain 内部发送传 false，保证队列里剩余的条目继续按序发送。
+        if (clearPendingQueue) session.pendingSendQueue.value = emptyList()
         val previousJob = session.getJob()
         previousJob?.cancel()
 
@@ -1045,6 +1091,8 @@ class ChatService(
      *   drain 依次自动注入并续答（自动引导）。
      * - immediate=true（排队引导旁的「立即发送」）：把该项标记为立即注入，
      *   GenerationHandler 在下一轮边界（工具调用完成/输出结束）消费注入。
+     * 队列里已有排队引导时，再次调用本方法会清空旧队列、打断当前生成并直接注入新引导，
+     * 避免引导越积越多、用户的新指令迟迟不生效。
      *
      * 实现复用 [handleMessageComplete] 的 resumeContext 续答机制：resumeContext 追加为
      * provider 看到的最后一条 USER 消息、不落持久化列表，handleMessageChunk 仍并入上一条
@@ -1069,6 +1117,11 @@ class ChatService(
         // 且被迫从头重生成反应慢）。把引导写入 steering 队列：immediate=true 由
         // GenerationHandler 在下一轮边界消费；其余排队等当前回合结束后由 drain 依次注入。
         if (runningJob != null && runningJob.isActive) {
+            // 已有排队引导时再次发送：直接打断当前任务并立即注入新引导，避免排队越积越多。
+            if (session.steeringQueue.value.isNotEmpty()) {
+                interruptGuidanceAndSend(session, conversationId, text)
+                return
+            }
             session.steeringQueue.value = session.steeringQueue.value + PendingSteering(
                 text = text,
                 immediate = immediate,
@@ -1090,11 +1143,44 @@ class ChatService(
         session.setJob(job)
     }
 
-    /** 排队引导旁的「立即发送」：把指定项标记为立即注入，GenerationHandler 在下一轮边界消费 */
-    fun sendGuidanceImmediate(conversationId: Uuid, itemId: Uuid) {
+    /** 排队引导卡片上的「打断并发送」：清空排队，中断当前生成，直接注入该引导 */
+    fun sendGuidanceInterrupt(conversationId: Uuid, text: String) {
         val session = sessions[conversationId] ?: return
-        session.steeringQueue.value = session.steeringQueue.value.map {
-            if (it.id == itemId) it.copy(immediate = true) else it
+        if (session.state.value.isGroupDiscussion) return
+        interruptGuidanceAndSend(session, conversationId, text)
+    }
+
+    private fun interruptGuidanceAndSend(
+        session: ConversationSession,
+        conversationId: Uuid,
+        text: String,
+    ) {
+        if (text.isBlank()) return
+        // 旧的排队引导已被用户的最新指令取代，直接清空；同时停掉 drain，避免它把剩余项再捞回来。
+        session.steeringQueue.value = emptyList()
+        session.steeringDrainJob?.cancel()
+        appScope.launch {
+            try {
+                stopGeneration(conversationId)
+                // stopGeneration 只 join 到 job 结束，invokeOnCompletion 清空 job 引用可能稍晚，
+                // 等引用真正清空后再注册新 job，避免新 job 被 setJob 的“取消旧 job”逻辑误杀。
+                withTimeoutOrNull(2_000) {
+                    while (session.getJob() != null) delay(20)
+                }
+                appendGuidancePart(conversationId, text)
+                val job = appScope.launch {
+                    try {
+                        handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(text))
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+                    }
+                }
+                session.setJob(job)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+            }
         }
     }
 
@@ -1584,9 +1670,21 @@ class ChatService(
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
                 val currentConversation = getConversationFlow(conversationId).value
+                val lastNode = currentConversation.messageNodes.lastOrNull()
+                val completionTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
                 val updatedConversation = currentConversation.copy(
                     messageNodes = currentConversation.messageNodes.map { node ->
-                        val newMessages = node.messages.map { it.finishReasoning() }
+                        val newMessages = node.messages.map { message ->
+                            val finished = message.finishReasoning()
+                            if (node === lastNode &&
+                                finished.role == MessageRole.ASSISTANT &&
+                                finished.finishedAt == null
+                            ) {
+                                finished.copy(finishedAt = completionTime)
+                            } else {
+                                finished
+                            }
+                        }
                         // finishReasoning 对无未完成推理的消息返回原引用 → 节点保持原引用，
                         // 避免生成结束时全表重建引用导致一次性整屏重组
                         val nodeChanged = newMessages.indices.any { newMessages[it] !== node.messages[it] }
@@ -2638,8 +2736,15 @@ class ChatService(
     }
 }
 
-/** 排队中的引导消息（UI 气泡用）：id 用于定位「立即发送 / 取消 / 编辑」，text 为引导内容 */
+/** 排队中的引导消息（UI 气泡用）：id 用于定位「打断并发送 / 取消 / 编辑」，text 为引导内容 */
 data class PendingGuidanceItem(
     val id: Uuid,
     val text: String,
+)
+
+/** 生成中排队的待发送消息（UI 卡片用）：answer=false 表示只追加消息不触发生成 */
+data class PendingSendItem(
+    val id: Uuid = Uuid.random(),
+    val content: List<UIMessagePart>,
+    val answer: Boolean = true,
 )
