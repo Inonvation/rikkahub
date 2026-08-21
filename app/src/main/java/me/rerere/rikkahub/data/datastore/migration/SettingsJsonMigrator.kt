@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.datastore.migration
 import android.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -71,6 +72,15 @@ object SettingsJsonMigrator {
             root["assistants"]?.let { element ->
                 val migrated = refreshBuiltinAssistants(JsonInstant.encodeToString(element))
                 root["assistants"] = JsonInstant.parseToJsonElement(migrated)
+            }
+
+            // V7: 思考冻结栏默认开启，恢复备份时同步覆盖旧值
+            root["displaySetting"]?.let { element ->
+                val obj = element as? JsonObject ?: return@let
+                val migrated = obj.toMutableMap().apply {
+                    this["thinkingFrozenBar"] = JsonPrimitive(true)
+                }
+                root["displaySetting"] = JsonObject(migrated)
             }
 
             JsonInstant.encodeToString(JsonObject(root))

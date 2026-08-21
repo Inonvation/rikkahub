@@ -117,6 +117,8 @@ private fun rememberReasoningState(
             state.scrollState.animateScrollTo(state.scrollState.maxValue)
         } else {
             if (state.expandState.expanded) {
+                // 生成结束先让位一帧，再折叠，避免高度动画与 LazyColumn 锚点调整抢同一帧
+                withFrameNanos {}
                 state.expandState = if (settings.displaySetting.autoCollapseAllSteps || settings.displaySetting.autoCloseThinking) {
                     ReasoningCardState.Collapsed
                 } else {

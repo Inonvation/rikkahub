@@ -108,7 +108,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
@@ -331,38 +330,23 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     }
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
-            val bottomSlots = chatBottomSlots(
-                showSystemPrompt = loadingJob?.isActive != true &&
-                    setting.getAssistantById(conversation.assistantId)?.allowConversationSystemPrompt == true,
-            )
-            suspend fun alignTallMessageStart(itemIndex: Int) {
-                snapshotFlow {
-                    val info = chatListState.layoutInfo
-                    val item = info.visibleItemsInfo.firstOrNull { it.index == itemIndex }
-                    if (item != null && info.viewportSize.height > 0) {
-                        item.size to info.viewportSize.height
-                    } else {
-                        null
-                    }
-                }.first { it != null }?.let { (itemSize, viewportHeight) ->
-                    val overflow = itemSize - viewportHeight
-                    if (overflow > 0) {
-                        chatListState.requestScrollToItem(itemIndex, overflow)
-                    }
+            suspend fun alignTallMessageStart(itemIndex: Int, fallbackToBottom: Boolean) {
+                chatListState.scrollToItem(itemIndex)
+                val info = chatListState.layoutInfo
+                val item = info.visibleItemsInfo.firstOrNull { it.index == itemIndex } ?: return
+                if (item.size <= info.viewportSize.height && fallbackToBottom) {
+                    chatListState.requestScrollToItem(info.totalItemsCount + 5)
                 }
             }
             vm.chatListInitialized = true
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
-                    val target = messageItemIndex(conversation.messageNodes.size, index, bottomSlots)
-                    chatListState.requestScrollToItem(target)
-                    alignTallMessageStart(target)
+                    alignTallMessageStart(index, fallbackToBottom = false)
                 }
             } else {
-                chatListState.requestScrollToItem(0)
                 // 历史会话打开时，若最后一条消息高于视口，把它的开头对齐到视口顶部
-                alignTallMessageStart(bottomSlots)
+                alignTallMessageStart(conversation.messageNodes.lastIndex, fallbackToBottom = true)
             }
         }
     }
@@ -433,7 +417,11 @@ private fun ChatPageContent(
     val context = LocalContext.current
 
     fun scrollAfterSend() {
-        chatListState.requestScrollToItem(0)
+        if (!chatListState.isScrollInProgress) {
+            scope.launch {
+                chatListState.requestScrollToItem(conversation.messageNodes.size + 5)
+            }
+        }
     }
 
     val toaster = LocalToaster.current
@@ -472,6 +460,8 @@ private fun ChatPageContent(
         }
         .distinctUntilChanged()
         .collectAsStateWithLifecycle(initialValue = 0)
+    val effectiveProcessingStatus = processingStatus
+        ?: if (subAgentActiveCount > 0) "等待子代理完成任务…" else null
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         buildList {
@@ -499,10 +489,7 @@ private fun ChatPageContent(
         ) {
         AssistantBackground(
             setting = setting,
-            // hazeSource 仅在开启模糊效果时挂载（与 ChatInput.hazeEffect 同开关）：未开启时空转采样白耗 GPU
-            modifier = Modifier.then(
-                if (setting.displaySetting.enableBlurEffect) Modifier.hazeSource(hazeState) else Modifier
-            )
+            modifier = Modifier.hazeSource(hazeState),
         )
         Scaffold(
             topBar = {
@@ -757,7 +744,7 @@ private fun ChatPageContent(
                     conversation = conversation,
                 state = chatListState,
                 loading = loadingJob?.isActive == true,
-                processingStatus = processingStatus,
+                processingStatus = effectiveProcessingStatus,
                 previewMode = previewMode,
                 settings = setting,
                 hazeState = hazeState,
@@ -809,13 +796,8 @@ private fun ChatPageContent(
                 },
                 onJumpToMessage = { index ->
                     previewMode = false
-                    val bottomSlots = chatBottomSlots(
-                        showSystemPrompt = loadingJob?.isActive != true &&
-                            setting.getAssistantById(conversation.assistantId)?.allowConversationSystemPrompt == true,
-                    )
-                    val target = messageItemIndex(conversation.messageNodes.size, index, bottomSlots)
                     scope.launch {
-                        chatListState.requestScrollToItem(target)
+                        chatListState.requestScrollToItem(index)
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason ->
@@ -1562,6 +1544,5 @@ private suspend fun scrollListByDelta(
     if (state.isScrollInProgress) {
         return
     }
-    // reverseLayout 下 scrollBy 方向与正向列表相反
-    state.scrollBy(-delta)
+    state.scrollBy(delta)
 }

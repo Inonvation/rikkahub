@@ -3,12 +3,10 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -41,13 +39,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -321,14 +319,6 @@ private fun MessagePartsBlock(
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
 
-    // 整条正文淡入的 alpha：消息级（nodeId 隔离，重生成/新消息时重置）。用 Animatable 而非
-    // MutableTransitionState/布尔标志——正文 Text part 槽位随 thinking 步骤数漂移重建时，
-    // AnimatedVisibility 会被移除导致淡入中断或重播闪烁；Animatable 存当前 alpha，重建后
-    // LaunchedEffect 从当前值继续淡入到 1，不中断、不重播。
-    // 初始值按 loading 决定：只有生成中的新正文才从 0 淡入；已完成的旧消息（导航返回恢复、
-    // 或滚动回看历史消息）首帧就是 1，避免每条消息进入视口时都重播一次淡入。
-    val assistantBodyAlpha = remember(nodeId) { Animatable(if (loading) 0f else 1f) }
-
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
@@ -369,6 +359,7 @@ private fun MessagePartsBlock(
     var prevLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, settings.displaySetting.autoCollapseAllSteps) {
         if (!loading && prevLoading && settings.displaySetting.autoCollapseAllSteps) {
+            withFrameNanos {}
             parts.forEach { part ->
                 if (part is UIMessagePart.Tool && part.isExecuted) {
                     toolBubbleExpanded[part.toolCallId] = false
@@ -424,6 +415,9 @@ private fun MessagePartsBlock(
     // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态
     LaunchedEffect(loading, autoCollapseAll) {
         if (autoCollapseAll) {
+            if (!loading) {
+                withFrameNanos {}
+            }
             chainCollapsed = !loading && hasProcessContent
         }
     }
@@ -549,26 +543,7 @@ private fun MessagePartsBlock(
                             }
                         }
 
-                        // 整条正文淡入：只有生成中的 assistant 正文淡入一次（300ms），之后流式
-                        // 打字机逐字输出保持；已完成的旧消息（导航返回/回看历史）不淡入。
-                        // user 消息不淡入。alpha 存消息级 Animatable，流式重建时 LaunchedEffect
-                        // 从当前 alpha 继续，不中断、不重播。
-                        if (role == MessageRole.ASSISTANT) {
-                            LaunchedEffect(loading) {
-                                if (loading) {
-                                    assistantBodyAlpha.animateTo(1f, animationSpec = tween(300))
-                                } else {
-                                    assistantBodyAlpha.snapTo(1f)
-                                }
-                            }
-                            Box(
-                                Modifier.graphicsLayer { alpha = assistantBodyAlpha.value }
-                            ) {
-                                renderContent()
-                            }
-                        } else {
-                            renderContent()
-                        }
+                        renderContent()
                     }
 
                     is UIMessagePart.Video -> {
@@ -760,7 +735,8 @@ private fun MessagePartsBlock(
             }
         }
 
-        // 过程内容：展开/折叠带动画（思考链 + 中间输出）
+        // 过程内容：保留纵向展开/收起的过渡动画；自动跟随已改为
+        // requestScrollToItem 并暂停在程序滚动期间，避免和动画抢位置。
         AnimatedVisibility(
             visible = !chainCollapsed,
             enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),

@@ -57,6 +57,13 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
                 currentThinkingSteps.add(ThinkingStep.ServerToolStep(part))
             }
 
+            is UIMessagePart.Text -> {
+                flushThinkingSteps()
+                if (part.text.isNotBlank()) {
+                    result.add(MessagePartBlock.ContentBlock(part, index))
+                }
+            }
+
             else -> {
                 flushThinkingSteps()
                 result.add(MessagePartBlock.ContentBlock(part, index))

@@ -82,17 +82,4 @@ class ChatScrollUtilsTest {
             )
         )
     }
-
-    @Test
-    fun `bottom slots count spacer and optional system prompt`() {
-        assertEquals(1, chatBottomSlots(showSystemPrompt = false))
-        assertEquals(2, chatBottomSlots(showSystemPrompt = true))
-    }
-
-    @Test
-    fun `message item index maps newest message to first slot above fixed items`() {
-        assertEquals(1, messageItemIndex(messageNodesSize = 3, messageIndex = 2, bottomSlots = 1))
-        assertEquals(2, messageItemIndex(messageNodesSize = 3, messageIndex = 1, bottomSlots = 1))
-        assertEquals(3, messageItemIndex(messageNodesSize = 3, messageIndex = 0, bottomSlots = 1))
-    }
 }

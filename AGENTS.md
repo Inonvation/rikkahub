@@ -25,6 +25,12 @@
 ./gradlew lint                   # 运行 Android Lint
 ```
 
+## 设备安装规则
+
+- **禁止通过 adb 删除手机上的任何软件**（包括 `adb uninstall`、`pm uninstall` 以及 Gradle 设备测试流程中的自动卸载）。卸载会清除应用数据，可能造成用户数据丢失。
+- 安装或更新手机上的应用**只允许覆盖安装**：`adb install -r <apk>`，或使用不会卸载的安装任务。
+- 默认不要运行会先卸载再安装的设备测试任务（如 `connectedDebugAndroidTest`），除非用户明确要求，且用户已确认应用数据可以清除。
+
 构建/安装要点（与上游不同，容易猜错）：
 
 - **入口 Activity 是 `RouteActivity`**（MAIN/LAUNCHER），项目里**没有** `MainActivity`

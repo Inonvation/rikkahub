@@ -24,6 +24,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -92,6 +95,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -105,6 +109,7 @@ import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownNewCache
@@ -246,6 +251,32 @@ private fun ChatListNormal(
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val isUserDragging by state.interactionSource.collectIsDraggedAsState()
+    var followLocked by remember { mutableStateOf(false) }
+    val lastMessageIndex = conversation.messageNodes.lastIndex
+    val freezeState = LocalThinkingFreezeState.current
+
+    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        return isChatListAtBottom(
+            lastItemEnd = lastItem.offset + lastItem.size,
+            viewportEnd = state.layoutInfo.viewportEndOffset,
+            bottomInsetPx = inputBarHeight.roundToInt(),
+        )
+    }
+
+    fun List<LazyListItemInfo>.isPinnedToBottom(): Boolean {
+        val lastItem = lastOrNull() ?: return false
+        return isChatListPinnedToBottom(
+            totalItemsCount = state.layoutInfo.totalItemsCount,
+            lastVisibleIndex = lastItem.index,
+            lastItemEnd = lastItem.offset + lastItem.size,
+            viewportEnd = state.layoutInfo.viewportEndOffset,
+            afterContentPadding = state.layoutInfo.afterContentPadding,
+        )
+    }
+
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
             if (settings.displaySetting.enableVolumeKeyScroll) {
@@ -254,7 +285,7 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                scope.launch { state.scrollBy(if (isVolumeUp) scrollAmount else -scrollAmount) }
+                scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
         }
@@ -272,7 +303,7 @@ private fun ChatListNormal(
     var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
 
     // 自动跟随键盘滚动
-    ImeLazyListAutoScroller(lazyListState = state, reverseLayout = true)
+    ImeLazyListAutoScroller(lazyListState = state)
 
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(conversation)
@@ -325,28 +356,68 @@ private fun ChatListNormal(
         // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
         // 按"每跨过 PREFETCH_WINDOW 条才触发一次 + 取消上一次未完成任务"合并快速滚动时的并发任务，
         // 避免每个 firstVisibleItemIndex 变化都启动一个重任务挤占主线程/GC。
+        LaunchedEffect(state.interactionSource) {
+            state.interactionSource.interactions.collect { interaction ->
+                if (interaction is PressInteraction.Press) {
+                    followLocked = true
+                }
+            }
+        }
+        LaunchedEffect(isUserDragging) {
+            if (isUserDragging) followLocked = true
+        }
+        LaunchedEffect(state) {
+            snapshotFlow {
+                Triple(
+                    state.layoutInfo.visibleItemsInfo,
+                    state.isScrollInProgress,
+                    isUserDragging,
+                )
+            }.distinctUntilChanged().collect { (visibleItemsInfo, inProgress, dragging) ->
+                if (!dragging && !inProgress && visibleItemsInfo.isPinnedToBottom()) {
+                    followLocked = false
+                }
+            }
+        }
+        if (settings.displaySetting.enableAutoScroll) {
+            LaunchedEffect(loadingState, followLocked, isUserDragging) {
+                if (!followLocked && loadingState && !isUserDragging &&
+                    freezeState?.scrollingByProgram != true &&
+                    state.layoutInfo.totalItemsCount > 0 &&
+                    state.layoutInfo.visibleItemsInfo.isAtBottom()
+                ) {
+                    snapshotFlow {
+                        val last = state.layoutInfo.visibleItemsInfo.lastOrNull()
+                        listOf(
+                            state.layoutInfo.totalItemsCount,
+                            state.firstVisibleItemIndex,
+                            state.firstVisibleItemScrollOffset,
+                            last?.index,
+                            last?.let { it.offset + it.size },
+                            state.layoutInfo.viewportEndOffset,
+                        )
+                    }.distinctUntilChanged().collect {
+                        if (freezeState?.scrollingByProgram != true &&
+                            state.layoutInfo.totalItemsCount > 0 &&
+                            !state.layoutInfo.visibleItemsInfo.isAtBottom()
+                        ) {
+                            state.requestScrollToItem(state.layoutInfo.totalItemsCount + 5)
+                        }
+                    }
+                }
+            }
+        }
+
         LaunchedEffect(state) {
             var prefetchJob: Job? = null
             snapshotFlow { state.firstVisibleItemIndex / PREFETCH_WINDOW }
                 .distinctUntilChanged()
                 .collect {
-                    val firstVisible = state.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@collect
-                    val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
+                    val firstVisible = state.firstVisibleItemIndex
                     val size = conversationUpdated.messageNodes.size
                     if (size <= 0) return@collect
-                    val bottomSlots = chatBottomSlots(
-                        showSystemPrompt = !loadingState &&
-                            assistant?.allowConversationSystemPrompt == true &&
-                            onConversationSystemPromptChange != null,
-                    )
-                    fun origIndex(itemIdx: Int): Int? {
-                        val k = itemIdx - bottomSlots
-                        return if (k in 0 until size) size - 1 - k else null
-                    }
-                    val oFirst = origIndex(firstVisible) ?: return@collect
-                    val oLast = origIndex(lastVisible) ?: return@collect
-                    val lo = (minOf(oFirst, oLast) - PREFETCH_BEHIND).coerceAtLeast(0)
-                    val hi = (maxOf(oFirst, oLast) + PREFETCH_AHEAD).coerceAtMost(size)
+                    val lo = (firstVisible - PREFETCH_BEHIND).coerceAtLeast(0)
+                    val hi = (firstVisible + PREFETCH_AHEAD).coerceAtMost(size)
                     if (lo >= hi) return@collect
                     val nodes = conversationUpdated.messageNodes.subList(lo, hi)
                     val prefetchAssistant = assistant
@@ -431,35 +502,16 @@ private fun ChatListNormal(
             ) {
             LazyColumn(
                 state = state,
-                reverseLayout = true,
                 contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    // hazeSource 仅在开启模糊效果时挂载：未开启时是空转采样，滚动时白白增加截取开销
-                    .then(
-                        if (settings.displaySetting.enableBlurEffect) Modifier.hazeSource(state = hazeState) else Modifier
-                    )
+                    .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
-            item(ScrollBottomKey) {
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                )
-            }
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
-                item(key = "ConversationSystemPrompt") {
-                    ConversationSystemPromptButton(
-                        customSystemPrompt = conversation.customSystemPrompt,
-                        onSystemPromptChange = onConversationSystemPromptChange,
-                    )
-                }
-            }
             itemsIndexed(
-                items = conversation.messageNodes.asReversed(),
+                items = conversation.messageNodes,
                 key = { index, item -> item.id },
                 // 按消息形态分类，让 LazyColumn 槽位按形态复用组合/布局缓存
                 // （含工具消息重子树：工具气泡 + 文件变更卡片，与纯文本消息形态差异大）
@@ -519,7 +571,7 @@ private fun ChatListNormal(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
-                            loading = loading && index == 0,
+                            loading = loading && index == lastMessageIndex,
                             onRegenerate = regenCb,
                             onEdit = editCb,
                             onFork = forkCb,
@@ -532,10 +584,26 @@ private fun ChatListNormal(
                             onClearTranslation = remember(node) { { msg: UIMessage -> currentOnClearTranslation.value(msg) } },
                             onToolApproval = toolApprovalCb,
                             onToolAnswer = toolAnswerCb,
-                            lastMessage = index == 0,
+                            lastMessage = index == lastMessageIndex,
                             onAssistantNameClick = assistantNameCb,
                         )
                     }
+            }
+
+            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+                item(key = "ConversationSystemPrompt") {
+                    ConversationSystemPromptButton(
+                        customSystemPrompt = conversation.customSystemPrompt,
+                        onSystemPromptChange = onConversationSystemPromptChange,
+                    )
+                }
+            }
+            item(ScrollBottomKey) {
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                )
             }
 
             }
@@ -560,7 +628,7 @@ private fun ChatListNormal(
             // 加载指示器悬浮在列表底部上方，不占用 LazyColumn item 高度，
             // 避免生成结束后 44dp 常驻空白，也避免收尾时 item 高度变化引发锚点跳动
             AnimatedVisibility(
-                visible = loading,
+                visible = loading || processingStatus != null,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .offset(y = -(2).dp)
@@ -790,9 +858,7 @@ private fun ChatListPreview(
         modifier = Modifier
             .padding(top = innerPadding.calculateTopPadding())
             .fillMaxSize()
-            .then(
-                if (settings.displaySetting.enableBlurEffect) Modifier.hazeSource(state = hazeState) else Modifier
-            ),
+            .hazeSource(state = hazeState),
     ) {
         // 搜索框
         OutlinedTextField(

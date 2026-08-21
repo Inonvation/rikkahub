@@ -81,15 +81,13 @@ class StreamChunkHandler(private val model: Model? = null) {
     private fun append(message: UIMessage, chunk: StreamChunk): UIMessage = with(message) {
         when (chunk) {
             is StreamChunk.TextStart -> {
-                if (chunk.id in textPartIndexes) this
-                else copy(parts = parts + UIMessagePart.Text("")).also {
-                    textPartIndexes[chunk.id] = parts.size
-                }
+                textPartIndexes.putIfAbsent(chunk.id, -1)
+                this
             }
             is StreamChunk.TextDelta -> {
                 val index = textPartIndexes[chunk.id]
                 // 容忍 Provider 未发送 Start：首次收到 Delta 时直接创建对应 part。
-                if (index == null || parts.getOrNull(index) !is UIMessagePart.Text) {
+                if (index == null || index < 0 || parts.getOrNull(index) !is UIMessagePart.Text) {
                     copy(parts = parts + UIMessagePart.Text(chunk.text)).also {
                         textPartIndexes[chunk.id] = parts.size
                     }

@@ -63,7 +63,9 @@ class ChatInputState {
                         }
 
                         part is UIMessagePart.Text -> {
-                            merged.add(part)
+                            if (part.text.isNotBlank()) {
+                                merged.add(part)
+                            }
                         }
 
                         else -> {

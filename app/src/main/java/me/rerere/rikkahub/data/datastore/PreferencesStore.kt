@@ -48,6 +48,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV7Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
@@ -84,7 +85,8 @@ private val Context.settingsStore by preferencesDataStore(
             PreferenceStoreV3Migration(),
             PreferenceStoreV4Migration(),
             PreferenceStoreV5Migration(),
-            PreferenceStoreV6Migration()
+            PreferenceStoreV6Migration(),
+            PreferenceStoreV7Migration()
         )
     }
 )
@@ -96,7 +98,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
-        const val CURRENT_DATA_VERSION = 6
+        const val CURRENT_DATA_VERSION = 7
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 
@@ -966,7 +968,7 @@ data class DisplaySetting(
     val autoCollapseAllSteps: Boolean = false,
     val doubleTapCollapseThinking: Boolean = true,
     /** 思考折叠按钮被顶栏遮挡时，在下方悬浮冻结条（用户半成品功能补全） */
-    val thinkingFrozenBar: Boolean = false,
+    val thinkingFrozenBar: Boolean = true,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,
