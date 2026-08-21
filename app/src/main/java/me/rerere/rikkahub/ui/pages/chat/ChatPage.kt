@@ -426,10 +426,8 @@ private fun ChatPageContent(
     val context = LocalContext.current
 
     fun scrollAfterSend() {
-        if (!chatListState.isScrollInProgress) {
-            scope.launch {
-                chatListState.requestScrollToItem(conversation.messageNodes.size + 5)
-            }
+        scope.launch {
+            chatListState.requestScrollToItem(conversation.messageNodes.size + 5)
         }
     }
 

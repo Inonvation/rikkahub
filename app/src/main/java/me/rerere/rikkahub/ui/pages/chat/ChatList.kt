@@ -24,7 +24,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -39,7 +38,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -250,31 +248,6 @@ private fun ChatListNormal(
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
-    val isUserDragging by state.interactionSource.collectIsDraggedAsState()
-    var followLocked by remember { mutableStateOf(false) }
-    val lastMessageIndex = conversation.messageNodes.lastIndex
-    val freezeState = LocalThinkingFreezeState.current
-
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        return isChatListAtBottom(
-            lastItemEnd = lastItem.offset + lastItem.size,
-            viewportEnd = state.layoutInfo.viewportEndOffset,
-            bottomInsetPx = inputBarHeight.roundToInt(),
-        )
-    }
-
-    fun List<LazyListItemInfo>.isPinnedToBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        return isChatListPinnedToBottom(
-            totalItemsCount = state.layoutInfo.totalItemsCount,
-            lastVisibleIndex = lastItem.index,
-            lastItemEnd = lastItem.offset + lastItem.size,
-            viewportEnd = state.layoutInfo.viewportEndOffset,
-            afterContentPadding = state.layoutInfo.afterContentPadding,
-        )
-    }
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -284,7 +257,7 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
+                scope.launch { state.scrollBy(if (isVolumeUp) scrollAmount else -scrollAmount) }
                 true
             } else false
         }
@@ -352,46 +325,28 @@ private fun ChatListNormal(
         // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
         // 按"每跨过 PREFETCH_WINDOW 条才触发一次 + 取消上一次未完成任务"合并快速滚动时的并发任务，
         // 避免每个 firstVisibleItemIndex 变化都启动一个重任务挤占主线程/GC。
-        if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(isUserDragging) {
-                if (isUserDragging) followLocked = true
-            }
-            LaunchedEffect(state, isUserDragging) {
-                snapshotFlow {
-                    Triple(
-                        state.layoutInfo.visibleItemsInfo,
-                        state.isScrollInProgress,
-                        isUserDragging,
-                    )
-                }.distinctUntilChanged().collect { (visibleItemsInfo, inProgress, dragging) ->
-                    if (!dragging && !inProgress && visibleItemsInfo.isPinnedToBottom()) {
-                        followLocked = false
-                    }
-                }
-            }
-            LaunchedEffect(state, isUserDragging, followLocked) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    if (!followLocked && !state.isScrollInProgress && !isUserDragging && loadingState &&
-                        freezeState?.scrollingByProgram != true
-                    ) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.scrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                        }
-                    }
-                }
-            }
-        }
-
         LaunchedEffect(state) {
             var prefetchJob: Job? = null
             snapshotFlow { state.firstVisibleItemIndex / PREFETCH_WINDOW }
                 .distinctUntilChanged()
                 .collect {
-                    val firstVisible = state.firstVisibleItemIndex
+                    val firstVisible = state.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@collect
+                    val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
                     val size = conversationUpdated.messageNodes.size
                     if (size <= 0) return@collect
-                    val lo = (firstVisible - PREFETCH_BEHIND).coerceAtLeast(0)
-                    val hi = (firstVisible + PREFETCH_AHEAD).coerceAtMost(size)
+                    val bottomSlots = chatBottomSlots(
+                        showSystemPrompt = !loadingState &&
+                            assistant?.allowConversationSystemPrompt == true &&
+                            onConversationSystemPromptChange != null,
+                    )
+                    fun origIndex(itemIdx: Int): Int? {
+                        val k = itemIdx - bottomSlots
+                        return if (k in 0 until size) size - 1 - k else null
+                    }
+                    val oFirst = origIndex(firstVisible) ?: return@collect
+                    val oLast = origIndex(lastVisible) ?: return@collect
+                    val lo = (minOf(oFirst, oLast) - PREFETCH_BEHIND).coerceAtLeast(0)
+                    val hi = (maxOf(oFirst, oLast) + PREFETCH_AHEAD).coerceAtMost(size)
                     if (lo >= hi) return@collect
                     val nodes = conversationUpdated.messageNodes.subList(lo, hi)
                     val prefetchAssistant = assistant
@@ -476,6 +431,7 @@ private fun ChatListNormal(
             ) {
             LazyColumn(
                 state = state,
+                reverseLayout = true,
                 contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -484,8 +440,31 @@ private fun ChatListNormal(
                     .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
+            item(ScrollBottomKey) {
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                )
+            }
+            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+                item(key = "ConversationSystemPrompt") {
+                    ConversationSystemPromptButton(
+                        customSystemPrompt = conversation.customSystemPrompt,
+                        onSystemPromptChange = onConversationSystemPromptChange,
+                    )
+                }
+            }
+            conversation.compressedHistory
+                ?.takeIf { it.summaryText.isNotBlank() }
+                ?.let { history ->
+                    item(key = "CompressedHistorySummary") {
+                        CompressedHistoryCard(summary = history.summaryText)
+                    }
+                }
+
             itemsIndexed(
-                items = conversation.messageNodes,
+                items = conversation.messageNodes.asReversed(),
                 key = { index, item -> item.id },
                 // 按消息形态分类，让 LazyColumn 槽位按形态复用组合/布局缓存
                 // （含工具消息重子树：工具气泡 + 文件变更卡片，与纯文本消息形态差异大）
@@ -545,7 +524,7 @@ private fun ChatListNormal(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
-                            loading = loading && index == lastMessageIndex,
+                            loading = loading && index == 0,
                             onRegenerate = regenCb,
                             onEdit = editCb,
                             onFork = forkCb,
@@ -558,34 +537,10 @@ private fun ChatListNormal(
                             onClearTranslation = remember(node) { { msg: UIMessage -> currentOnClearTranslation.value(msg) } },
                             onToolApproval = toolApprovalCb,
                             onToolAnswer = toolAnswerCb,
-                            lastMessage = index == lastMessageIndex,
+                            lastMessage = index == 0,
                             onAssistantNameClick = assistantNameCb,
                         )
                     }
-            }
-
-            conversation.compressedHistory
-                ?.takeIf { it.summaryText.isNotBlank() }
-                ?.let { history ->
-                    item(key = "CompressedHistorySummary") {
-                        CompressedHistoryCard(summary = history.summaryText)
-                    }
-                }
-
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
-                item(key = "ConversationSystemPrompt") {
-                    ConversationSystemPromptButton(
-                        customSystemPrompt = conversation.customSystemPrompt,
-                        onSystemPromptChange = onConversationSystemPromptChange,
-                    )
-                }
-            }
-            item(ScrollBottomKey) {
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                )
             }
 
             }

@@ -6,26 +6,34 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 
 @Composable
 fun ImeLazyListAutoScroller(
     lazyListState: LazyListState,
+    reverseLayout: Boolean = false,
 ) {
     val ime = WindowInsets.ime
     val localDensity = LocalDensity.current
-    LaunchedEffect(lazyListState) {
-        var prevImeBottom = ime.getBottom(localDensity)
+    var imeHeigh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
         snapshotFlow {
             ime.getBottom(localDensity)
-        }.collect { imeBottom ->
-            val delta = imeBottom - prevImeBottom
-            prevImeBottom = imeBottom
-            // 与上游一致：键盘高度变化多少，列表就同步滚动多少。
-            // 不论是否钉在底部，可视内容都会跟随键盘一起上移/下移，而不是被截断。
-            if (delta != 0 && !lazyListState.isScrollInProgress) {
-                lazyListState.scrollBy(delta.toFloat())
+        }.collect { keyboardHeight ->
+            if (reverseLayout) {
+                // reverseLayout 列表底部天然锚定在 IME 上方，无需补偿滚动
+                return@collect
+            }
+            if (keyboardHeight > 0) {
+                lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
+                imeHeigh = keyboardHeight
+            } else {
+                imeHeigh = 0
             }
         }
     }
