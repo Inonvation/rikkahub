@@ -12,12 +12,10 @@ import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -135,8 +133,6 @@ import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
-private const val TAG = "ChatList"
-private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 
 // 滚动预取窗口：跨过 PREFETCH_WINDOW 条索引才触发一次；前向预取 PREFETCH_AHEAD
@@ -391,10 +387,6 @@ private fun ChatListNormal(
                     // 滚动期间保持锁定，防止折叠动画刚结束就被拉回底部。
                     val programmaticScroll = freezeState?.scrollingByProgram == true
                     val totalItems = state.layoutInfo.totalItemsCount
-                    val hasUnfinishedTool =
-                        conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.parts
-                            ?.any { it is UIMessagePart.Tool && !it.isExecuted } == true
-                    val finalizing = lastMessageFinished && !hasUnfinishedTool
                     // 1) 用户在滚动中上滑 → 锁定，暂停自动跟随
                     if (dragging || (inProgress && !programmaticScroll)) {
                         val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
@@ -410,7 +402,7 @@ private fun ChatListNormal(
                     // 3) 跟随输出：仅当用户未滚动、在底部、且未主动上滑时
                     // 生成回合内的工具调用会把最后一条消息标记为 finished，但它仍在当前回合中，
                     // 不能用 finishedAt 判断是否继续跟随；只看 loading 是否仍为生成中。
-                    if (!dragging && !inProgress && !programmaticScroll && loadingState && !finalizing &&
+                    if (!dragging && !inProgress && !programmaticScroll && loadingState && !lastMessageFinished &&
                         !userScrolledUp && visibleItemsInfo.isAtBottom() && totalItems > 0
                     ) {
                         state.requestScrollToItem(totalItems - 1)
@@ -618,35 +610,6 @@ private fun ChatListNormal(
                 }
             }
 
-            // 常驻 item + 高度收缩动画：生成结束时加载行平滑收起，
-            // 避免整 item 瞬时移除导致列表末尾高度突变（贴底时 LazyColumn 锚点修正表现为跳变）
-            item(LoadingIndicatorKey) {
-                AnimatedVisibility(
-                    visible = loading,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        RabbitLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
-                        ) {
-                            Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-
             // 为了能正确滚动到这
             item(ScrollBottomKey) {
                 Spacer(
@@ -673,6 +636,39 @@ private fun ChatListNormal(
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)
             )
+
+            // 加载指示器悬浮在列表底部上方，不占用 LazyColumn item 高度，
+            // 避免生成结束后 44dp 常驻空白，也避免收尾时 item 高度变化引发锚点跳动
+            AnimatedVisibility(
+                visible = loading,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(2).dp)
+                    .zIndex(4f),
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    RabbitLoadingIndicator(
+                        modifier = Modifier.size(24.dp)
+                    )
+                    AnimatedVisibility(
+                        visible = processingStatus != null,
+                    ) {
+                        Text(
+                            text = processingStatus ?: "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
 
             // 完成选择
             AnimatedVisibility(
