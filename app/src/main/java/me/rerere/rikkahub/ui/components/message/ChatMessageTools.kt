@@ -31,6 +31,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -174,7 +175,7 @@ private fun ToolDurationText(tool: UIMessagePart.Tool) {
     val finishedAtMs = tool.finishedAtMs
     val finishedAt = tool.finishedAt
     var durationMs by remember(startedAtMs, finishedAtMs, startedAt, finishedAt) {
-        mutableStateOf(
+        mutableLongStateOf(
             if (startedAtMs != null) {
                 (finishedAtMs ?: SystemClock.elapsedRealtime()) - startedAtMs
             } else {
