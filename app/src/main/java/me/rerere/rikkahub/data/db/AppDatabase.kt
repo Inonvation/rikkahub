@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.GroupDAO
+import me.rerere.rikkahub.data.db.dao.ManagementAuditDao
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
@@ -33,6 +34,7 @@ import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.GroupEntity
+import me.rerere.rikkahub.data.db.entity.ManagementAuditEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
@@ -48,6 +50,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_38_39
 import me.rerere.rikkahub.data.db.migrations.Migration_39_40
 import me.rerere.rikkahub.data.db.migrations.Migration_40_41
+import me.rerere.rikkahub.data.db.migrations.Migration_43_44
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -71,8 +74,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         SubAgentUsageEntity::class,
         SubAgentTaskEntity::class,
         GroupEntity::class,
+        ManagementAuditEntity::class,
     ],
-    version = 43,
+    version = 44,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -133,6 +137,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun subAgentTaskDao(): SubAgentTaskDAO
 
     abstract fun groupDao(): GroupDAO
+
+    abstract fun managementAuditDao(): ManagementAuditDao
 
     /**
      * 备份/同步前把未落盘的 WAL 合并进主库文件，保证导出的 .db 单文件自洽一致，

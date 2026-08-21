@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.data.model
 
+import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -43,6 +46,26 @@ class ChatModeTest {
         workspaceId = workspaceId?.let { Uuid.parse(it) },
         defaultMode = defaultMode,
     )
+
+    private fun settingsWithSearch(
+        builtInSearch: Boolean = false,
+        enableWebSearch: Boolean = false,
+    ): Settings {
+        val modelId = Uuid.random()
+        val model = Model(
+            id = modelId,
+            modelId = "test-search-model",
+            displayName = "Test Search Model",
+            tools = if (builtInSearch) setOf(BuiltInTools.Search) else emptySet(),
+        )
+        val assistant = Assistant(enableWebSearch = enableWebSearch)
+        return settings().copy(
+            chatModelId = modelId,
+            providers = listOf(ProviderSetting.OpenAI(models = listOf(model))),
+            assistants = listOf(assistant),
+            assistantId = assistant.id,
+        )
+    }
 
     private fun conversation(mode: String?) =
         Conversation.ofId(id = Uuid.random(), assistantId = Uuid.random()).copy(mode = mode)
@@ -108,6 +131,30 @@ class ChatModeTest {
         val p = ChatMode.MINIMAL.policy()
         assertFalse(p.includeToolSystemPrompt)
         assertTrue(p.includeAgentBehaviorPrompt)
+    }
+
+    @Test
+    fun builtInSearchMakesSearchCapabilityEffectiveWithoutWebSearch() {
+        assertFalse(
+            Capability.SEARCH in ChatMode.STANDARD.policy()
+                .restrictedCapabilities(settingsWithSearch(builtInSearch = true))
+        )
+    }
+
+    @Test
+    fun localWebSearchMakesSearchCapabilityEffective() {
+        assertFalse(
+            Capability.SEARCH in ChatMode.STANDARD.policy()
+                .restrictedCapabilities(settingsWithSearch(enableWebSearch = true))
+        )
+    }
+
+    @Test
+    fun searchCapabilityIsRestrictedWithoutAnySearchEnabled() {
+        assertTrue(
+            Capability.SEARCH in ChatMode.STANDARD.policy()
+                .restrictedCapabilities(settingsWithSearch())
+        )
     }
 
     @Test
@@ -177,6 +224,31 @@ class ChatModeTest {
         assertTrue(Capability.MCP_ADMIN in creative)
         assertTrue(Capability.CREATIVE_TOOLS in creative)
         assertTrue(Capability.WORKSPACE in creative)
+    }
+
+    @Test
+    fun managementModeIncludesNewAdminCapabilities() {
+        val creative = ChatMode.CREATIVE.policy().capabilities
+        assertTrue(Capability.PROVIDER_ADMIN in creative)
+        assertTrue(Capability.ASSISTANT_ADMIN in creative)
+        assertTrue(Capability.SETTINGS_ADMIN in creative)
+        assertTrue(Capability.DATA_ADMIN in creative)
+    }
+
+    @Test
+    fun anyAdminCapabilityDerivesManagementBehavior() {
+        assertEquals(
+            AgentBehaviorProfile.MANAGEMENT,
+            ChatModePolicy(capabilities = setOf(Capability.PROVIDER_ADMIN)).behaviorProfile,
+        )
+    }
+
+    @Test
+    fun unrestrictedPolicyExcludesManagementOnlyCapabilities() {
+        assertFalse(Capability.PROVIDER_ADMIN in ChatModePolicy.UNRESTRICTED_CAPABILITIES)
+        assertFalse(Capability.ASSISTANT_ADMIN in ChatModePolicy.UNRESTRICTED_CAPABILITIES)
+        assertFalse(Capability.SETTINGS_ADMIN in ChatModePolicy.UNRESTRICTED_CAPABILITIES)
+        assertFalse(Capability.DATA_ADMIN in ChatModePolicy.UNRESTRICTED_CAPABILITIES)
     }
 
     @Test

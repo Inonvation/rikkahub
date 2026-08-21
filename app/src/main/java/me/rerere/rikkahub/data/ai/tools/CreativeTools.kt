@@ -266,7 +266,7 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_create",
-            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode (built-in name or custom mode id). Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS. Omit everything to start from the standard base. Requires user approval. The new mode appears at the end of the mode picker and in Settings.",
+            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode (built-in name or custom mode id). Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS, PROVIDER_ADMIN, ASSISTANT_ADMIN, SETTINGS_ADMIN, DATA_ADMIN. Omit everything to start from the standard base. Requires user approval. The new mode appears at the end of the mode picker and in Settings.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -394,7 +394,7 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_update",
-            description = "Update an existing capability mode. id can be a custom mode id, custom:<id>, or built-in name (STANDARD/PTC/MINIMAL/CREATIVE). For custom modes: name, description, capabilities (full list) OR add/remove. For built-in modes: only capabilities/add/remove/behavior; name and description are fixed. Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS. Requires user approval. Existing conversations keep referencing this mode id.",
+            description = "Update an existing capability mode. id can be a custom mode id, custom:<id>, or built-in name (STANDARD/PTC/MINIMAL/CREATIVE). For custom modes: name, description, capabilities (full list) OR add/remove. For built-in modes: only capabilities/add/remove/behavior; name and description are fixed. Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS, PROVIDER_ADMIN, ASSISTANT_ADMIN, SETTINGS_ADMIN, DATA_ADMIN. Requires user approval. Existing conversations keep referencing this mode id.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {

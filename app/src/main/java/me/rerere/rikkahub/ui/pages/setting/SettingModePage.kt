@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
@@ -50,10 +51,11 @@ import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FileDownload
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.export.CustomModeSerializer
 import me.rerere.rikkahub.data.export.rememberExporter
 import me.rerere.rikkahub.data.export.rememberImporter
@@ -64,6 +66,7 @@ import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.ModeRefs
 import me.rerere.rikkahub.data.model.effectivePolicy
+import me.rerere.rikkahub.data.model.restrictedCapabilities
 import me.rerere.rikkahub.ui.components.ai.ModePickerSheet
 import me.rerere.rikkahub.ui.components.ai.description
 import me.rerere.rikkahub.ui.components.ai.displayName
@@ -207,6 +210,43 @@ fun SettingModePage(vm: SettingVM = koinViewModel()) {
                     onMove = { from, to -> moveCustomMode(settings, vm, from, to) },
                 )
             }
+            item {
+                Card(
+                    onClick = { navController.navigate(Screen.ManagementDashboard) },
+                    colors = CustomColors.cardColorsOnSurfaceContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.ServerStack01,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.setting_page_management_console),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = stringResource(R.string.setting_page_console_bottom_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        Icon(
+                            imageVector = HugeIcons.ArrowRight01,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -265,31 +305,6 @@ private fun moveCustomMode(settings: Settings, vm: SettingVM, from: Int, to: Int
     vm.updateSettings(settings.copy(customModes = modes))
 }
 
-private fun restrictedCapabilities(policy: ChatModePolicy, settings: Settings): Set<Capability> {
-    val assistant = settings.getCurrentAssistant()
-    return buildSet {
-        if (Capability.SEARCH in policy.capabilities && !assistant.enableWebSearch) add(Capability.SEARCH)
-        if (Capability.WORKSPACE in policy.capabilities && assistant.workspaceId == null) add(Capability.WORKSPACE)
-        if (Capability.MCP_USE in policy.capabilities &&
-            (assistant.mcpServers.isEmpty() || !settings.enableMcpManager)
-        ) {
-            add(Capability.MCP_USE)
-        }
-        if (Capability.MCP_ADMIN in policy.capabilities && !settings.enableMcpManager) add(Capability.MCP_ADMIN)
-        if (Capability.SKILL_USE in policy.capabilities && assistant.enabledSkills.isEmpty()) add(Capability.SKILL_USE)
-        if (Capability.MEMORY in policy.capabilities && !assistant.enableMemory) add(Capability.MEMORY)
-        if (Capability.TODO in policy.capabilities && !settings.enableTodoList) add(Capability.TODO)
-        if (Capability.SUBAGENT in policy.capabilities && !settings.enableSubAgent) add(Capability.SUBAGENT)
-        if (Capability.STUDY in policy.capabilities && assistant.enabledStudyTools.isEmpty()) add(Capability.STUDY)
-        if (Capability.HISTORY in policy.capabilities && !assistant.enableRecentChatsReference) {
-            add(Capability.HISTORY)
-        }
-        if (Capability.KNOWLEDGE in policy.capabilities && assistant.knowledgeBaseIds.isEmpty()) {
-            add(Capability.KNOWLEDGE)
-        }
-    }
-}
-
 /** 模式说明 + 组装内容清单：内置四模式与自定义模式共用同一卡片样式，支持编辑/复制/导出/排序/删除。 */
 @Composable
 private fun ModeAssembleGroup(
@@ -343,7 +358,7 @@ private fun ModeAssembleGroup(
                 title = name,
                 description = description,
                 capabilities = policy.capabilities,
-                restricted = restrictedCapabilities(policy, settings),
+                restricted = policy.restrictedCapabilities(settings),
                 tag = if (modified) {
                     stringResource(R.string.setting_mode_page_preset_modified)
                 } else {
@@ -411,7 +426,7 @@ private fun ModeAssembleGroup(
                 title = custom.name.ifBlank { custom.id },
                 description = custom.description,
                 capabilities = custom.policy.capabilities,
-                restricted = restrictedCapabilities(custom.policy, settings),
+                restricted = custom.policy.restrictedCapabilities(settings),
                 tag = stringResource(R.string.setting_mode_page_custom),
                 tagColor = MaterialTheme.colorScheme.primary,
                 actions = {
@@ -548,7 +563,7 @@ private fun ModeDetailCard(
                 Text(
                     text = stringResource(
                         R.string.setting_mode_page_restricted_hint,
-                        restricted.sortedBy { it.name }.joinToString("、") { it.name },
+                        restricted.sortedBy { it.name }.joinToString("、") { it.note() },
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.tertiary,

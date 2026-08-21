@@ -32,6 +32,8 @@ class AgentBehaviorPromptTest {
         assertTrue(prompt.contains("wait for approval"))
         assertTrue(prompt.contains("rollback or verification plan"))
         assertTrue(prompt.contains("keep workspace behavior"))
+        assertTrue(prompt.contains("admin_inventory"))
+        assertTrue(prompt.contains("management_undo"))
         assertFalse(prompt.contains("## Mode: Workspace"))
     }
 

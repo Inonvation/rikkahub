@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,6 +37,7 @@ import kotlinx.datetime.toInstant
 import me.rerere.ai.core.TokenUsage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.SlidersVertical
+import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
@@ -220,6 +222,20 @@ fun WorkspaceFooterBar(
             }
 
             if (!minimal) {
+                IconButton(
+                    onClick = {
+                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        navController.navigate(Screen.ManagementDashboard)
+                    },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ServerStack01,
+                        contentDescription = stringResource(R.string.setting_page_management_console),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 // 右侧指标：平均缓存命中率 / 会话费用
                 var showCostSheet by remember { mutableStateOf(false) }

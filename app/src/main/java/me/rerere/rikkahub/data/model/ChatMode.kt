@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.model
 
 import kotlinx.serialization.Serializable
+import me.rerere.ai.provider.BuiltInTools
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.Settings
 import kotlin.uuid.Uuid
 
@@ -23,7 +26,7 @@ enum class ChatMode {
     /** PTC（UI 显示「工作区模式」）：包含标准全部能力，并启用信任文件夹与工作区的所有工具能力（未配置时自动降级）。 */
     PTC,
 
-    /** CREATIVE（UI 显示「管理模式」）：包含工作区全部能力，并支持 skill/MCP 感知配置、环境与日志读取、提供商与新模式写入（写操作需审批）。 */
+    /** CREATIVE（UI 显示「管理模式」）：包含工作区全部能力，并支持 skill/MCP/提供商/助手/全局设置/搜索服务管理、环境与日志读取、新模式写入（写操作需审批）。 */
     CREATIVE;
 
     fun policy(): ChatModePolicy = when (this) {
@@ -37,7 +40,9 @@ enum class ChatMode {
             capabilities = ChatModePolicy.STANDARD.capabilities +
                 Capability.SKILL_USE +
                 Capability.WORKSPACE + Capability.TRUSTED_FOLDER +
-                Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS
+                Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS +
+                Capability.PROVIDER_ADMIN + Capability.ASSISTANT_ADMIN +
+                Capability.SETTINGS_ADMIN + Capability.DATA_ADMIN
         )
     }
 }
@@ -45,6 +50,33 @@ enum class ChatMode {
 /** 内置模式生效策略：用户覆盖优先，否则使用出厂默认。 */
 fun ChatMode.effectivePolicy(settings: Settings): ChatModePolicy =
     settings.builtinModeOverrides[this] ?: policy()
+
+/** 模式能力中因当前助手或全局设置限制而实际不可用的项。 */
+fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> = buildSet {
+    val assistant = settings.getCurrentAssistant()
+    val builtInSearchEnabled = settings.getCurrentChatModel()?.tools?.contains(BuiltInTools.Search) == true
+    if (Capability.SEARCH in capabilities && !assistant.enableWebSearch && !builtInSearchEnabled) {
+        add(Capability.SEARCH)
+    }
+    if (Capability.WORKSPACE in capabilities && assistant.workspaceId == null) add(Capability.WORKSPACE)
+    if (Capability.MCP_USE in capabilities &&
+        (assistant.mcpServers.isEmpty() || !settings.enableMcpManager)
+    ) {
+        add(Capability.MCP_USE)
+    }
+    if (Capability.MCP_ADMIN in capabilities && !settings.enableMcpManager) add(Capability.MCP_ADMIN)
+    if (Capability.SKILL_USE in capabilities && assistant.enabledSkills.isEmpty()) add(Capability.SKILL_USE)
+    if (Capability.MEMORY in capabilities && !assistant.enableMemory) add(Capability.MEMORY)
+    if (Capability.TODO in capabilities && !settings.enableTodoList) add(Capability.TODO)
+    if (Capability.SUBAGENT in capabilities && !settings.enableSubAgent) add(Capability.SUBAGENT)
+    if (Capability.STUDY in capabilities && assistant.enabledStudyTools.isEmpty()) add(Capability.STUDY)
+    if (Capability.HISTORY in capabilities && !assistant.enableRecentChatsReference) {
+        add(Capability.HISTORY)
+    }
+    if (Capability.KNOWLEDGE in capabilities && assistant.knowledgeBaseIds.isEmpty()) {
+        add(Capability.KNOWLEDGE)
+    }
+}
 
 /**
  * 能力项：一个工具族或提示词片段的门控单元。模式即一份能力清单（[ChatModePolicy.capabilities]），
@@ -112,6 +144,18 @@ enum class Capability(val managementOnly: Boolean = false) {
 
     /** env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete */
     CREATIVE_TOOLS(managementOnly = true),
+
+    /** provider_list/provider_get/provider_update/provider_delete/provider_test */
+    PROVIDER_ADMIN(managementOnly = true),
+
+    /** assistant_list/assistant_get/assistant_create/assistant_update/assistant_duplicate/assistant_delete */
+    ASSISTANT_ADMIN(managementOnly = true),
+
+    /** settings_admin_list/settings_admin_get/settings_admin_set */
+    SETTINGS_ADMIN(managementOnly = true),
+
+    /** search_admin_* 与 admin_inventory */
+    DATA_ADMIN(managementOnly = true),
 }
 
 /** 行为风格：由能力清单派生的执行准则，决定 agent behavior 提示词注入哪一段模式指导。 */
@@ -160,12 +204,18 @@ data class ChatModePolicy(
     val includeReminders: Boolean get() = Capability.REMINDERS in capabilities
     val includeToolSystemPrompt: Boolean get() = Capability.TOOL_SYSTEM_PROMPT in capabilities
     val allowCreativeTools: Boolean get() = Capability.CREATIVE_TOOLS in capabilities
+    val allowProviderAdmin: Boolean get() = Capability.PROVIDER_ADMIN in capabilities
+    val allowAssistantAdmin: Boolean get() = Capability.ASSISTANT_ADMIN in capabilities
+    val allowSettingsAdmin: Boolean get() = Capability.SETTINGS_ADMIN in capabilities
+    val allowDataAdmin: Boolean get() = Capability.DATA_ADMIN in capabilities
     val allowLocalTools: Boolean get() = Capability.LOCAL_TOOLS in capabilities
     val allowSearch: Boolean get() = Capability.SEARCH in capabilities
     val allowDocument: Boolean get() = Capability.DOCUMENT in capabilities
     val behaviorProfile: AgentBehaviorProfile
         get() = behaviorProfileOverride ?: when {
-            allowCreativeTools || allowSkillAdmin || allowMcpAdmin -> AgentBehaviorProfile.MANAGEMENT
+            allowCreativeTools || allowProviderAdmin || allowAssistantAdmin ||
+                allowSettingsAdmin || allowDataAdmin || allowSkillAdmin || allowMcpAdmin ->
+                AgentBehaviorProfile.MANAGEMENT
             allowWorkspace || allowTrustedFolder -> AgentBehaviorProfile.WORKSPACE
             capabilities == MINIMAL_CAPABILITIES -> AgentBehaviorProfile.MINIMAL
             else -> AgentBehaviorProfile.STANDARD

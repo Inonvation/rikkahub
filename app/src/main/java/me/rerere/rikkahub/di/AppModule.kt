@@ -9,6 +9,8 @@ import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.db.fts.FtsKeywordSearcher
 import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.management.ManagementAuditStore
+import me.rerere.rikkahub.data.management.ManagementRollbackStore
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.ui.hooks.ChatDraftStore
@@ -147,6 +149,8 @@ val appModule = module {
             discussionToolAssembler = get(),
             groupRepository = get(),
             json = get(),
+            managementAuditStore = get(),
+            managementRollbackStore = get(),
         )
     }
 

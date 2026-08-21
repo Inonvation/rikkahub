@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -204,7 +203,6 @@ private fun ToolDurationText(tool: UIMessagePart.Tool) {
             else -> "完成 · ${formatToolDuration(durationMs)}"
         },
         style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
         color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
@@ -300,51 +298,50 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             val titleText = renderer.title(context)
             val subtitle = renderer.subtitle(context)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = titleText,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .shimmer(isLoading = rendererLoading),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (tool.hasStarted && (tool.isFinished || loading)) {
-                        ToolDurationText(tool)
-                    }
-                }
+                Text(
+                    text = titleText,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.shimmer(isLoading = rendererLoading),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 subtitle?.invoke()
             }
         },
-        extra = if (isPending && onToolApproval != null) {
+        extra = if (
+            (isPending && onToolApproval != null) ||
+            (tool.hasStarted && (tool.isFinished || loading))
+        ) {
             {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FilledTonalIconButton(
-                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showDenyDialog = true },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = stringResource(R.string.chat_message_tool_deny),
-                            modifier = Modifier.size(14.dp)
-                        )
+                    if (tool.hasStarted && (tool.isFinished || loading)) {
+                        ToolDurationText(tool)
                     }
-                    FilledTonalIconButton(
-                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onToolApproval(tool.toolCallId, true, "") },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = stringResource(R.string.chat_message_tool_approve),
-                            modifier = Modifier.size(14.dp)
-                        )
+                    if (isPending && onToolApproval != null) {
+                        FilledTonalIconButton(
+                            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showDenyDialog = true },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Cancel01,
+                                contentDescription = stringResource(R.string.chat_message_tool_deny),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        FilledTonalIconButton(
+                            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onToolApproval(tool.toolCallId, true, "") },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Tick01,
+                                contentDescription = stringResource(R.string.chat_message_tool_approve),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }

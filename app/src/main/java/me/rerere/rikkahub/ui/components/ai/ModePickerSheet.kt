@@ -89,6 +89,10 @@ fun Capability.note(): String = when (this) {
     Capability.TOOL_SYSTEM_PROMPT -> "tool.systemPrompt 循环"
     Capability.AGENT_BEHAVIOR_PROMPT -> "agent behavior 行为层提示词"
     Capability.CREATIVE_TOOLS -> "env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete"
+    Capability.PROVIDER_ADMIN -> "provider 增删改查与连通性测试"
+    Capability.ASSISTANT_ADMIN -> "助手增删改查与配置修改"
+    Capability.SETTINGS_ADMIN -> "全局设置读写"
+    Capability.DATA_ADMIN -> "搜索服务管理与配置盘点"
 }
 
 /**

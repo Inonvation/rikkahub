@@ -7,9 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,8 +23,11 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Idea01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
+import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import kotlin.time.Duration
 import kotlin.time.DurationUnit
 
@@ -83,7 +84,7 @@ internal fun ReasoningFoldArrow(
         imageVector = imageVector,
         contentDescription = null,
         modifier = modifier.size(16.dp),
-        tint = MaterialTheme.colorScheme.secondary,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -114,12 +115,12 @@ internal fun ReasoningHeaderRow(
     val hapticController = rememberHaptic()
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MaterialTheme.shapes.small)
             .clickable {
                 hapticController.perform(HapticFeedbackType.KeyboardTap)
                 onClick()
             }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -134,7 +135,8 @@ internal fun ReasoningHeaderRow(
                 title = title,
                 duration = duration,
                 loading = loading,
-                chatFontFamily = LocalTextStyle.current.fontFamily ?: FontFamily.Default,
+                chatFontFamily = LocalChatFontFamily.current
+                    ?: rememberChatFontFamily(LocalSettings.current.displaySetting),
             )
         }
         if (extra != null) {

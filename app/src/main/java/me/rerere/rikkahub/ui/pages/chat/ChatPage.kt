@@ -108,8 +108,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -330,24 +332,24 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     }
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
-            suspend fun alignTallMessageStart(itemIndex: Int, fallbackToBottom: Boolean) {
+            suspend fun alignTallMessageStart(itemIndex: Int) {
+                // 等 LazyColumn 完成首帧布局再滚动，避免历史会话刚打开时定位被吞掉
+                withTimeoutOrNull(1_000) {
+                    snapshotFlow { chatListState.layoutInfo.totalItemsCount }
+                        .first { it > 0 }
+                } ?: return
                 chatListState.scrollToItem(itemIndex)
-                val info = chatListState.layoutInfo
-                val item = info.visibleItemsInfo.firstOrNull { it.index == itemIndex } ?: return
-                if (item.size <= info.viewportSize.height && fallbackToBottom) {
-                    chatListState.requestScrollToItem(info.totalItemsCount + 5)
-                }
             }
-            vm.chatListInitialized = true
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
-                    alignTallMessageStart(index, fallbackToBottom = false)
+                    alignTallMessageStart(index)
                 }
             } else {
-                // 历史会话打开时，若最后一条消息高于视口，把它的开头对齐到视口顶部
-                alignTallMessageStart(conversation.messageNodes.lastIndex, fallbackToBottom = true)
+                // 历史会话打开时，始终把最后一条消息的开头对齐到视口顶部
+                alignTallMessageStart(conversation.messageNodes.lastIndex)
             }
+            vm.chatListInitialized = true
         }
     }
 

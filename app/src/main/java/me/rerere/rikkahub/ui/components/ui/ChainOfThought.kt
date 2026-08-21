@@ -104,7 +104,9 @@ fun <T> ChainOfThought(
             Column(
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .animateContentSize(),
+                    .animateContentSize(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    ),
             ) {
                 // 对齐上游：折叠时直接截断步骤（visibleSteps），用外层 animateContentSize 平滑高度。
                 // 此前用 AnimatedVisibility + expandVertically/shrinkVertically 逐步骤播放垂直动画，
@@ -353,17 +355,17 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                     .then(
                         if (onClick != null) {
                             Modifier
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(MaterialTheme.shapes.small)
                                 .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() }
                         } else if (hasContent) {
                             Modifier
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(MaterialTheme.shapes.small)
                                 .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onExpandedChange(!expanded) }
                         } else {
                             Modifier
                         }
                     )
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .padding(vertical = 8.dp)
                     ),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,

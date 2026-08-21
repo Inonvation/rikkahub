@@ -121,6 +121,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
+import me.rerere.rikkahub.ui.pages.setting.ManagementPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPage
@@ -514,6 +515,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingProviderPage()
                             }
 
+                            entry<Screen.ManagementDashboard> {
+                                ManagementPage()
+                            }
+
                             entry<Screen.SettingProviderDetail> { key ->
                                 val id = Uuid.parse(key.providerId)
                                 SettingProviderDetailPage(id = id)
@@ -799,6 +804,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Setting : Screen
+
+    @Serializable
+    data object ManagementDashboard : Screen
 
     @Serializable
     data object Backup : Screen

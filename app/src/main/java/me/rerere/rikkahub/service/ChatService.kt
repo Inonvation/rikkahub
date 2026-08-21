@@ -79,6 +79,16 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createCreativeTools
+import me.rerere.rikkahub.data.ai.tools.createProviderAdminTools
+import me.rerere.rikkahub.data.ai.tools.createAssistantAdminTools
+import me.rerere.rikkahub.data.ai.tools.createSettingsAdminTools
+import me.rerere.rikkahub.data.ai.tools.createDataAdminTools
+import me.rerere.rikkahub.data.ai.tools.createAuditTools
+import me.rerere.rikkahub.data.ai.tools.createWorkspaceAdminTools
+import me.rerere.rikkahub.data.ai.tools.createTrustedFolderAdminTools
+import me.rerere.rikkahub.data.ai.tools.createKnowledgeAdminTools
+import me.rerere.rikkahub.data.ai.tools.createConversationAdminTools
+import me.rerere.rikkahub.data.ai.tools.createRollbackTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -108,6 +118,8 @@ import me.rerere.rikkahub.data.ai.transformers.TrustedFolderReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.WorkspaceReminderTransformer
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.management.ManagementAuditStore
+import me.rerere.rikkahub.data.management.ManagementRollbackStore
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -239,6 +251,8 @@ class ChatService(
     private val discussionToolAssembler: me.rerere.rikkahub.data.ai.discussion.DiscussionToolAssembler,
     private val groupRepository: GroupRepository,
     private val json: kotlinx.serialization.json.Json,
+    private val managementAuditStore: ManagementAuditStore,
+    private val managementRollbackStore: ManagementRollbackStore,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -1658,6 +1672,92 @@ class ChatService(
                                 settingsStore = settingsStore,
                                 assistant = assistant,
                                 conversationRepository = conversationRepo,
+                            )
+                        )
+                    }
+                    if (modePolicy.allowProviderAdmin) {
+                        addAll(
+                            createProviderAdminTools(
+                                settingsStore = settingsStore,
+                                providerManager = providerManager,
+                                auditStore = managementAuditStore,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                    }
+                    if (modePolicy.allowAssistantAdmin) {
+                        addAll(
+                            createAssistantAdminTools(
+                                settingsStore = settingsStore,
+                                auditStore = managementAuditStore,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                    }
+                    if (modePolicy.allowSettingsAdmin) {
+                        addAll(
+                            createSettingsAdminTools(
+                                settingsStore = settingsStore,
+                                auditStore = managementAuditStore,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                    }
+                    if (modePolicy.allowDataAdmin) {
+                        addAll(
+                            createDataAdminTools(
+                                settingsStore = settingsStore,
+                                auditStore = managementAuditStore,
+                                conversationRepo = conversationRepo,
+                                trustedFolderRepository = trustedFolderRepository,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                        addAll(
+                            createWorkspaceAdminTools(
+                                settingsStore = settingsStore,
+                                workspaceRepository = workspaceRepository,
+                                auditStore = managementAuditStore,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                        addAll(
+                            createTrustedFolderAdminTools(
+                                trustedFolderRepository = trustedFolderRepository,
+                                auditStore = managementAuditStore,
+                            )
+                        )
+                        addAll(
+                            createKnowledgeAdminTools(
+                                settingsStore = settingsStore,
+                                knowledgeManager = knowledgeManager,
+                                auditStore = managementAuditStore,
+                                rollbackStore = managementRollbackStore,
+                            )
+                        )
+                        addAll(
+                            createConversationAdminTools(
+                                settingsStore = settingsStore,
+                                conversationRepo = conversationRepo,
+                                auditStore = managementAuditStore,
+                                currentConversationId = conversation.id,
+                            )
+                        )
+                    }
+                    if (modePolicy.allowCreativeTools ||
+                        modePolicy.allowProviderAdmin ||
+                        modePolicy.allowAssistantAdmin ||
+                        modePolicy.allowSettingsAdmin ||
+                        modePolicy.allowDataAdmin ||
+                        modePolicy.allowSkillAdmin ||
+                        modePolicy.allowMcpAdmin
+                    ) {
+                        addAll(createAuditTools(managementAuditStore))
+                        addAll(
+                            createRollbackTools(
+                                rollbackStore = managementRollbackStore,
+                                settingsStore = settingsStore,
+                                auditStore = managementAuditStore,
                             )
                         )
                     }

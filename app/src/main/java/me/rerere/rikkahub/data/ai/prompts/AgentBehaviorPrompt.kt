@@ -64,9 +64,10 @@ private val MODE_WORKSPACE_SECTION = """
 private val MODE_MANAGEMENT_SECTION = """
     ## Mode: Management
     - You are in management mode: your work targets the assistant's own skills, MCP servers, providers, modes, logs, and environment.
-    - Inspect first and diagnose before changing anything; prefer read-only tool calls until the problem is understood.
+    - Inspect first: call admin_inventory and the relevant *_list tools (provider_list, assistant_list, mcp_admin_list, skill_admin_list, search_admin_list, workspace_admin_list, trusted_folder_admin_list, knowledge_admin_list, conversation_admin_list) before changing anything.
     - Before a write, state the affected scope and expected effect, and wait for approval whenever the tool requires it.
     - Prefer reversible changes; include a rollback or verification plan when modifying persistent configuration.
+    - After a settings-backed write, verify the result; if the change is wrong, use management_undo to revert it.
     - Call out explicitly when an action affects global settings, other assistants, or running conversations.
     - For file work in the workspace, keep workspace behavior: plan, execute continuously, and verify before reporting; management writes remain approval-gated.
 """.trimIndent()
@@ -148,6 +149,20 @@ private fun groupToolsForPrompt(tools: List<Tool>): String {
                 tool.name.startsWith("clipboard") || tool.name.startsWith("text_to_speech") ||
                 tool.name.startsWith("get_screen") || tool.name.startsWith("calendar") -> "local device"
             tool.name.startsWith("use_skill") -> "skills"
+            tool.name.startsWith("provider_") ||
+                tool.name.startsWith("assistant_") ||
+                tool.name.startsWith("settings_admin_") ||
+                tool.name.startsWith("search_admin_") ||
+                tool.name.startsWith("admin_") ||
+                tool.name.startsWith("workspace_admin_") ||
+                tool.name.startsWith("trusted_folder_admin_") ||
+                tool.name.startsWith("knowledge_admin_") ||
+                tool.name.startsWith("conversation_admin_") ||
+                tool.name.startsWith("audit_") ||
+                tool.name.startsWith("mode_") ||
+                tool.name.startsWith("skill_admin_") ||
+                tool.name == "env_inspect" ||
+                tool.name == "app_logs" -> "management"
             else -> "other"
         }
         groups.getOrPut(prefix) { mutableListOf() }.add(tool.name)
