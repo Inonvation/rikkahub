@@ -38,6 +38,13 @@ import java.util.Locale
 import kotlin.uuid.Uuid
 
 private const val MAX_LOG_CHARS = 8 * 1024
+private const val FOLLOW_ASSISTANT_REF = "follow_assistant"
+private val AI_VISIBLE_BEHAVIOR_PROFILES = listOf(
+    AgentBehaviorProfile.STANDARD,
+    AgentBehaviorProfile.WORKSPACE,
+    AgentBehaviorProfile.MANAGEMENT,
+    AgentBehaviorProfile.MINIMAL,
+)
 
 /** 日志/环境文本中的密钥类字段脱敏：值替换为 [REDACTED]。 */
 private val SECRET_PATTERN = Regex(
@@ -196,7 +203,7 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_list",
-            description = "Read-only: list all capability modes. Built-in modes show their effective capabilities and whether they have a user override; custom modes show their stored capabilities. Returns ref values usable with mode_update/mode_delete. Set brief=true to return only ref, name and override status.",
+            description = "Read-only: list all capability modes, including the implicit follow-assistant mode. Built-in modes show their effective capabilities and whether they have a user override; custom modes show their stored capabilities. Returns ref values usable with mode_update/mode_delete. Set brief=true to return only ref, name and override status.",
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -211,6 +218,16 @@ fun createCreativeTools(
                 val brief = (input as? JsonObject)?.get("brief")?.jsonPrimitive?.booleanOrNull == true
                 val current = settingsStore.settingsFlow.value
                 val text = buildString {
+                    appendLine("## Follow assistant")
+                    if (brief) {
+                        appendLine("- $FOLLOW_ASSISTANT_REF | Follow assistant configuration")
+                    } else {
+                        appendLine(
+                            "- $FOLLOW_ASSISTANT_REF | Follow assistant configuration | " +
+                                "no preset mode; follows the current assistant tool configuration | " +
+                                "cannot be updated or deleted"
+                        )
+                    }
                     appendLine("## Built-in modes")
                     ChatMode.entries.forEach { mode ->
                         val policy = mode.effectivePolicy(current)
@@ -319,11 +336,11 @@ fun createCreativeTools(
                 val baseName = input.str("base")?.trim().orEmpty()
                 val behaviorName = input.str("behavior")?.trim().orEmpty()
                 val behavior = if (behaviorName.isNotEmpty()) {
-                    runCatching { AgentBehaviorProfile.valueOf(behaviorName) }.getOrNull()
+                    AI_VISIBLE_BEHAVIOR_PROFILES.firstOrNull { it.name == behaviorName }
                         ?: return@Tool listOf(
                             UIMessagePart.Text(
                                 "Error: unknown behavior \"" + behaviorName + "\". Valid names: " +
-                                    AgentBehaviorProfile.entries.joinToString(", ") { it.name }
+                                    AI_VISIBLE_BEHAVIOR_PROFILES.joinToString(", ") { it.name }
                             )
                         )
                 } else {
@@ -422,6 +439,11 @@ fun createCreativeTools(
                 if (ref.isEmpty()) {
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
                 }
+                if (ref == FOLLOW_ASSISTANT_REF) {
+                    return@Tool listOf(
+                        UIMessagePart.Text("Error: $FOLLOW_ASSISTANT_REF cannot be updated; it always follows the current assistant configuration.")
+                    )
+                }
                 val current = settingsStore.settingsFlow.value
                 val builtin = ModeRefs.parseBuiltin(ref)
                 val target = current.findCustomMode(ref)
@@ -450,11 +472,11 @@ fun createCreativeTools(
                     ?.mapNotNull { it.stringContentOrNull() } ?: emptyList()
                 val behaviorName = input.str("behavior")?.trim().orEmpty()
                 val behavior = if (behaviorName.isNotEmpty()) {
-                    runCatching { AgentBehaviorProfile.valueOf(behaviorName) }.getOrNull()
+                    AI_VISIBLE_BEHAVIOR_PROFILES.firstOrNull { it.name == behaviorName }
                         ?: return@Tool listOf(
                             UIMessagePart.Text(
                                 "Error: unknown behavior \"" + behaviorName + "\". Valid names: " +
-                                    AgentBehaviorProfile.entries.joinToString(", ") { it.name }
+                                    AI_VISIBLE_BEHAVIOR_PROFILES.joinToString(", ") { it.name }
                             )
                         )
                 } else {
@@ -538,6 +560,11 @@ fun createCreativeTools(
                 val ref = input.str("id")?.trim().orEmpty()
                 if (ref.isEmpty()) {
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
+                }
+                if (ref == FOLLOW_ASSISTANT_REF) {
+                    return@Tool listOf(
+                        UIMessagePart.Text("Error: $FOLLOW_ASSISTANT_REF cannot be deleted; it always follows the current assistant configuration.")
+                    )
                 }
                 val current = settingsStore.settingsFlow.value
                 val builtin = ModeRefs.parseBuiltin(ref)

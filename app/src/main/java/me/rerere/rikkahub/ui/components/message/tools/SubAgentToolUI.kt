@@ -97,7 +97,8 @@ object SubAgentCompletedToolUI : ToolUIRenderer {
         val durationMs = args.getJsonLong("durationMs")
 
         val hasUsage = (prompt ?: 0) > 0 || (completion ?: 0) > 0 || (cached ?: 0) > 0
-        val hasDuration = durationMs != null && durationMs > 0
+        // 新气泡由通用时长组件统一展示（Tool 自带 startedAt/finishedAt），旧数据无时间戳时回退显示 input 里的 durationMs。
+        val hasDuration = durationMs != null && durationMs > 0 && context.tool.startedAt == null
         if (!hasUsage && !hasDuration) return null
 
         val promptText = (prompt ?: 0).formatNumber()

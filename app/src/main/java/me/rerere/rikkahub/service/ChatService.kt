@@ -533,6 +533,8 @@ class ChatService(
                             parts = msg.parts + UIMessagePart.Tool(
                                 toolCallId = Uuid.random().toString(),
                                 toolName = "spawn_subagent_completed",
+                                startedAt = task.startedAt,
+                                finishedAt = task.finishedAt,
                                 input = buildJsonObject {
                                     put("taskId", JsonPrimitive(task.taskId))
                                     put("agentId", task.agentId)
@@ -875,7 +877,7 @@ class ChatService(
                 // 新对话继承助手上次选择的默认工作目录
                 .copy(
                     workspaceCwd = assistant.defaultWorkspaceCwd,
-                    // 固化并记录模式快照，避免后续修改全局/助手默认时改变已有会话的能力配置
+                    // 有显式默认模式时固化快照；无显式默认时保持 null，会话跟随助手配置
                     mode = initialMode ?: resolveModeRef(
                         assistant = assistant,
                         settings = currentSettings,

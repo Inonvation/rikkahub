@@ -52,7 +52,7 @@ fun ChatMode.effectivePolicy(settings: Settings): ChatModePolicy =
  * preset 决定可见性，注册表/沙箱/审批/持久化等宿主层不动。
  */
 @Serializable
-enum class Capability {
+enum class Capability(val managementOnly: Boolean = false) {
     /** 本地工具族（时间/剪贴板/JS 等） */
     LOCAL_TOOLS,
 
@@ -111,7 +111,7 @@ enum class Capability {
     AGENT_BEHAVIOR_PROMPT,
 
     /** env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete */
-    CREATIVE_TOOLS,
+    CREATIVE_TOOLS(managementOnly = true),
 }
 
 /** 行为风格：由能力清单派生的执行准则，决定 agent behavior 提示词注入哪一段模式指导。 */
@@ -128,6 +128,9 @@ enum class AgentBehaviorProfile {
 
     /** 极简：默认不调用工具，只在用户明确要求时使用。 */
     MINIMAL,
+
+    /** 无模式版本行为：不注入模式引导，保留决策、工具分组与子代理说明。 */
+    LEGACY,
 }
 
 /**
@@ -204,6 +207,16 @@ data class ChatModePolicy(
             capabilities = MINIMAL_CAPABILITIES,
             behaviorProfileOverride = AgentBehaviorProfile.MINIMAL,
         )
+
+        /** 跟随助手配置能力集合：等价于引入四个模式前的完整工具/提示词能力，仅排除管理模式专属工具。 */
+        val UNRESTRICTED_CAPABILITIES: Set<Capability> =
+            Capability.entries.filterNot { it.managementOnly }.toSet()
+
+        /** 跟随助手配置策略：无模式门控，行为提示词还原无模式版本。 */
+        val UNRESTRICTED = ChatModePolicy(
+            capabilities = UNRESTRICTED_CAPABILITIES,
+            behaviorProfileOverride = AgentBehaviorProfile.LEGACY,
+        )
     }
 }
 
@@ -229,24 +242,14 @@ object ModeRefs {
 }
 
 /**
- * 默认模式解析（单一数据源）：助手显式配置 > 全局显式配置 > 兼容规则。
+ * 默认模式解析（单一数据源）：助手显式配置 > 全局显式配置。
  *
- * 兼容规则：未显式配置时，绑定工作区或存在激活信任文件夹的助手落到 PTC，
- * 保持升级前行为不静默丢失能力；其余落到 STANDARD。
+ * 未显式配置时返回 null，表示会话使用「跟随助手配置」。
  */
+@Suppress("UNUSED_PARAMETER")
 fun resolveModeRef(assistant: Assistant, settings: Settings, trustedFolderActive: Boolean): String? =
     assistant.defaultMode
         ?: settings.defaultMode
-        ?: when {
-            assistant.workspaceId != null -> ModeRefs.builtin(ChatMode.PTC)
-            trustedFolderActive -> ModeRefs.builtin(ChatMode.PTC)
-            else -> ModeRefs.builtin(ChatMode.STANDARD)
-        }
-
-fun resolveMode(assistant: Assistant, settings: Settings, trustedFolderActive: Boolean): ChatMode =
-    resolveModeRef(assistant, settings, trustedFolderActive)
-        ?.let { ModeRefs.parseBuiltin(it) }
-        ?: ChatMode.STANDARD
 
 /** 把模式引用解析为策略；引用为空或指向不存在的模式时返回 null。 */
 fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
@@ -259,8 +262,8 @@ fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
 }
 
 /**
- * 会话级生效策略：会话自定义模式（含自定义模式）优先，否则回落默认解析。
- * 旧会话 mode 为 null 时按 [resolveModeRef] 现算，保证升级兼容。
+ * 会话级生效策略：mode 为 null 时使用「跟随助手配置」；显式模式按引用解析，
+ * 非法或已删除的显式引用回退标准模式。
  */
 fun resolveConversationPolicy(
     conversation: Conversation,
@@ -270,10 +273,7 @@ fun resolveConversationPolicy(
 ): ChatModePolicy {
     val modeStr = conversation.mode
     if (modeStr.isNullOrBlank()) {
-        return resolveModePolicy(
-            ref = resolveModeRef(assistant, settings, trustedFolderActive),
-            settings = settings,
-        ) ?: ChatMode.STANDARD.effectivePolicy(settings)
+        return ChatModePolicy.UNRESTRICTED
     }
     return resolveModePolicy(ref = modeStr, settings = settings) ?: ChatMode.STANDARD.effectivePolicy(settings)
 }

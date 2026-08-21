@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.model
 import me.rerere.rikkahub.data.datastore.Settings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
@@ -16,6 +17,13 @@ class ChatModeTest {
             ChatMode.entries.toList(),
         )
     }
+
+    private fun resolveMode(
+        assistant: Assistant,
+        settings: Settings,
+        trustedFolderActive: Boolean,
+    ): ChatMode? = resolveModeRef(assistant, settings, trustedFolderActive)
+        ?.let { ModeRefs.parseBuiltin(it) }
 
     private fun settings(
         defaultMode: String? = null,
@@ -172,7 +180,17 @@ class ChatModeTest {
     }
 
     @Test
-    fun resolveModePrefersAssistantThenGlobalThenCompatibility() {
+    fun unrestrictedPolicyMatchesPreModeCapabilities() {
+        val policy = ChatModePolicy.UNRESTRICTED
+        assertEquals(ChatModePolicy.UNRESTRICTED_CAPABILITIES, policy.capabilities)
+        assertFalse(Capability.CREATIVE_TOOLS in policy.capabilities)
+        assertTrue(Capability.SKILL_ADMIN in policy.capabilities)
+        assertTrue(Capability.MCP_ADMIN in policy.capabilities)
+        assertEquals(AgentBehaviorProfile.LEGACY, policy.behaviorProfile)
+    }
+
+    @Test
+    fun resolveModePrefersAssistantThenGlobalOnly() {
         val base = settings()
         // 助手显式配置优先
         assertEquals(
@@ -184,15 +202,9 @@ class ChatModeTest {
             ChatMode.CREATIVE,
             resolveMode(assistant(), settings(defaultMode = ChatMode.CREATIVE.name), false),
         )
-        // 兼容：绑定工作区 -> PTC
-        assertEquals(
-            ChatMode.PTC,
-            resolveMode(assistant(workspaceId = "11111111-1111-1111-1111-111111111111"), base, false),
-        )
-        // 兼容：激活信任文件夹 -> PTC
-        assertEquals(ChatMode.PTC, resolveMode(assistant(), base, true))
-        // 默认 -> STANDARD
-        assertEquals(ChatMode.STANDARD, resolveMode(assistant(), base, false))
+        // 无显式配置 -> null，表示跟随助手配置
+        assertNull(resolveMode(assistant(workspaceId = "11111111-1111-1111-1111-111111111111"), base, false))
+        assertNull(resolveMode(assistant(), base, true))
     }
 
     @Test
@@ -220,9 +232,9 @@ class ChatModeTest {
             ChatMode.STANDARD.policy(),
             resolveConversationPolicy(conversation("NOT_A_MODE"), asst, base, false),
         )
-        // 会话未快照 -> 默认解析
+        // 会话未快照 -> 跟随助手配置
         assertEquals(
-            ChatMode.PTC.policy(),
+            ChatModePolicy.UNRESTRICTED,
             resolveConversationPolicy(conversation(null), assistant(workspaceId = "11111111-1111-1111-1111-111111111111"), base, false),
         )
     }
@@ -240,24 +252,22 @@ class ChatModeTest {
         )
         val customRef = ModeRefs.custom(custom.id)
 
-        // 全局默认指向自定义模式
-        assertEquals(
-            custom.policy,
-            resolveConversationPolicy(conversation(null), assistant(), settingsWithCustom, false),
-        )
+        // 全局默认只用于新建会话快照，mode 为 null 的会话仍然跟随助手配置
+        assertEquals(ChatModePolicy.UNRESTRICTED, resolveConversationPolicy(conversation(null), assistant(), settingsWithCustom, false))
         assertEquals(customRef, resolveModeRef(assistant(), settingsWithCustom, false))
 
         // 助手默认优先，且不受全局覆盖
         val assistantCustom = assistant(defaultMode = customRef)
-        assertEquals(
-            custom.policy,
-            resolveConversationPolicy(conversation(null), assistantCustom, settingsWithCustom, false),
-        )
+        assertEquals(ChatModePolicy.UNRESTRICTED, resolveConversationPolicy(conversation(null), assistantCustom, settingsWithCustom, false))
+        assertEquals(customRef, resolveModeRef(assistantCustom, settingsWithCustom, false))
 
-        // 自定义模式被删除后回退标准
+        // 显式引用自定义模式时使用自定义策略
+        assertEquals(custom.policy, resolveConversationPolicy(conversation(customRef), assistant(), settingsWithCustom, false))
+
+        // 自定义模式被删除后，显式引用回退标准
         assertEquals(
             ChatMode.STANDARD.policy(),
-            resolveConversationPolicy(conversation(null), assistantCustom, settings(), false),
+            resolveConversationPolicy(conversation(customRef), assistantCustom, settings(), false),
         )
     }
 
@@ -270,7 +280,7 @@ class ChatModeTest {
         )
 
         assertEquals(
-            override,
+            ChatModePolicy.UNRESTRICTED,
             resolveConversationPolicy(conversation(null), assistant(), settingsWithOverride, false),
         )
         assertEquals(

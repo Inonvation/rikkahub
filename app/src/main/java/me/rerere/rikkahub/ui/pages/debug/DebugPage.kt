@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.common.android.Logging
+import me.rerere.rikkahub.data.ai.PromptMetrics
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -146,6 +147,15 @@ private fun MainPage(vm: DebugVM) {
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Text(
+            text = "Prompt revision: ${PromptMetrics.revision}",
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+        )
+        Text(
+            text = "Last generation: ${PromptMetrics.lastSystemPromptChars} chars / " +
+                "${PromptMetrics.lastApproxTokens} tokens / ${PromptMetrics.lastToolCount} tools",
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+        )
         var avatar: Avatar by remember { mutableStateOf(Avatar.Emoji("😎")) }
         UIAvatar(
             value = avatar,

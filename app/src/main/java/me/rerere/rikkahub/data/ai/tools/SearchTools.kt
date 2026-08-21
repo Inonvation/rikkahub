@@ -10,14 +10,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.currentDateLabel
 import me.rerere.rikkahub.data.ai.tools.local.convertHtmlToMarkdown
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.toLocalString
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
 import me.rerere.search.ScrapedResult
-import java.time.LocalDate
 import kotlin.uuid.Uuid
 
 /**
@@ -109,17 +108,19 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
 private fun searchToolDescription(providerName: String, concise: Boolean): String {
     if (concise) {
         return """
-            Search the web for up-to-date or specific information using $providerName.
-            Use this when the user (or the parent agent) asks for the latest news, current facts, or needs verification.
-            Generate focused keywords and run multiple searches if needed.
+        Search the web for up-to-date or specific information using $providerName.
+        Use this when the user (or the parent agent) asks for the latest news, current facts, or needs verification.
+        Avoid using it for general knowledge you already know unless the user asks for verification.
+        Generate focused keywords and run multiple searches if needed.
             When thorough cross-verified info is wanted, call MULTIPLE search_web__* tools (one per provider) and compare results.
             """.trimIndent()
     }
     return """
         Search the web for up-to-date or specific information using $providerName.
         Use this when the user asks for the latest news, current facts, or needs verification.
+        Avoid using it for general knowledge you already know unless the user asks for verification.
         Generate focused keywords and run multiple searches if needed.
-        Today is ${LocalDate.now().toLocalString(true)}.
+        Today is ${currentDateLabel()}.
 
         Multi-source: when the user wants thorough cross-verified info, call MULTIPLE search_web__* tools
         (one per enabled search provider) and compare the independent results.

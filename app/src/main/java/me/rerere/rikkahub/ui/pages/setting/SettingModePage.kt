@@ -120,6 +120,17 @@ fun SettingModePage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { showPicker = true },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_mode)) },
+                        supportingContent = if (settings.defaultMode == null) {
+                            {
+                                Text(
+                                    text = stringResource(R.string.setting_mode_page_follow_assistant_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            null
+                        },
                         trailingContent = {
                             Text(
                                 text = modeRefDisplayName(
@@ -691,11 +702,17 @@ private fun ModeEditSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                AgentBehaviorProfile.entries.forEachIndexed { index, profile ->
+                val behaviorProfiles = listOf(
+                    AgentBehaviorProfile.STANDARD,
+                    AgentBehaviorProfile.WORKSPACE,
+                    AgentBehaviorProfile.MANAGEMENT,
+                    AgentBehaviorProfile.MINIMAL,
+                )
+                behaviorProfiles.forEachIndexed { index, profile ->
                     SegmentedButton(
                         selected = behaviorProfile == profile,
                         onClick = { behaviorProfile = profile },
-                        shape = SegmentedButtonDefaults.itemShape(index, AgentBehaviorProfile.entries.size),
+                        shape = SegmentedButtonDefaults.itemShape(index, behaviorProfiles.size),
                     ) {
                         Text(
                             text = when (profile) {
@@ -703,6 +720,7 @@ private fun ModeEditSheet(
                                 AgentBehaviorProfile.WORKSPACE -> stringResource(R.string.mode_behavior_workspace)
                                 AgentBehaviorProfile.MANAGEMENT -> stringResource(R.string.mode_behavior_management)
                                 AgentBehaviorProfile.MINIMAL -> stringResource(R.string.mode_behavior_minimal)
+                                AgentBehaviorProfile.LEGACY -> ""
                             }
                         )
                     }

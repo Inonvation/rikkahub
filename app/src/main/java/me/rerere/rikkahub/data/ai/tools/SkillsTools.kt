@@ -52,16 +52,16 @@ fun createSkillTools(
         buildString {
             appendLine("**Skills**")
             appendLine("The app ships a skills system. Each skill is a directory containing a SKILL.md with specialized instructions. You can read skill content with `use_skill`, inspect which skills the current assistant has enabled with `skill_admin_list`, and enable or disable them for the current assistant with `skill_admin_set_enabled`.")
-            appendLine("<available_skills>")
-            allSkills.forEach { skill ->
+            appendLine("<enabled_skills>")
+            available.forEach { skill ->
                 appendLine("  <skill>")
                 appendLine("    <name>${skill.name}</name>")
                 appendLine("    <description>${skill.description}</description>")
-                appendLine("    <enabled>${skillEnabled(skill)}</enabled>")
                 appendLine("  </skill>")
             }
-            append("</available_skills>")
+            append("</enabled_skills>")
             appendLine()
+            appendLine("Use `skill_admin_list` to inspect all installed skills and their enablement.")
         }
     }
 
@@ -73,6 +73,7 @@ fun createSkillTools(
             description = """
                 Load and apply a skill to get specialized instructions or capabilities.
                 Call this tool when the user's request matches one of the available skills.
+                Avoid calling it when no enabled skill clearly matches the request.
             """.trimIndent(),
             systemPrompt = systemPrompt,
             parameters = {
@@ -115,7 +116,7 @@ fun createSkillTools(
 
     tools += Tool(
         name = "skill_admin_list",
-        description = "List all installed skills and whether each one is enabled for the current assistant.",
+        description = "List all installed skills and whether each one is enabled for the current assistant. Use when you need to inspect available skills or their enablement.",
         systemPrompt = systemPrompt,
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {})
@@ -127,7 +128,7 @@ fun createSkillTools(
 
     tools += Tool(
         name = "skill_admin_set_enabled",
-        description = "Enable or disable a skill for the current assistant. The change takes effect from the next message; use `skill_admin_list` first to see available skill names.",
+        description = "Enable or disable a skill for the current assistant. Use when the user asks to manage skills. The change takes effect from the next message; call `skill_admin_list` first to see available skill names.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {

@@ -52,4 +52,15 @@ class AgentBehaviorPromptTest {
         assertFalse(prompt.contains("## Tool Groups"))
         assertFalse(prompt.contains("Available tools are grouped below"))
     }
+
+    @Test
+    fun legacyProfileOmitsModeSectionsAndKeepsToolGroups() {
+        val prompt = buildAgentBehaviorPrompt(
+            tools = listOf(Tool(name = "get_time", description = "get time", execute = { emptyList() })),
+            profile = AgentBehaviorProfile.LEGACY,
+        )
+        assertFalse(prompt.contains("## Mode:"))
+        assertTrue(prompt.contains("## Plan & Act"))
+        assertTrue(prompt.contains("## Tool Groups"))
+    }
 }

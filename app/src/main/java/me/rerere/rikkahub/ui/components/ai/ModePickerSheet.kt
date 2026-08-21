@@ -103,6 +103,7 @@ fun ModePickerSheet(
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
     showFollowGlobal: Boolean = false,
+    followAssistantSummary: String? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -120,6 +121,7 @@ fun ModePickerSheet(
                 ModeOptionRow(
                     name = stringResource(R.string.chat_mode_follow_global),
                     description = stringResource(R.string.chat_mode_follow_global_desc),
+                    summary = followAssistantSummary,
                     selected = selectedRef == null,
                     onClick = { onSelect(null) },
                 )
@@ -155,6 +157,7 @@ private fun ModeOptionRow(
     description: String,
     selected: Boolean,
     onClick: () -> Unit,
+    summary: String? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -174,6 +177,13 @@ private fun ModeOptionRow(
                     text = description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!summary.isNullOrBlank()) {
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }

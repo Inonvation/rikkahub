@@ -965,8 +965,9 @@
   <string name="chat_mode_minimal_desc">以用户自定义提示词为主，保留本地工具、联网搜索与附件解析，不注入 MCP 与外部工具声明，默认不主动调用工具</string>
   <string name="chat_mode_creative">管理模式</string>
   <string name="chat_mode_creative_desc">包含工作区模式全部能力，并开放 skill/MCP 感知配置、环境与日志读取、提供商与新模式管理（写操作需审批）</string>
-  <string name="chat_mode_follow_global">跟随全局</string>
-  <string name="chat_mode_follow_global_desc">未显式配置时，绑定工作区或存在激活信任文件夹的助手默认工作区模式，其余默认标准</string>
+  <string name="chat_mode_follow_global">跟随助手配置</string>
+  <string name="chat_mode_follow_global_desc">不套用任何预设模式；MCP、知识库、工作区等能力将按助手当前设置生效</string>
+  <string name="setting_mode_page_follow_assistant_hint">未配置任何默认模式时，新会话使用跟随助手配置</string>
   <string name="mode_deleted">已删除模式</string>
   <string name="mode_modified_suffix">（已修改）</string>
   <string name="mode_picker_title">切换模式</string>

@@ -18,11 +18,12 @@ internal fun buildAgentBehaviorPrompt(
     return buildString {
         appendLine("## Agent Behavior")
         appendLine()
-        appendLine(modeGuidanceSection(profile))
+        if (profile != AgentBehaviorProfile.LEGACY) {
+            appendLine(modeGuidanceSection(profile))
+            appendLine()
+        }
+        appendLine(PLAN_AND_ACT_SECTION)
         appendLine()
-        appendLine(DECISION_MAKING_SECTION)
-        appendLine()
-        appendLine(TOOL_USAGE_SECTION)
         if (toolGroups.isNotBlank() && profile != AgentBehaviorProfile.MINIMAL) {
             appendLine()
             append(toolGroups)
@@ -41,6 +42,7 @@ private fun modeGuidanceSection(profile: AgentBehaviorProfile): String = when (p
     AgentBehaviorProfile.WORKSPACE -> MODE_WORKSPACE_SECTION
     AgentBehaviorProfile.MANAGEMENT -> MODE_MANAGEMENT_SECTION
     AgentBehaviorProfile.MINIMAL -> MODE_MINIMAL_SECTION
+    AgentBehaviorProfile.LEGACY -> ""
 }
 
 private val MODE_STANDARD_SECTION = """
@@ -76,21 +78,13 @@ private val MODE_MINIMAL_SECTION = """
     - If a tool is genuinely necessary, keep it single-purpose and explain why.
 """.trimIndent()
 
-private val DECISION_MAKING_SECTION = """
-    ## Decision-Making
-    - Before acting, restate the user's goal in one sentence and identify what is actually needed.
-    - Do not start with tool calls out of habit. Only call a tool when it clearly advances the goal.
-    - Prefer the fewest, highest-leverage steps; avoid doing work that does not move the answer forward.
-    - Before you finalize a reply, check that it actually answers the user's question — if not, ask or gather what is missing.
-""".trimIndent()
-
-private val TOOL_USAGE_SECTION = """
-    ## Tool Usage
-    - A tool is a means, not a reflex. Call one only when you are confident it will advance the task;
-      if you are unsure, ask the user to clarify instead of guessing.
-    - When several tools could work, pick the most direct one — read before writing, targeted queries before broad scans.
-    - If a tool returns an error, read the error, adjust your approach, and try once more; do not blindly repeat the same call.
-    - If tool output is large, use it to answer, do not dump it back verbatim.
+private val PLAN_AND_ACT_SECTION = """
+    ## Plan & Act
+    - Restate the goal in one sentence before acting, then pick the fewest high-leverage steps.
+    - Do not call tools out of habit; call one only when it clearly advances the goal.
+    - Prefer the most direct tool: read before write, targeted query before broad scan.
+    - If a tool errors, adjust and retry once; do not repeat the same call or dump large output verbatim.
+    - Before finalizing, verify the answer actually addresses the user's request.
 """.trimIndent()
 
 private val ASK_USER_SECTION = """

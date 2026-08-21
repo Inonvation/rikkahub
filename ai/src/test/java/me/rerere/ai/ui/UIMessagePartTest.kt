@@ -59,12 +59,16 @@ class UIMessagePartTest {
     fun `tool timing fields round trip`() {
         val startedAt = Clock.System.now()
         val finishedAt = startedAt + 5.seconds
+        val startedAtMs = 1_000L
+        val finishedAtMs = 6_000L
         val part: UIMessagePart = UIMessagePart.Tool(
             toolCallId = "tool_1",
             toolName = "workspace_shell",
             input = """{"command":"sleep 1"}""",
             startedAt = startedAt,
             finishedAt = finishedAt,
+            startedAtMs = startedAtMs,
+            finishedAtMs = finishedAtMs,
         )
 
         val encoded = json.encodeToString(part)
@@ -72,6 +76,7 @@ class UIMessagePartTest {
 
         assertEquals(part, restored)
         assertFalse(restored.isRunning)
+        assertEquals(5_000L, restored.durationMs)
     }
 
     @Test
@@ -82,8 +87,24 @@ class UIMessagePartTest {
             toolName = "workspace_shell",
             input = """{"command":"sleep 5"}""",
             startedAt = startedAt,
+            startedAtMs = 1_000L,
         )
 
         assertTrue(running.isRunning)
+    }
+
+    @Test
+    fun `tool duration falls back to wall clock when monotonic is missing`() {
+        val startedAt = Clock.System.now()
+        val finishedAt = startedAt + 5.seconds
+        val tool = UIMessagePart.Tool(
+            toolCallId = "tool_3",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 1"}""",
+            startedAt = startedAt,
+            finishedAt = finishedAt,
+        )
+
+        assertEquals(5_000L, tool.durationMs)
     }
 }

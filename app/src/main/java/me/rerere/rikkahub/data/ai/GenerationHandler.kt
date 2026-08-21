@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
@@ -147,15 +149,16 @@ private suspend fun executeToolSerialized(
     toolsInternal: List<Tool>,
     workspaceId: String?,
     json: Json,
-    execute: suspend (UIMessagePart.Tool, List<Tool>) -> UIMessagePart.Tool?,
+    execute: suspend (UIMessagePart.Tool, List<Tool>, suspend (UIMessagePart.Tool) -> Unit) -> UIMessagePart.Tool?,
+    onToolStarted: suspend (UIMessagePart.Tool) -> Unit,
 ): UIMessagePart.Tool? {
     val inputJson = runCatching {
         json.parseToJsonElement(tool.input.ifBlank { "{}" }) as? JsonObject
     }.getOrNull()
-    val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId) ?: return execute(tool, toolsInternal)
+    val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId) ?: return execute(tool, toolsInternal, onToolStarted)
     val mutex = workspaceToolLocks.getOrPut(key) { Mutex() }
     return mutex.withLock {
-        execute(tool, toolsInternal)
+        execute(tool, toolsInternal, onToolStarted)
     }
 }
 
@@ -239,7 +242,9 @@ class GenerationHandler(
          *  （工具调用/输出完成）消费并注入 user_guidance 气泡 + 续答指令，不打断当前流式；
          *  其余项排队不消费，等回合结束后由 ChatService 依次自动注入。 */
         steeringQueue: kotlinx.coroutines.flow.MutableStateFlow<List<PendingSteering>>? = null,
-    ): Flow<GenerationChunk> = flow {
+    ): Flow<GenerationChunk> = channelFlow<GenerationChunk> {
+        // 工具开始事件由并行的 async 子协程发出；flow 的 emit 不允许跨协程，必须用 channelFlow 的 send。
+        val emit: suspend (GenerationChunk) -> Unit = { send(it) }
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
@@ -442,27 +447,20 @@ class GenerationHandler(
                 toolsToProcess = messages.last().getTools().filter { it.canResumeExecution }
             }
 
-            // 真正开始执行前打点：审批等待不计入，Auto/Approved 才进入计时。
-            val startedTools = toolsToProcess.map { tool ->
-                if (tool.approvalState is ToolApprovalState.Auto ||
-                    tool.approvalState is ToolApprovalState.Approved
-                ) {
-                    tool.copy(startedAt = Clock.System.now())
-                } else {
-                    tool
-                }
-            }
-            if (startedTools != toolsToProcess) {
-                val lastMessage = messages.last()
-                val updatedParts = lastMessage.parts.map { part ->
-                    if (part is UIMessagePart.Tool) {
-                        startedTools.find { it.toolCallId == part.toolCallId } ?: part
-                    } else {
-                        part
+            val messageUpdateMutex = Mutex()
+            val onToolStarted: suspend (UIMessagePart.Tool) -> Unit = { started ->
+                messageUpdateMutex.withLock {
+                    val lastMessage = messages.last()
+                    val updatedParts = lastMessage.parts.map { part ->
+                        if (part is UIMessagePart.Tool && part.toolCallId == started.toolCallId) {
+                            started
+                        } else {
+                            part
+                        }
                     }
+                    messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
+                    emit(GenerationChunk.Messages(messages))
                 }
-                messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
-                emit(GenerationChunk.Messages(messages))
             }
             // Handle tools (execute approved tools, handle denied tools)
             // 并行执行：多个工具（含多子代理派发）并发跑，按原始顺序回填结果。
@@ -470,9 +468,9 @@ class GenerationHandler(
             // shell 依次执行），防止同文件并发编辑的"读-改-写"竞态；其余工具仍并行。
             val workspaceIdForLock = assistant.workspaceId?.toString()
             val executedTools = coroutineScope {
-                startedTools.map { tool ->
+                toolsToProcess.map { tool ->
                     async {
-                        executeToolSerialized(tool, toolsInternal, workspaceIdForLock, json, ::executeTool)
+                        executeToolSerialized(tool, toolsInternal, workspaceIdForLock, json, ::executeTool, onToolStarted)
                     }
                 }.awaitAll().filterNotNull()
             }
@@ -596,6 +594,14 @@ class GenerationHandler(
                     )
                 }
             }
+            PromptMetrics.lastSystemPromptChars = system.length
+            PromptMetrics.lastApproxTokens = system.length / 4
+            PromptMetrics.lastToolCount = tools.size
+            Log.i(
+                TAG,
+                "system_prompt promptRevision=$PROMPT_REVISION chars=${system.length} " +
+                    "approxTokens=${system.length / 4} tools=${tools.size}"
+            )
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(messages.limitContext(assistant.contextMessageLimit))
         }.transforms(
@@ -825,12 +831,14 @@ class GenerationHandler(
     private suspend fun executeTool(
         tool: UIMessagePart.Tool,
         toolsInternal: List<Tool>,
+        onToolStarted: suspend (UIMessagePart.Tool) -> Unit,
     ): UIMessagePart.Tool? {
         return when (tool.approvalState) {
             is ToolApprovalState.Denied -> {
                 val reason = (tool.approvalState as ToolApprovalState.Denied).reason
                 tool.copy(
                     finishedAt = Clock.System.now(),
+                    finishedAtMs = SystemClock.elapsedRealtime(),
                     output = listOf(
                         UIMessagePart.Text(
                             json.encodeToString(
@@ -850,6 +858,7 @@ class GenerationHandler(
                 val answer = (tool.approvalState as ToolApprovalState.Answered).answer
                 tool.copy(
                     finishedAt = Clock.System.now(),
+                    finishedAtMs = SystemClock.elapsedRealtime(),
                     output = listOf(
                         UIMessagePart.Text(answer)
                     )
@@ -860,7 +869,13 @@ class GenerationHandler(
 
             else -> {
                 // Auto or Approved - execute the tool
-                val startedAt = tool.startedAt ?: Clock.System.now()
+                val startedAt = Clock.System.now()
+                val startedAtMs = SystemClock.elapsedRealtime()
+                val startedTool = tool.copy(
+                    startedAt = startedAt,
+                    startedAtMs = startedAtMs,
+                )
+                onToolStarted(startedTool)
                 runCatching {
                     val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
                         ?: error("Tool ${tool.toolName} not found")
@@ -881,18 +896,22 @@ class GenerationHandler(
                     } else args
                     val result = toolDef.execute(executeArgs)
                     val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
-                    tool.copy(
+                    startedTool.copy(
                         startedAt = startedAt,
+                        startedAtMs = startedAtMs,
                         finishedAt = Clock.System.now(),
+                        finishedAtMs = SystemClock.elapsedRealtime(),
                         output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                     )
                 }.getOrElse {
                     // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                     if (it is CancellationException) throw it
                     Log.w(TAG, "Tool execution failed", it)
-                    tool.copy(
+                    startedTool.copy(
                         startedAt = startedAt,
+                        startedAtMs = startedAtMs,
                         finishedAt = Clock.System.now(),
+                        finishedAtMs = SystemClock.elapsedRealtime(),
                         output = listOf(
                             UIMessagePart.Text(
                                 json.encodeToString(

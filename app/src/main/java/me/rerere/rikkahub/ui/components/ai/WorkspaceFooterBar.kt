@@ -47,7 +47,6 @@ import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.resolveConversationPolicy
-import me.rerere.rikkahub.data.model.resolveModeRef
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
@@ -135,14 +134,8 @@ fun WorkspaceFooterBar(
         mainCost + subCost
     }
 
-    // 当前生效模式引用：旧会话未快照时按助手/全局现算
-    val effectiveModeRef = conversation.mode
-        ?: resolveModeRef(
-            assistant = assistant,
-            settings = settings,
-            trustedFolderActive = activeTrustedProject != null,
-        )
-    val modeLabel = modeRefDisplayName(effectiveModeRef, settings.customModes, settings.builtinModeOverrides)
+    // 当前生效模式引用：null 表示「跟随助手配置」
+    val modeLabel = modeRefDisplayName(conversation.mode, settings.customModes, settings.builtinModeOverrides)
     val effectivePolicy = resolveConversationPolicy(
         conversation = conversation,
         assistant = assistant,
@@ -150,6 +143,30 @@ fun WorkspaceFooterBar(
         trustedFolderActive = activeTrustedProject != null,
     )
     val minimal = effectivePolicy.behaviorProfile == AgentBehaviorProfile.MINIMAL
+
+    // 跟随助手配置的实时摘要：按当前助手/全局设置列出会生效的能力族
+    val followAssistantSummary = remember(assistant, settings, activeTrustedProject) {
+        val enabled = buildList {
+            val mcpCount = settings.mcpServers.count { it.id in assistant.mcpServers && it.commonOptions.enable }
+            if (mcpCount > 0) add("MCP $mcpCount")
+            if (assistant.enableWebSearch) add("联网搜索")
+            if (assistant.enableMemory) add("记忆")
+            if (assistant.enabledSkills.isNotEmpty()) add("技能 ${assistant.enabledSkills.size}")
+            if (assistant.knowledgeBaseIds.isNotEmpty()) add("知识库")
+            if (assistant.workspaceId != null) add("工作区")
+            if (activeTrustedProject != null) add("信任文件夹")
+            if (assistant.enableRecentChatsReference) add("历史引用")
+            if (assistant.enabledStudyTools.isNotEmpty()) add("学习工具")
+            if (assistant.enableTimeReminder) add("时间提醒")
+            if (settings.enableTodoList) add("Todo")
+            if (settings.enableSubAgent) add("子代理")
+        }
+        if (enabled.isEmpty()) {
+            "当前仅启用本地工具、附件解析等基础能力"
+        } else {
+            "当前已启用：${enabled.joinToString("、")}"
+        }
+    }
 
     Surface(color = Color.Transparent, modifier = modifier.fillMaxWidth()) {
         Row(
@@ -243,6 +260,7 @@ fun WorkspaceFooterBar(
             customModes = settings.customModes,
             builtinModeOverrides = settings.builtinModeOverrides,
             showFollowGlobal = true,
+            followAssistantSummary = followAssistantSummary,
             onSelect = { ref ->
                 showModePicker = false
                 onSwitchMode(ref)

@@ -3,9 +3,11 @@ package me.rerere.rikkahub.data.ai.tools
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.files.SkillMetadata
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -135,5 +137,21 @@ class SkillsToolsTest {
         )
 
         assertEquals(setOf("alpha"), captured)
+    }
+
+    @Test
+    fun `system prompt only lists enabled skills`() {
+        val tools = createSkillTools(
+            enabledSkills = setOf("alpha"),
+            allSkills = listOf(createMetadata("alpha"), createMetadata("beta")),
+        )
+        val prompt = tools.first { it.name == "use_skill" }.systemPrompt(
+            Model(modelId = "test-model"),
+            emptyList(),
+        )
+
+        assertTrue(prompt.contains("alpha"))
+        assertFalse(prompt.contains("beta"))
+        assertTrue(prompt.contains("skill_admin_list"))
     }
 }

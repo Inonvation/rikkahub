@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.message
 
+import android.os.SystemClock
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,15 +40,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import kotlin.time.Clock
-import kotlin.time.DurationUnit
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -127,29 +130,78 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
     )
 }
 
+internal fun formatToolDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return when {
+        minutes <= 0 -> String.format(Locale.US, "%.1fs", ms / 1000.0)
+        minutes < 60 -> String.format(Locale.US, "%dm%02ds", minutes, seconds)
+        else -> String.format(Locale.US, "%dh%02dm%02ds", minutes / 60, minutes % 60, seconds)
+    }
+}
+
+internal fun toolTextParts(tool: UIMessagePart.Tool): List<String> =
+    tool.output.filterIsInstance<UIMessagePart.Text>().map { it.text }
+
+internal fun toolExitCode(tool: UIMessagePart.Tool): Int? {
+    for (text in toolTextParts(tool)) {
+        val json = runCatching { JsonInstant.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: continue
+        json["exitCode"]?.jsonPrimitive?.intOrNull?.let { return it }
+    }
+    return null
+}
+
+internal fun toolFailed(tool: UIMessagePart.Tool): Boolean {
+    for (text in toolTextParts(tool)) {
+        val json = runCatching { JsonInstant.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: continue
+        val exitCode = json["exitCode"]?.jsonPrimitive?.intOrNull
+        if (exitCode != null && exitCode != 0) return true
+        val error = json["error"]
+        if (error is JsonPrimitive && error.contentOrNull?.isNotBlank() == true) return true
+    }
+    return false
+}
+
 @Composable
 private fun ToolDurationText(tool: UIMessagePart.Tool) {
-    val startedAt = tool.startedAt ?: return
+    val startedAtMs = tool.startedAtMs
+    val startedAt = tool.startedAt
+    if (startedAtMs == null && startedAt == null) return
+    val finishedAtMs = tool.finishedAtMs
     val finishedAt = tool.finishedAt
-    var duration by remember(startedAt, finishedAt) {
-        mutableStateOf((finishedAt ?: Clock.System.now()) - startedAt)
+    var durationMs by remember(startedAtMs, finishedAtMs, startedAt, finishedAt) {
+        mutableStateOf(
+            if (startedAtMs != null) {
+                (finishedAtMs ?: SystemClock.elapsedRealtime()) - startedAtMs
+            } else {
+                ((finishedAt ?: Clock.System.now()) - startedAt!!).inWholeMilliseconds
+            }
+        )
     }
-    LaunchedEffect(startedAt, finishedAt) {
-        if (finishedAt == null) {
+    LaunchedEffect(startedAtMs, finishedAtMs, startedAt, finishedAt) {
+        if (finishedAtMs == null && finishedAt == null) {
             while (true) {
                 delay(200)
-                duration = Clock.System.now() - startedAt
+                durationMs = if (startedAtMs != null) {
+                    SystemClock.elapsedRealtime() - startedAtMs
+                } else {
+                    (Clock.System.now() - startedAt!!).inWholeMilliseconds
+                }
             }
         }
     }
+    val exitCode = toolExitCode(tool)
+    val failed = toolFailed(tool)
     Text(
-        text = if (finishedAt == null) {
-            "执行中 ${duration.toString(DurationUnit.SECONDS, 1)}"
-        } else {
-            "完成 · ${duration.toString(DurationUnit.SECONDS, 1)}"
+        text = when {
+            !tool.isFinished -> "执行中 ${formatToolDuration(durationMs)}"
+            failed -> "失败 · ${formatToolDuration(durationMs)}${if (exitCode != null) " (exit $exitCode)" else ""}"
+            else -> "完成 · ${formatToolDuration(durationMs)}"
         },
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontFamily = FontFamily.Monospace,
+        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -243,33 +295,26 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         label = {
             val titleText = renderer.title(context)
             val subtitle = renderer.subtitle(context)
-            if (subtitle != null) {
-                // 标题下方辅助信息行（如子代理完成气泡的 token 用量 + 耗时），始终可见
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
                         text = titleText,
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.shimmer(isLoading = rendererLoading),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .shimmer(isLoading = rendererLoading),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    subtitle()
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = titleText,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.shimmer(isLoading = rendererLoading),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (tool.startedAt != null && (tool.finishedAt != null || loading)) {
+                    if (tool.hasStarted && (tool.isFinished || loading)) {
                         ToolDurationText(tool)
                     }
                 }
+                subtitle?.invoke()
             }
         },
         extra = if (isPending && onToolApproval != null) {

@@ -189,13 +189,33 @@ sealed class UIMessagePart {
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
         val startedAt: Instant? = null,
         val finishedAt: Instant? = null,
+        val startedAtMs: Long? = null,
+        val finishedAtMs: Long? = null,
         override var metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
         val isExecuted: Boolean get() = output.isNotEmpty()
 
+        /** Whether the tool has recorded a start time (wall clock or monotonic) */
+        val hasStarted: Boolean get() = startedAt != null || startedAtMs != null
+
+        /** Whether the tool has recorded an end time (wall clock or monotonic) */
+        val isFinished: Boolean get() = finishedAt != null || finishedAtMs != null
+
         /** Whether the tool has started executing but has not finished yet */
-        val isRunning: Boolean get() = startedAt != null && finishedAt == null
+        val isRunning: Boolean get() = hasStarted && !isFinished
+
+        /** Unified execution duration in milliseconds, preferring the monotonic clock. */
+        val durationMs: Long?
+            get() {
+                val startMs = startedAtMs
+                val endMs = finishedAtMs
+                if (startMs != null && endMs != null) return endMs - startMs
+                val start = startedAt
+                val end = finishedAt
+                if (start != null && end != null) return (end - start).inWholeMilliseconds
+                return null
+            }
 
         /** Whether the tool is pending user approval */
         val isPending: Boolean get() = approvalState is ToolApprovalState.Pending
@@ -217,6 +237,8 @@ sealed class UIMessagePart {
                 approvalState = approvalState,
                 startedAt = startedAt ?: other.startedAt,
                 finishedAt = finishedAt ?: other.finishedAt,
+                startedAtMs = startedAtMs ?: other.startedAtMs,
+                finishedAtMs = finishedAtMs ?: other.finishedAtMs,
                 metadata = if (other.metadata != null) other.metadata else metadata,
             )
         }
