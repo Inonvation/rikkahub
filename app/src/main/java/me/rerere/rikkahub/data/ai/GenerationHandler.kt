@@ -442,13 +442,35 @@ class GenerationHandler(
                 toolsToProcess = messages.last().getTools().filter { it.canResumeExecution }
             }
 
+            // 真正开始执行前打点：审批等待不计入，Auto/Approved 才进入计时。
+            val startedTools = toolsToProcess.map { tool ->
+                if (tool.approvalState is ToolApprovalState.Auto ||
+                    tool.approvalState is ToolApprovalState.Approved
+                ) {
+                    tool.copy(startedAt = Clock.System.now())
+                } else {
+                    tool
+                }
+            }
+            if (startedTools != toolsToProcess) {
+                val lastMessage = messages.last()
+                val updatedParts = lastMessage.parts.map { part ->
+                    if (part is UIMessagePart.Tool) {
+                        startedTools.find { it.toolCallId == part.toolCallId } ?: part
+                    } else {
+                        part
+                    }
+                }
+                messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
+                emit(GenerationChunk.Messages(messages))
+            }
             // Handle tools (execute approved tools, handle denied tools)
             // 并行执行：多个工具（含多子代理派发）并发跑，按原始顺序回填结果。
             // workspace 文件类工具经 executeToolSerialized 串行化（同一文件/同一 workspace 的
             // shell 依次执行），防止同文件并发编辑的"读-改-写"竞态；其余工具仍并行。
             val workspaceIdForLock = assistant.workspaceId?.toString()
             val executedTools = coroutineScope {
-                toolsToProcess.map { tool ->
+                startedTools.map { tool ->
                     async {
                         executeToolSerialized(tool, toolsInternal, workspaceIdForLock, json, ::executeTool)
                     }
@@ -808,6 +830,7 @@ class GenerationHandler(
             is ToolApprovalState.Denied -> {
                 val reason = (tool.approvalState as ToolApprovalState.Denied).reason
                 tool.copy(
+                    finishedAt = Clock.System.now(),
                     output = listOf(
                         UIMessagePart.Text(
                             json.encodeToString(
@@ -826,6 +849,7 @@ class GenerationHandler(
             is ToolApprovalState.Answered -> {
                 val answer = (tool.approvalState as ToolApprovalState.Answered).answer
                 tool.copy(
+                    finishedAt = Clock.System.now(),
                     output = listOf(
                         UIMessagePart.Text(answer)
                     )
@@ -836,6 +860,7 @@ class GenerationHandler(
 
             else -> {
                 // Auto or Approved - execute the tool
+                val startedAt = tool.startedAt ?: Clock.System.now()
                 runCatching {
                     val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
                         ?: error("Tool ${tool.toolName} not found")
@@ -857,6 +882,8 @@ class GenerationHandler(
                     val result = toolDef.execute(executeArgs)
                     val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
                     tool.copy(
+                        startedAt = startedAt,
+                        finishedAt = Clock.System.now(),
                         output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                     )
                 }.getOrElse {
@@ -864,6 +891,8 @@ class GenerationHandler(
                     if (it is CancellationException) throw it
                     Log.w(TAG, "Tool execution failed", it)
                     tool.copy(
+                        startedAt = startedAt,
+                        finishedAt = Clock.System.now(),
                         output = listOf(
                             UIMessagePart.Text(
                                 json.encodeToString(

@@ -146,6 +146,44 @@ function getToolTitle(toolName: string, args: unknown, t: TFunction): string {
   return t("tool_part.tool_call_with_name", { toolName });
 }
 
+function parseInstant(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatDuration(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function ToolDurationLabel({ tool, loading }: { tool: UIToolPart; loading?: boolean }) {
+  const { t } = useTranslation("message");
+  const started = React.useMemo(() => parseInstant(tool.startedAt), [tool.startedAt]);
+  const finished = React.useMemo(() => parseInstant(tool.finishedAt), [tool.finishedAt]);
+  const [now, setNow] = React.useState<number>(Date.now());
+
+  React.useEffect(() => {
+    if (finished !== null) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(timer);
+  }, [finished]);
+
+  if (started === null) return null;
+  if (finished !== null) {
+    return (
+      <span className="text-muted-foreground text-xs">
+        {t("tool_part.completed_duration", { duration: formatDuration(finished - started) })}
+      </span>
+    );
+  }
+  if (!loading) return null;
+  return (
+    <span className="text-muted-foreground text-xs">
+      {t("tool_part.running_duration", { duration: formatDuration(now - started) })}
+    </span>
+  );
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
@@ -544,7 +582,12 @@ export function ToolPart({
             <Icon className="h-4 w-4 text-primary" />
           )
         }
-        label={<span className="text-foreground line-clamp-2 text-sm font-medium">{title}</span>}
+        label={
+          <span className="flex min-w-0 flex-col">
+            <span className="text-foreground line-clamp-2 text-sm font-medium">{title}</span>
+            <ToolDurationLabel tool={tool} loading={loading} />
+          </span>
+        }
         extra={
           isPending && onToolApproval ? (
             <div className="flex items-center gap-1">

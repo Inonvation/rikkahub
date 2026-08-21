@@ -41,6 +41,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.time.Clock
+import kotlin.time.DurationUnit
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -121,6 +124,32 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                 overflow = TextOverflow.Ellipsis,
             )
         },
+    )
+}
+
+@Composable
+private fun ToolDurationText(tool: UIMessagePart.Tool) {
+    val startedAt = tool.startedAt ?: return
+    val finishedAt = tool.finishedAt
+    var duration by remember(startedAt, finishedAt) {
+        mutableStateOf((finishedAt ?: Clock.System.now()) - startedAt)
+    }
+    LaunchedEffect(startedAt, finishedAt) {
+        if (finishedAt == null) {
+            while (true) {
+                delay(200)
+                duration = Clock.System.now() - startedAt
+            }
+        }
+    }
+    Text(
+        text = if (finishedAt == null) {
+            "执行中 ${duration.toString(DurationUnit.SECONDS, 1)}"
+        } else {
+            "完成 · ${duration.toString(DurationUnit.SECONDS, 1)}"
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -228,14 +257,19 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     subtitle()
                 }
             } else {
-                Text(
-                    text = titleText,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.shimmer(isLoading = rendererLoading),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = titleText,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.shimmer(isLoading = rendererLoading),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (tool.startedAt != null && (tool.finishedAt != null || loading)) {
+                        ToolDurationText(tool)
+                    }
+                }
             }
         },
         extra = if (isPending && onToolApproval != null) {

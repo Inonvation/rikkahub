@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.SlidersVertical
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
 import me.rerere.rikkahub.data.ai.cost.CostCurrency
 import me.rerere.rikkahub.data.datastore.Settings
@@ -50,6 +52,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -71,6 +74,7 @@ fun WorkspaceFooterBar(
     val trustedFolderRepository: TrustedFolderRepository = koinInject()
     val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
     val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+    val navController = LocalNavController.current
 
     val scope = rememberCoroutineScope()
     val hapticController = rememberHaptic()
@@ -159,21 +163,26 @@ fun WorkspaceFooterBar(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.small)
-                    .clickable(
+                    .combinedClickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                    ) {
-                        if (modeSwitchEnabled) {
+                        onClick = {
+                            if (modeSwitchEnabled) {
+                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                showModePicker = true
+                            } else {
+                                // 有消息/生成中：模式锁定，给出提示而不是无响应
+                                toaster.show(
+                                    message = lockedModeDesc,
+                                    type = ToastType.Normal,
+                                )
+                            }
+                        },
+                        onLongClick = {
                             hapticController.perform(HapticFeedbackType.KeyboardTap)
-                            showModePicker = true
-                        } else {
-                            // 有消息/生成中：模式锁定，给出提示而不是无响应
-                            toaster.show(
-                                message = lockedModeDesc,
-                                type = ToastType.Normal,
-                            )
+                            navController.navigate(Screen.SettingModes)
                         }
-                    }
+                    )
                     .padding(vertical = 4.dp, horizontal = 6.dp)
                     .alpha(if (modeSwitchEnabled) 1f else 0.6f),
             ) {

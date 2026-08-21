@@ -46,6 +46,7 @@ fun KnowledgeBasePickerButton(
     selectedIds: Set<Uuid>,
     onSelectionChange: (Set<Uuid>) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
@@ -57,6 +58,7 @@ fun KnowledgeBasePickerButton(
     val hasSelection = selectedIds.isNotEmpty()
 
     IconButton(
+        enabled = enabled,
         onClick = {
             hapticController.perform(HapticFeedbackType.KeyboardTap)
             showPicker = true
@@ -67,8 +69,11 @@ fun KnowledgeBasePickerButton(
             HugeIcons.Bookshelf01,
             contentDescription = "知识库",
             modifier = Modifier.size(20.dp),
-            tint = if (hasSelection) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                hasSelection -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
 

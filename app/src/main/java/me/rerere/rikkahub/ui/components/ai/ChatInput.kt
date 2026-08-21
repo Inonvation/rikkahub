@@ -125,6 +125,9 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.data.model.resolveConversationPolicy
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionList
@@ -212,6 +215,15 @@ fun ChatInput(
     val asrState by asr.state.collectAsState()
     val hapticController = rememberHaptic()
     val mcpManager: McpManager = koinInject()
+    val trustedFolderRepository: TrustedFolderRepository = koinInject()
+    val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
+    val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+    val modePolicy = resolveConversationPolicy(
+        conversation = conversation,
+        assistant = assistant,
+        settings = settings,
+        trustedFolderActive = activeTrustedProject != null,
+    )
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
         soundEffectPlayer.preload(R.raw.asr_start, R.raw.asr_stop)
@@ -426,6 +438,7 @@ fun ChatInput(
                                             assistant = assistant,
                                             servers = settings.mcpServers,
                                             mcpManager = mcpManager,
+                                            enabled = modePolicy.allowMcpUse,
                                             onUpdateAssistant = onUpdateAssistant,
                                             compact = true,
                                         )
@@ -434,6 +447,7 @@ fun ChatInput(
                                     // Knowledge Base
                                     KnowledgeBasePickerButton(
                                         selectedIds = assistant.knowledgeBaseIds,
+                                        enabled = modePolicy.allowKnowledge,
                                         onSelectionChange = { newIds ->
                                             onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
                                         },

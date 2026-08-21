@@ -17,17 +17,22 @@ fun ToggleSurface(
     checked: Boolean,
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(50),
+    enabled: Boolean = true,
     onClick: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val hapticController = rememberHaptic()
-    val contentColor =
-        if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        checked -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
     Surface(
         onClick = {
             hapticController.perform(HapticFeedbackType.KeyboardTap)
             onClick()
         },
+        enabled = enabled,
         color = Color.Transparent,
         contentColor = contentColor,
         modifier = modifier,

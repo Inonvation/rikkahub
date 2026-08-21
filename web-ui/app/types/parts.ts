@@ -54,6 +54,8 @@ export interface ToolPart extends BaseMessagePart {
   input: string;
   output: UIMessagePart[];
   approvalState: ToolApprovalState;
+  startedAt?: string | null;
+  finishedAt?: string | null;
 }
 
 /**

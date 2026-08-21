@@ -187,10 +187,15 @@ sealed class UIMessagePart {
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
+        val startedAt: Instant? = null,
+        val finishedAt: Instant? = null,
         override var metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
         val isExecuted: Boolean get() = output.isNotEmpty()
+
+        /** Whether the tool has started executing but has not finished yet */
+        val isRunning: Boolean get() = startedAt != null && finishedAt == null
 
         /** Whether the tool is pending user approval */
         val isPending: Boolean get() = approvalState is ToolApprovalState.Pending
@@ -210,6 +215,8 @@ sealed class UIMessagePart {
                 input = input + other.input,
                 output = output + other.output,
                 approvalState = approvalState,
+                startedAt = startedAt ?: other.startedAt,
+                finishedAt = finishedAt ?: other.finishedAt,
                 metadata = if (other.metadata != null) other.metadata else metadata,
             )
         }

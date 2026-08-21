@@ -7,6 +7,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -51,5 +53,37 @@ class UIMessagePartTest {
 
         assertEquals(ServerToolStatus.IN_PROGRESS, part.status)
         assertFalse(part.isFinished)
+    }
+
+    @Test
+    fun `tool timing fields round trip`() {
+        val startedAt = Clock.System.now()
+        val finishedAt = startedAt + 5.seconds
+        val part: UIMessagePart = UIMessagePart.Tool(
+            toolCallId = "tool_1",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 1"}""",
+            startedAt = startedAt,
+            finishedAt = finishedAt,
+        )
+
+        val encoded = json.encodeToString(part)
+        val restored = json.decodeFromString<UIMessagePart>(encoded) as UIMessagePart.Tool
+
+        assertEquals(part, restored)
+        assertFalse(restored.isRunning)
+    }
+
+    @Test
+    fun `tool running state requires start without finish`() {
+        val startedAt = Clock.System.now()
+        val running = UIMessagePart.Tool(
+            toolCallId = "tool_2",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 5"}""",
+            startedAt = startedAt,
+        )
+
+        assertTrue(running.isRunning)
     }
 }

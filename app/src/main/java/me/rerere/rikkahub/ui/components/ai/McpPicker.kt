@@ -61,6 +61,7 @@ fun McpPickerButton(
     servers: List<McpServerConfig>,
     mcpManager: McpManager,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onUpdateAssistant: (Assistant) -> Unit,
     compact: Boolean = false,
 ) {
@@ -74,6 +75,7 @@ fun McpPickerButton(
     ToggleSurface(
         modifier = modifier,
         checked = assistant.mcpServers.isNotEmpty(),
+        enabled = enabled,
         onClick = {
             showMcpPicker = true
         }

@@ -9,6 +9,14 @@ import kotlin.uuid.Uuid
 
 class ChatModeTest {
 
+    @Test
+    fun minimalModeIsDisplayedFirst() {
+        assertEquals(
+            listOf(ChatMode.MINIMAL, ChatMode.STANDARD, ChatMode.PTC, ChatMode.CREATIVE),
+            ChatMode.entries.toList(),
+        )
+    }
+
     private fun settings(
         defaultMode: String? = null,
         customModes: List<CustomModeConfig> = emptyList(),

@@ -360,7 +360,7 @@ private fun ChatListNormal(
             .fillMaxSize(),
     ) {
         // 自动滚动到底部：生成加载中且用户在底部时，跟随输出滚动。
-        // 用 scrollBy 滚到可滚动终点：已在底部时为 0 开销，内容长高后直接贴住最新底部。
+        // 用 requestScrollToItem 跟随输出：内部有去抖，避免流式每个 chunk 都触发滚动+重布局死循环。
         // 上滑锁定：用户一旦主动上滑（哪怕仍在底部留白死区内，isAtBottom 仍为 true），
         // 立即暂停跟随，直到用户重新滚回真正的底部（isPinnedToBottom）才解除——
         // 修复"生成收尾阶段 loading 仍为 true 的窗口期，刚上滑一点就被瞬间拉回底部"的跳变。
@@ -376,16 +376,25 @@ private fun ChatListNormal(
                             state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset,
                             state.isScrollInProgress,
                         ),
-                        isUserDragging,
+                        Triple(
+                            isUserDragging,
+                            conversationUpdated.version,
+                            conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.finishedAt != null,
+                        ),
                     )
-                }.collect { (scrollInfo, dragging) ->
+                }.collect { (scrollInfo, extra) ->
                     val (visibleItemsInfo, pos, inProgress) = scrollInfo
+                    val (dragging, _, lastMessageFinished) = extra
                     val idx = pos.first
                     val off = pos.second
                     // 悬浮条折叠/展开是程序滚动，不是用户手势：
                     // 滚动期间保持锁定，防止折叠动画刚结束就被拉回底部。
                     val programmaticScroll = freezeState?.scrollingByProgram == true
                     val totalItems = state.layoutInfo.totalItemsCount
+                    val hasUnfinishedTool =
+                        conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.parts
+                            ?.any { it is UIMessagePart.Tool && !it.isExecuted } == true
+                    val finalizing = lastMessageFinished && !hasUnfinishedTool
                     // 1) 用户在滚动中上滑 → 锁定，暂停自动跟随
                     if (dragging || (inProgress && !programmaticScroll)) {
                         val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
@@ -401,12 +410,10 @@ private fun ChatListNormal(
                     // 3) 跟随输出：仅当用户未滚动、在底部、且未主动上滑时
                     // 生成回合内的工具调用会把最后一条消息标记为 finished，但它仍在当前回合中，
                     // 不能用 finishedAt 判断是否继续跟随；只看 loading 是否仍为生成中。
-                    if (!dragging && !inProgress && !programmaticScroll && loadingState &&
+                    if (!dragging && !inProgress && !programmaticScroll && loadingState && !finalizing &&
                         !userScrolledUp && visibleItemsInfo.isAtBottom() && totalItems > 0
                     ) {
-                        // 直接滚到可滚动终点：流式时最后一条消息变高也能稳定贴住底部，
-                        // 不会只定位到消息顶部而看不到最新内容。
-                        state.scrollBy(Float.MAX_VALUE)
+                        state.requestScrollToItem(totalItems - 1)
                     }
                     lastIdx = idx
                     lastOff = off

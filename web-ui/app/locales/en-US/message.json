@@ -56,7 +56,9 @@
     "ask_user_title": "Ask User",
     "ask_user_questions_count": "Ask {{count}} questions",
     "ask_user_submit": "Submit",
-    "ask_user_answered": "Answered"
+    "ask_user_answered": "Answered",
+    "running_duration": "Running {{duration}}",
+    "completed_duration": "Completed · {{duration}}"
   },
   "media_part": {
     "video_load_failed": "Failed to load video: {{url}}",

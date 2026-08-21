@@ -14,25 +14,25 @@ import kotlin.uuid.Uuid
  */
 @Serializable
 enum class ChatMode {
+    /** 极简：只注入用户自定义提示词，保留本地工具、联网搜索与附件解析（不注入 MCP/外部工具声明）。 */
+    MINIMAL,
+
     /** 标准：功能完整，遵循助手设置中的工具，默认不注入 use_skill，可在设置中按需开启；不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置。 */
     STANDARD,
 
     /** PTC（UI 显示「工作区模式」）：包含标准全部能力，并启用信任文件夹与工作区的所有工具能力（未配置时自动降级）。 */
     PTC,
 
-    /** 极简：只注入用户自定义提示词，保留本地工具、联网搜索与附件解析（不注入 MCP/外部工具声明）。 */
-    MINIMAL,
-
     /** CREATIVE（UI 显示「管理模式」）：包含工作区全部能力，并支持 skill/MCP 感知配置、环境与日志读取、提供商与新模式写入（写操作需审批）。 */
     CREATIVE;
 
     fun policy(): ChatModePolicy = when (this) {
+        MINIMAL -> ChatModePolicy.MINIMAL
         STANDARD -> ChatModePolicy.STANDARD
         PTC -> ChatModePolicy(
             capabilities = ChatModePolicy.STANDARD.capabilities +
                 Capability.SKILL_USE + Capability.WORKSPACE + Capability.TRUSTED_FOLDER
         )
-        MINIMAL -> ChatModePolicy.MINIMAL
         CREATIVE -> ChatModePolicy(
             capabilities = ChatModePolicy.STANDARD.capabilities +
                 Capability.SKILL_USE +

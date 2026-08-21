@@ -56,7 +56,9 @@
     "ask_user_title": "询问用户",
     "ask_user_questions_count": "询问 {{count}} 个问题",
     "ask_user_submit": "提交",
-    "ask_user_answered": "已回答"
+    "ask_user_answered": "已回答",
+    "running_duration": "执行中 {{duration}}",
+    "completed_duration": "完成 · {{duration}}"
   },
   "media_part": {
     "video_load_failed": "加载视频失败：{{url}}",
