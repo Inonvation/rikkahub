@@ -447,7 +447,7 @@ private fun ChatPageContent(
         modelContextTokenLimit = modelContextTokenLimit,
         assistantContextTokenLimit = assistant.contextTokenLimit,
     )
-    val totalTokens = conversation.currentMessages.sumOf { it.usage?.totalTokens ?: 0 }
+    val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
     val usagePercent = if (effectiveContextTokenLimit > 0) {
         totalTokens / effectiveContextTokenLimit.toFloat()
     } else {
@@ -1233,7 +1233,7 @@ private fun TopBar(
         actions = {
             // 上下文用量圆圈
             val assistant = settings.getCurrentAssistant()
-            val totalTokens = conversation.currentMessages.sumOf { it.usage?.totalTokens ?: 0 }
+            val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
             val modelContextTokenLimit = settings.getCurrentChatModel()?.modelId?.let {
                 ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
             }

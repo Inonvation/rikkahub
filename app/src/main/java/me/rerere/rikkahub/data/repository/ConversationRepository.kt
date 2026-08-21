@@ -627,7 +627,8 @@ class ConversationRepository(
                 folderId = local?.folderId,
                 discussion = local?.discussion,
                 groupId = local?.groupId,
-                compressedHistory = local?.compressedHistory,
+                // 同步可能改变消息结构，压缩快照不随同步传输，直接失效避免陈旧上下文
+                compressedHistory = null,
                 syncUpdatedAt = newVersion,
             )
 

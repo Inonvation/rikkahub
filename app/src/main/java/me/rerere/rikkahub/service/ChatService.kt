@@ -518,7 +518,13 @@ class ChatService(
             )
         }
         if (changed) {
-            saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
+            saveConversation(
+                conversationId,
+                conversation.copy(
+                    messageNodes = updatedNodes,
+                    compressedHistory = null,
+                )
+            )
         }
     }
 
@@ -590,7 +596,13 @@ class ChatService(
             )
         }
         if (changed) {
-            saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
+            saveConversation(
+                conversationId,
+                conversation.copy(
+                    messageNodes = updatedNodes,
+                    compressedHistory = null,
+                )
+            )
         }
     }
 
@@ -1384,7 +1396,8 @@ class ChatService(
                     val node = conversation.getMessageNodeByMessage(message)
                     val indexAt = conversation.messageNodes.indexOf(node)
                     val newConversation = conversation.copy(
-                        messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
+                        messageNodes = conversation.messageNodes.subList(0, indexAt + 1),
+                        compressedHistory = null,
                     )
                     saveConversation(conversationId, newConversation)
                     handleMessageComplete(conversationId)
@@ -1407,7 +1420,8 @@ class ChatService(
                         // 重生成 assistant 消息：截断到目标消息之前，生成上下文之后不留悬空旧尾部（#15）。
                         // 与 USER 分支的 subList 截断保持一致，避免「A1' 不知道 U2 → U2→A2 悬空」的语义错乱。
                         val newConversation = conversation.copy(
-                            messageNodes = conversation.messageNodes.subList(0, nodeIndex)
+                            messageNodes = conversation.messageNodes.subList(0, nodeIndex),
+                            compressedHistory = null,
                         )
                         saveConversation(conversationId, newConversation)
                         handleMessageComplete(conversationId)
@@ -1464,7 +1478,10 @@ class ChatService(
                         }
                     )
                 }
-                val updatedConversation = conversation.copy(messageNodes = updatedNodes)
+                val updatedConversation = conversation.copy(
+                    messageNodes = updatedNodes,
+                    compressedHistory = null,
+                )
                 saveConversation(conversationId, updatedConversation)
 
                 // Check if there are still pending tools
@@ -2239,7 +2256,13 @@ class ChatService(
         // 移除无效消息
         messagesNodes = messagesNodes.filter { it.messages.isNotEmpty() }
 
-        updateConversation(conversationId, conversation.copy(messageNodes = messagesNodes))
+        updateConversation(
+            conversationId,
+            conversation.copy(
+                messageNodes = messagesNodes,
+                compressedHistory = null,
+            )
+        )
     }
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
@@ -2696,7 +2719,13 @@ class ChatService(
 
         if (!edited) return
 
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(
+            conversationId,
+            currentConversation.copy(
+                messageNodes = updatedNodes,
+                compressedHistory = null,
+            )
+        )
     }
 
     suspend fun forkConversationAtMessage(
@@ -2764,7 +2793,13 @@ class ChatService(
             }
         }
 
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(
+            conversationId,
+            currentConversation.copy(
+                messageNodes = updatedNodes,
+                compressedHistory = null,
+            )
+        )
     }
 
     suspend fun deleteMessage(
@@ -2820,7 +2855,10 @@ class ChatService(
             )
         }
 
-        return conversation.copy(messageNodes = updatedNodes)
+        return conversation.copy(
+            messageNodes = updatedNodes,
+            compressedHistory = null,
+        )
     }
 
     private fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
