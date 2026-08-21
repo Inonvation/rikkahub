@@ -38,7 +38,7 @@ import kotlin.time.DurationUnit
  * 保证冻结悬浮状态与普通显示状态的样式、缩进、交互一致，切换时不会水平错位。
  */
 
-/** 主文案：标题优先，否则"思考了n秒"；loading 时 shimmer 闪烁 */
+/** 主文案：加载中显示轮换趣味文案（标题保留在旁），否则标题优先、无标题显示"思考了n秒" */
 @Composable
 internal fun ReasoningHeaderLabel(
     title: String?,
@@ -46,6 +46,15 @@ internal fun ReasoningHeaderLabel(
     loading: Boolean,
     chatFontFamily: FontFamily,
 ) {
+    // 加载中（reasoning 流式进行中）→ 主文案轮换趣味文案；有自定义标题时保留在旁
+    if (loading) {
+        RotatingThinkingLabel(
+            enabled = true,
+            primaryTitle = title,
+            chatFontFamily = chatFontFamily,
+        )
+        return
+    }
     val style = MaterialTheme.typography.titleSmall.copy(fontFamily = chatFontFamily)
     val color = MaterialTheme.colorScheme.secondary
     if (title != null) {

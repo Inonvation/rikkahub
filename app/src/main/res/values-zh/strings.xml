@@ -365,6 +365,62 @@
   <string name="db_migrating">正在迁移数据库…</string>
   <string name="deep_thinking">深度思考</string>
   <string name="deep_thinking_seconds">思考了 %1$.1f 秒</string>
+  <string-array name="thinking_rotation_phrases_early">
+    <item>深度思考中…</item>
+    <item>分析中…</item>
+    <item>推理中…</item>
+    <item>推演中…</item>
+    <item>检索记忆中…</item>
+    <item>整合思路…</item>
+    <item>规划中…</item>
+    <item>计算中…</item>
+    <item>思考中…</item>
+    <item>生成中…</item>
+  </string-array>
+  <string-array name="thinking_rotation_phrases_mid">
+    <item>摸鱼中…</item>
+    <item>胡思乱想中…</item>
+    <item>划水中…</item>
+    <item>假装很忙…</item>
+    <item>偷懒一下…</item>
+    <item>发了个呆…</item>
+    <item>大脑开机中…</item>
+    <item>正在充电…</item>
+    <item>转圈圈思考…</item>
+    <item>揉揉眼睛想问题…</item>
+    <item>小脑袋冒烟中…</item>
+    <item>思考到冒泡泡…</item>
+    <item>磨洋工中…</item>
+    <item>到处溜达中…</item>
+    <item>闲庭信步中…</item>
+    <item>磨磨唧唧中…</item>
+    <item>蹦跶中…</item>
+    <item>撒欢中…</item>
+    <item>叽里呱啦中…</item>
+    <item>七荤八素中…</item>
+    <item>瞎忙活中…</item>
+    <item>赶猫中…</item>
+  </string-array>
+  <string-array name="thinking_rotation_phrases_late">
+    <item>大脑 CPU 拉满…</item>
+    <item>已进入冥想…</item>
+    <item>面壁思考中…</item>
+    <item>在知识的海洋里挣扎…</item>
+    <item>与世界和解中…</item>
+    <item>检索阿卡夏记录…</item>
+    <item>加载中…</item>
+    <item>正在思考…</item>
+    <item>超空间跳跃中…</item>
+    <item>扭曲时空中…</item>
+    <item>量子化中…</item>
+    <item>蛇行走位中…</item>
+    <item>焯水ing…</item>
+    <item>克劳丁中…</item>
+    <item>通灵中…</item>
+    <item>跳吉特巴中…</item>
+    <item>太空步中…</item>
+    <item>光合作用中…</item>
+  </string-array>
   <string name="delete">删除</string>
   <string name="donate_page_afdian_desc">适用于🇨🇳用户</string>
   <string name="donate_page_donation_methods">赞助方式</string>

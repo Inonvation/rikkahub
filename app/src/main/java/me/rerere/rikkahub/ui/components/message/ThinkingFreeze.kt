@@ -79,6 +79,8 @@ class ThinkingFrozenBarSection(
     val bottomY: MutableIntState = mutableIntStateOf(Int.MIN_VALUE),
     val duration: MutableState<Duration> = mutableStateOf(Duration.ZERO),
     val title: MutableState<String?> = mutableStateOf(null),
+    /** 该思考步骤是否仍在流式生成中（用于吸顶条主文案的轮换趣味文案） */
+    val streaming: MutableState<Boolean> = mutableStateOf(false),
     val cardColor: MutableState<Color> = mutableStateOf(Color.Unspecified),
     val contentVisible: MutableState<Boolean> = mutableStateOf(false),
     val collapsed: MutableState<Boolean> = mutableStateOf(false),
@@ -147,7 +149,8 @@ private fun ThinkingFrozenBarContent(section: ThinkingFrozenBarSection) {
         ReasoningHeaderRow(
             title = section.title.value,
             duration = section.duration.value,
-            loading = false,
+            // 流式生成中 → loading=true，主文案走轮换趣味文案；结束后恢复静态标题/思考时长
+            loading = section.streaming.value,
             contentVisible = section.contentVisible.value,
             folded = section.folded.value,
             onClick = section.onToggle,

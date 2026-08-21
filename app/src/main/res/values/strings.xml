@@ -384,6 +384,42 @@
   <string name="db_migrating">Migrating database...</string>
   <string name="deep_thinking">Deep Thinking</string>
   <string name="deep_thinking_seconds">Thought for %1$.1f seconds</string>
+  <string-array name="thinking_rotation_phrases_early">
+    <item>Deep in thought…</item>
+    <item>Analyzing…</item>
+    <item>Reasoning…</item>
+    <item>Working it through…</item>
+    <item>Scanning my memory…</item>
+    <item>Piecing ideas together…</item>
+    <item>Planning…</item>
+    <item>Computing…</item>
+    <item>Thinking…</item>
+    <item>Generating…</item>
+  </string-array>
+  <string-array name="thinking_rotation_phrases_mid">
+    <item>Slacking off…</item>
+    <item>Daydreaming…</item>
+    <item>Goofing around…</item>
+    <item>Acting busy…</item>
+    <item>Taking a quick break…</item>
+    <item>Zoned out…</item>
+    <item>Booting my brain…</item>
+    <item>Charging up…</item>
+    <item>Spinning around mid-thought…</item>
+    <item>Rubbing my eyes over this…</item>
+    <item>Smoke coming from the head…</item>
+    <item>Thinking in bubbles…</item>
+  </string-array>
+  <string-array name="thinking_rotation_phrases_late">
+    <item>CPU at max…</item>
+    <item>Entering meditation…</item>
+    <item>Pondering against the wall…</item>
+    <item>Drowning in the sea of knowledge…</item>
+    <item>Making peace with the world…</item>
+    <item>Consulting the Akashic records…</item>
+    <item>Loading…</item>
+    <item>Processing…</item>
+  </string-array>
   <string name="delete">Delete</string>
   <string name="donate_page_afdian_desc">For 🇨🇳 users</string>
   <string name="donate_page_donation_methods">Donation Methods</string>

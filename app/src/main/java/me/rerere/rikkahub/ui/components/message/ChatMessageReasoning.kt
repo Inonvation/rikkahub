@@ -267,6 +267,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
 
     // 实时同步吸顶条展示所需数据
     section.duration.value = state.duration
+    section.streaming.value = loading
     section.title.value = if (loading && thinkingTitle != null) thinkingTitle else null
     section.cardColor.value = LocalCardColor.current
     section.contentVisible.value = state.expandState != ReasoningCardState.Collapsed
