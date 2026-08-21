@@ -24,7 +24,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -125,7 +124,6 @@ import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
-import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.utils.ToolParseCache
@@ -303,9 +301,6 @@ private fun ChatListNormal(
     // workspace 图片/链接点击 → 应用内预览（ImagePreviewDialog）
     var workspacePreviewImage by remember { mutableStateOf<String?>(null) }
 
-    // 自动跟随键盘滚动
-    ImeLazyListAutoScroller(lazyListState = state)
-
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(conversation)
     var showSizeWarningDialog by rememberSaveable(conversation.id) { mutableStateOf(true) }
@@ -357,52 +352,30 @@ private fun ChatListNormal(
         // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
         // 按"每跨过 PREFETCH_WINDOW 条才触发一次 + 取消上一次未完成任务"合并快速滚动时的并发任务，
         // 避免每个 firstVisibleItemIndex 变化都启动一个重任务挤占主线程/GC。
-        LaunchedEffect(state.interactionSource) {
-            state.interactionSource.interactions.collect { interaction ->
-                if (interaction is PressInteraction.Press) {
-                    followLocked = true
-                }
-            }
-        }
-        LaunchedEffect(isUserDragging) {
-            if (isUserDragging) followLocked = true
-        }
-        LaunchedEffect(state) {
-            snapshotFlow {
-                Triple(
-                    state.layoutInfo.visibleItemsInfo,
-                    state.isScrollInProgress,
-                    isUserDragging,
-                )
-            }.distinctUntilChanged().collect { (visibleItemsInfo, inProgress, dragging) ->
-                if (!dragging && !inProgress && visibleItemsInfo.isPinnedToBottom()) {
-                    followLocked = false
-                }
-            }
-        }
         if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(loadingState, followLocked, isUserDragging) {
-                if (!followLocked && loadingState && !isUserDragging &&
-                    freezeState?.scrollingByProgram != true &&
-                    state.layoutInfo.totalItemsCount > 0 &&
-                    state.layoutInfo.visibleItemsInfo.isAtBottom()
-                ) {
-                    snapshotFlow {
-                        val last = state.layoutInfo.visibleItemsInfo.lastOrNull()
-                        listOf(
-                            state.layoutInfo.totalItemsCount,
-                            state.firstVisibleItemIndex,
-                            state.firstVisibleItemScrollOffset,
-                            last?.index,
-                            last?.let { it.offset + it.size },
-                            state.layoutInfo.viewportEndOffset,
-                        )
-                    }.distinctUntilChanged().collect {
-                        if (freezeState?.scrollingByProgram != true &&
-                            state.layoutInfo.totalItemsCount > 0 &&
-                            !state.layoutInfo.visibleItemsInfo.isAtBottom()
-                        ) {
-                            state.requestScrollToItem(state.layoutInfo.totalItemsCount + 5)
+            LaunchedEffect(isUserDragging) {
+                if (isUserDragging) followLocked = true
+            }
+            LaunchedEffect(state, isUserDragging) {
+                snapshotFlow {
+                    Triple(
+                        state.layoutInfo.visibleItemsInfo,
+                        state.isScrollInProgress,
+                        isUserDragging,
+                    )
+                }.distinctUntilChanged().collect { (visibleItemsInfo, inProgress, dragging) ->
+                    if (!dragging && !inProgress && visibleItemsInfo.isPinnedToBottom()) {
+                        followLocked = false
+                    }
+                }
+            }
+            LaunchedEffect(state, isUserDragging, followLocked) {
+                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                    if (!followLocked && !state.isScrollInProgress && !isUserDragging && loadingState &&
+                        freezeState?.scrollingByProgram != true
+                    ) {
+                        if (visibleItemsInfo.isAtBottom()) {
+                            state.scrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                         }
                     }
                 }

@@ -196,7 +196,6 @@ fun ChatInput(
     val focusManager = LocalFocusManager.current
 
     // 输入框整体始终是圆角矩形，不随键盘状态改变形状；
-    // 用 imePadding 平滑跟随键盘升降（insets 逐帧变化），底部保留 8dp 间距，
     // 避免"贴合键盘变直角 + 收起时突变跳一下"。
 
     fun sendMessage() {
@@ -259,69 +258,47 @@ fun ChatInput(
     ) {
         Column(
             modifier = modifier
-                .imePadding()
-                .navigationBarsPadding()
                 .padding(horizontal = 8.dp)
-                .padding(bottom = 6.dp)
+                .padding(bottom = 4.dp)
                 // 多行文本增长 / 附件行出现/移除时平滑过渡高度，避免瞬时跳变。
                 // 用克制 tween 而非默认 spring，避免高度轻微过冲回弹的粘滞感。
                 .animateContentSize(animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             // 排队中的引导：独立于输入框的气泡，位于输入框上方、右对齐（对齐 Codex 样式）
             if (pendingGuidance.isNotEmpty()) {
-                Surface(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    shadowElevation = 1.dp,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalAlignment = Alignment.End,
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        horizontalAlignment = Alignment.End,
-                    ) {
-                        pendingGuidance.forEach { item ->
-                            PendingGuidanceBubble(
-                                text = item.text,
-                                onSendNow = { onSendPendingGuidance?.invoke(item) },
-                                onCancel = { onCancelPendingGuidance?.invoke(item) },
-                                onEdit = { onEditPendingGuidance?.invoke(item) },
-                            )
-                        }
+                    pendingGuidance.forEach { item ->
+                        PendingGuidanceBubble(
+                            text = item.text,
+                            onSendNow = { onSendPendingGuidance?.invoke(item) },
+                            onCancel = { onCancelPendingGuidance?.invoke(item) },
+                            onEdit = { onEditPendingGuidance?.invoke(item) },
+                        )
                     }
                 }
             }
 
             // 排队中的待发送消息：独立于输入框，显示在输入框上方，等 AI 回合结束按序发送
             if (pendingSends.isNotEmpty()) {
-                Surface(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    shadowElevation = 1.dp,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalAlignment = Alignment.End,
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        horizontalAlignment = Alignment.End,
-                    ) {
-                        pendingSends.forEach { item ->
-                            PendingSendBubble(
-                                item = item,
-                                onCancel = { onCancelPendingSend?.invoke(item) },
-                            )
-                        }
+                    pendingSends.forEach { item ->
+                        PendingSendBubble(
+                            item = item,
+                            onCancel = { onCancelPendingSend?.invoke(item) },
+                        )
                     }
                 }
             }
@@ -343,8 +320,8 @@ fun ChatInput(
                 color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
@@ -578,22 +555,21 @@ fun ChatInput(
                             }
                         }
                     }
+                WorkspaceFooterBar(
+                    assistant = assistant,
+                    conversation = conversation,
+                    settings = settings,
+                    // 会话无消息且未生成中时可切换模式；首条消息发送后锁定，仅展示
+                    // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
+                    modeSwitchEnabled = !loading && conversation.currentMessages.none { it.role == MessageRole.USER },
+                    onSwitchMode = { ref ->
+                        onUpdateConversation(conversation.copy(mode = ref))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 }
             }
 
-            // 工作目录 + 统计栏：位于 imePadding 作用域内，键盘弹起自动避让
-            WorkspaceFooterBar(
-                assistant = assistant,
-                conversation = conversation,
-                settings = settings,
-                // 会话无消息且未生成中时可切换模式；首条消息发送后锁定，仅展示
-                // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
-                modeSwitchEnabled = !loading && conversation.currentMessages.none { it.role == MessageRole.USER },
-                onSwitchMode = { ref ->
-                    onUpdateConversation(conversation.copy(mode = ref))
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
 
         }
     }
@@ -937,7 +913,7 @@ private fun TextInputRow(
                 )
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences,
                 imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
@@ -967,11 +943,19 @@ private fun TextInputRow(
             leadingIcon = when {
                 // 子代理任务运行时：输入框左侧显示子代理图标（替代快捷消息按钮），点击进面板
                 subAgentActive && onOpenSubAgentPanel != null -> {
-                    { SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount) }
+                    {
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount)
+                        }
+                    }
                 }
 
                 quickMessages.isNotEmpty() -> {
-                    { QuickMessageButton(quickMessages = quickMessages, state = state) }
+                    {
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            QuickMessageButton(quickMessages = quickMessages, state = state)
+                        }
+                    }
                 }
 
                 else -> null

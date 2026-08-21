@@ -174,7 +174,7 @@ fun WorkspaceFooterBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 模式 chip：未发送消息且未生成中时可点击切换；锁定后置灰仅展示
@@ -202,7 +202,7 @@ fun WorkspaceFooterBar(
                             navController.navigate(Screen.SettingModes)
                         }
                     )
-                    .padding(vertical = 4.dp, horizontal = 6.dp)
+                    .padding(vertical = 2.dp, horizontal = 6.dp)
                     .alpha(if (modeSwitchEnabled) 1f else 0.6f),
             ) {
                 Icon(
@@ -302,7 +302,7 @@ private fun IndicatorText(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
         ) { onClick() } else it }
-        .padding(vertical = 4.dp)
+        .padding(vertical = 2.dp)
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall.copy(

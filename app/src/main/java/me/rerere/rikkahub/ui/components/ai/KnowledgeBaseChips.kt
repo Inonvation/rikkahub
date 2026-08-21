@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -52,57 +51,49 @@ fun KnowledgeBaseChips(
     }
     if (selected.isEmpty()) return
 
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-        shadowElevation = 1.dp,
+    FlowRow(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        FlowRow(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            selected.forEach { base ->
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
+        selected.forEach { base ->
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier.padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Icon(
+                        imageVector = HugeIcons.Bookshelf01,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Text(
+                        text = base.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(max = 160.dp)
+                            .padding(horizontal = 4.dp),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    IconButton(
+                        onClick = {
+                            val baseUuid = runCatching { Uuid.parse(base.id) }.getOrNull() ?: return@IconButton
+                            onUpdateAssistant(assistant.copy(knowledgeBaseIds = selectedIds - baseUuid))
+                        },
+                        modifier = Modifier.size(20.dp),
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Bookshelf01,
-                            contentDescription = null,
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = "取消选中",
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
-                        Text(
-                            text = base.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .widthIn(max = 160.dp)
-                                .padding(horizontal = 4.dp),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                        IconButton(
-                            onClick = {
-                                val baseUuid = runCatching { Uuid.parse(base.id) }.getOrNull() ?: return@IconButton
-                                onUpdateAssistant(assistant.copy(knowledgeBaseIds = selectedIds - baseUuid))
-                            },
-                            modifier = Modifier.size(20.dp),
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Cancel01,
-                                contentDescription = "取消选中",
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
                     }
                 }
             }

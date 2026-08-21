@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,7 +42,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -73,6 +74,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -86,6 +88,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -534,244 +537,54 @@ private fun ChatPageContent(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize()
         ) {
-        AssistantBackground(
-            setting = setting,
-            modifier = Modifier.hazeSource(hazeState),
-        )
-        Scaffold(
-            topBar = {
-                TopBar(
-                    settings = setting,
-                    conversation = conversation,
-                    previewMode = previewMode,
-                    onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
-                    onNewChat = {
-                        navigateToChatPage(navController)
-                    },
-                    onClickMenu = {
-                        previewMode = !previewMode
-                    },
-                    onUpdateTitle = {
-                        vm.updateTitle(it)
-                    },
-                    onOpenRightDrawer = {
-                        onRightDrawerOpenChange(true)
-                    },
-                    onCompressClick = {
-                        showCompressDialog = true
-                    },
-                )
-            },
-            bottomBar = {
-                Column {
-                    // TodolistBanner - 显示在聊天输入框上方（订阅 TodoStorage 实时刷新）
-                    // 空列表不展示（模型可能传空 items，渲染 0/0 空卡无意义）
-                    if (todolist != null && todolist!!.items.isNotEmpty()) {
-                        TodolistBanner(
-                            todolist = todolist!!,
-                            onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
-                            stateKey = "todo:${conversation.id}",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
-                    if (assistant.knowledgeBaseIds.isNotEmpty()) {
-                        KnowledgeBaseChips(
-                            assistant = assistant,
-                            onUpdateAssistant = { updatedAssistant ->
-                                vm.updateSettings(
-                                    setting.copy(
-                                        assistants = setting.assistants.map { a ->
-                                            if (a.id == updatedAssistant.id) updatedAssistant else a
-                                        }
-                                    )
-                                )
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
+            AssistantBackground(
+                setting = setting,
+                modifier = Modifier.hazeSource(hazeState),
+            )
+        }
 
-                    ChatInput(
-                    state = inputState,
-                    loading = loadingJob?.isActive == true,
-                    settings = setting,
-                    hazeState = hazeState,
-                    conversation = conversation,
-                    completionProviders = completionProviders,
-                    onCancelClick = {
-                        vm.stopGeneration()
-                    },
-                    enableSearch = enableWebSearch,
-                    onUpdateSearchMode = { mode ->
-                        val current = setting.getCurrentAssistant()
-                        val model = setting.getCurrentChatModel()
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == current.id) {
-                                        assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
-                                    } else {
-                                        assistant
-                                    }
-                                },
-                                providers = if (model == null) {
-                                    setting.providers
-                                } else {
-                                    setting.providers.map { provider ->
-                                        provider.editModel(
-                                            model.copy(
-                                                tools = if (mode == SearchMode.BUILT_IN) {
-                                                    model.tools + BuiltInTools.Search
-                                                } else {
-                                                    model.tools - BuiltInTools.Search
-                                                }
-                                            )
-                                        )
-                                    }
-                                },
-                            )
-                        )
-                    },
-                    onSendClick = {
-                        if (currentChatModel == null) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
-                            return@ChatInput
-                        }
-                        if (inputState.isEditing()) {
-                            vm.handleMessageEdit(
-                                parts = inputState.getContents(),
-                                messageId = inputState.editingMessage!!,
-                            )
-                        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
-                            // 生成中（主 AI 正在生成 或 子代理运行中）：主输入框发送走引导逻辑——
-                            // 没有排队引导时默认排队，等当前回合自然结束再注入；已有排队引导时
-                            // 再次发送视为打断当前任务，直接注入最新引导。有附件时回退普通发送，避免静默丢附件。
-                            val contents = inputState.getContents()
-                            val hasAttachment = contents.any { it !is UIMessagePart.Text }
-                            if (hasAttachment) {
-                                // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
-                                // 附件无法走 steering 文本引导，走 sendMessageQueued 的排队机制（#17）。
-                                vm.sendMessageQueued(contents)
-                            } else {
-                                val guidanceText = inputState.textContent.text.toString()
-                                if (pendingGuidance.isNotEmpty()) {
-                                    vm.sendGuidanceInterrupt(guidanceText)
-                                } else {
-                                    vm.sendGuidance(guidanceText)
-                                }
-                            }
-                            scrollAfterSend()
-                        } else {
-                            vm.handleMessageSend(inputState.getContents())
-                            scrollAfterSend()
-                        }
-                        inputState.clearInput()
-                        vm.clearDraft()
-                    },
-                    onLongSendClick = {
-                        if (inputState.isEditing()) {
-                            vm.handleMessageEdit(
-                                parts = inputState.getContents(),
-                                messageId = inputState.editingMessage!!,
-                            )
-                        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
-                            // 生成中长按发送：只追加消息不回复，但不打断当前任务，先排队。
-                            vm.sendMessageQueued(inputState.getContents(), answer = false)
-                            scrollAfterSend()
-                        } else {
-                            vm.handleMessageSend(content = inputState.getContents(), answer = false)
-                            scrollAfterSend()
-                        }
-                        inputState.clearInput()
-                        vm.clearDraft()
-                    },
-                    onUpdateChatModel = {
-                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
-                    },
-                    onOpenProviderSettings = {
-                        navController.navigate(Screen.SettingProvider)
-                    },
-                    onUpdateAssistant = {
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == it.id) {
-                                        it
-                                    } else {
-                                        assistant
-                                    }
-                                }
-                            )
-                        )
-                    },
-                    onUpdateSearchService = { index ->
-                        vm.updateSettings(
-                            setting.copy(
-                                searchServiceSelected = index
-                            )
-                        )
-                    },
-                    onUpdateConversation = { newConversation ->
-                        vm.updateConversation(newConversation)
-                        vm.saveConversationAsync()
-                    },
-                    onMoreClick = {
-                        showFilesSheet = true
-                    },
-                    onOptimizePromptClick = {
-                        if (inputState.isEmpty()) {
-                            toaster.show(
-                                context.getString(R.string.prompt_optimize_empty_input),
-                                type = ToastType.Error,
-                            )
-                        } else {
-                            showPromptOptimizeSheet = true
-                        }
-                    },
-                    subAgentActive = subAgentActiveCount > 0,
-                    subAgentActiveCount = subAgentActiveCount,
-                    pendingGuidance = pendingGuidance,
-                    pendingSends = pendingSends,
-                    onSendPendingGuidance = { item ->
-                        vm.sendGuidanceInterrupt(item.text)
-                    },
-                    onCancelPendingGuidance = { item ->
-                        vm.cancelPendingGuidance(item.id)
-                    },
-                    onCancelPendingSend = { item ->
-                        vm.cancelPendingSend(item.id)
-                    },
-                    onEditPendingGuidance = { item ->
-                        vm.editPendingGuidance(item.id, item.text)
-                    },
-                    onOpenSubAgentPanel = {
-                        navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))
-                    },
-                )
-                }
-            },
-            containerColor = Color.Transparent,
-        ) { innerPadding ->
-            // Column 整体应用 Scaffold innerPadding：content 区域与 topBar/bottomBar 是叠放的，
-            // 必须手动 .padding(innerPadding) 避开顶栏（原代码靠 ChatList 内部 top padding 处理，
-            // 改为横幅后统一在 Column 层处理，避免消息列表与顶栏重叠）
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+        // 消息列表保持全高，输入栏悬浮在上层：消息可以滚到输入栏背后参与背景模糊；
+        // 列表底部保留输入栏高度 + 间距的 content padding，最后一条消息仍能完整滚动到输入栏上方，
+        // 加载指示器 / 建议条 / 知识库徽章也不会紧贴输入栏边缘。
+        var inputBarHeightPx by remember { mutableIntStateOf(0) }
+        val density = LocalDensity.current
+        val inputBarHeight = with(density) { inputBarHeightPx.toDp() }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+        ) {
+            TopBar(
+                settings = setting,
+                conversation = conversation,
+                previewMode = previewMode,
+                onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
+                onNewChat = {
+                    navigateToChatPage(navController)
+                },
+                onClickMenu = {
+                    previewMode = !previewMode
+                },
+                onUpdateTitle = {
+                    vm.updateTitle(it)
+                },
+                onOpenRightDrawer = {
+                    onRightDrawerOpenChange(true)
+                },
+                onCompressClick = {
+                    showCompressDialog = true
+                },
+            )
+
+            CompositionLocalProvider(
+                LocalThinkingFreezeState provides thinkingFreezeState,
+                // 提供滚动折叠：吸顶条点击时按像素量平滑滚动列表（上滚收起思考 / 下滚解除吸顶）。
+                // 挂起函数，调用方在协程中调用并等待完成（如"先滚到位再折叠"的顺序执行）。
+                LocalScrollThinkingHeaderToPin provides { delta ->
+                    scrollListByDelta(chatListState, delta)
+                },
             ) {
-                // 消息列表区：Column 已应用 innerPadding，ChatList 不再自己加 padding
-                CompositionLocalProvider(
-                    LocalThinkingFreezeState provides thinkingFreezeState,
-                    // 提供滚动折叠：吸顶条点击时按像素量平滑滚动列表（上滚收起思考 / 下滚解除吸顶）。
-                    // 挂起函数，调用方在协程中调用并等待完成（如"先滚到位再折叠"的顺序执行）。
-                    LocalScrollThinkingHeaderToPin provides { delta ->
-                        scrollListByDelta(chatListState, delta)
-                    },
-                ) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -779,121 +592,321 @@ private fun ChatPageContent(
                             thinkingFreezeState.topBarBottomY = coords.positionInWindow().y.roundToInt()
                         }
                 ) {
-                AnimatedContent(
-                    targetState = conversation.id,
-                    transitionSpec = {
-                        fadeIn(tween(300)) togetherWith fadeOut(tween(200))
-                    },
-                    label = "ChatContent",
+                    AnimatedContent(
+                        targetState = conversation.id,
+                        transitionSpec = {
+                            fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                        },
+                        label = "ChatContent",
+                    ) {
+                        ChatList(
+                            innerPadding = PaddingValues(top = 0.dp, bottom = inputBarHeight + 16.dp),
+                            conversation = conversation,
+                            state = chatListState,
+                            loading = loadingJob?.isActive == true,
+                            processingStatus = effectiveProcessingStatus,
+                            previewMode = previewMode,
+                            settings = setting,
+                            hazeState = hazeState,
+                            errors = errors,
+                            onDismissError = onDismissError,
+                            onClearAllErrors = onClearAllErrors,
+                            onRegenerate = {
+                                vm.regenerateAtMessage(it)
+                            },
+                            onEdit = {
+                                inputState.editingMessage = it.id
+                                inputState.setContents(it.parts)
+                            },
+                            onForkMessage = {
+                                scope.launch {
+                                    val fork = vm.forkMessage(message = it)
+                                    navigateToChatPage(navController, chatId = fork.id)
+                                }
+                            },
+                            onDelete = {
+                                if (loadingJob?.isActive == true) {
+                                    vm.showDeleteBlockedWhileGeneratingError()
+                                } else {
+                                    vm.deleteMessage(it)
+                                }
+                            },
+                            onUpdateMessage = { newNode ->
+                                vm.updateConversation(
+                                    conversation.copy(
+                                        messageNodes = conversation.messageNodes.map { node ->
+                                            if (node.id == newNode.id) {
+                                                newNode
+                                            } else {
+                                                node
+                                            }
+                                        }
+                                    ))
+                                vm.saveConversationAsync()
+                            },
+                            onClickSuggestion = { suggestion ->
+                                inputState.editingMessage = null
+                                inputState.setMessageText(suggestion)
+                            },
+                            onTranslate = { message, locale ->
+                                vm.translateMessage(message, locale)
+                            },
+                            onClearTranslation = { message ->
+                                vm.clearTranslationField(message.id)
+                            },
+                            onJumpToMessage = { index ->
+                                previewMode = false
+                                scope.launch {
+                                    chatListState.requestScrollToItem(index)
+                                }
+                            },
+                            onToolApproval = { toolCallId, approved, reason ->
+                                vm.handleToolApproval(toolCallId, approved, reason)
+                            },
+                            onToolAnswer = { toolCallId, answer ->
+                                vm.handleToolAnswer(toolCallId, answer)
+                            },
+                            onToggleFavorite = { node ->
+                                vm.toggleMessageFavorite(node)
+                            },
+                            onConversationSystemPromptChange = { newPrompt ->
+                                vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
+                                vm.saveConversationAsync()
+                            },
+                            onAssistantNameClick = {
+                                showAssistantPicker = true
+                            },
+                        )
+                    }
+
+                    // 悬浮吸顶条：绘制于列表之上，顶部对齐列表区（顶栏正下方，无间距）。
+                    // 只由 activeSection（注册的思考步骤中头部滚入冻结区的那个）驱动显隐。
+                    ChatFontProvider(displaySetting = setting.displaySetting) {
+                        ThinkingFrozenBar(
+                            state = thinkingFreezeState,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
+
+                    if (showAssistantPicker) {
+                        AssistantPickerSheet(
+                            settings = setting,
+                            currentAssistant = assistant,
+                            onAssistantSelected = { selected ->
+                                showAssistantPicker = false
+                                // 切换助手：更新全局当前助手，再新开聊天窗口（新窗口按全局当前助手绑定会话）
+                                vm.updateSettings(setting.copy(assistantId = selected.id))
+                                navigateToChatPage(navController)
+                            },
+                            onDismiss = {
+                                showAssistantPicker = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .imePadding()
+                .navigationBarsPadding()
+                .onSizeChanged { inputBarHeightPx = it.height },
+        ) {
+            // TodolistBanner - 显示在聊天输入框上方（订阅 TodoStorage 实时刷新）
+            // 空列表不展示（模型可能传空 items，渲染 0/0 空卡无意义）
+            if (todolist != null && todolist!!.items.isNotEmpty()) {
+                TodolistBanner(
+                    todolist = todolist!!,
+                    onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
+                    stateKey = "todo:${conversation.id}",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            if (assistant.knowledgeBaseIds.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                ChatList(
-                    innerPadding = PaddingValues(0.dp),
-                    conversation = conversation,
-                state = chatListState,
+                    KnowledgeBaseChips(
+                        assistant = assistant,
+                        onUpdateAssistant = { updatedAssistant ->
+                            vm.updateSettings(
+                                setting.copy(
+                                    assistants = setting.assistants.map { a ->
+                                        if (a.id == updatedAssistant.id) updatedAssistant else a
+                                    }
+                                )
+                            )
+                        },
+                    )
+                }
+            }
+
+            ChatInput(
+                modifier = Modifier.fillMaxWidth(),
+                state = inputState,
                 loading = loadingJob?.isActive == true,
-                processingStatus = effectiveProcessingStatus,
-                previewMode = previewMode,
                 settings = setting,
                 hazeState = hazeState,
-                errors = errors,
-                onDismissError = onDismissError,
-                onClearAllErrors = onClearAllErrors,
-                onRegenerate = {
-                    vm.regenerateAtMessage(it)
+                conversation = conversation,
+                completionProviders = completionProviders,
+                onCancelClick = {
+                    vm.stopGeneration()
                 },
-                onEdit = {
-                    inputState.editingMessage = it.id
-                    inputState.setContents(it.parts)
-                },
-                onForkMessage = {
-                    scope.launch {
-                        val fork = vm.forkMessage(message = it)
-                        navigateToChatPage(navController, chatId = fork.id)
-                    }
-                },
-                onDelete = {
-                    if (loadingJob?.isActive == true) {
-                        vm.showDeleteBlockedWhileGeneratingError()
-                    } else {
-                        vm.deleteMessage(it)
-                    }
-                },
-                onUpdateMessage = { newNode ->
-                    vm.updateConversation(
-                        conversation.copy(
-                            messageNodes = conversation.messageNodes.map { node ->
-                                if (node.id == newNode.id) {
-                                    newNode
+                enableSearch = enableWebSearch,
+                onUpdateSearchMode = { mode ->
+                    val current = setting.getCurrentAssistant()
+                    val model = setting.getCurrentChatModel()
+                    vm.updateSettings(
+                        setting.copy(
+                            assistants = setting.assistants.map { assistant ->
+                                if (assistant.id == current.id) {
+                                    assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
                                 } else {
-                                    node
+                                    assistant
+                                }
+                            },
+                            providers = if (model == null) {
+                                setting.providers
+                            } else {
+                                setting.providers.map { provider ->
+                                    provider.editModel(
+                                        model.copy(
+                                            tools = if (mode == SearchMode.BUILT_IN) {
+                                                model.tools + BuiltInTools.Search
+                                            } else {
+                                                model.tools - BuiltInTools.Search
+                                            }
+                                        )
+                                    )
+                                }
+                            },
+                        )
+                    )
+                },
+                onSendClick = {
+                    if (currentChatModel == null) {
+                        toaster.show("请先选择模型", type = ToastType.Error)
+                        return@ChatInput
+                    }
+                    if (inputState.isEditing()) {
+                        vm.handleMessageEdit(
+                            parts = inputState.getContents(),
+                            messageId = inputState.editingMessage!!,
+                        )
+                    } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
+                        // 生成中（主 AI 正在生成 或 子代理运行中）：主输入框发送走引导逻辑——
+                        // 没有排队引导时默认排队，等当前回合自然结束再注入；已有排队引导时
+                        // 再次发送视为打断当前任务，直接注入最新引导。有附件时回退普通发送，避免静默丢附件。
+                        val contents = inputState.getContents()
+                        val hasAttachment = contents.any { it !is UIMessagePart.Text }
+                        if (hasAttachment) {
+                            // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
+                            // 附件无法走 steering 文本引导，走 sendMessageQueued 的排队机制（#17）。
+                            vm.sendMessageQueued(contents)
+                        } else {
+                            val guidanceText = inputState.textContent.text.toString()
+                            if (pendingGuidance.isNotEmpty()) {
+                                vm.sendGuidanceInterrupt(guidanceText)
+                            } else {
+                                vm.sendGuidance(guidanceText)
+                            }
+                        }
+                        scrollAfterSend()
+                    } else {
+                        vm.handleMessageSend(inputState.getContents())
+                        scrollAfterSend()
+                    }
+                    inputState.clearInput()
+                    vm.clearDraft()
+                },
+                onLongSendClick = {
+                    if (inputState.isEditing()) {
+                        vm.handleMessageEdit(
+                            parts = inputState.getContents(),
+                            messageId = inputState.editingMessage!!,
+                        )
+                    } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
+                        // 生成中长按发送：只追加消息不回复，但不打断当前任务，先排队。
+                        vm.sendMessageQueued(inputState.getContents(), answer = false)
+                        scrollAfterSend()
+                    } else {
+                        vm.handleMessageSend(content = inputState.getContents(), answer = false)
+                        scrollAfterSend()
+                    }
+                    inputState.clearInput()
+                    vm.clearDraft()
+                },
+                onUpdateChatModel = {
+                    vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
+                },
+                onOpenProviderSettings = {
+                    navController.navigate(Screen.SettingProvider)
+                },
+                onUpdateAssistant = {
+                    vm.updateSettings(
+                        setting.copy(
+                            assistants = setting.assistants.map { assistant ->
+                                if (assistant.id == it.id) {
+                                    it
+                                } else {
+                                    assistant
                                 }
                             }
-                        ))
+                        )
+                    )
+                },
+                onUpdateSearchService = { index ->
+                    vm.updateSettings(
+                        setting.copy(
+                            searchServiceSelected = index
+                        )
+                    )
+                },
+                onUpdateConversation = { newConversation ->
+                    vm.updateConversation(newConversation)
                     vm.saveConversationAsync()
                 },
-                onClickSuggestion = { suggestion ->
-                    inputState.editingMessage = null
-                    inputState.setMessageText(suggestion)
+                onMoreClick = {
+                    showFilesSheet = true
                 },
-                onTranslate = { message, locale ->
-                    vm.translateMessage(message, locale)
-                },
-                onClearTranslation = { message ->
-                    vm.clearTranslationField(message.id)
-                },
-                onJumpToMessage = { index ->
-                    previewMode = false
-                    scope.launch {
-                        chatListState.requestScrollToItem(index)
+                onOptimizePromptClick = {
+                    if (inputState.isEmpty()) {
+                        toaster.show(
+                            context.getString(R.string.prompt_optimize_empty_input),
+                            type = ToastType.Error,
+                        )
+                    } else {
+                        showPromptOptimizeSheet = true
                     }
                 },
-                onToolApproval = { toolCallId, approved, reason ->
-                    vm.handleToolApproval(toolCallId, approved, reason)
+                subAgentActive = subAgentActiveCount > 0,
+                subAgentActiveCount = subAgentActiveCount,
+                pendingGuidance = pendingGuidance,
+                pendingSends = pendingSends,
+                onSendPendingGuidance = { item ->
+                    vm.sendGuidanceInterrupt(item.text)
                 },
-                onToolAnswer = { toolCallId, answer ->
-                    vm.handleToolAnswer(toolCallId, answer)
+                onCancelPendingGuidance = { item ->
+                    vm.cancelPendingGuidance(item.id)
                 },
-                onToggleFavorite = { node ->
-                    vm.toggleMessageFavorite(node)
+                onCancelPendingSend = { item ->
+                    vm.cancelPendingSend(item.id)
                 },
-                onConversationSystemPromptChange = { newPrompt ->
-                    vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
-                    vm.saveConversationAsync()
+                onEditPendingGuidance = { item ->
+                    vm.editPendingGuidance(item.id, item.text)
                 },
-                onAssistantNameClick = {
-                    showAssistantPicker = true
+                onOpenSubAgentPanel = {
+                    navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))
                 },
             )
-            }
-
-            // 悬浮吸顶条：绘制于列表之上，顶部对齐列表区（顶栏正下方，无间距）。
-            // 只由 activeSection（注册的思考步骤中头部滚入冻结区的那个）驱动显隐。
-            ChatFontProvider(displaySetting = setting.displaySetting) {
-                ThinkingFrozenBar(
-                    state = thinkingFreezeState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
-            }
-
-            if (showAssistantPicker) {
-                AssistantPickerSheet(
-                    settings = setting,
-                    currentAssistant = assistant,
-                    onAssistantSelected = { selected ->
-                        showAssistantPicker = false
-                        // 切换助手：更新全局当前助手，再新开聊天窗口（新窗口按全局当前助手绑定会话）
-                        vm.updateSettings(setting.copy(assistantId = selected.id))
-                        navigateToChatPage(navController)
-                    },
-                    onDismiss = {
-                        showAssistantPicker = false
-                    }
-                )
-            }
-
-            }
-            }
-            }
         }
 
         if (showCompressDialog) {
@@ -955,7 +968,6 @@ private fun ChatPageContent(
             )
         }
     }
-}
 }
 
 @Composable
