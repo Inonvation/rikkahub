@@ -38,7 +38,6 @@ import java.util.Locale
 import kotlin.uuid.Uuid
 
 private const val MAX_LOG_CHARS = 8 * 1024
-private const val FOLLOW_ASSISTANT_REF = "follow_assistant"
 private val AI_VISIBLE_BEHAVIOR_PROFILES = listOf(
     AgentBehaviorProfile.STANDARD,
     AgentBehaviorProfile.WORKSPACE,
@@ -220,10 +219,10 @@ fun createCreativeTools(
                 val text = buildString {
                     appendLine("## Follow assistant")
                     if (brief) {
-                        appendLine("- $FOLLOW_ASSISTANT_REF | Follow assistant configuration")
+                        appendLine("- ${ModeRefs.FOLLOW_ASSISTANT} | Follow assistant configuration")
                     } else {
                         appendLine(
-                            "- $FOLLOW_ASSISTANT_REF | Follow assistant configuration | " +
+                            "- ${ModeRefs.FOLLOW_ASSISTANT} | Follow assistant configuration | " +
                                 "no preset mode; follows the current assistant tool configuration | " +
                                 "cannot be updated or deleted"
                         )
@@ -439,9 +438,9 @@ fun createCreativeTools(
                 if (ref.isEmpty()) {
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
                 }
-                if (ref == FOLLOW_ASSISTANT_REF) {
+                if (ref == ModeRefs.FOLLOW_ASSISTANT) {
                     return@Tool listOf(
-                        UIMessagePart.Text("Error: $FOLLOW_ASSISTANT_REF cannot be updated; it always follows the current assistant configuration.")
+                        UIMessagePart.Text("Error: ${ModeRefs.FOLLOW_ASSISTANT} cannot be updated; it always follows the current assistant configuration.")
                     )
                 }
                 val current = settingsStore.settingsFlow.value
@@ -561,9 +560,9 @@ fun createCreativeTools(
                 if (ref.isEmpty()) {
                     return@Tool listOf(UIMessagePart.Text("Error: id is required."))
                 }
-                if (ref == FOLLOW_ASSISTANT_REF) {
+                if (ref == ModeRefs.FOLLOW_ASSISTANT) {
                     return@Tool listOf(
-                        UIMessagePart.Text("Error: $FOLLOW_ASSISTANT_REF cannot be deleted; it always follows the current assistant configuration.")
+                        UIMessagePart.Text("Error: ${ModeRefs.FOLLOW_ASSISTANT} cannot be deleted; it always follows the current assistant configuration.")
                     )
                 }
                 val current = settingsStore.settingsFlow.value

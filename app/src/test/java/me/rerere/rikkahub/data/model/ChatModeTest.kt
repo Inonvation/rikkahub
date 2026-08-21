@@ -237,6 +237,11 @@ class ChatModeTest {
             ChatModePolicy.UNRESTRICTED,
             resolveConversationPolicy(conversation(null), assistant(workspaceId = "11111111-1111-1111-1111-111111111111"), base, false),
         )
+        // 防御：字面量 follow_assistant 也按跟随助手配置解析
+        assertEquals(
+            ChatModePolicy.UNRESTRICTED,
+            resolveConversationPolicy(conversation(ModeRefs.FOLLOW_ASSISTANT), asst, base, false),
+        )
     }
 
     @Test

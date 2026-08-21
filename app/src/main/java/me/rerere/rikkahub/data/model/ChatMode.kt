@@ -233,6 +233,9 @@ data class CustomModeConfig(
 object ModeRefs {
     const val CUSTOM_PREFIX = "custom:"
 
+    /** 「跟随助手配置」伪条目引用，仅用于 mode_list 展示与防御性解析，不落库为会话 mode。 */
+    const val FOLLOW_ASSISTANT = "follow_assistant"
+
     fun builtin(mode: ChatMode): String = mode.name
 
     fun custom(id: String): String = "$CUSTOM_PREFIX$id"
@@ -272,7 +275,7 @@ fun resolveConversationPolicy(
     trustedFolderActive: Boolean,
 ): ChatModePolicy {
     val modeStr = conversation.mode
-    if (modeStr.isNullOrBlank()) {
+    if (modeStr.isNullOrBlank() || modeStr == ModeRefs.FOLLOW_ASSISTANT) {
         return ChatModePolicy.UNRESTRICTED
     }
     return resolveModePolicy(ref = modeStr, settings = settings) ?: ChatMode.STANDARD.effectivePolicy(settings)
