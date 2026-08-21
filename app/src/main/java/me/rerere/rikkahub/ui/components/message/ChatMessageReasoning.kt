@@ -304,14 +304,14 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                     }
                 }
             } else if (state.expandState != ReasoningCardState.Collapsed) {
-                // 真实折叠：先收起内容，等高度动画/锚点调整落定，再一次性滚到吸顶线。
-                // 不能先滚后收：收起瞬间 item 高度变化会触发 LazyColumn 锚点重排，
-                // 把头部顶走，且 animateScrollToItem 的目标在布局变化时会失效。
+                // 真实折叠：先把头部滚到吸顶线（item 未折叠、纯滚动，scrollBy 精确），
+                // 再收起内容；若收起引发 LazyColumn 锚点重排，等稳定后按实测坐标校准。
                 section.folded.value = false
                 val target = pin + frozenGapPx
                 stepScope.launch {
                     fs.scrollingByProgram = true
                     try {
+                        scrollHeaderToPin?.invoke(section.topY.value - target)
                         state.onExpandedChange(false, loading)
                         if (stateKey != null) setSectionExpanded(stateKey, false)
                         // 等折叠动画驱动的锚点变化彻底落定，再按实测坐标一次性校准。
