@@ -35,14 +35,26 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
 private const val DEFAULT_CONTEXT_TOKEN_LIMIT = 128_000
 
+internal fun resolveContextTokenLimit(
+    modelContextTokenLimit: Int?,
+    assistantContextTokenLimit: Int,
+): Int = modelContextTokenLimit?.takeIf { it > 0 }
+    ?: assistantContextTokenLimit.takeIf { it > 0 }
+    ?: DEFAULT_CONTEXT_TOKEN_LIMIT
+
 @Composable
 fun CompressContextDialog(
     contextTokenLimit: Int,
+    modelContextTokenLimit: Int? = null,
     onSaveContextTokenLimit: (Int) -> Unit,
     onDismiss: () -> Unit,
     onCompress: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job
 ) {
-    var contextLimit by remember { mutableIntStateOf(contextTokenLimit) }
+    var contextLimit by remember {
+        mutableIntStateOf(
+            resolveContextTokenLimit(modelContextTokenLimit, contextTokenLimit)
+        )
+    }
     var additionalPrompt by remember { mutableStateOf("") }
     var selectedTokens by remember { mutableIntStateOf(0) }
     var keepRecentMessages by remember { mutableIntStateOf(0) }

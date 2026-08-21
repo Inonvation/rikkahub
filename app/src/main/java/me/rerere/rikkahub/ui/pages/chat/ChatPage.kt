@@ -114,6 +114,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
@@ -152,6 +153,7 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
+import me.rerere.rikkahub.ui.components.ai.resolveContextTokenLimit
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
@@ -853,8 +855,12 @@ private fun ChatPageContent(
 
         if (showCompressDialog) {
             val assistant = setting.getCurrentAssistant()
+            val modelContextTokenLimit = setting.getCurrentChatModel()?.modelId?.let {
+                ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
+            }
             CompressContextDialog(
                 contextTokenLimit = assistant.contextTokenLimit,
+                modelContextTokenLimit = modelContextTokenLimit,
                 onSaveContextTokenLimit = { newLimit ->
                     val effectiveLimit = newLimit.takeIf { it > 0 } ?: 128_000
                     vm.updateSettings(
@@ -1175,7 +1181,13 @@ private fun TopBar(
             // 上下文用量圆圈
             val assistant = settings.getCurrentAssistant()
             val totalTokens = conversation.currentMessages.sumOf { it.usage?.totalTokens ?: 0 }
-            val contextTokenLimit = assistant.contextTokenLimit.takeIf { it > 0 } ?: 128_000
+            val modelContextTokenLimit = settings.getCurrentChatModel()?.modelId?.let {
+                ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
+            }
+            val contextTokenLimit = resolveContextTokenLimit(
+                modelContextTokenLimit = modelContextTokenLimit,
+                assistantContextTokenLimit = assistant.contextTokenLimit,
+            )
             val tokenText = when {
                 totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
                 else -> totalTokens.toString()
