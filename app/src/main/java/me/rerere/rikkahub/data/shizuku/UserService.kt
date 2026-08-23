@@ -6,18 +6,24 @@ import androidx.annotation.Keep
 import rikka.shizuku.IShizukuCommandService
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
 /**
  * Shizuku UserService：以 shell(ADB) 身份运行，由 Shizuku 通过 app_process 启动。
  *
  * 命令通过 [ProcessBuilder] 直接 exec 参数数组执行，不经过 shell，避免拼接注入。
+ * stdout/stderr 用独立线程并发读取，防止命令输出量超过管道缓冲时与超时互锁。
  */
 class UserService() : IShizukuCommandService.Stub() {
     companion object {
         private const val TAG = "ShizukuUserService"
         private const val MAX_OUTPUT_BYTES = 256 * 1024
     }
+
+    private val ioExecutor: ExecutorService = Executors.newFixedThreadPool(2)
 
     @Volatile
     private var lastExitCode = -1
@@ -37,16 +43,16 @@ class UserService() : IShizukuCommandService.Stub() {
     override fun execute(cmd: Array<String>, timeoutMillis: Long): Int {
         return try {
             val process = ProcessBuilder(*cmd).start()
-            val stdout = readAll(process.inputStream)
-            val stderr = readAll(process.errorStream)
+            val stdoutFuture = readAllAsync(process.inputStream)
+            val stderrFuture = readAllAsync(process.errorStream)
             val finished = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!finished) {
                 process.destroyForcibly()
             }
             lastExitCode = if (finished) process.exitValue() else -1
-            lastStdout = stdout
-            lastStderr = stderr
-            Log.i(TAG, "exit=$lastExitCode, cmd=${cmd.joinToString(" ")}")
+            lastStdout = getQuietly(stdoutFuture)
+            lastStderr = getQuietly(stderrFuture)
+            Log.i(TAG, "exit=$lastExitCode, timedOut=${!finished}, cmd=${cmd.joinToString(" ")}")
             lastExitCode
         } catch (e: Throwable) {
             Log.e(TAG, "execute failed", e)
@@ -67,6 +73,16 @@ class UserService() : IShizukuCommandService.Stub() {
         Log.i(TAG, "destroy")
         android.os.Process.killProcess(android.os.Process.myPid())
     }
+
+    private fun readAllAsync(stream: InputStream): Future<String> =
+        ioExecutor.submit<String> { readAll(stream) }
+
+    private fun getQuietly(future: Future<String>): String =
+        try {
+            future.get(5, TimeUnit.SECONDS)
+        } catch (_: Throwable) {
+            ""
+        }
 
     private fun readAll(stream: InputStream): String {
         val buffer = ByteArrayOutputStream()

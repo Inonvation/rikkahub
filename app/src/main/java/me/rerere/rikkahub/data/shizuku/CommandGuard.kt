@@ -29,6 +29,11 @@ object CommandGuard {
         "am" to setOf("force-stop", "kill", "kill-all", "broadcast", "start", "start-activity"),
     )
 
+    /** find 中会导致写操作或不可控行为的参数，任何情况下拦截 */
+    private val FIND_DANGEROUS_ARGS = setOf(
+        "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprintf", "-fprint", "-fls",
+    )
+
     /**
      * 校验命令是否允许执行。
      * @param allowWrite 是否允许写类子命令（调用方须已通过 SafetyGuard 与用户审批）
@@ -41,6 +46,10 @@ object CommandGuard {
         if (binary !in ALLOWED_BINARIES) return "不允许的命令: $binary"
         if (binary == "rm" && !allowWrite) {
             return "rm 需要审批后执行"
+        }
+        if (binary == "find") {
+            val danger = command.drop(1).firstOrNull { it in FIND_DANGEROUS_ARGS }
+            if (danger != null) return "find 参数包含危险选项: $danger"
         }
         val sub = command.getOrNull(1)
         if (!allowWrite && sub != null && WRITE_SUBCOMMANDS[binary]?.contains(sub) == true) {

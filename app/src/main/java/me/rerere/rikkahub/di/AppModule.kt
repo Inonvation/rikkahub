@@ -73,7 +73,7 @@ val appModule = module {
         TodoStorage(get())
     }
 
-    // 浼氳瘽绾ц緭鍏ヨ崏绋跨紦瀛橈細鍒囨崲浼氳瘽/鍔╂墜鏃朵繚瀛樻湭鍙戦€佺殑杈撳叆锛岄噸鏂拌繘鍏ユ椂鎭㈠
+    // 会话级输入草稿缓存：切换会话/助手时保存未发送的输入，重新进入时恢复
     single {
         ChatDraftStore()
     }
@@ -95,7 +95,7 @@ val appModule = module {
         )
     }
 
-    // 瀛愪唬鐞?
+    // 子代理
     single {
         me.rerere.rikkahub.data.ai.subagent.SubAgentToolAssembler(
             mcpManager = get(),
@@ -106,7 +106,7 @@ val appModule = module {
         )
     }
 
-    // 缇ょ粍璁ㄨ
+    // 群组讨论
     single {
         me.rerere.rikkahub.data.ai.discussion.DiscussionToolAssembler(
             mcpManager = get(),
@@ -131,8 +131,8 @@ val appModule = module {
         )
     }
 
-    // 鐢熸垚閫氱煡涓庝笟鍔¤В鑰︼細ChatService 鍙彂浜嬩欢锛岄€氱煡鐢辫繖閲屾秷璐癸紱
-    // createdAtStart 淇濊瘉杩涚▼鍚姩鍗宠闃咃紝鍚﹀垯鍚庡彴鐢熸垚鐨勪簨浠朵細鍥犳棤璁㈤槄鑰呰€屼涪澶?
+    // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；
+    // createdAtStart 保证进程启动即订阅，否则后台生成的事件会因无订阅者而丢失
     single(createdAtStart = true) {
         ChatNotificationManager(
             context = get(),
@@ -142,8 +142,8 @@ val appModule = module {
         )
     }
 
-    // createdAtStart锛欳hatService 鍚姩鍗冲垱寤衡€斺€斿唴閮ㄨ闃呭瓙浠ｇ悊瀹屾垚娴侊紙寮傛鍞ら啋姣嶄唬鐞嗭級
-    // 蹇呴』鍦ㄤ换浣曚换鍔″畬鎴愬墠灏辩华锛屽惁鍒欏畬鎴愪簨浠朵細鍥犳棤璁㈤槄鑰呰€屼涪澶憋紙鍚?ChatNotificationManager 妯″紡锛?
+    // createdAtStart：ChatService 启动即创建——内部订阅子代理完成流（异步唤醒母代理）
+    // 必须在任何任务完成前就绪，否则完成事件会因无订阅者而丢失（同 ChatNotificationManager 模式）
     single(createdAtStart = true) {
         ChatService(
             context = get(),

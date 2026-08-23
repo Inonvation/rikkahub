@@ -7,11 +7,12 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
+
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+
 import kotlinx.coroutines.launch
 
 private val Context.toolPermissionDataStore by preferencesDataStore("device_tool_permissions")
@@ -70,7 +71,7 @@ class DeviceToolPermission(
         DEVICE_TOOL_NAMES.forEach { name ->
             scope.launch {
                 toolFlow(name).collect { level ->
-                    cache.value = cache.value + (name to level)
+                    cache.update { it + (name to level) }
                 }
             }
         }
