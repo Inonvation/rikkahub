@@ -70,7 +70,7 @@ class RikkaHubApp : Application() {
         QuickJSLoader.init()
 
         // Init Shizuku (device capability layer)
-        ShizukuService.initialize()
+        ShizukuService.initialize(this)
 
         // 应用待恢复的 DB（必须在任何 get<AppDatabase>() 之前同步完成）
         applyPendingDbRestore()

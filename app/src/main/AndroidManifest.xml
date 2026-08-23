@@ -147,6 +147,11 @@
         android:name="android.support.FILE_PROVIDER_PATHS"
         android:resource="@xml/file_paths" />
     </provider>
+    <!-- Shizuku UserService：以 shell(ADB) 身份运行，执行白名单命令 -->
+    <service
+      android:name=".data.shizuku.UserService"
+      android:exported="false"
+      android:process=":shizuku" />
     <!-- Shizuku: 允许应用以 shell(ADB) 权限调用系统 API（设备能力层） -->
     <provider
       android:name="rikka.shizuku.ShizukuProvider"

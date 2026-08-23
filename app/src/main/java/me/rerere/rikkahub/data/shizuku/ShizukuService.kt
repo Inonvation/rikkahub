@@ -1,24 +1,28 @@
 package me.rerere.rikkahub.data.shizuku
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import rikka.shizuku.IShizukuCommandService
 import rikka.shizuku.Shizuku
+import rikka.shizuku.Shizuku.UserServiceArgs
 
 /**
- * Shizuku 授权管理层。
+ * Shizuku 授权与 UserService 连接管理层。
  *
- * 让应用以 shell(ADB) 权限调用系统 API。本类只负责授权状态管理：
- * 安装检查、服务连通性、权限授予、状态监听。命令执行由后续的
- * ShizukuCommandExecutor 负责。
+ * 授权部分：安装检查、服务连通性、权限授予、状态监听。
+ * 执行部分：通过 [UserService]（以 shell/ADB 身份运行）执行白名单命令。
  */
 object ShizukuService {
     private const val TAG = "ShizukuService"
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
     private const val PERMISSION_REQUEST_CODE = 10086
+    private const val BIND_TIMEOUT_MS = 5_000L
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -41,10 +45,38 @@ object ShizukuService {
     private var permissionListenerRegistered = false
     private var initialized = false
 
+    // UserService 连接
+    private var userServiceArgs: UserServiceArgs? = null
+    private val serviceLock = Object()
+
+    @Volatile
+    private var commandService: IShizukuCommandService? = null
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            synchronized(serviceLock) {
+                commandService = IShizukuCommandService.Stub.asInterface(binder)
+                serviceLock.notifyAll()
+            }
+            Log.i(TAG, "UserService connected")
+            refreshState()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            synchronized(serviceLock) {
+                commandService = null
+                serviceLock.notifyAll()
+            }
+            Log.w(TAG, "UserService disconnected")
+            refreshState()
+        }
+    }
+
     /** 初始化并注册 Shizuku 状态监听，建议在 Application.onCreate 调用一次 */
-    fun initialize() {
+    fun initialize(context: Context) {
         if (initialized) return
         initialized = true
+        userServiceArgs = UserServiceArgs(ComponentName(context, UserService::class.java))
         registerBinderListeners()
         registerPermissionListener()
         refreshState()
@@ -185,6 +217,52 @@ object ShizukuService {
         } catch (e: Throwable) {
             lastPermissionError = "请求权限失败: ${e.message}"
             Log.w(TAG, lastPermissionError, e)
+        }
+    }
+
+    /**
+     * 确保 UserService 已连接（阻塞等待，最多 [BIND_TIMEOUT_MS]）。
+     * 调用方应处于 IO 线程。
+     */
+    fun ensureUserService(timeoutMillis: Long = BIND_TIMEOUT_MS): Boolean {
+        if (commandService != null) return true
+        if (!isReady()) return false
+        synchronized(serviceLock) {
+            if (commandService != null) return true
+            val args = userServiceArgs ?: return false
+            try {
+                Shizuku.bindUserService(args, serviceConnection)
+            } catch (e: Throwable) {
+                Log.w(TAG, "bindUserService failed", e)
+                return false
+            }
+            val deadline = System.currentTimeMillis() + timeoutMillis
+            while (commandService == null && System.currentTimeMillis() < deadline) {
+                try {
+                    (serviceLock as java.lang.Object).wait(200)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+            return commandService != null
+        }
+    }
+
+    /** 通过 UserService 执行命令；未连接时返回 null */
+    fun executeViaUserService(cmd: List<String>, timeoutMillis: Long): ShizukuCommandResult? {
+        val service = commandService ?: return null
+        return try {
+            val exitCode = service.execute(cmd.toTypedArray(), timeoutMillis)
+            ShizukuCommandResult(
+                exitCode = exitCode,
+                stdout = service.getStdout(),
+                stderr = service.getStderr(),
+                timedOut = exitCode == -1,
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "executeViaUserService failed", e)
+            ShizukuCommandResult(-1, "", "命令执行失败: ${e.message}")
         }
     }
 }
