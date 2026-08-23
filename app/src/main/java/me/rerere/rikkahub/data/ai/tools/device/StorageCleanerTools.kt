@@ -17,14 +17,15 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.device.DeviceToolPermission
 import me.rerere.rikkahub.data.shizuku.ShizukuCommandExecutor
 
-internal fun buildStorageCleanerTools(): List<Tool> = listOf(
+internal fun buildStorageCleanerTools(permission: DeviceToolPermission): List<Tool> = listOf(
     buildStorageOverviewTool(),
     buildScanLargeFilesTool(),
     buildScanCacheTool(),
-    buildCleanCacheTool(),
-    buildCleanFilesTool(),
+    buildCleanCacheTool(permission),
+    buildCleanFilesTool(permission),
 )
 
 private fun runShizuku(timeoutMillis: Long = 30_000L, vararg cmd: String): String? {
@@ -175,14 +176,15 @@ private fun validateCleanPath(path: String): String? {
     return null
 }
 
-private fun buildCleanCacheTool(): Tool = Tool(
+private fun buildCleanCacheTool(permission: DeviceToolPermission): Tool = Tool(
     name = "clean_cache",
     description = "清理所有应用的缓存文件，释放存储空间。需用户确认。只清理 cache，不清数据。",
     parameters = { null },
-    needsApproval = { _ -> true },
+    needsApproval = { _ -> permission.needsApproval("clean_cache") },
     execute = { _ ->
         withContext(Dispatchers.IO) {
             // trim-caches 参数为目标释放大小（字节），传大值以尽可能清理全部缓存
+            if (permission.isForbidden("clean_cache")) return@withContext listOf(UIMessagePart.Text(buildJsonObject { put("error", "清理缓存已被禁止使用") }.toString()))
             val result = ShizukuCommandExecutor.execute(
                 listOf("pm", "trim-caches", "107374182400"),
                 allowWrite = true,
@@ -201,7 +203,7 @@ private fun buildCleanCacheTool(): Tool = Tool(
     },
 )
 
-private fun buildCleanFilesTool(): Tool = Tool(
+private fun buildCleanFilesTool(permission: DeviceToolPermission): Tool = Tool(
     name = "clean_files",
     description = "删除用户确认过的大文件。路径必须来自 scan_large_files 的扫描结果，且只能删除 /sdcard 下的文件。需用户确认。",
     parameters = {
@@ -216,9 +218,10 @@ private fun buildCleanFilesTool(): Tool = Tool(
             required = listOf("paths")
         )
     },
-    needsApproval = { _ -> true },
+    needsApproval = { _ -> permission.needsApproval("clean_files") },
     execute = { params ->
         withContext(Dispatchers.IO) {
+            if (permission.isForbidden("clean_files")) return@withContext listOf(UIMessagePart.Text(buildJsonObject { put("error", "删除文件已被禁止使用") }.toString()))
             val paths = params.jsonObject["paths"]?.jsonArray
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
                 ?.filter { it.isNotEmpty() } ?: emptyList()

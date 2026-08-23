@@ -133,6 +133,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDevicePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDeviceWhitelistPage
+import me.rerere.rikkahub.ui.pages.setting.SettingDevicePermissionPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.study.stats.StudyStatsPage
@@ -563,6 +564,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingFilesPage()
                             }
 
+                            entry<Screen.SettingDevicePermission> {
+                                SettingDevicePermissionPage()
+                            }
+
                             entry<Screen.SettingDeviceWhitelist> {
                                 SettingDeviceWhitelistPage()
                             }
@@ -895,6 +900,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingDeviceWhitelist : Screen
+
+    @Serializable
+    data object SettingDevicePermission : Screen
 
     @Serializable
     data object Debug : Screen

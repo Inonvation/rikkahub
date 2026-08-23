@@ -126,9 +126,10 @@ fun SettingDevicePage() {
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingDevicePermission) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
                         headlineContent = { Text("工具审批") },
-                        supportingContent = { Text("冻结/清理操作需确认，自动允许/禁止后续版本开放") },
+                        supportingContent = { Text("自动允许 / 每次询问 / 禁止") },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                 }

@@ -7,6 +7,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
 import me.rerere.rikkahub.data.device.DeviceSafetyStore
+import me.rerere.rikkahub.data.device.DeviceToolPermission
 import me.rerere.rikkahub.data.device.SafetyGuard
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.db.fts.FtsKeywordSearcher
@@ -45,7 +46,11 @@ val appModule = module {
     }
 
     single {
-        DeviceTools(get(), get())
+        DeviceToolPermission(get(), get<AppScope>())
+    }
+
+    single {
+        DeviceTools(get(), get(), get())
     }
 
     single {
