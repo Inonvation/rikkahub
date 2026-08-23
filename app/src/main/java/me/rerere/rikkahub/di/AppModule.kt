@@ -6,6 +6,8 @@ import me.rerere.knowledge.retrieval.KeywordSearcher
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
+import me.rerere.rikkahub.data.device.DeviceSafetyStore
+import me.rerere.rikkahub.data.device.SafetyGuard
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.db.fts.FtsKeywordSearcher
 import me.rerere.rikkahub.data.db.fts.KnowledgeChunkFtsManager
@@ -35,7 +37,15 @@ val appModule = module {
     }
 
     single {
-        DeviceTools(get())
+        DeviceSafetyStore(get())
+    }
+
+    single {
+        SafetyGuard(get(), get())
+    }
+
+    single {
+        DeviceTools(get(), get())
     }
 
     single {

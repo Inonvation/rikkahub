@@ -23,11 +23,12 @@ object ShizukuCommandExecutor {
     fun execute(
         command: List<String>,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
+        allowWrite: Boolean = false,
     ): ShizukuCommandResult {
         if (command.isEmpty()) {
             return ShizukuCommandResult(-1, "", "空命令", blocked = true)
         }
-        val violation = CommandGuard.check(command)
+        val violation = CommandGuard.check(command, allowWrite)
         if (violation != null) {
             Log.w(TAG, "command blocked: $violation -> ${command.joinToString(" ")}")
             return ShizukuCommandResult(-1, "", "命令被安全策略拦截: $violation", blocked = true)

@@ -1245,7 +1245,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
         temperature = 0.8f,
         enableMemory = true,
         enableTimeReminder = false,
-        localTools = listOf(LocalToolOption.DeviceDoctor, LocalToolOption.StorageCleaner),
+        localTools = listOf(LocalToolOption.DeviceDoctor, LocalToolOption.StorageCleaner, LocalToolOption.FreezeApps),
     ),
 )
 

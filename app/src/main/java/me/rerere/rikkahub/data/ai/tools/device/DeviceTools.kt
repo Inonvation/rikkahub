@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.tools.device
 import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.device.SafetyGuard
 import me.rerere.rikkahub.data.shizuku.ShizukuService
 
 /**
@@ -10,11 +11,16 @@ import me.rerere.rikkahub.data.shizuku.ShizukuService
  *
  * 注入闸门：Shizuku 未就绪时不注入任何设备工具声明，避免模型拿到不可用的工具。
  * 模式层面的控制由 ChatMode 的 DEVICE_TOOLS 能力负责，助手层面的控制由
- * Assistant.localTools 负责。
+ * Assistant.localTools 负责。写工具（冻结、清理）在执行时经过 SafetyGuard
+ * 校验与用户审批。
  */
-class DeviceTools(context: Context) {
+class DeviceTools(
+    context: Context,
+    private val safetyGuard: SafetyGuard,
+) {
     private val deviceDoctorTools = buildDeviceDoctorTools(context)
     private val storageCleanerTools = buildStorageCleanerTools()
+    private val freezeAppTools = buildFreezeAppTools(safetyGuard)
 
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         if (!ShizukuService.isReady()) return emptyList()
@@ -25,7 +31,9 @@ class DeviceTools(context: Context) {
         if (options.contains(LocalToolOption.StorageCleaner)) {
             tools.addAll(storageCleanerTools)
         }
-        // FreezeApps 在 Phase 2 接入
+        if (options.contains(LocalToolOption.FreezeApps)) {
+            tools.addAll(freezeAppTools)
+        }
         return tools
     }
 }

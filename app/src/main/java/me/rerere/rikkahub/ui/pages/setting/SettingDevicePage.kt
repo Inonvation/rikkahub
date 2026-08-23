@@ -23,19 +23,23 @@ import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Zap
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.shizuku.ShizukuService
 import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.SettingScaffold
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.plus
 
 /**
  * 设备能力设置页：Shizuku 授权状态、安全设置入口。
- * 白名单与审批的详细配置在 Phase 2 接入。
+ * 三档审批（自动允许/询问/禁止）后续版本接入。
  */
 @Composable
 fun SettingDevicePage() {
     val context = LocalContext.current
+    val navController = LocalNavController.current
     var installed by remember { mutableStateOf(ShizukuService.isShizukuInstalled(context)) }
     var serviceRunning by remember { mutableStateOf(ShizukuService.isServiceRunning()) }
     var permissionGranted by remember { mutableStateOf(ShizukuService.hasPermission()) }
@@ -115,15 +119,16 @@ fun SettingDevicePage() {
             item {
                 IosGroup(title = "安全设置") {
                     item(
+                        onClick = { navController.navigate(Screen.SettingDeviceWhitelist) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
                         headlineContent = { Text("白名单管理") },
-                        supportingContent = { Text("微信、QQ 及系统关键应用保护，后续版本开放") },
+                        supportingContent = { Text("微信、QQ 及系统关键应用保护") },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
                         headlineContent = { Text("工具审批") },
-                        supportingContent = { Text("每次询问 / 自动允许 / 禁止，后续版本开放") },
+                        supportingContent = { Text("冻结/清理操作需确认，自动允许/禁止后续版本开放") },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                 }

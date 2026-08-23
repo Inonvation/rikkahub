@@ -4,11 +4,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -21,6 +23,8 @@ internal fun buildStorageCleanerTools(): List<Tool> = listOf(
     buildStorageOverviewTool(),
     buildScanLargeFilesTool(),
     buildScanCacheTool(),
+    buildCleanCacheTool(),
+    buildCleanFilesTool(),
 )
 
 private fun runShizuku(timeoutMillis: Long = 30_000L, vararg cmd: String): String? {
@@ -144,6 +148,106 @@ private fun buildScanCacheTool(): Tool = Tool(
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("count", entries.size)
                 put("topByCache", JsonArray(entries))
+            }.toString()))
+        }
+    },
+)
+/** 允许删除的存储前缀 */
+private val CLEANABLE_PREFIXES = listOf("/sdcard/", "/storage/emulated/0/")
+
+/** 禁止删除的目录 */
+private val FORBIDDEN_CLEAN_DIRS = listOf(
+    "/sdcard/Android/data/",
+    "/sdcard/Android/obb/",
+    "/sdcard/Android/media/",
+)
+
+/** 校验文件路径是否允许删除，返回 null 表示允许 */
+private fun validateCleanPath(path: String): String? {
+    val normalized = path.trim().removeSuffix("/")
+    if (normalized.isBlank()) return "路径为空"
+    if (CLEANABLE_PREFIXES.none { normalized.startsWith(it) }) {
+        return "只允许删除 /sdcard 下的文件"
+    }
+    if (FORBIDDEN_CLEAN_DIRS.any { normalized.startsWith(it) }) {
+        return "禁止删除其他应用的私有数据目录"
+    }
+    return null
+}
+
+private fun buildCleanCacheTool(): Tool = Tool(
+    name = "clean_cache",
+    description = "清理所有应用的缓存文件，释放存储空间。需用户确认。只清理 cache，不清数据。",
+    parameters = { null },
+    needsApproval = { _ -> true },
+    execute = { _ ->
+        withContext(Dispatchers.IO) {
+            // trim-caches 参数为目标释放大小（字节），传大值以尽可能清理全部缓存
+            val result = ShizukuCommandExecutor.execute(
+                listOf("pm", "trim-caches", "107374182400"),
+                allowWrite = true,
+                timeoutMillis = 60_000L,
+            )
+            if (result.blocked || result.exitCode != 0) {
+                return@withContext listOf(UIMessagePart.Text(buildJsonObject {
+                    put("error", "清理失败: ${result.stderr.ifBlank { result.stdout }}")
+                }.toString()))
+            }
+            listOf(UIMessagePart.Text(buildJsonObject {
+                put("cleaned", true)
+                put("message", "缓存清理完成")
+            }.toString()))
+        }
+    },
+)
+
+private fun buildCleanFilesTool(): Tool = Tool(
+    name = "clean_files",
+    description = "删除用户确认过的大文件。路径必须来自 scan_large_files 的扫描结果，且只能删除 /sdcard 下的文件。需用户确认。",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("paths", buildJsonObject {
+                    put("type", "array")
+                    put("items", buildJsonObject { put("type", "string") })
+                    put("description", "要删除的文件绝对路径列表")
+                })
+            },
+            required = listOf("paths")
+        )
+    },
+    needsApproval = { _ -> true },
+    execute = { params ->
+        withContext(Dispatchers.IO) {
+            val paths = params.jsonObject["paths"]?.jsonArray
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
+                ?.filter { it.isNotEmpty() } ?: emptyList()
+            if (paths.isEmpty()) return@withContext listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", "缺少 paths")
+            }.toString()))
+            val rejected = mutableListOf<String>()
+            val deleted = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for (path in paths) {
+                val violation = validateCleanPath(path)
+                if (violation != null) {
+                    rejected.add("$path($violation)")
+                    continue
+                }
+                val result = ShizukuCommandExecutor.execute(
+                    listOf("rm", "-f", path),
+                    allowWrite = true,
+                )
+                if (result.blocked || result.exitCode != 0) {
+                    failed.add(path)
+                } else {
+                    deleted.add(path)
+                }
+            }
+            listOf(UIMessagePart.Text(buildJsonObject {
+                put("deleted", JsonArray(deleted.map { JsonPrimitive(it) }))
+                put("rejected", JsonArray(rejected.map { JsonPrimitive(it) }))
+                put("failed", JsonArray(failed.map { JsonPrimitive(it) }))
             }.toString()))
         }
     },
