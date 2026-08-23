@@ -85,6 +85,7 @@ class StreamChunkHandler(private val model: Model? = null) {
                 this
             }
             is StreamChunk.TextDelta -> {
+                if (chunk.text.isEmpty()) return this
                 val index = textPartIndexes[chunk.id]
                 // 容忍 Provider 未发送 Start：首次收到 Delta 时直接创建对应 part。
                 if (index == null || index < 0 || parts.getOrNull(index) !is UIMessagePart.Text) {
@@ -285,7 +286,7 @@ class StreamChunkHandler(private val model: Model? = null) {
             is StreamChunk.Usage -> copy(usage = usage.merge(chunk.usage))
             is StreamChunk.Finish -> copy(
                 finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-            ).finishReasoning().also {
+            ).finishReasoning().cleanupBlankParts().also {
                 // Finish 同时结束尚未显式结束的 reasoning，并释放本次响应流的索引状态。
                 textPartIndexes.clear()
                 reasoningPartIndexes.clear()
@@ -302,6 +303,13 @@ class StreamChunkHandler(private val model: Model? = null) {
         if (part is UIMessagePart.ServerTool && part.toolCallId == id) transform(part) else part
     })
 }
+
+private fun UIMessage.cleanupBlankParts(): UIMessage = copy(
+    parts = parts.filterNot { part ->
+        (part is UIMessagePart.Text && part.text.isBlank()) ||
+            (part is UIMessagePart.Reasoning && part.reasoning.isBlank())
+    }
+)
 
 private fun parseServerToolJson(value: String) = runCatching {
     json.parseToJsonElement(value)
@@ -322,7 +330,7 @@ fun List<UIMessage>.handleTextGenerationResult(
         modelId = model?.id,
         usage = result.usage,
         finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
-    ).finishReasoning()
+    ).finishReasoning().cleanupBlankParts()
     return if (last().role != incoming.role) {
         this + incoming
     } else {
@@ -338,7 +346,7 @@ private fun UIMessage.appendMessage(delta: UIMessage): UIMessage {
     var newParts = delta.parts.fold(parts) { acc, deltaPart ->
         when (deltaPart) {
             is UIMessagePart.Text -> {
-                if (deltaPart.text.isEmpty()) {
+                if (deltaPart.text.isBlank()) {
                     acc
                 } else {
                     val lastPart = acc.lastOrNull()
@@ -355,7 +363,7 @@ private fun UIMessage.appendMessage(delta: UIMessage): UIMessage {
             is UIMessagePart.Image -> acc + deltaPart
 
             is UIMessagePart.Reasoning -> {
-                if (deltaPart.reasoning.isEmpty() && deltaPart.metadata == null) {
+                if (deltaPart.reasoning.isBlank() && deltaPart.metadata == null) {
                     acc
                 } else {
                     val lastPart = acc.lastOrNull()

@@ -48,7 +48,7 @@ class ChatInputState {
     }
 
     fun getContents(): List<UIMessagePart> {
-        val text = textContent.text.toString()
+        val text = textContent.text.toString().trim()
         if (isEditing()) {
             val originalParts = editingParts
             if (originalParts != null) {
@@ -82,7 +82,7 @@ class ChatInputState {
             }
             return if (text.isBlank()) messageContent else listOf(UIMessagePart.Text(text)) + messageContent
         }
-        return listOf(UIMessagePart.Text(text)) + messageContent
+        return if (text.isBlank()) messageContent else listOf(UIMessagePart.Text(text)) + messageContent
     }
 
     fun isEmpty(): Boolean {

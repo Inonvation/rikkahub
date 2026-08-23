@@ -950,6 +950,7 @@ class ChatService(
         if (session.isGenerating) {
             session.pendingSendQueue.value =
                 session.pendingSendQueue.value + PendingSendItem(content = content, answer = answer)
+            scheduleDrainPendingSend(conversationId)
         } else {
             sendMessage(conversationId, content, answer = answer)
         }
@@ -1364,7 +1365,7 @@ class ChatService(
             when (part) {
                 is UIMessagePart.Text -> {
                     part.copy(
-                        text = part.text.replaceRegexes(
+                        text = part.text.trim().replaceRegexes(
                             assistant = assistant,
                             scope = AssistantAffectScope.USER,
                             visual = false

@@ -82,6 +82,35 @@ class StreamChunkHandlerTest {
     }
 
     @Test
+    fun `blank streamed text should not create or keep empty parts`() {
+        var messages = listOf(UIMessage.user("hello"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.TextStart("text-1"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("text-1", ""))
+        messages = handler.handle(messages, StreamChunk.TextEnd("text-1"))
+
+        messages = handler.handle(messages, StreamChunk.TextStart("text-2"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("text-2", "\n\n"))
+        messages = handler.handle(messages, StreamChunk.TextEnd("text-2"))
+        messages = handler.handle(messages, StreamChunk.Finish(finishReason = "stop"))
+
+        assertEquals(0, messages.last().parts.count { it is UIMessagePart.Text })
+    }
+
+    @Test
+    fun `blank reasoning should be removed on end`() {
+        var messages = listOf(UIMessage.user("hello"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.ReasoningStart("reasoning-1"))
+        messages = handler.handle(messages, StreamChunk.ReasoningEnd("reasoning-1"))
+        messages = handler.handle(messages, StreamChunk.Finish(finishReason = "stop"))
+
+        assertEquals(0, messages.last().parts.count { it is UIMessagePart.Reasoning })
+    }
+
+    @Test
     fun `image snapshots should replace previous image data`() {
         var messages = listOf(UIMessage.user("draw an image"))
         val handler = StreamChunkHandler(model)

@@ -7,8 +7,7 @@ import org.junit.Test
 
 class ChatScrollUtilsTest {
     @Test
-    fun `empty layout is neither at bottom nor pinned`() {
-        assertFalse(isChatListAtBottom(lastItemEnd = null, viewportEnd = 1000, bottomInsetPx = 100))
+    fun `empty layout is not pinned`() {
         assertFalse(
             isChatListPinnedToBottom(
                 totalItemsCount = 0,
@@ -16,17 +15,6 @@ class ChatScrollUtilsTest {
                 lastItemEnd = null,
                 viewportEnd = 1000,
                 afterContentPadding = 50,
-            )
-        )
-    }
-
-    @Test
-    fun `terminal item fully visible inside input inset is at bottom`() {
-        assertTrue(
-            isChatListAtBottom(
-                lastItemEnd = 900,
-                viewportEnd = 1000,
-                bottomInsetPx = 90,
             )
         )
     }
@@ -82,4 +70,5 @@ class ChatScrollUtilsTest {
             )
         )
     }
+
 }

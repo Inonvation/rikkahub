@@ -434,7 +434,6 @@ private fun MessagePartsBlock(
                     // 卡片 item 高度在动画期间变化；用户停留片刻后下滑时，滚动 offset
                     // 按动画前高度计算，LazyColumn 重测布局产生视觉跳动（"生成完跳一下"）。
                     ChainOfThought(
-                        modifier = Modifier.animateContentSize(),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                         cardColors = CardDefaults.cardColors(
@@ -700,13 +699,16 @@ private fun MessagePartsBlock(
     val processBlocks = if (finalOutputStart >= 0) groupedParts.subList(0, finalOutputStart) else groupedParts
     val finalBlocks = if (finalOutputStart >= 0) groupedParts.subList(finalOutputStart, groupedParts.size) else emptyList()
 
-    // 消息内容区：折叠卡 + 过程区 + 最终输出，块间统一 4.dp 间距（与外层一致，避免气泡粘连）
+    // 消息内容区：折叠卡 + 过程区 + 最终输出，块间统一 4.dp 间距（与外层一致，避免气泡粘连）。
+    // 注意：外层不做 animateContentSize——流式正文/思考卡片自带高度动画，再包一层会二次动画，
+    // 流式结束产生额外跳动；"已处理"折叠用下方 AnimatedVisibility 的自包含高度动画即可。
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // 折叠控制卡：有过程内容时始终显示（手动折叠/展开与开关无关），开关只决定完成后是否自动收起
+        // 折叠控制卡：有过程内容时始终显示（手动折叠/展开与开关无关），开关只决定完成后是否自动收起。
+        // 普通布局下过程内容在卡片下方展开/收起，卡片本身顶部锚定不动。
         if (hasProcessContent) {
             Card(
                 onClick = { chainCollapsed = !chainCollapsed },
@@ -736,8 +738,8 @@ private fun MessagePartsBlock(
             }
         }
 
-        // 过程内容：保留纵向展开/收起的过渡动画；自动跟随已改为
-        // requestScrollToItem 并暂停在程序滚动期间，避免和动画抢位置。
+        // 过程内容：自包含高度动画（expand/shrink）+ 淡入淡出。只作用于本块，
+        // 不影响外层/流式正文的高度动画；普通布局下内容在卡片下方自然展开。
         AnimatedVisibility(
             visible = !chainCollapsed,
             enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),

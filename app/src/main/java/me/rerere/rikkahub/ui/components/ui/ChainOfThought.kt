@@ -108,7 +108,7 @@ fun <T> ChainOfThought(
                         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                     ),
             ) {
-                // 对齐上游：折叠时直接截断步骤（visibleSteps），用外层 animateContentSize 平滑高度。
+                // 对齐上游：折叠时直接截断步骤（visibleSteps），用 animateContentSize 平滑高度。
                 // 此前用 AnimatedVisibility + expandVertically/shrinkVertically 逐步骤播放垂直动画，
                 // 生成结束 steps 定稿、折叠状态变化时会触发这个动画，卡片 item 高度延迟变化，
                 // 用户停留后下滑即被挤动（"生成完跳一下"）。改为无逐步骤动画，高度一次性变化。
@@ -448,7 +448,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         )
                         .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
                 ) {
-                    content()
+                    content?.invoke()
                 }
             }
         }

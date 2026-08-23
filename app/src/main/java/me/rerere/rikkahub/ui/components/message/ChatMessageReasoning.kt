@@ -251,6 +251,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             key = stateKey ?: "reasoning:${reasoning.createdAt}",
         )
     }
+    // 仅启用吸顶冻结时跟踪步骤窗口坐标
     val stepModifier = if (freezeEnabled) {
         Modifier.onLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) { bounds ->
             val rect = bounds.boundsInWindow
@@ -276,8 +277,8 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     // 吸顶条点击：
     // - 生成中（loading）：状态机强制 Preview 无法真实折叠，退化为滚动折叠——
     //   内容滚出条上方 / 头部滚回条下方，item 高度不变，不写展开状态记忆；
-    // - 生成完成：真实折叠/展开。先收起内容，等 item 高度动画与 LazyColumn 锚点调整
-    //   落定，再按实测坐标一次性滚到吸顶线；避免"收起瞬间锚点重排把头部顶走"的跳变。
+    // - 生成完成：真实折叠/展开。普通布局下思考头部天然锚定（顶部固定），
+    //   只需先把头部滚到吸顶线，再切换状态即可，折叠/展开时头部停在吸顶线。
     section.onToggle = {
         val fs = freezeState
         if (fs != null) {
@@ -286,76 +287,57 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 if (section.folded.value) {
                     // 滚动展开：下滚，头部回到吸顶线下方，解除吸顶（条淡出、真实头部淡入）
                     stepScope.launch {
-                        fs.scrollingByProgram = true
-                        try {
-                            scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
-                            section.folded.value = false
-                        } finally {
-                            fs.scrollingByProgram = false
-                        }
+                        scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
+                        section.folded.value = false
                     }
                 } else {
                     // 滚动折叠：上滚，思考内容滚出条上方，输出顶部落到条正下方
                     stepScope.launch {
-                        fs.scrollingByProgram = true
-                        try {
-                            scrollHeaderToPin?.invoke(section.bottomY.value - (pin + frozenGapPx))
-                            section.folded.value = true
-                        } finally {
-                            fs.scrollingByProgram = false
-                        }
+                        scrollHeaderToPin?.invoke(section.bottomY.value - (pin + frozenGapPx))
+                        section.folded.value = true
                     }
                 }
             } else if (state.expandState != ReasoningCardState.Collapsed) {
-                // 真实折叠：先把头部滚到吸顶线（item 未折叠、纯滚动，scrollBy 精确），
-                // 再收起内容；若收起引发 LazyColumn 锚点重排，等稳定后按实测坐标校准。
+                // 真实折叠：把头部滚到吸顶线（纯滚动），再收起内容；头部在吸顶线停住
                 section.folded.value = false
                 val target = pin + frozenGapPx
                 stepScope.launch {
-                    fs.scrollingByProgram = true
-                    try {
-                        scrollHeaderToPin?.invoke(section.topY.value - target)
-                        state.onExpandedChange(false, loading)
-                        if (stateKey != null) setSectionExpanded(stateKey, false)
-                        // 等折叠动画驱动的锚点变化彻底落定，再按实测坐标一次性校准。
-                        // 只等稳定，不追中间值；只有漂移超过阈值才补滚一次。
-                        section.awaitLayoutStable(stepScope)
-                        val drift = section.topY.value - target
-                        if (abs(drift) > foldDriftPx) {
-                            scrollHeaderToPin?.invoke(drift)
-                        }
-                    } finally {
-                        fs.scrollingByProgram = false
+                    scrollHeaderToPin?.invoke(section.topY.value - target)
+                    state.onExpandedChange(false, loading)
+                    if (stateKey != null) setSectionExpanded(stateKey, false)
+                    // 等预滚动位置落定，按实测坐标做一次最终校准（漂移超阈值才补滚）
+                    withFrameNanos { }
+                    val drift = section.topY.value - target
+                    if (abs(drift) > foldDriftPx) {
+                        scrollHeaderToPin?.invoke(drift)
                     }
                 }
             } else {
-                // 真实展开（防御分支：正常情况下折叠后的展开走真实头部点击）
+                // 真实展开（防御分支）：把头部滚到吸顶线并展开内容
                 section.folded.value = false
+                val target = pin + frozenGapPx
                 stepScope.launch {
-                    fs.scrollingByProgram = true
-                    try {
-                        state.onExpandedChange(true, loading)
-                        if (stateKey != null) setSectionExpanded(stateKey, true)
-                    } finally {
-                        fs.scrollingByProgram = false
-                    }
+                    scrollHeaderToPin?.invoke(section.topY.value - target)
+                    state.onExpandedChange(true, loading)
+                    if (stateKey != null) setSectionExpanded(stateKey, true)
                 }
             }
         }
     }
 
     // 生成结束自动折叠（或手动折叠）时：若此前处于 loading 滚动折叠态，
-    // 头部仍在视口上方，输出会藏在顶栏后面——把头部滚回吸顶线
+    // 头部仍在视口上方，输出会藏在顶栏后面——把头部滚回吸顶线。
     LaunchedEffect(section.contentVisible.value, section.folded.value) {
         if (!section.contentVisible.value && section.folded.value) {
             section.folded.value = false
             val fs = freezeState
             if (fs != null) {
-                fs.scrollingByProgram = true
-                try {
-                    scrollHeaderToPin?.invoke(section.topY.value - (fs.topBarBottomY + frozenGapPx))
-                } finally {
-                    fs.scrollingByProgram = false
+                val target = fs.topBarBottomY + frozenGapPx
+                scrollHeaderToPin?.invoke(section.topY.value - target)
+                withFrameNanos { }
+                val drift = section.topY.value - target
+                if (abs(drift) > foldDriftPx) {
+                    scrollHeaderToPin?.invoke(drift)
                 }
             }
         }
@@ -441,27 +423,4 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             )
         },
     )
-}
-
-/**
- * 等待折叠引起的布局变化稳定：连续两帧坐标一致才返回。
- * 单帧不可靠，因为 withFrameNanos 在下一帧开始时就会恢复，
- * 此时重组/布局尚未执行，读到的 topY 还是折叠前的旧值。
- */
-private suspend fun ThinkingFrozenBarSection.awaitLayoutStable(scope: CoroutineScope) {
-    var last = topY.value
-    var stableFrames = 0
-    var frames = 0
-    // 最多等 120 帧（约 2 秒），防止流式内容持续改变布局时永远等不到稳定。
-    while (scope.isActive && stableFrames < 2 && frames < 120) {
-        withFrameNanos { }
-        frames++
-        val current = topY.value
-        if (current == last) {
-            stableFrames++
-        } else {
-            stableFrames = 0
-            last = current
-        }
-    }
 }

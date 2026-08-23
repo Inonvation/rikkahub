@@ -331,7 +331,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
         }
     }
 
-    val chatListState = remember(conversation.id) { LazyListState() }
+    // 普通布局下首次组合就定位到最后一条消息开始处（避免历史会话刚打开先渲染顶部再滚动的闪动）
+    val chatListState = remember(conversation.id) {
+        LazyListState(
+            firstVisibleItemIndex = conversation.messageNodes.lastIndex.coerceAtLeast(0)
+        )
+    }
     DisposableEffect(conversation.id) {
         onDispose {
             vm.chatListInitialized = false
@@ -339,6 +344,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     }
     LaunchedEffect(nodeId, conversation.messageNodes.size) {
         if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
+            // 普通布局：消息 item index 即消息下标，底部固定项（系统 prompt/压缩摘要/滚动占位）在末尾
             suspend fun alignTallMessageStart(itemIndex: Int) {
                 // 等 LazyColumn 完成首帧布局再滚动，避免历史会话刚打开时定位被吞掉
                 withTimeoutOrNull(1_000) {
@@ -353,8 +359,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                     alignTallMessageStart(index)
                 }
             } else {
-                // 历史会话打开时，始终把最后一条消息的开头对齐到视口顶部
-                alignTallMessageStart(conversation.messageNodes.lastIndex)
+                // 历史会话打开：把最后一条消息的开头对齐到视口顶部，读长回复从开头开始、
+                // 首次下滑无跳变；若最后一条消息短于视口，则贴底展示。
+                val lastIndex = conversation.messageNodes.lastIndex
+                alignTallMessageStart(lastIndex)
+                val info = chatListState.layoutInfo
+                val item = info.visibleItemsInfo.firstOrNull { it.index == lastIndex }
+                if (item != null && item.size <= info.viewportSize.height) {
+                    chatListState.requestScrollToItem(conversation.messageNodes.size + 10)
+                }
             }
             vm.chatListInitialized = true
         }
@@ -424,10 +437,18 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var pendingSendScroll by remember(conversation.id) { mutableStateOf(false) }
 
     fun scrollAfterSend() {
-        scope.launch {
-            chatListState.requestScrollToItem(conversation.messageNodes.size + 5)
+        pendingSendScroll = true
+    }
+
+    // 发送后贴底：等新消息节点真正进入列表（size 变化）再滚到底（index 越界会钳制到末尾）。
+    // 用 requestScrollToItem 而非 animateScrollToItem，避免与流式布局/用户手势抢动画帧。
+    LaunchedEffect(conversation.messageNodes.size) {
+        if (pendingSendScroll && conversation.messageNodes.isNotEmpty()) {
+            pendingSendScroll = false
+            chatListState.requestScrollToItem(conversation.messageNodes.size + 10)
         }
     }
 
@@ -655,6 +676,7 @@ private fun ChatPageContent(
                             onJumpToMessage = { index ->
                                 previewMode = false
                                 scope.launch {
+                                    // 普通布局下消息 item index 即消息下标
                                     chatListState.requestScrollToItem(index)
                                 }
                             },
@@ -819,7 +841,7 @@ private fun ChatPageContent(
                         }
                         scrollAfterSend()
                     } else {
-                        vm.handleMessageSend(inputState.getContents())
+                        vm.sendMessageQueued(inputState.getContents())
                         scrollAfterSend()
                     }
                     inputState.clearInput()
@@ -836,7 +858,7 @@ private fun ChatPageContent(
                         vm.sendMessageQueued(inputState.getContents(), answer = false)
                         scrollAfterSend()
                     } else {
-                        vm.handleMessageSend(content = inputState.getContents(), answer = false)
+                        vm.sendMessageQueued(inputState.getContents(), answer = false)
                         scrollAfterSend()
                     }
                     inputState.clearInput()

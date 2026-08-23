@@ -1,10 +1,9 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -240,7 +239,11 @@ private fun RenderDetails(
     }
     val summaryText = summaryElement?.text() ?: "Details"
 
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+    Column(
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .animateContentSize()
+    ) {
         // Summary (clickable header)
         Row(
             modifier = Modifier
@@ -272,10 +275,11 @@ private fun RenderDetails(
         }
 
         // Details content (animated visibility)
+        // 纯淡入淡出 + 外层 animateContentSize 平滑高度。
         AnimatedVisibility(
             visible = isExpanded,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
+            enter = fadeIn(),
+            exit = fadeOut(),
         ) {
             Column(
                 modifier = Modifier

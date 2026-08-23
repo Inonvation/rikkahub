@@ -42,13 +42,6 @@ class ThinkingFreezeState {
     /** 列表内容区顶边的窗口 Y（顶栏底边）；思考头部滚到其上方即进入冻结区 */
     var topBarBottomY by mutableIntStateOf(Int.MAX_VALUE)
 
-    /**
-     * 悬浮条触发的程序滚动（折叠/展开）进行中。
-     * ChatList 的自动跟随用它区分"用户手势上滑"和"程序滚动"，
-     * 避免折叠动画刚结束就被拉回底部。
-     */
-    var scrollingByProgram by mutableStateOf(false)
-
     /** 已注册的思考步骤，key 为 reasoning 节 key，由 ChatMessageReasoningStep 维护 */
     val sections = mutableStateMapOf<String, ThinkingFrozenBarSection>()
 
@@ -161,3 +154,4 @@ private fun ThinkingFrozenBarContent(section: ThinkingFrozenBarSection) {
         )
     }
 }
+

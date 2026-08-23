@@ -8,10 +8,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -232,10 +230,12 @@ fun CollapsibleTranslationText(
         }
 
         // Translation content (collapsible)
+        // 纯淡入淡出 + animateContentSize 平滑高度：避免方向性滑动动画的突兀感。
         AnimatedVisibility(
+            modifier = Modifier.animateContentSize(),
             visible = !isCollapsed,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+            enter = fadeIn(),
+            exit = fadeOut()
         ) {
             Card(
                 modifier = Modifier
