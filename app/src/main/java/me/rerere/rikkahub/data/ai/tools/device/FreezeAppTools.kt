@@ -16,16 +16,18 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.device.DeviceToolPermission
 import me.rerere.rikkahub.data.device.SafetyGuard
+import me.rerere.rikkahub.data.management.ManagementAuditStore
 import me.rerere.rikkahub.data.shizuku.ShizukuCommandExecutor
 
 internal fun buildFreezeAppTools(
     safetyGuard: SafetyGuard,
     permission: DeviceToolPermission,
+    auditStore: ManagementAuditStore,
 ): List<Tool> = listOf(
-    buildFreezeAppTool(safetyGuard, permission),
-    buildUnfreezeAppTool(safetyGuard, permission),
+    buildFreezeAppTool(safetyGuard, permission, auditStore),
+    buildUnfreezeAppTool(safetyGuard, permission, auditStore),
     buildListFrozenAppsTool(),
-    buildFreezeBatchTool(safetyGuard, permission),
+    buildFreezeBatchTool(safetyGuard, permission, auditStore),
 )
 
 private fun errorResult(message: String): List<UIMessagePart> =
@@ -34,7 +36,11 @@ private fun errorResult(message: String): List<UIMessagePart> =
 private fun successResult(body: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): List<UIMessagePart> =
     listOf(UIMessagePart.Text(buildJsonObject(body).toString()))
 
-private fun buildFreezeAppTool(safetyGuard: SafetyGuard, permission: DeviceToolPermission): Tool = Tool(
+private fun buildFreezeAppTool(
+    safetyGuard: SafetyGuard,
+    permission: DeviceToolPermission,
+    auditStore: ManagementAuditStore,
+): Tool = Tool(
     name = "freeze_app",
     description = "冻结指定应用：图标消失、无法运行、不占后台，数据保留，解冻后恢复。需用户确认。系统关键应用与受保护应用（微信/QQ/支付宝等）会被拒绝。",
     parameters = {
@@ -53,16 +59,25 @@ private fun buildFreezeAppTool(safetyGuard: SafetyGuard, permission: DeviceToolP
         withContext(Dispatchers.IO) {
             val pkg = params.jsonObject["packageName"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             if (pkg.isBlank()) return@withContext errorResult("缺少 packageName")
-            if (permission.isForbidden("freeze_app")) return@withContext errorResult("冻结应用已被禁止使用")
+            if (permission.isForbidden("freeze_app")) {
+                auditStore.record("freeze_app", pkg, "forbidden")
+                return@withContext errorResult("冻结应用已被禁止使用")
+            }
             val reason = safetyGuard.checkFreeze(pkg)
-            if (reason != null) return@withContext errorResult(reason)
+            if (reason != null) {
+                auditStore.record("freeze_app", pkg, "blocked", reason)
+                return@withContext errorResult(reason)
+            }
             val result = ShizukuCommandExecutor.execute(
                 listOf("pm", "disable-user", "--user", "0", pkg),
                 allowWrite = true,
             )
             if (result.blocked || result.exitCode != 0) {
-                return@withContext errorResult("冻结失败: ${result.stderr.ifBlank { result.stdout }}")
+                val err = result.stderr.ifBlank { result.stdout }
+                auditStore.record("freeze_app", pkg, "failed", err)
+                return@withContext errorResult("冻结失败: $err")
             }
+            auditStore.record("freeze_app", pkg, "success")
             successResult {
                 put("package", pkg)
                 put("frozen", true)
@@ -72,7 +87,11 @@ private fun buildFreezeAppTool(safetyGuard: SafetyGuard, permission: DeviceToolP
     },
 )
 
-private fun buildUnfreezeAppTool(safetyGuard: SafetyGuard, permission: DeviceToolPermission): Tool = Tool(
+private fun buildUnfreezeAppTool(
+    safetyGuard: SafetyGuard,
+    permission: DeviceToolPermission,
+    auditStore: ManagementAuditStore,
+): Tool = Tool(
     name = "unfreeze_app",
     description = "解冻指定应用，恢复运行。需用户确认。",
     parameters = {
@@ -91,14 +110,20 @@ private fun buildUnfreezeAppTool(safetyGuard: SafetyGuard, permission: DeviceToo
         withContext(Dispatchers.IO) {
             val pkg = params.jsonObject["packageName"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             if (pkg.isBlank()) return@withContext errorResult("缺少 packageName")
-            if (permission.isForbidden("unfreeze_app")) return@withContext errorResult("解冻应用已被禁止使用")
+            if (permission.isForbidden("unfreeze_app")) {
+                auditStore.record("unfreeze_app", pkg, "forbidden")
+                return@withContext errorResult("解冻应用已被禁止使用")
+            }
             val result = ShizukuCommandExecutor.execute(
                 listOf("pm", "enable", pkg),
                 allowWrite = true,
             )
             if (result.blocked || result.exitCode != 0) {
-                return@withContext errorResult("解冻失败: ${result.stderr.ifBlank { result.stdout }}")
+                val err = result.stderr.ifBlank { result.stdout }
+                auditStore.record("unfreeze_app", pkg, "failed", err)
+                return@withContext errorResult("解冻失败: $err")
             }
+            auditStore.record("unfreeze_app", pkg, "success")
             successResult {
                 put("package", pkg)
                 put("frozen", false)
@@ -129,7 +154,11 @@ private fun buildListFrozenAppsTool(): Tool = Tool(
     },
 )
 
-private fun buildFreezeBatchTool(safetyGuard: SafetyGuard, permission: DeviceToolPermission): Tool = Tool(
+private fun buildFreezeBatchTool(
+    safetyGuard: SafetyGuard,
+    permission: DeviceToolPermission,
+    auditStore: ManagementAuditStore,
+): Tool = Tool(
     name = "freeze_batch",
     description = "批量冻结多个应用。需用户确认，受保护应用会被跳过。",
     parameters = {
@@ -151,7 +180,10 @@ private fun buildFreezeBatchTool(safetyGuard: SafetyGuard, permission: DeviceToo
                 ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
                 ?.filter { it.isNotEmpty() } ?: emptyList()
             if (packages.isEmpty()) return@withContext errorResult("缺少 packages")
-            if (permission.isForbidden("freeze_batch")) return@withContext errorResult("批量冻结已被禁止使用")
+            if (permission.isForbidden("freeze_batch")) {
+                auditStore.record("freeze_batch", packages.joinToString(","), "forbidden")
+                return@withContext errorResult("批量冻结已被禁止使用")
+            }
             val frozen = mutableListOf<String>()
             val skipped = mutableListOf<String>()
             val failed = mutableListOf<String>()
@@ -171,6 +203,11 @@ private fun buildFreezeBatchTool(safetyGuard: SafetyGuard, permission: DeviceToo
                     frozen.add(pkg)
                 }
             }
+            auditStore.record(
+                "freeze_batch",
+                packages.joinToString(","),
+                "frozen=${frozen.size}, skipped=${skipped.size}, failed=${failed.size}",
+            )
             successResult {
                 put("frozen", JsonArray(frozen.map { JsonPrimitive(it) }))
                 put("skipped", JsonArray(skipped.map { JsonPrimitive(it) }))

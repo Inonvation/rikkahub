@@ -50,7 +50,7 @@ val appModule = module {
     }
 
     single {
-        DeviceTools(get(), get(), get())
+        DeviceTools(get(), get(), get(), get())
     }
 
     single {

@@ -126,6 +126,13 @@ fun SettingDevicePage() {
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingDeviceAudit) },
+                        leadingContent = { Icon(HugeIcons.Settings03, null) },
+                        headlineContent = { Text("操作记录") },
+                        supportingContent = { Text("冻结/清理历史，用于安全追溯") },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingDevicePermission) },
                         leadingContent = { Icon(HugeIcons.Settings03, null) },
                         headlineContent = { Text("工具审批") },

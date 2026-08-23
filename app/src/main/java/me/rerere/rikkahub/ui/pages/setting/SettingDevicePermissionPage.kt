@@ -1,11 +1,18 @@
 package me.rerere.rikkahub.ui.pages.setting
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,10 +36,24 @@ private fun PermissionLevel.label(): String = when (this) {
     PermissionLevel.FORBID -> "禁止"
 }
 
-private fun PermissionLevel.next(): PermissionLevel = when (this) {
-    PermissionLevel.ALLOW -> PermissionLevel.ASK
-    PermissionLevel.ASK -> PermissionLevel.FORBID
-    PermissionLevel.FORBID -> PermissionLevel.ALLOW
+/** 三档级别的分段按钮选择器 */
+@Composable
+private fun PermissionSegmentedRow(
+    selected: PermissionLevel,
+    onSelect: (PermissionLevel) -> Unit,
+) {
+    val levels = listOf(PermissionLevel.ALLOW, PermissionLevel.ASK, PermissionLevel.FORBID)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        levels.forEachIndexed { index, level ->
+            SegmentedButton(
+                selected = selected == level,
+                onClick = { onSelect(level) },
+                shape = SegmentedButtonDefaults.itemShape(index, levels.size),
+            ) {
+                Text(level.label())
+            }
+        }
+    }
 }
 
 /**
@@ -54,38 +75,38 @@ fun SettingDevicePermissionPage() {
         ) {
             item {
                 IosGroup(title = "全局默认") {
-                    item(
-                        onClick = { scope.launch { permission.setMaster(master.next()) } },
-                        supportingContent = { Text("未单独设置的工具使用此级别，点击切换") },
-                        headlineContent = { Text("默认：${master.label()}") },
-                        trailingContent = {
+                    item {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                text = master.label(),
-                                color = MaterialTheme.colorScheme.primary,
+                                text = "默认级别（未单独设置的工具使用此级别）",
+                                style = MaterialTheme.typography.bodyMedium,
                             )
-                        },
-                    )
+                            Spacer(Modifier.height(10.dp))
+                            PermissionSegmentedRow(
+                                selected = master,
+                                onSelect = { level -> scope.launch { permission.setMaster(level) } },
+                            )
+                        }
+                    }
                 }
             }
             item {
                 IosGroup(title = "各工具设置") {
                     DEVICE_TOOL_NAMES.forEach { name ->
                         val level = allLevels[name] ?: master
-                        item(
-                            onClick = { scope.launch { permission.setTool(name, level.next()) } },
-                            supportingContent = { Text("点击切换：自动允许 / 每次询问 / 禁止") },
-                            headlineContent = { Text(DEVICE_TOOL_LABELS[name] ?: name) },
-                            trailingContent = {
+                        item {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = level.label(),
-                                    color = if (level == PermissionLevel.FORBID) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.primary
-                                    },
+                                    text = DEVICE_TOOL_LABELS[name] ?: name,
+                                    style = MaterialTheme.typography.bodyMedium,
                                 )
-                            },
-                        )
+                                Spacer(Modifier.height(10.dp))
+                                PermissionSegmentedRow(
+                                    selected = level,
+                                    onSelect = { selected -> scope.launch { permission.setTool(name, selected) } },
+                                )
+                            }
+                        }
                     }
                 }
             }

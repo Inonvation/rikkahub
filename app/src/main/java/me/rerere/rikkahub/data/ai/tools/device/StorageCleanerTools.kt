@@ -18,14 +18,15 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.device.DeviceToolPermission
+import me.rerere.rikkahub.data.management.ManagementAuditStore
 import me.rerere.rikkahub.data.shizuku.ShizukuCommandExecutor
 
-internal fun buildStorageCleanerTools(permission: DeviceToolPermission): List<Tool> = listOf(
+internal fun buildStorageCleanerTools(permission: DeviceToolPermission, auditStore: ManagementAuditStore): List<Tool> = listOf(
     buildStorageOverviewTool(),
     buildScanLargeFilesTool(),
     buildScanCacheTool(),
-    buildCleanCacheTool(permission),
-    buildCleanFilesTool(permission),
+    buildCleanCacheTool(permission, auditStore),
+    buildCleanFilesTool(permission, auditStore),
 )
 
 private fun runShizuku(timeoutMillis: Long = 30_000L, vararg cmd: String): String? {
@@ -176,7 +177,7 @@ private fun validateCleanPath(path: String): String? {
     return null
 }
 
-private fun buildCleanCacheTool(permission: DeviceToolPermission): Tool = Tool(
+private fun buildCleanCacheTool(permission: DeviceToolPermission, auditStore: ManagementAuditStore): Tool = Tool(
     name = "clean_cache",
     description = "清理所有应用的缓存文件，释放存储空间。需用户确认。只清理 cache，不清数据。",
     parameters = { null },
@@ -191,10 +192,12 @@ private fun buildCleanCacheTool(permission: DeviceToolPermission): Tool = Tool(
                 timeoutMillis = 60_000L,
             )
             if (result.blocked || result.exitCode != 0) {
+                auditStore.record("clean_cache", "", "failed")
                 return@withContext listOf(UIMessagePart.Text(buildJsonObject {
                     put("error", "清理失败: ${result.stderr.ifBlank { result.stdout }}")
                 }.toString()))
             }
+            auditStore.record("clean_cache", "", "success")
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("cleaned", true)
                 put("message", "缓存清理完成")
@@ -203,7 +206,7 @@ private fun buildCleanCacheTool(permission: DeviceToolPermission): Tool = Tool(
     },
 )
 
-private fun buildCleanFilesTool(permission: DeviceToolPermission): Tool = Tool(
+private fun buildCleanFilesTool(permission: DeviceToolPermission, auditStore: ManagementAuditStore): Tool = Tool(
     name = "clean_files",
     description = "删除用户确认过的大文件。路径必须来自 scan_large_files 的扫描结果，且只能删除 /sdcard 下的文件。需用户确认。",
     parameters = {
@@ -247,6 +250,7 @@ private fun buildCleanFilesTool(permission: DeviceToolPermission): Tool = Tool(
                     deleted.add(path)
                 }
             }
+            auditStore.record("clean_files", deleted.joinToString(","), "deleted=${deleted.size}, rejected=${rejected.size}, failed=${failed.size}")
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("deleted", JsonArray(deleted.map { JsonPrimitive(it) }))
                 put("rejected", JsonArray(rejected.map { JsonPrimitive(it) }))
