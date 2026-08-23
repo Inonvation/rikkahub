@@ -41,6 +41,7 @@ enum class ChatMode {
                 Capability.SKILL_USE +
                 Capability.WORKSPACE + Capability.TRUSTED_FOLDER +
                 Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS +
+                Capability.DEVICE_TOOLS +
                 Capability.PROVIDER_ADMIN + Capability.ASSISTANT_ADMIN +
                 Capability.SETTINGS_ADMIN + Capability.DATA_ADMIN
         )
@@ -124,6 +125,9 @@ enum class Capability(val managementOnly: Boolean = false) {
     /** 学习工具（生词/笔记/错题/知识卡/测验） */
     STUDY,
 
+    /** 设备工具族（诊断/存储/冻结，依赖 Shizuku） */
+    DEVICE_TOOLS,
+
     /** 历史对话引用/会话搜索 */
     HISTORY,
 
@@ -198,6 +202,7 @@ data class ChatModePolicy(
     val allowTodo: Boolean get() = Capability.TODO in capabilities
     val allowSubAgent: Boolean get() = Capability.SUBAGENT in capabilities
     val allowStudy: Boolean get() = Capability.STUDY in capabilities
+    val allowDeviceTools: Boolean get() = Capability.DEVICE_TOOLS in capabilities
     val allowHistory: Boolean get() = Capability.HISTORY in capabilities
     val allowKnowledge: Boolean get() = Capability.KNOWLEDGE in capabilities
     val includePromptInjection: Boolean get() = Capability.PROMPT_INJECTION in capabilities

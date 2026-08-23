@@ -50,6 +50,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV7Migration
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
@@ -1244,7 +1245,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
         temperature = 0.8f,
         enableMemory = true,
         enableTimeReminder = false,
-        localTools = listOf(),
+        localTools = listOf(LocalToolOption.DeviceDoctor, LocalToolOption.StorageCleaner, LocalToolOption.FreezeApps),
     ),
 )
 

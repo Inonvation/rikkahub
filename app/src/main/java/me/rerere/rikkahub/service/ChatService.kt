@@ -78,6 +78,7 @@ import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
 import me.rerere.rikkahub.data.ai.tools.createCreativeTools
 import me.rerere.rikkahub.data.ai.tools.createProviderAdminTools
 import me.rerere.rikkahub.data.ai.tools.createAssistantAdminTools
@@ -256,6 +257,7 @@ class ChatService(
     private val templateTransformer: TemplateTransformer,
     private val providerManager: ProviderManager,
     private val localTools: LocalTools,
+    private val deviceTools: DeviceTools,
     val mcpManager: McpManager,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
@@ -1634,6 +1636,9 @@ class ChatService(
                     }
                     if (modePolicy.allowLocalTools) {
                         addAll(localTools.getTools(assistant.localTools))
+                    }
+                    if (modePolicy.allowDeviceTools) {
+                        addAll(deviceTools.getAllTools())
                     }
                     if (modePolicy.allowHistory && assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))

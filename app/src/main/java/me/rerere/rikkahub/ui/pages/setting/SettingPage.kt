@@ -217,6 +217,21 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             // 数据
+            // 设备能力
+            item("deviceCapability") {
+                IosGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = "设备能力",
+                ) {
+                    item(
+                        onClick = { navController.navigate(Screen.SettingDevice) },
+                        leadingContent = { Icon(HugeIcons.Zap, null) },
+                        headlineContent = { Text("设备能力") },
+                        supportingContent = { Text("Shizuku 授权 / 冻结 / 存储 / 诊断") },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                }
+            }
             item("dataSettings") {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()

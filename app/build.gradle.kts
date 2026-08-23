@@ -100,6 +100,7 @@ android {
     }
     buildFeatures {
         compose = true
+        aidl = true
         buildConfig = true
     }
     sourceSets {
@@ -278,6 +279,10 @@ dependencies {
 
     // mcp
     implementation(libs.modelcontextprotocol.kotlin.sdk)
+
+      // Shizuku (device capability layer)
+      implementation(libs.shizuku.api)
+      implementation(libs.shizuku.provider)
 
     // jmDNS (mDNS/Bonjour for .local hostname)
     implementation(libs.jmdns)
