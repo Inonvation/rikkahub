@@ -8,25 +8,25 @@ import me.rerere.rikkahub.data.datastore.Settings
 import kotlin.uuid.Uuid
 
 /**
- * 助手能力模式：决定生成时注入哪些工具族、系统提示词片段与环境说明。
+ * 鍔╂墜鑳藉姏妯″紡锛氬喅瀹氱敓鎴愭椂娉ㄥ叆鍝簺宸ュ叿鏃忋€佺郴缁熸彁绀鸿瘝鐗囨涓庣幆澧冭鏄庛€?
  *
- * 与既有「模式注入」（[PromptInjection.ModeInjection]，提示词注入类别）语义隔离，互不干扰。
+ * 涓庢棦鏈夈€屾ā寮忔敞鍏ャ€嶏紙[PromptInjection.ModeInjection]锛屾彁绀鸿瘝娉ㄥ叆绫诲埆锛夎涔夐殧绂伙紝浜掍笉骞叉壈銆?
  *
- * 模式为可组合结构：内置模式对应一组 [Capability] 清单，管理模式可通过
- * [CustomModeConfig] 声明一份能力清单生成新模式（写操作需用户审批）。
+ * 妯″紡涓哄彲缁勫悎缁撴瀯锛氬唴缃ā寮忓搴斾竴缁?[Capability] 娓呭崟锛岀鐞嗘ā寮忓彲閫氳繃
+ * [CustomModeConfig] 澹版槑涓€浠借兘鍔涙竻鍗曠敓鎴愭柊妯″紡锛堝啓鎿嶄綔闇€鐢ㄦ埛瀹℃壒锛夈€?
  */
 @Serializable
 enum class ChatMode {
-    /** 极简：只注入用户自定义提示词，保留本地工具、联网搜索与附件解析（不注入 MCP/外部工具声明）。 */
+    /** 鏋佺畝锛氬彧娉ㄥ叆鐢ㄦ埛鑷畾涔夋彁绀鸿瘝锛屼繚鐣欐湰鍦板伐鍏枫€佽仈缃戞悳绱笌闄勪欢瑙ｆ瀽锛堜笉娉ㄥ叆 MCP/澶栭儴宸ュ叿澹版槑锛夈€?*/
     MINIMAL,
 
-    /** 标准：功能完整，遵循助手设置中的工具，默认不注入 use_skill，可在设置中按需开启；不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置。 */
+    /** 鏍囧噯锛氬姛鑳藉畬鏁达紝閬靛惊鍔╂墜璁剧疆涓殑宸ュ叿锛岄粯璁や笉娉ㄥ叆 use_skill锛屽彲鍦ㄨ缃腑鎸夐渶寮€鍚紱涓嶆敞鍏ュ伐浣滃尯/淇′换鏂囦欢澶瑰伐鍏蜂笌 AGENTS 璇存槑锛屼笉鏀寔 skill/MCP 鎰熺煡涓庨厤缃€?*/
     STANDARD,
 
-    /** PTC（UI 显示「工作区模式」）：包含标准全部能力，并启用信任文件夹与工作区的所有工具能力（未配置时自动降级）。 */
+    /** PTC锛圲I 鏄剧ず銆屽伐浣滃尯妯″紡銆嶏級锛氬寘鍚爣鍑嗗叏閮ㄨ兘鍔涳紝骞跺惎鐢ㄤ俊浠绘枃浠跺す涓庡伐浣滃尯鐨勬墍鏈夊伐鍏疯兘鍔涳紙鏈厤缃椂鑷姩闄嶇骇锛夈€?*/
     PTC,
 
-    /** CREATIVE（UI 显示「管理模式」）：包含工作区全部能力，并支持 skill/MCP/提供商/助手/全局设置/搜索服务管理、环境与日志读取、新模式写入（写操作需审批）。 */
+    /** CREATIVE锛圲I 鏄剧ず銆岀鐞嗘ā寮忋€嶏級锛氬寘鍚伐浣滃尯鍏ㄩ儴鑳藉姏锛屽苟鏀寔 skill/MCP/鎻愪緵鍟?鍔╂墜/鍏ㄥ眬璁剧疆/鎼滅储鏈嶅姟绠＄悊銆佺幆澧冧笌鏃ュ織璇诲彇銆佹柊妯″紡鍐欏叆锛堝啓鎿嶄綔闇€瀹℃壒锛夈€?*/
     CREATIVE;
 
     fun policy(): ChatModePolicy = when (this) {
@@ -41,17 +41,18 @@ enum class ChatMode {
                 Capability.SKILL_USE +
                 Capability.WORKSPACE + Capability.TRUSTED_FOLDER +
                 Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS +
+                Capability.DEVICE_TOOLS +
                 Capability.PROVIDER_ADMIN + Capability.ASSISTANT_ADMIN +
                 Capability.SETTINGS_ADMIN + Capability.DATA_ADMIN
         )
     }
 }
 
-/** 内置模式生效策略：用户覆盖优先，否则使用出厂默认。 */
+/** 鍐呯疆妯″紡鐢熸晥绛栫暐锛氱敤鎴疯鐩栦紭鍏堬紝鍚﹀垯浣跨敤鍑哄巶榛樿銆?*/
 fun ChatMode.effectivePolicy(settings: Settings): ChatModePolicy =
     settings.builtinModeOverrides[this] ?: policy()
 
-/** 模式能力中因当前助手或全局设置限制而实际不可用的项。 */
+/** 妯″紡鑳藉姏涓洜褰撳墠鍔╂墜鎴栧叏灞€璁剧疆闄愬埗鑰屽疄闄呬笉鍙敤鐨勯」銆?*/
 fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> = buildSet {
     val assistant = settings.getCurrentAssistant()
     val builtInSearchEnabled = settings.getCurrentChatModel()?.tools?.contains(BuiltInTools.Search) == true
@@ -79,67 +80,70 @@ fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> =
 }
 
 /**
- * 能力项：一个工具族或提示词片段的门控单元。模式即一份能力清单（[ChatModePolicy.capabilities]），
- * 清单里列出该模式允许注入的能力，与 dsh 的 agent preset（agent.cordis.yml 组装行）同思路：
- * preset 决定可见性，注册表/沙箱/审批/持久化等宿主层不动。
+ * 鑳藉姏椤癸細涓€涓伐鍏锋棌鎴栨彁绀鸿瘝鐗囨鐨勯棬鎺у崟鍏冦€傛ā寮忓嵆涓€浠借兘鍔涙竻鍗曪紙[ChatModePolicy.capabilities]锛夛紝
+ * 娓呭崟閲屽垪鍑鸿妯″紡鍏佽娉ㄥ叆鐨勮兘鍔涳紝涓?dsh 鐨?agent preset锛坅gent.cordis.yml 缁勮琛岋級鍚屾€濊矾锛?
+ * preset 鍐冲畾鍙鎬э紝娉ㄥ唽琛?娌欑/瀹℃壒/鎸佷箙鍖栫瓑瀹夸富灞備笉鍔ㄣ€?
  */
 @Serializable
 enum class Capability(val managementOnly: Boolean = false) {
-    /** 本地工具族（时间/剪贴板/JS 等） */
+    /** 鏈湴宸ュ叿鏃忥紙鏃堕棿/鍓创鏉?JS 绛夛級 */
     LOCAL_TOOLS,
 
-    /** 联网搜索工具族 */
+    /** 鑱旂綉鎼滅储宸ュ叿鏃?*/
     SEARCH,
 
-    /** 附件文档解析与 OCR 注入 */
+    /** 闄勪欢鏂囨。瑙ｆ瀽涓?OCR 娉ㄥ叆 */
     DOCUMENT,
 
-    /** workspace 工具族 + AGENTS.md/工作区环境说明注入 */
+    /** workspace 宸ュ叿鏃?+ AGENTS.md/宸ヤ綔鍖虹幆澧冭鏄庢敞鍏?*/
     WORKSPACE,
 
-    /** 信任文件夹工具族 + 环境说明注入 */
+    /** 淇′换鏂囦欢澶瑰伐鍏锋棌 + 鐜璇存槑娉ㄥ叆 */
     TRUSTED_FOLDER,
 
-    /** use_skill（已启用 skill 的使用） */
+    /** use_skill锛堝凡鍚敤 skill 鐨勪娇鐢級 */
     SKILL_USE,
 
-    /** skill_admin_*（感知与配置 skill） */
+    /** skill_admin_*锛堟劅鐭ヤ笌閰嶇疆 skill锛?*/
     SKILL_ADMIN,
 
-    /** 外部 MCP 工具 mcp__* */
+    /** 澶栭儴 MCP 宸ュ叿 mcp__* */
     MCP_USE,
 
-    /** mcp_admin_*（感知与配置 MCP） */
+    /** mcp_admin_*锛堟劅鐭ヤ笌閰嶇疆 MCP锛?*/
     MCP_ADMIN,
 
-    /** 记忆工具与记忆提示词 */
+    /** 璁板繂宸ュ叿涓庤蹇嗘彁绀鸿瘝 */
     MEMORY,
 
-    /** todo 工具 */
+    /** todo 宸ュ叿 */
     TODO,
 
-    /** 子代理工具 */
+    /** 瀛愪唬鐞嗗伐鍏?*/
     SUBAGENT,
 
-    /** 学习工具（生词/笔记/错题/知识卡/测验） */
+    /** 瀛︿範宸ュ叿锛堢敓璇?绗旇/閿欓/鐭ヨ瘑鍗?娴嬮獙锛?*/
     STUDY,
 
-    /** 历史对话引用/会话搜索 */
+    /** 设备工具族（诊断/存储/冻结，依赖 Shizuku） */
+    DEVICE_TOOLS,
+
+    /** 鍘嗗彶瀵硅瘽寮曠敤/浼氳瘽鎼滅储 */
     HISTORY,
 
-    /** 知识库检索 */
+    /** 鐭ヨ瘑搴撴绱?*/
     KNOWLEDGE,
 
-    /** 模式注入/lorebook 提示词注入 */
+    /** 妯″紡娉ㄥ叆/lorebook 鎻愮ず璇嶆敞鍏?*/
     PROMPT_INJECTION,
 
-    /** 时间提醒/todo 提醒 */
+    /** 鏃堕棿鎻愰啋/todo 鎻愰啋 */
     REMINDERS,
 
-    /** tool.systemPrompt 循环 */
+    /** tool.systemPrompt 寰幆 */
     TOOL_SYSTEM_PROMPT,
 
-    /** agent behavior 行为层提示词（独立于 tool.systemPrompt） */
+    /** agent behavior 琛屼负灞傛彁绀鸿瘝锛堢嫭绔嬩簬 tool.systemPrompt锛?*/
     AGENT_BEHAVIOR_PROMPT,
 
     /** env_inspect/app_logs/provider_add/mode_create/mode_update/mode_delete */
@@ -154,38 +158,38 @@ enum class Capability(val managementOnly: Boolean = false) {
     /** settings_admin_list/settings_admin_get/settings_admin_set */
     SETTINGS_ADMIN(managementOnly = true),
 
-    /** search_admin_* 与 admin_inventory */
+    /** search_admin_* 涓?admin_inventory */
     DATA_ADMIN(managementOnly = true),
 }
 
-/** 行为风格：由能力清单派生的执行准则，决定 agent behavior 提示词注入哪一段模式指导。 */
+/** 琛屼负椋庢牸锛氱敱鑳藉姏娓呭崟娲剧敓鐨勬墽琛屽噯鍒欙紝鍐冲畾 agent behavior 鎻愮ず璇嶆敞鍏ュ摢涓€娈垫ā寮忔寚瀵笺€?*/
 @Serializable
 enum class AgentBehaviorProfile {
-    /** 通用：工具齐全，但按需使用，不主动扩大任务范围。 */
+    /** 閫氱敤锛氬伐鍏烽綈鍏紝浣嗘寜闇€浣跨敤锛屼笉涓诲姩鎵╁ぇ浠诲姟鑼冨洿銆?*/
     STANDARD,
 
-    /** 工作区：以项目文件为中心，连续推进多步任务并验证结果。 */
+    /** 宸ヤ綔鍖猴細浠ラ」鐩枃浠朵负涓績锛岃繛缁帹杩涘姝ヤ换鍔″苟楠岃瘉缁撴灉銆?*/
     WORKSPACE,
 
-    /** 管理：以只读感知为前提，写操作说明影响并等待审批。 */
+    /** 绠＄悊锛氫互鍙鎰熺煡涓哄墠鎻愶紝鍐欐搷浣滆鏄庡奖鍝嶅苟绛夊緟瀹℃壒銆?*/
     MANAGEMENT,
 
-    /** 极简：默认不调用工具，只在用户明确要求时使用。 */
+    /** 鏋佺畝锛氶粯璁や笉璋冪敤宸ュ叿锛屽彧鍦ㄧ敤鎴锋槑纭姹傛椂浣跨敤銆?*/
     MINIMAL,
 
-    /** 无模式版本行为：不注入模式引导，保留决策、工具分组与子代理说明。 */
+    /** 鏃犳ā寮忕増鏈涓猴細涓嶆敞鍏ユā寮忓紩瀵硷紝淇濈暀鍐崇瓥銆佸伐鍏峰垎缁勪笌瀛愪唬鐞嗚鏄庛€?*/
     LEGACY,
 }
 
 /**
- * 模式策略：生成时的工具族/提示词片段/环境说明门控清单。
- * 序列化存 [capabilities]，布尔字段为派生视图，注入链路读取不受影响。
+ * 妯″紡绛栫暐锛氱敓鎴愭椂鐨勫伐鍏锋棌/鎻愮ず璇嶇墖娈?鐜璇存槑闂ㄦ帶娓呭崟銆?
+ * 搴忓垪鍖栧瓨 [capabilities]锛屽竷灏斿瓧娈典负娲剧敓瑙嗗浘锛屾敞鍏ラ摼璺鍙栦笉鍙楀奖鍝嶃€?
  */
 @Serializable
 data class ChatModePolicy(
-    /** 该模式允许注入的能力清单 */
+    /** 璇ユā寮忓厑璁告敞鍏ョ殑鑳藉姏娓呭崟 */
     val capabilities: Set<Capability> = DEFAULT_CAPABILITIES,
-    /** 显式行为风格；null = 按能力清单自动推导 */
+    /** 鏄惧紡琛屼负椋庢牸锛沶ull = 鎸夎兘鍔涙竻鍗曡嚜鍔ㄦ帹瀵?*/
     val behaviorProfileOverride: AgentBehaviorProfile? = null,
 ) {
     val allowWorkspace: Boolean get() = Capability.WORKSPACE in capabilities
@@ -198,6 +202,7 @@ data class ChatModePolicy(
     val allowTodo: Boolean get() = Capability.TODO in capabilities
     val allowSubAgent: Boolean get() = Capability.SUBAGENT in capabilities
     val allowStudy: Boolean get() = Capability.STUDY in capabilities
+    val allowDeviceTools: Boolean get() = Capability.DEVICE_TOOLS in capabilities
     val allowHistory: Boolean get() = Capability.HISTORY in capabilities
     val allowKnowledge: Boolean get() = Capability.KNOWLEDGE in capabilities
     val includePromptInjection: Boolean get() = Capability.PROMPT_INJECTION in capabilities
@@ -221,13 +226,13 @@ data class ChatModePolicy(
             else -> AgentBehaviorProfile.STANDARD
         }
 
-    /** 是否注入 agent behavior 提示词：独立能力开关，极简模式默认保留一段行为准则。 */
+    /** 鏄惁娉ㄥ叆 agent behavior 鎻愮ず璇嶏細鐙珛鑳藉姏寮€鍏筹紝鏋佺畝妯″紡榛樿淇濈暀涓€娈佃涓哄噯鍒欍€?*/
     val includeAgentBehaviorPrompt: Boolean
         get() = Capability.AGENT_BEHAVIOR_PROMPT in capabilities ||
             behaviorProfile == AgentBehaviorProfile.MINIMAL
 
     companion object {
-        /** 默认能力（标准模式基础）：本地工具/搜索/附件解析/MCP/记忆/扩展工具/提示词注入/提醒/工具提示词/行为层提示词 */
+        /** 榛樿鑳藉姏锛堟爣鍑嗘ā寮忓熀纭€锛夛細鏈湴宸ュ叿/鎼滅储/闄勪欢瑙ｆ瀽/MCP/璁板繂/鎵╁睍宸ュ叿/鎻愮ず璇嶆敞鍏?鎻愰啋/宸ュ叿鎻愮ず璇?琛屼负灞傛彁绀鸿瘝 */
         val DEFAULT_CAPABILITIES: Set<Capability> = setOf(
             Capability.LOCAL_TOOLS,
             Capability.SEARCH,
@@ -245,24 +250,24 @@ data class ChatModePolicy(
             Capability.AGENT_BEHAVIOR_PROMPT,
         )
 
-        /** 标准模式策略：默认能力，不注入 use_skill */
+        /** 鏍囧噯妯″紡绛栫暐锛氶粯璁よ兘鍔涳紝涓嶆敞鍏?use_skill */
         val STANDARD = ChatModePolicy(capabilities = DEFAULT_CAPABILITIES)
 
-        /** 极简模式能力清单：本地工具/搜索/附件解析 */
+        /** 鏋佺畝妯″紡鑳藉姏娓呭崟锛氭湰鍦板伐鍏?鎼滅储/闄勪欢瑙ｆ瀽 */
         val MINIMAL_CAPABILITIES: Set<Capability> =
             setOf(Capability.LOCAL_TOOLS, Capability.SEARCH, Capability.DOCUMENT)
 
-        /** 极简模式策略：不注入工具声明，但仍保留一段「默认不主动调用工具」的行为准则 */
+        /** 鏋佺畝妯″紡绛栫暐锛氫笉娉ㄥ叆宸ュ叿澹版槑锛屼絾浠嶄繚鐣欎竴娈点€岄粯璁や笉涓诲姩璋冪敤宸ュ叿銆嶇殑琛屼负鍑嗗垯 */
         val MINIMAL = ChatModePolicy(
             capabilities = MINIMAL_CAPABILITIES,
             behaviorProfileOverride = AgentBehaviorProfile.MINIMAL,
         )
 
-        /** 跟随助手配置能力集合：等价于引入四个模式前的完整工具/提示词能力，仅排除管理模式专属工具。 */
+        /** 璺熼殢鍔╂墜閰嶇疆鑳藉姏闆嗗悎锛氱瓑浠蜂簬寮曞叆鍥涗釜妯″紡鍓嶇殑瀹屾暣宸ュ叿/鎻愮ず璇嶈兘鍔涳紝浠呮帓闄ょ鐞嗘ā寮忎笓灞炲伐鍏枫€?*/
         val UNRESTRICTED_CAPABILITIES: Set<Capability> =
             Capability.entries.filterNot { it.managementOnly }.toSet()
 
-        /** 跟随助手配置策略：无模式门控，行为提示词还原无模式版本。 */
+        /** 璺熼殢鍔╂墜閰嶇疆绛栫暐锛氭棤妯″紡闂ㄦ帶锛岃涓烘彁绀鸿瘝杩樺師鏃犳ā寮忕増鏈€?*/
         val UNRESTRICTED = ChatModePolicy(
             capabilities = UNRESTRICTED_CAPABILITIES,
             behaviorProfileOverride = AgentBehaviorProfile.LEGACY,
@@ -270,7 +275,7 @@ data class ChatModePolicy(
     }
 }
 
-/** 管理模式生成的自定义模式配置，写入 [Settings.customModes]。 */
+/** 绠＄悊妯″紡鐢熸垚鐨勮嚜瀹氫箟妯″紡閰嶇疆锛屽啓鍏?[Settings.customModes]銆?*/
 @Serializable
 data class CustomModeConfig(
     val id: String = Uuid.random().toString(),
@@ -279,11 +284,11 @@ data class CustomModeConfig(
     val policy: ChatModePolicy = ChatModePolicy(),
 )
 
-/** 会话内模式引用的序列化：内置模式存枚举名，自定义模式存 `custom:<id>`。 */
+/** 浼氳瘽鍐呮ā寮忓紩鐢ㄧ殑搴忓垪鍖栵細鍐呯疆妯″紡瀛樻灇涓惧悕锛岃嚜瀹氫箟妯″紡瀛?`custom:<id>`銆?*/
 object ModeRefs {
     const val CUSTOM_PREFIX = "custom:"
 
-    /** 「跟随助手配置」伪条目引用，仅用于 mode_list 展示与防御性解析，不落库为会话 mode。 */
+    /** 銆岃窡闅忓姪鎵嬮厤缃€嶄吉鏉＄洰寮曠敤锛屼粎鐢ㄤ簬 mode_list 灞曠ず涓庨槻寰℃€цВ鏋愶紝涓嶈惤搴撲负浼氳瘽 mode銆?*/
     const val FOLLOW_ASSISTANT = "follow_assistant"
 
     fun builtin(mode: ChatMode): String = mode.name
@@ -295,16 +300,16 @@ object ModeRefs {
 }
 
 /**
- * 默认模式解析（单一数据源）：助手显式配置 > 全局显式配置。
+ * 榛樿妯″紡瑙ｆ瀽锛堝崟涓€鏁版嵁婧愶級锛氬姪鎵嬫樉寮忛厤缃?> 鍏ㄥ眬鏄惧紡閰嶇疆銆?
  *
- * 未显式配置时返回 null，表示会话使用「跟随助手配置」。
+ * 鏈樉寮忛厤缃椂杩斿洖 null锛岃〃绀轰細璇濅娇鐢ㄣ€岃窡闅忓姪鎵嬮厤缃€嶃€?
  */
 @Suppress("UNUSED_PARAMETER")
 fun resolveModeRef(assistant: Assistant, settings: Settings, trustedFolderActive: Boolean): String? =
     assistant.defaultMode
         ?: settings.defaultMode
 
-/** 把模式引用解析为策略；引用为空或指向不存在的模式时返回 null。 */
+/** 鎶婃ā寮忓紩鐢ㄨВ鏋愪负绛栫暐锛涘紩鐢ㄤ负绌烘垨鎸囧悜涓嶅瓨鍦ㄧ殑妯″紡鏃惰繑鍥?null銆?*/
 fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
     if (ref.isNullOrBlank()) return null
     if (ref.startsWith(ModeRefs.CUSTOM_PREFIX)) {
@@ -315,8 +320,8 @@ fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
 }
 
 /**
- * 会话级生效策略：mode 为 null 时使用「跟随助手配置」；显式模式按引用解析，
- * 非法或已删除的显式引用回退标准模式。
+ * 浼氳瘽绾х敓鏁堢瓥鐣ワ細mode 涓?null 鏃朵娇鐢ㄣ€岃窡闅忓姪鎵嬮厤缃€嶏紱鏄惧紡妯″紡鎸夊紩鐢ㄨВ鏋愶紝
+ * 闈炴硶鎴栧凡鍒犻櫎鐨勬樉寮忓紩鐢ㄥ洖閫€鏍囧噯妯″紡銆?
  */
 fun resolveConversationPolicy(
     conversation: Conversation,

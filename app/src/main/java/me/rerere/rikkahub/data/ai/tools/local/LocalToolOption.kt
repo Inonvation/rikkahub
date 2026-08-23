@@ -36,4 +36,15 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("calendar")
     data object Calendar : LocalToolOption()
+    @Serializable
+    @SerialName("device_doctor")
+    data object DeviceDoctor : LocalToolOption()
+
+    @Serializable
+    @SerialName("storage_cleaner")
+    data object StorageCleaner : LocalToolOption()
+
+    @Serializable
+    @SerialName("freeze_apps")
+    data object FreezeApps : LocalToolOption()
 }

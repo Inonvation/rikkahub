@@ -9,7 +9,7 @@ package me.rerere.rikkahub.data.shizuku
  */
 object CommandGuard {
     private val ALLOWED_BINARIES = setOf(
-        "pm", "settings", "dumpsys", "df", "du", "getprop",
+        "pm", "settings", "dumpsys", "df", "du", "getprop", "find", "logcat",
         "am", "screencap", "ps", "top", "echo", "test", "ls", "cat",
     )
 
