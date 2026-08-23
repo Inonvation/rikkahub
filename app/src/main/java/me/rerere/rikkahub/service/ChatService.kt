@@ -1638,7 +1638,7 @@ class ChatService(
                         addAll(localTools.getTools(assistant.localTools))
                     }
                     if (modePolicy.allowDeviceTools) {
-                        addAll(deviceTools.getTools(assistant.localTools))
+                        addAll(deviceTools.getAllTools())
                     }
                     if (modePolicy.allowHistory && assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))
