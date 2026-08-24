@@ -33,7 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -62,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -197,7 +198,17 @@ fun ChatInput(
 
     // 输入框整体始终是圆角矩形，不随键盘状态改变形状；
     // 避免"贴合键盘变直角 + 收起时突变跳一下"。
-    val imeVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    var imeHeightMax by remember { mutableStateOf(0) }
+    // 记录键盘最大高度，用于按比例判断“键盘开始收起”。
+    // 这样工具栏展开与键盘回落同时进行，避免 isImeVisible 在收起时
+    // 等到键盘完全消失才翻转、导致展开动画滞后。
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > imeHeightMax) imeHeightMax = imeBottom
+    }
+    // 键盘可见性 = 当前 IME 高度 > 最大高度 * 40%（出现/收起都在动画中段越线 → 两端对称、跟手）
+    val imeVisible = imeHeightMax > 0 && imeBottom > (imeHeightMax * 0.4f)
 
     fun sendMessage() {
         focusManager.clearFocus(force = true)
