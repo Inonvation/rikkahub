@@ -269,6 +269,14 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
     val rendererLoading = renderer.isLoading(context, loading)
 
+    // 状态配色（仅用于界面提示）：等待确认 / 执行中 / 失败 / 完成，配合头部行一眼看出工具状态
+    val statusColor = when {
+        isPending -> MaterialTheme.colorScheme.tertiary
+        rendererLoading -> MaterialTheme.colorScheme.primary
+        toolFailed(tool) -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用。
     // 折叠类工具已执行时也始终保留可展开区域：折叠态 output 未解析、摘要为空，
     // 但必须有非空 content 才能出现展开箭头、可点击展开。否则折叠态 content 与
@@ -290,7 +298,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     imageVector = renderer.icon(context),
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = LocalContentColor.current.copy(alpha = 0.7f)
+                    tint = statusColor.copy(alpha = 0.8f)
                 )
             }
         },
@@ -301,7 +309,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 Text(
                     text = titleText,
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = statusColor,
                     modifier = Modifier.shimmer(isLoading = rendererLoading),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

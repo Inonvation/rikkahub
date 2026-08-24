@@ -76,6 +76,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -480,6 +481,7 @@ private fun ChatPageContent(
     }
 
     val toaster = LocalToaster.current
+
     val workspaceRepository: WorkspaceRepository = koinInject()
     val todoStorage: TodoStorage = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
@@ -490,10 +492,15 @@ private fun ChatPageContent(
     val thinkingFreezeState = remember { ThinkingFreezeState() }
 
     // 用户手动滚动闩锁：折叠思考/过程内容后的延迟贴底，只在用户没有滑离底部时执行。
-    // 用户在贴底等待窗口内开始滚动（非程序滚动）→ 置位，贴底直接放弃，
-    // 避免"看历史时某个瞬间被拽回底部"；列表稳定回到底部后复位，让下一次折叠重新武装。
+    // 用户在贴底等待窗口内开始滚动 → 置位，贴底直接放弃，避免"看历史时被拽回底部"；
+    // 列表稳定回到底部后复位，让下一次折叠重新武装。
+    // 关键：用户手指按在列表上（listInteracting，触点即置位）时也要置位——它覆盖"手指已按下
+    // 但尚未消费滚动"的窗口，且不受 programScroll（折叠动画的程序滚动）抑制：
+    // 否则折叠动画期间用户上拉会被当成"程序滚动"而漏掉，折叠后的延迟贴底仍会拽回（历史回跳根因）。
     var userScrolledLatch by remember { mutableStateOf(false) }
-    LaunchedEffect(chatListState, thinkingFreezeState) {
+    // 记录用户最近一次触碰/滚动的时刻，贴底在阈值内主动放弃，兜底防止"刚上拉就被贴底"的竞态。
+    var lastUserScrollAt by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(chatListState, thinkingFreezeState, listInteracting) {
         snapshotFlow {
             val info = chatListState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()
@@ -510,29 +517,22 @@ private fun ChatPageContent(
                 thinkingFreezeState.scrollingByProgram,
             )
         }.collect { (inProgress, pinned, programScroll) ->
-            if (inProgress && !programScroll) {
-                // 用户手势开始（非程序滚动）→ 本次折叠不再贴底
+            val userInteracting = listInteracting.value
+            if (userInteracting || (inProgress && !programScroll)) {
+                // 用户手指在列表上，或用户手势已开始（非程序滚动）→ 本次折叠不再贴底
                 userScrolledLatch = true
-            } else if (!inProgress && pinned) {
-                // 列表稳定回到底部 → 复位闩锁
+                lastUserScrollAt = android.os.SystemClock.elapsedRealtime()
+            } else if (!inProgress && pinned && !userInteracting) {
+                // 列表稳定回到底部、且用户未触碰 → 复位闩锁
                 userScrolledLatch = false
             }
         }
     }
     val assistant = setting.getCurrentAssistant()
-    val modelContextTokenLimit = setting.getCurrentChatModel()?.modelId?.let {
-        ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
-    }
-    val effectiveContextTokenLimit = resolveContextTokenLimit(
-        modelContextTokenLimit = modelContextTokenLimit,
-        assistantContextTokenLimit = assistant.contextTokenLimit,
-    )
-    val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
-    val usagePercent = if (effectiveContextTokenLimit > 0) {
-        totalTokens / effectiveContextTokenLimit.toFloat()
-    } else {
-        0f
-    }
+    val tokenStats = computeTokenStats(conversation, setting)
+    val effectiveContextTokenLimit = tokenStats.contextTokenLimit
+    val totalTokens = tokenStats.totalTokens
+    val usagePercent = tokenStats.usagePercent
     // 订阅本会话 todo 状态（TodoStorage 是唯一状态源，写入时实时刷新 banner）
     val todolist by todoStorage.loadAsFlow(conversation.id.toString())
         .collectAsStateWithLifecycle(initialValue = null)
@@ -578,6 +578,47 @@ private fun ChatPageContent(
                 )
             }
         }
+    }
+
+    // 统一发送入口：普通发送（appendOnly=false）与长按仅追加（appendOnly=true）共用一份
+    // 分支逻辑，避免两处粘贴的 send/编辑/生成中引导队列代码日后分叉不一致。
+    fun performSend(appendOnly: Boolean) {
+        if (!appendOnly && currentChatModel == null) {
+            toaster.show("请先选择模型", type = ToastType.Error)
+            return
+        }
+        if (inputState.isEditing()) {
+            vm.handleMessageEdit(
+                parts = inputState.getContents(),
+                messageId = inputState.editingMessage!!,
+            )
+        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
+            if (appendOnly) {
+                // 生成中长按发送：只追加消息不回复，不打断当前任务，先排队。
+                vm.sendMessageQueued(inputState.getContents(), answer = false)
+            } else {
+                val contents = inputState.getContents()
+                val hasAttachment = contents.any { it !is UIMessagePart.Text }
+                if (hasAttachment) {
+                    // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
+                    vm.sendMessageQueued(contents)
+                } else {
+                    val guidanceText = inputState.textContent.text.toString()
+                    if (pendingGuidance.isNotEmpty()) {
+                        vm.sendGuidanceInterrupt(guidanceText)
+                    } else {
+                        vm.sendGuidance(guidanceText)
+                    }
+                }
+            }
+            scrollAfterSend()
+        } else {
+            // 普通发送（appendOnly=false）要触发 AI 生成（answer=true）；长按仅追加（appendOnly=true）不生成（answer=false）
+            vm.sendMessageQueued(inputState.getContents(), answer = !appendOnly)
+            scrollAfterSend()
+        }
+        inputState.clearInput()
+        vm.clearDraft()
     }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
@@ -680,10 +721,12 @@ private fun ChatPageContent(
                 },
                 LocalScrollChatToBottom provides {
                     // 消费闩锁（无论是否贴底都复位，让下一次折叠重新武装）；
-                    // 用户已滑离底部或正在滚动 → 放弃贴底，避免拽回正在看历史的用户
+                    // 用户已滑离底部、正在滚动、或刚滚动过（350ms 内）→ 放弃贴底，避免拽回正在看历史的用户
                     val interrupted = userScrolledLatch
                     userScrolledLatch = false
-                    if (interrupted || chatListState.isScrollInProgress) return@provides
+                    val recentlyScrolled =
+                        android.os.SystemClock.elapsedRealtime() - lastUserScrollAt < 350L
+                    if (interrupted || recentlyScrolled || chatListState.isScrollInProgress) return@provides
                     // 程序滚动标记：贴底滚动本身不算用户滚动（避免反向武装闩锁/自动跟随抢滚）
                     thinkingFreezeState.scrollingByProgram = true
                     try {
@@ -922,57 +965,10 @@ private fun ChatPageContent(
                     )
                 },
                 onSendClick = {
-                    if (currentChatModel == null) {
-                        toaster.show("请先选择模型", type = ToastType.Error)
-                        return@ChatInput
-                    }
-                    if (inputState.isEditing()) {
-                        vm.handleMessageEdit(
-                            parts = inputState.getContents(),
-                            messageId = inputState.editingMessage!!,
-                        )
-                    } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
-                        // 生成中（主 AI 正在生成 或 子代理运行中）：主输入框发送走引导逻辑——
-                        // 没有排队引导时默认排队，等当前回合自然结束再注入；已有排队引导时
-                        // 再次发送视为打断当前任务，直接注入最新引导。有附件时回退普通发送，避免静默丢附件。
-                        val contents = inputState.getContents()
-                        val hasAttachment = contents.any { it !is UIMessagePart.Text }
-                        if (hasAttachment) {
-                            // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
-                            // 附件无法走 steering 文本引导，走 sendMessageQueued 的排队机制（#17）。
-                            vm.sendMessageQueued(contents)
-                        } else {
-                            val guidanceText = inputState.textContent.text.toString()
-                            if (pendingGuidance.isNotEmpty()) {
-                                vm.sendGuidanceInterrupt(guidanceText)
-                            } else {
-                                vm.sendGuidance(guidanceText)
-                            }
-                        }
-                        scrollAfterSend()
-                    } else {
-                        vm.sendMessageQueued(inputState.getContents())
-                        scrollAfterSend()
-                    }
-                    inputState.clearInput()
-                    vm.clearDraft()
+                    performSend(appendOnly = false)
                 },
                 onLongSendClick = {
-                    if (inputState.isEditing()) {
-                        vm.handleMessageEdit(
-                            parts = inputState.getContents(),
-                            messageId = inputState.editingMessage!!,
-                        )
-                    } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
-                        // 生成中长按发送：只追加消息不回复，但不打断当前任务，先排队。
-                        vm.sendMessageQueued(inputState.getContents(), answer = false)
-                        scrollAfterSend()
-                    } else {
-                        vm.sendMessageQueued(inputState.getContents(), answer = false)
-                        scrollAfterSend()
-                    }
-                    inputState.clearInput()
-                    vm.clearDraft()
+                    performSend(appendOnly = true)
                 },
                 onUpdateChatModel = {
                     vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
@@ -1374,32 +1370,25 @@ private fun TopBar(
         },
         actions = {
             // 上下文用量圆圈
-            val assistant = settings.getCurrentAssistant()
-            val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
-            val modelContextTokenLimit = settings.getCurrentChatModel()?.modelId?.let {
-                ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
-            }
-            val contextTokenLimit = resolveContextTokenLimit(
-                modelContextTokenLimit = modelContextTokenLimit,
-                assistantContextTokenLimit = assistant.contextTokenLimit,
-            )
+            val tokenStats = computeTokenStats(conversation, settings)
+            val totalTokens = tokenStats.totalTokens
+            val usagePercent = tokenStats.usagePercent
             val tokenText = when {
                 totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
                 else -> totalTokens.toString()
             }
-            val usagePercent = (totalTokens / contextTokenLimit.toFloat()).coerceIn(0f, 1f)
             IconButton(
                 onClick = {
                     hapticController.perform(HapticFeedbackType.KeyboardTap)
                     onCompressClick()
                 },
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(44.dp),
             ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
                     CircularProgressIndicator(
                         progress = { usagePercent },
                         modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 2.5.dp,
+                        strokeWidth = 3.dp,
                         color = when {
                             usagePercent > 0.9f -> MaterialTheme.colorScheme.error
                             usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
@@ -1409,7 +1398,7 @@ private fun TopBar(
                     )
                     Text(
                         text = tokenText,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -1754,4 +1743,35 @@ private suspend fun scrollListByDelta(
         return
     }
     state.scrollBy(delta)
+}
+
+/**
+ * 汇总一条会话当前的 token 用量与上下文上限，供顶部用量圆圈与自动压缩共用，
+ * 避免两处重复计算导致数值口径不一致。
+ */
+private data class TokenStats(
+    val totalTokens: Int,
+    val contextTokenLimit: Int,
+    val usagePercent: Float,
+)
+
+private fun computeTokenStats(
+    conversation: Conversation,
+    settings: Settings,
+): TokenStats {
+    val assistant = settings.getCurrentAssistant()
+    val modelContextTokenLimit = settings.getCurrentChatModel()?.modelId?.let {
+        ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
+    }
+    val contextTokenLimit = resolveContextTokenLimit(
+        modelContextTokenLimit = modelContextTokenLimit,
+        assistantContextTokenLimit = assistant.contextTokenLimit,
+    )
+    val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
+    val usagePercent = if (contextTokenLimit > 0) {
+        totalTokens / contextTokenLimit.toFloat()
+    } else {
+        0f
+    }
+    return TokenStats(totalTokens, contextTokenLimit, usagePercent)
 }

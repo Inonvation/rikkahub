@@ -5,8 +5,12 @@ import android.util.LruCache
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -261,8 +265,8 @@ internal fun EditedFilesList(
 
             AnimatedVisibility(
                 visible = expanded,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = expandVertically(animationSpec = tween(200)) + fadeIn(animationSpec = tween(200)),
+                exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(animationSpec = tween(200)),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -1036,8 +1040,8 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
 
             AnimatedVisibility(
                 visible = expanded,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = expandVertically(animationSpec = tween(200)) + fadeIn(animationSpec = tween(200)),
+                exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(animationSpec = tween(200)),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),

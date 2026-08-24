@@ -93,6 +93,17 @@ private val KEYWORD_RULES = listOf(
     ),
     Rule(
         keywords = listOf(
+            "tpm exhausted",
+            "tpm limit",
+            "tpm exceeded",
+            "tokens per minute",
+            "inference tpm",
+        ),
+        reason = "触发限流：每分钟 Token 额度已用尽",
+        suggestion = "稍等片刻再试，或降低请求频率/并发请求数",
+    ),
+    Rule(
+        keywords = listOf(
             "file does not exist",
             "no such file",
             "file not found",

@@ -49,11 +49,7 @@ fun KnowledgeBasePickerButton(
     enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    val navController = LocalNavController.current
     val hapticController = rememberHaptic()
-    val knowledgeManager = koinInject<KnowledgeManager>()
-    val bases by knowledgeManager.baseRepository.getAllWithDocumentCount()
-        .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val hasSelection = selectedIds.isNotEmpty()
 
@@ -82,81 +78,104 @@ fun KnowledgeBasePickerButton(
             onDismissRequest = { showPicker = false },
             sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
-            ) {
-                Text(
-                    "选择知识库",
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text(
-                    "选中的知识库将在对话中供 AI 检索",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
-                )
+            KnowledgeBasePicker(
+                selectedIds = selectedIds,
+                onSelectionChange = onSelectionChange,
+                onDismiss = { showPicker = false },
+            )
+        }
+    }
+}
 
-                if (bases.isEmpty()) {
-                    Text(
-                        "还没有知识库，请先在扩展管理中创建",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 16.dp),
-                    )
-                }
+/**
+ * 知识库选择器（供底部弹窗 / 「更多选项」入口复用，UI 统一）。
+ */
+@OptIn(ExperimentalUuidApi::class)
+@Composable
+fun KnowledgeBasePicker(
+    selectedIds: Set<Uuid>,
+    onSelectionChange: (Set<Uuid>) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val navController = LocalNavController.current
+    val knowledgeManager = koinInject<KnowledgeManager>()
+    val bases by knowledgeManager.baseRepository.getAllWithDocumentCount()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 400.dp),
+    Column(
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 24.dp),
+    ) {
+        Text(
+            "选择知识库",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            "选中的知识库将在对话中供 AI 检索",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+        )
+
+        if (bases.isEmpty()) {
+            Text(
+                "还没有知识库，请先在扩展管理中创建",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+        }
+
+        LazyColumn(
+            modifier = Modifier.heightIn(max = 400.dp),
+        ) {
+            items(bases, key = { it.id }) { base ->
+                val baseUuid = Uuid.parse(base.id)
+                val isSelected = baseUuid in selectedIds
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(bases, key = { it.id }) { base ->
-                        val baseUuid = Uuid.parse(base.id)
-                        val isSelected = baseUuid in selectedIds
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(base.name, style = MaterialTheme.typography.titleSmall)
-                                if (base.description.isNotBlank()) {
-                                    Text(
-                                        base.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                    )
-                                }
-                                Text(
-                                    "${base.documentCount} 文档",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = isSelected,
-                                onCheckedChange = { checked ->
-                                    if (checked) {
-                                        onSelectionChange(selectedIds + baseUuid)
-                                    } else {
-                                        onSelectionChange(selectedIds - baseUuid)
-                                    }
-                                },
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(base.name, style = MaterialTheme.typography.titleSmall)
+                        if (base.description.isNotBlank()) {
+                            Text(
+                                base.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
                             )
                         }
+                        Text(
+                            "${base.documentCount} 文档",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
+                    Switch(
+                        checked = isSelected,
+                        onCheckedChange = { checked ->
+                            if (checked) {
+                                onSelectionChange(selectedIds + baseUuid)
+                            } else {
+                                onSelectionChange(selectedIds - baseUuid)
+                            }
+                        },
+                    )
+                }
+            }
 
-                    item {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        TextButton(
-                            onClick = {
-                                showPicker = false
-                                navController.navigate(Screen.KnowledgeBases)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("管理知识库")
-                        }
-                    }
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                TextButton(
+                    onClick = {
+                        onDismiss()
+                        navController.navigate(Screen.KnowledgeBases)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("管理知识库")
                 }
             }
         }

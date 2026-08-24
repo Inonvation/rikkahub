@@ -5,12 +5,10 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -65,9 +63,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -103,8 +104,6 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
@@ -120,14 +119,10 @@ import me.rerere.rikkahub.service.PendingSendItem
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
-import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.QuickMessage
-import me.rerere.rikkahub.data.model.resolveConversationPolicy
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionList
@@ -214,16 +209,6 @@ fun ChatInput(
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
     val hapticController = rememberHaptic()
-    val mcpManager: McpManager = koinInject()
-    val trustedFolderRepository: TrustedFolderRepository = koinInject()
-    val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
-    val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
-    val modePolicy = resolveConversationPolicy(
-        conversation = conversation,
-        assistant = assistant,
-        settings = settings,
-        trustedFolderActive = activeTrustedProject != null,
-    )
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
         soundEffectPlayer.preload(R.raw.asr_start, R.raw.asr_stop)
@@ -231,7 +216,6 @@ fun ChatInput(
     val asrPermission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(permissionState = asrPermission)
     var asrBaseText by remember { mutableStateOf("") }
-    var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(asrState.status) {
         when (asrState.status) {
             ASRStatus.Listening -> {
@@ -399,53 +383,6 @@ fun ChatInput(
                                     },
                                     onlyIcon = true,
                                     compact = true,
-                                )
-                            }
-
-                            // Collapsible section: MCP, Knowledge Base, Workspace
-                            AnimatedVisibility(
-                                visible = expanded,
-                                enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
-                                exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    // MCP
-                                    if (settings.mcpServers.isNotEmpty()) {
-                                        McpPickerButton(
-                                            assistant = assistant,
-                                            servers = settings.mcpServers,
-                                            mcpManager = mcpManager,
-                                            enabled = modePolicy.allowMcpUse,
-                                            onUpdateAssistant = onUpdateAssistant,
-                                            compact = true,
-                                        )
-                                    }
-
-                                    // Knowledge Base
-                                    KnowledgeBasePickerButton(
-                                        selectedIds = assistant.knowledgeBaseIds,
-                                        enabled = modePolicy.allowKnowledge,
-                                        onSelectionChange = { newIds ->
-                                            onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
-                                        },
-                                    )
-                                }
-                            }
-
-                            // Expand / Collapse
-                            IconButton(
-                                onClick = {
-                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
-                                    expanded = !expanded
-                                },
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Icon(
-                                    imageVector = if (expanded) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
-                                    contentDescription = stringResource(R.string.more_options),
-                                    modifier = Modifier.size(20.dp),
                                 )
                             }
 
@@ -751,6 +688,18 @@ private fun TextInputRow(
     val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
         settings.getQuickMessagesOfAssistant(assistant)
     }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    // 点击用户消息进入编辑态时，自动聚焦输入框并弹出键盘，避免"已进入编辑却还要再点一下输入框"。
+    // 编辑态从 false→true 时触发一次；取消编辑（true→false）无需处理，保持用户当前焦点即可。
+    // 等一帧让编辑条/输入框完成布局再请求焦点，规避首帧 FocusRequester 尚未绑定导致的异常。
+    LaunchedEffect(state.isEditing()) {
+        if (state.isEditing()) {
+            withFrameNanos { }
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -894,6 +843,7 @@ private fun TextInputRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("chat_input")
+                .focusRequester(focusRequester)
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused

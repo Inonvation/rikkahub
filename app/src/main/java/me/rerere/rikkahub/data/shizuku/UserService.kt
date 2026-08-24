@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
  * 命令通过 [ProcessBuilder] 直接 exec 参数数组执行，不经过 shell，避免拼接注入。
  * stdout/stderr 用独立线程并发读取，防止命令输出量超过管道缓冲时与超时互锁。
  */
+@Keep
 class UserService() : IShizukuCommandService.Stub() {
     companion object {
         private const val TAG = "ShizukuUserService"

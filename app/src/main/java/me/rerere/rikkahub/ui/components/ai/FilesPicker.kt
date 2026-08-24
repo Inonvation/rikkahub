@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -52,15 +54,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Settings03
@@ -70,8 +75,11 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.resolveConversationPolicy
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
@@ -283,6 +291,123 @@ internal fun FilesPicker(
                     },
                 ),
         )
+
+        // 外部能力：MCP / 知识库（从输入栏收起到「更多」里，减少常驻触控）
+        val modePolicy = resolveConversationPolicy(
+            conversation = conversation,
+            assistant = assistant,
+            settings = settings,
+            trustedFolderActive = activeTrustedProject != null,
+        )
+        val mcpManager: McpManager = koinInject()
+        val mcpStatus by mcpManager.syncingStatus.collectAsStateWithLifecycle()
+        val mcpLoading = mcpStatus.values.any { it == McpStatus.Connecting }
+        val enabledMcpCount = settings.mcpServers.count {
+            it.commonOptions.enable && it.id in assistant.mcpServers
+        }
+        var showMcpSheet by remember { mutableStateOf(false) }
+        var showKbSheet by remember { mutableStateOf(false) }
+
+        // 与「扩展管理 / 信任文件夹 / 工作区」一致的 ListItem 入口
+        ListItem(
+            leadingContent = { Icon(HugeIcons.McpServer, contentDescription = null) },
+            headlineContent = { Text("MCP 服务") },
+            supportingContent = {
+                Text(
+                    text = when {
+                        settings.mcpServers.isEmpty() -> "未配置 MCP 服务"
+                        enabledMcpCount > 0 -> "已启用 $enabledMcpCount 个服务"
+                        else -> "未启用服务"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingContent = {
+                if (mcpLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable(enabled = settings.mcpServers.isNotEmpty() && modePolicy.allowMcpUse) {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    showMcpSheet = true
+                },
+        )
+
+        ListItem(
+            leadingContent = { Icon(HugeIcons.Bookshelf01, contentDescription = null) },
+            headlineContent = { Text("知识库") },
+            supportingContent = {
+                Text(
+                    text = if (assistant.knowledgeBaseIds.isEmpty()) "未选择知识库"
+                    else "已选择 ${assistant.knowledgeBaseIds.size} 个知识库",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable(enabled = modePolicy.allowKnowledge) {
+                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    showKbSheet = true
+                },
+        )
+
+        if (showMcpSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showMcpSheet = false },
+                sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.7f)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.mcp_picker_title),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    )
+                    if (mcpLoading) {
+                        LinearWavyProgressIndicator()
+                    }
+                    McpPicker(
+                        assistant = assistant,
+                        servers = settings.mcpServers,
+                        onUpdateAssistant = onUpdateAssistant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                }
+            }
+        }
+
+        if (showKbSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showKbSheet = false },
+                sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
+            ) {
+                KnowledgeBasePicker(
+                    selectedIds = assistant.knowledgeBaseIds,
+                    onSelectionChange = { newIds ->
+                        onUpdateAssistant(assistant.copy(knowledgeBaseIds = newIds))
+                    },
+                    onDismiss = { showKbSheet = false },
+                )
+            }
+        }
+
         if (showWorkspaceSheet) {
             WorkspaceSelectSheet(
                 assistant = assistant,

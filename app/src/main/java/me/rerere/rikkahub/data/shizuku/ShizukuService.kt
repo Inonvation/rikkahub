@@ -76,7 +76,14 @@ object ShizukuService {
     fun initialize(context: Context) {
         if (initialized) return
         initialized = true
+        // Shizuku UserServiceArgs 必须设置 processNameSuffix（否则 bindUserService 在
+        // forAdd() 里对 processName 做 requireNonNull 抛 NPE，导致 UserService 永远连不上，
+        // 即使已授权，设备工具也会报“Shizuku UserService 连接失败”）。tag 用于在混淆后
+        // 固定用户服务身份，daemon(false) 使服务随调用进程结束而退出，避免常驻进程泄漏。
         userServiceArgs = UserServiceArgs(ComponentName(context, UserService::class.java))
+            .processNameSuffix("shizuku")
+            .daemon(false)
+            .tag("shizuku-command")
         registerBinderListeners()
         registerPermissionListener()
         refreshState()

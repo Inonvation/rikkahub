@@ -99,7 +99,9 @@ fun <T> ChainOfThought(
     ) {
         Card(
             modifier = modifier,
+            // 保留气泡卡片底色（由调用方 cardColors 指定），仅做图标净化，不把整个气泡变透明。
             colors = cardColors,
+            elevation = CardDefaults.cardElevation(),
             shape = RoundedCornerShape(16.dp),
         ) {
             Column(
@@ -373,32 +375,25 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Icon（不透明背景遮住背后的连线）
+                // 图标直接落在时间线上，去掉不透明底盒（更轻盈克制）
                 Box(
                     modifier = Modifier.width(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .background(LocalCardColor.current),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (icon != null) {
-                            Box(
-                                modifier = Modifier.size(14.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                icon()
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant)
-                            )
+                    if (icon != null) {
+                        Box(
+                            modifier = Modifier.size(16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            icon()
                         }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant)
+                        )
                     }
                 }
 

@@ -44,7 +44,6 @@ import me.rerere.rikkahub.ui.components.richtext.DiffRemovedColor
 import me.rerere.rikkahub.ui.components.richtext.DiffView
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.parseDiffStats
-import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 
@@ -246,8 +245,7 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-            .shimmer(isLoading = loading),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         CodeHighlightText(
             code = preview,
@@ -334,8 +332,7 @@ object ShellToolUI : ToolUIRenderer {
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.small)
                         .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .shimmer(isLoading = context.loading),
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     Text(
                         text = combined.lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n"),
