@@ -233,7 +233,6 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
         policy: ChatModePolicy? = null,
-        conversationId: String? = null,
         /** 续答唤醒指令（子代理完成时注入）。追加为 provider 看到的**最后一条 USER 消息**，
          *  不写进 system（保持 system 前缀字节不变 → prompt cache 命中，对齐 Claude Code
          *  "用消息不用 prompt 编辑"的做法）。只进 internalMessages（发送列表），不落持久化列表，
@@ -342,7 +341,7 @@ class GenerationHandler(
                             model = model,
                             assistant = assistant,
                             settings = settings,
-                            conversationId = conversationId,
+                            conversationId = conversationId?.toString(),
                         )
                         val visualMessages = messages.visualTransforms(
                             transformers = outputTransformers,
@@ -369,7 +368,6 @@ class GenerationHandler(
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
                     policy = policy,
-                    conversationId = conversationId,
                     resumeContext = effectiveResumeContext,
                 )
                 messages = messages.visualTransforms(
@@ -499,7 +497,7 @@ class GenerationHandler(
                         model = model,
                         assistant = assistant,
                         settings = settings,
-                        conversationId = conversationId,
+                        conversationId = conversationId?.toString(),
                     )
                 )
             )
@@ -559,7 +557,6 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
         policy: ChatModePolicy? = null,
-        conversationId: String? = null,
         resumeContext: String? = null,
     ) {
         val internalMessages = buildList {
@@ -617,7 +614,7 @@ class GenerationHandler(
             conversationLorebookIds = conversationLorebookIds,
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
-            conversationId = conversationId,
+            conversationId = conversationId?.toString(),
         )
 
         // 续答唤醒指令：作为 provider 看到的最后一条 USER 消息追加（transforms 之后，避免被

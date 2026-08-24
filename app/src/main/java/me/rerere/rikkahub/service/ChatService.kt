@@ -1595,7 +1595,6 @@ class ChatService(
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
-                conversationId = conversation.id.toString(),
                 policy = modePolicy,
                 resumeContext = resumeContext,
                 steeringQueue = session.steeringQueue,

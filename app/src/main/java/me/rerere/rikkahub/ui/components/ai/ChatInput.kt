@@ -113,7 +113,7 @@ import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Files02
-import me.rerere.hugeicons.stroke.FullScreen
+import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
@@ -923,7 +923,7 @@ private fun TextInputRow(
                                 hapticController.perform(HapticFeedbackType.KeyboardTap)
                                 isFullScreen = !isFullScreen
                             }) {
-                            Icon(HugeIcons.FullScreen, null)
+                            Icon(HugeIcons.Fullscreen, null)
                         }
                     }
                     trailingContent()
