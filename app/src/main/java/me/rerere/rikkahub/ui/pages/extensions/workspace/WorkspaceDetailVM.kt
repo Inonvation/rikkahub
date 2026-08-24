@@ -26,6 +26,7 @@ class WorkspaceDetailVM(
     private val initialArea: WorkspaceStorageArea? = null,
     /** 初始目录路径（相对存储区根，""=根目录），用于定位到文件所在目录 */
     private val initialPath: String = "",
+    private val terminalSessionManager: WorkspaceTerminalSessionManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
@@ -387,6 +388,7 @@ class WorkspaceDetailVM(
             val workspace = state.value.workspace ?: return@launch
             _installProgress.value = RootfsInstallProgress(stage = RootfsInstallStage.DOWNLOADING)
             try {
+                terminalSessionManager.closeWorkspace(workspace.root)
                 repository.installRootfs(workspace.id, url) { progress ->
                     _installProgress.value = progress
                 }

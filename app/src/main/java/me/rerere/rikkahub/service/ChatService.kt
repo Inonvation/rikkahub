@@ -1590,6 +1590,7 @@ class ChatService(
                 // 持久化尾部保持上一条 ASSISTANT → 续答并入同一条消息（BUG3 修复 + 缓存优化）。
                 messages = messagesToGenerate,
                 assistant = assistant,
+                conversationId = conversationId,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds,

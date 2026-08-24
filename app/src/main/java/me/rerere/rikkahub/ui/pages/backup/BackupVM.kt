@@ -51,6 +51,7 @@ class BackupVM(
 
     val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
     val s3BackupItems = MutableStateFlow<UiState<List<S3BackupItem>>>(UiState.Idle)
+    val localBackupItems = MutableStateFlow(WebDavConfig.BackupItem.entries.toList())
 
     /** 本地导入导出的大致进度提示（阶段文字），null 表示无进行中的操作 */
     val backupProgress = MutableStateFlow<String?>(null)
@@ -196,6 +197,11 @@ class BackupVM(
         syncPreview.value = null
     }
 
+    /** 更新本地导出/导入时选择的备份内容（聊天记录和/或文件）。 */
+    fun updateLocalBackupItems(items: List<WebDavConfig.BackupItem>) {
+        localBackupItems.value = items
+    }
+
     fun loadBackupFileItems() {
         viewModelScope.launch {
             runCatching {
@@ -243,7 +249,7 @@ class BackupVM(
     suspend fun exportToFile(): File {
         backupProgress.value = "正在准备备份文件…"
         val file = webDavSync.prepareBackupFile(
-            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries),
+            settings.value.webDavConfig.copy(items = localBackupItems.value),
             onProgress = { backupProgress.value = it }
         )
         backupProgress.value = "正在写入目标文件…"
@@ -254,7 +260,7 @@ class BackupVM(
     suspend fun restoreFromLocalFile(file: File) {
         webDavSync.restoreFromLocalFile(
             file,
-            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries),
+            settings.value.webDavConfig.copy(items = localBackupItems.value),
             onProgress = { backupProgress.value = it }
         )
     }

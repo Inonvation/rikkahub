@@ -7,7 +7,7 @@
   <string name="about_page_version">Версия</string>
   <string name="about_page_website">Веб-сайт</string>
   <string name="add">Добавить</string>
-  <string name="app_name">RikkaHub</string>
+  <string name="app_name">Inova</string>
   <string name="asr_button_content_description">Распознавание речи</string>
   <string name="asr_button_stop">Стоп</string>
   <string name="assistant_detail_basic_desc">Настройте имя, аватар, модель и параметры</string>
@@ -845,7 +845,7 @@
   <string name="setting_page_search_title">Служба поиска</string>
   <string name="setting_page_share">Поделиться</string>
   <string name="setting_page_share_desc">Поделиться этим приложением с друзьями</string>
-  <string name="setting_page_share_text">RikkaHub — открытый Android-ассистент с ИИ\n\nСайт: https://rikka-ai.com/</string>
+  <string name="setting_page_share_text">Inova — открытый Android-ассистент с ИИ\n\nСайт: https://rikka-ai.com/</string>
   <string name="setting_page_sponsor_alert_confirm">Пожертвовать</string>
   <string name="setting_page_sponsor_alert_desc">Вы запустили приложение более 100 раз! Если вам нравится им пользоваться, пожалуйста, поддержите разработчика.</string>
   <string name="setting_page_sponsor_alert_dismiss">Не сейчас</string>
@@ -873,7 +873,7 @@
   <string name="setting_page_web_server_address_note_desc">LAN-адрес: использует IP-адрес устройства в Wi-Fi, доступен другим устройствам в той же сети. Недоступен при использовании мобильных данных.
 Локальный адрес: использует localhost, доступен только на этом устройстве.
 Адрес mDNS: использует имя хоста .local, доступен по имени с других устройств в той же сети без знания IP-адреса.</string>
-  <string name="setting_page_web_server_desc">Разрешить доступ к RikkaHub через веб</string>
+  <string name="setting_page_web_server_desc">Разрешить доступ к Inova через веб</string>
   <string name="setting_page_web_server_error">Ошибка</string>
   <string name="setting_page_web_server_jwt_enable">Включить аутентификацию</string>
   <string name="setting_page_web_server_jwt_enable_desc">Требовать проверку пароля при доступе к веб-интерфейсу</string>
@@ -1312,5 +1312,26 @@
   <string name="chat_drawer_sync_no_changes">Нет изменений для синхронизации</string>
   <string name="pending_guidance_queued">Ожидание подсказки: %1$s</string>
   <string name="user_guidance_title">Подсказка пользователя</string>
+  <string name="search_picker_local_title">Локальный поиск</string>
+  <string name="search_picker_local_description">Подключение к различным сторонним поисковым провайдерам</string>
+  <string name="search_picker_model_title">Поиск через модель</string>
+  <string name="search_picker_model_description">Облачный поиск, встроенный в провайдера моделей</string>
+  <string name="search_picker_select_provider">Выберите провайдера поиска</string>
+  <string name="search_picker_turn_off">Отключить поиск</string>
+  <string name="setting_update_reminder_enabled">Напоминания об обновлениях включены</string>
+  <string name="setting_update_reminder_paused_until">Приостановлено до %1$s</string>
+  <string name="setting_update_reminder_pause_title">Приостановить напоминания об обновлениях</string>
+  <string name="setting_update_reminder_pause_description">Выберите, как долго приостановить напоминания об обновлениях. Они возобновятся автоматически.</string>
+  <string name="setting_update_reminder_pause_days">%1$d дн.</string>
+  <string name="setting_update_reminder_resume_now">Возобновить сейчас</string>
+  <string name="reasoning_max">Максимум</string>
+  <string name="backup_page_import_overwrite_confirm">Импорт резервной копии перезапишет данные приложения. Продолжить?</string>
+  <string name="setting_page_preferences_network">Сеть</string>
+  <string name="setting_page_preferences_network_desc">Настройки User-Agent и сетевых запросов</string>
+  <string name="setting_page_preferences_network_user_agent">User-Agent</string>
+  <string name="setting_page_preferences_network_user_agent_desc">Оставьте пустым, чтобы использовать %1$s</string>
+  <string name="setting_page_preferences_network_proxy">Прокси</string>
+  <string name="setting_page_preferences_network_proxy_desc">Поддерживает HTTP и SOCKS5 прокси-URL. Оставьте пустым для использования системных настроек.</string>
+  <string name="setting_page_preferences_network_proxy_invalid">Введите корректный URL прокси-сервера с хостом и портом.</string>
 </resources>
 

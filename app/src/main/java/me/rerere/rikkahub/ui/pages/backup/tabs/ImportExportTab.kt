@@ -17,7 +17,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MultiChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.StickyHeader
@@ -54,6 +59,7 @@ fun ImportExportTab(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val selectedBackupItems by vm.localBackupItems.collectAsStateWithLifecycle()
     var isExporting by remember { mutableStateOf(false) }
     var isRestoring by remember { mutableStateOf(false) }
     // 选中文件后、确认框弹出前的"拷贝+解析预览"阶段，用于展示进度框避免黑屏
@@ -165,6 +171,39 @@ fun ImportExportTab(
 
         item {
             CardGroup {
+                item(
+                    headlineContent = { Text(stringResource(R.string.backup_page_backup_items)) },
+                    supportingContent = {
+                        MultiChoiceSegmentedButtonRow(
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            WebDavConfig.BackupItem.entries.forEachIndexed { index, item ->
+                                SegmentedButton(
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index = index,
+                                        count = WebDavConfig.BackupItem.entries.size
+                                    ),
+                                    onCheckedChange = { checked ->
+                                        val newItems = if (checked) {
+                                            selectedBackupItems + item
+                                        } else {
+                                            selectedBackupItems - item
+                                        }
+                                        vm.updateLocalBackupItems(newItems)
+                                    },
+                                    checked = item in selectedBackupItems
+                                ) {
+                                    Text(
+                                        when (item) {
+                                            WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
+                                            WebDavConfig.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
                 item(
                     onClick = if (!isExporting) {
                         {

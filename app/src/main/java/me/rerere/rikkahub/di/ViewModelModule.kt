@@ -129,6 +129,7 @@ val viewModelModule = module {
                 runCatching { WorkspaceStorageArea.valueOf(name) }.getOrNull()
             },
             initialPath = initialPath,
+            terminalSessionManager = get(),
         )
     }
     viewModelOf(::FavoriteVM)

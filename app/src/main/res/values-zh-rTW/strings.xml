@@ -7,7 +7,7 @@
   <string name="about_page_version">版本</string>
   <string name="about_page_website">官網</string>
   <string name="add">添加</string>
-  <string name="app_name">RikkaHub</string>
+  <string name="app_name">Inova</string>
   <string name="asr_button_content_description">語音辨識</string>
   <string name="asr_button_stop">停止</string>
   <string name="assistant_detail_basic_desc">設定名稱、頭像、模型與參數</string>
@@ -845,7 +845,7 @@
   <string name="setting_page_search_title">搜尋服務</string>
   <string name="setting_page_share">分享</string>
   <string name="setting_page_share_desc">分享本APP給朋友</string>
-  <string name="setting_page_share_text">RikkaHub - 開源安卓AI助手\n\n官網: https://rikka-ai.com/</string>
+  <string name="setting_page_share_text">Inova - 開源安卓AI助手\n\n官網: https://rikka-ai.com/</string>
   <string name="setting_page_sponsor_alert_confirm">捐款</string>
   <string name="setting_page_sponsor_alert_desc">您已啟動應用程式超過 100 次！如果您喜歡使用它，請考慮支持開發者。</string>
   <string name="setting_page_sponsor_alert_dismiss">稍後再說</string>
@@ -871,7 +871,7 @@
   <string name="setting_page_web_server">Web伺服器</string>
   <string name="setting_page_web_server_address_note">位址備註</string>
   <string name="setting_page_web_server_address_note_desc">LAN 位址：使用裝置 WiFi IP，可供同一網路上的其他裝置存取。行動數據無法使用。\n本機位址：使用 localhost，僅供本裝置存取。\nmDNS 位址：使用 .local 主機名稱，可供同一網路上的其他裝置透過名稱存取，無需知道 IP。</string>
-  <string name="setting_page_web_server_desc">允許您透過網頁存取 RikkaHub</string>
+  <string name="setting_page_web_server_desc">允許您透過網頁存取 Inova</string>
   <string name="setting_page_web_server_error">錯誤</string>
   <string name="setting_page_web_server_jwt_enable">啟用身分驗證</string>
   <string name="setting_page_web_server_jwt_enable_desc">存取網頁介面時需要密碼驗證</string>
@@ -1310,5 +1310,26 @@
   <string name="chat_drawer_sync_no_changes">無需同步，本地與雲端一致</string>
   <string name="pending_guidance_queued">引導已排入：%1$s</string>
   <string name="user_guidance_title">使用者引導</string>
+  <string name="search_picker_local_title">本機搜尋</string>
+  <string name="search_picker_local_description">連線至各種第三方搜尋提供者</string>
+  <string name="search_picker_model_title">模型搜尋</string>
+  <string name="search_picker_model_description">模型提供者內建的雲端搜尋</string>
+  <string name="search_picker_select_provider">選擇搜尋提供者</string>
+  <string name="search_picker_turn_off">關閉搜尋</string>
+  <string name="setting_update_reminder_enabled">更新提醒已啟用</string>
+  <string name="setting_update_reminder_paused_until">已暫停至 %1$s</string>
+  <string name="setting_update_reminder_pause_title">暫停更新提醒</string>
+  <string name="setting_update_reminder_pause_description">選擇暫停更新提醒的時長。它們會自動恢復。</string>
+  <string name="setting_update_reminder_pause_days">%1$d 天</string>
+  <string name="setting_update_reminder_resume_now">立即恢復</string>
+  <string name="reasoning_max">最大</string>
+  <string name="backup_page_import_overwrite_confirm">匯入備份將覆寫應用程式資料。是否繼續？</string>
+  <string name="setting_page_preferences_network">網路</string>
+  <string name="setting_page_preferences_network_desc">User-Agent 和網路請求設定</string>
+  <string name="setting_page_preferences_network_user_agent">User-Agent</string>
+  <string name="setting_page_preferences_network_user_agent_desc">留空以使用 %1$s</string>
+  <string name="setting_page_preferences_network_proxy">代理</string>
+  <string name="setting_page_preferences_network_proxy_desc">支援 HTTP 和 SOCKS5 代理網址。留空以使用系統設定。</string>
+  <string name="setting_page_preferences_network_proxy_invalid">請輸入包含主機和連接埠的有效代理 URL。</string>
 </resources>
 
