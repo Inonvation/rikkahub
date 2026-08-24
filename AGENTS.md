@@ -10,7 +10,7 @@
 - 自定义包名 `com.inonvation.rikkahub`，自定义签名 `keystore.jks`
 - `origin` → `https://github.com/Inonvation/rikkahub.git`（日常推送）
 - `upstream` → `https://github.com/rikkahub/rikkahub.git`（原项目）
-- **永不向 upstream 推送或提 PR**；拉上游用 `git fetch upstream && git merge upstream/main`
+- **永不向 upstream 推送或提 PR**；拉上游用 `git fetch upstream && git merge upstream/master`（上游默认分支为 `master`）
 
 更多定制细节见 `CLAUDE.md`。
 

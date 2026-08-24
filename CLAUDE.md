@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **永远不要向 `upstream` 提 PR 或推送**。`upstream` 指向原项目 `rikkahub/rikkahub`。
 - 日常推送只推 `origin`（你自己 GitHub 的 `Inonvation/rikkahub`）。
-- 拉取上游更新用 `git fetch upstream && git merge upstream/main`，有冲突手动解决。
+- 拉取上游更新用 `git fetch upstream && git merge upstream/master`（上游默认分支为 `master`），有冲突手动解决。
 
 ### 远程地址
 
