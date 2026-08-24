@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -90,8 +91,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import me.rerere.ai.core.MessageRole
@@ -146,6 +147,9 @@ fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
     state: LazyListState,
+    // 用户手指是否正按在消息列表上（由 ChatPage 的 pointerInput 维护）：程序滚动
+    // （自动跟随）在用户触碰列表期间绝不发起，避免拖拽中被拽回。
+    isUserInteracting: MutableState<Boolean>? = null,
     loading: Boolean,
     processingStatus: String? = null,
     previewMode: Boolean,
@@ -190,6 +194,7 @@ fun ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 state = state,
+                isUserInteracting = isUserInteracting,
                 loading = loading,
                 processingStatus = processingStatus,
                 settings = settings,
@@ -222,6 +227,7 @@ private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
     state: LazyListState,
+    isUserInteracting: MutableState<Boolean>? = null,
     loading: Boolean,
     processingStatus: String? = null,
     settings: Settings,
@@ -253,6 +259,8 @@ private fun ChatListNormal(
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    // 思考悬浮冻结条状态：折叠/展开的程序滚动与高度动画期间置 scrollingByProgram，抑制自动跟随抢滚
+    val thinkingFreezeState = LocalThinkingFreezeState.current
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -262,7 +270,10 @@ private fun ChatListNormal(
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     settings.displaySetting.volumeKeyScrollRatio
-                scope.launch { state.scrollBy(if (isVolumeUp) scrollAmount else -scrollAmount) }
+                // 音量上=往历史滚（普通布局负 delta）；reverseLayout 时代被翻转，这里还原。
+                // 音量键滚动视为手动滚动：解除跟随，回底后由"稳定回底"重新武装。
+                userScrolledUp = true
+                scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
         }
@@ -326,21 +337,33 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动跟随：加载中、最后一条未定稿且用户未主动上滑时，把列表保持在底部。
-        // 新内容追加使列表暂时离开底部不算"用户上滑"（否则第二条起永远不再跟随），
-        // 只有用户真正滚动向上才取消跟随；滚回底部或发送消息后自动恢复。
-        LaunchedEffect(state, loadingState) {
+        // 仅当新增节点是用户消息（用户主动发送）时复位跟随闩锁：
+        // 发送后应跟随新输出；生成中追加的助手/工具节点不复位，避免读历史时被重新武装拽回。
+        LaunchedEffect(conversationUpdated.messageNodes.size) {
+            if (conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.role == MessageRole.USER) {
+                userScrolledUp = false
+            }
+        }
+
+        // 自动跟随：加载中且用户未主动上滑时，把列表保持在底部。
+        // 状态机：用户主动上滑/跳离底部 → userScrolledUp=true 取消跟随；
+        // 只有滚动稳定且回到真正底部 → userScrolledUp=false 恢复跟随（"稳定回底才重新武装"）。
+        // 新内容追加使列表暂时离开底部不算"用户上滑"（否则第二条起永远不再跟随）。
+        // 跟随用可取消的挂起 scrollToItem（effect 重启/新 emission 即取消在途滚动），
+        // 不用 fire-and-forget 的 requestScrollToItem——它在滚动进行中会硬跳并把位置钉死，
+        // 且会在列表内部作用域排一个手势结束后的补正协程（"闪到底又弹回"根因）。
+        LaunchedEffect(state, loadingState, settings.displaySetting.enableAutoScroll, thinkingFreezeState) {
             if (settings.displaySetting.enableAutoScroll) {
-                var lastIdx = 0
-                var lastOff = 0
+                // 从当前真实位置起步，避免 effect 因 loadingState 变化重启后把"已经上滑"误判成"原地未动"
+                var lastIdx = state.firstVisibleItemIndex
+                var lastOff = state.firstVisibleItemScrollOffset
                 snapshotFlow {
-                    Triple(
+                    Pair(
                         state.layoutInfo,
                         state.isScrollInProgress,
-                        conversationUpdated.messageNodes.lastOrNull()?.currentMessage?.finishedAt,
                     )
-                }.collect { (info, inProgress, lastFinishedAt) ->
-                    val last = info.visibleItemsInfo.lastOrNull() ?: return@collect
+                }.collectLatest { (info, inProgress) ->
+                    val last = info.visibleItemsInfo.lastOrNull() ?: return@collectLatest
                     val pinned = isChatListPinnedToBottom(
                         totalItemsCount = info.totalItemsCount,
                         lastVisibleIndex = last.index,
@@ -350,45 +373,43 @@ private fun ChatListNormal(
                     )
                     val idx = state.firstVisibleItemIndex
                     val off = state.firstVisibleItemScrollOffset
-                    // 1) 用户滚动中上滑（看历史）→ 取消跟随
-                    if (inProgress) {
-                        val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
-                        if (movedUp) userScrolledUp = true
+                    val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
+                    // 1) 只在用户真实手势（inProgress）中检测"上滑"取消跟随；
+                    //    程序滚动/锚点重排造成的位置变化不算——否则发送贴底的重锚瞬时会误判成
+                    //    用户上滑，导致整个生成期间跟随被禁（第二条消息不跟随的根因）。
+                    if (inProgress && movedUp) {
+                        userScrolledUp = true
                     }
-                    // 2) 滚回真正底部 → 恢复跟随
-                    if (!inProgress && pinned) {
+                    // 2) 滚动稳定且回到真正底部 → 恢复跟随
+                    val liveScrolling = state.isScrollInProgress
+                    if (!inProgress && !liveScrolling && pinned) {
                         userScrolledUp = false
                     }
+                    // 思考折叠/展开的程序滚动与高度动画期间不跟随，避免抢滚
+                    val folding = thinkingFreezeState?.scrollingByProgram == true
+                    val shouldFollow = !userScrolledUp && loadingState && !pinned
+                    // 触点守护：用户手指正按在列表上绝不跟随。isScrollInProgress 要越过
+                    // touch-slop 后才置位，覆盖不了"手指已按下但尚未消费滚动"的帧级竞态；
+                    // down 事件即置位的触点状态把这个窗口封死，杜绝在拖拽期间发起
+                    // scrollToItem 排队到松手后执行（"生成完/切会话后下拉被拽回"根因）。
+                    val requestNow = !inProgress && !liveScrolling && !folding && shouldFollow &&
+                        (isUserInteracting?.value != true)
                     lastIdx = idx
                     lastOff = off
-                    // 3) 跟随：生成中、最后一条未定稿、用户未主动上滑
-                    if (!inProgress && !userScrolledUp && loadingState && lastFinishedAt == null) {
-                        state.requestScrollToItem(info.totalItemsCount - 1)
+                    // 3) 跟随：仅当"生成中、用户未上滑、列表已离开底部"时发请求。
+                    //    已钉底/正在滚动/思考折叠动画/用户触碰中都不发。发请求前用实时
+                    //    isScrollInProgress 二次校验，挡住 snapshotFlow 的陈旧快照。
+                    if (requestNow && !state.isScrollInProgress) {
+                        state.scrollToItem(info.totalItemsCount - 1)
                     }
                 }
             }
         }
 
-        // 生成结束的一次性落定：若仍钉在底部，把最后内容滚到可见（用户已上滑则跳过）
-        LaunchedEffect(loadingState) {
-            if (!loadingState) {
-                snapshotFlow { state.layoutInfo }
-                    .first { it.totalItemsCount > 0 }
-                val info = state.layoutInfo
-                val last = info.visibleItemsInfo.lastOrNull() ?: return@LaunchedEffect
-                if (isChatListPinnedToBottom(
-                        totalItemsCount = info.totalItemsCount,
-                        lastVisibleIndex = last.index,
-                        lastItemEnd = last.offset + last.size,
-                        viewportEnd = info.viewportEndOffset,
-                        afterContentPadding = info.afterContentPadding,
-                    )
-                ) {
-                    state.requestScrollToItem(info.totalItemsCount - 1)
-                }
-            }
-        }
-
+        // 生成结束不再发任何滚动请求（38217976 语义：生成结束即停止跟随）。
+        // 此前的"落定 effect"会在 loading 翻转后继续发 requestScrollToItem，落在用户
+        // 刚起手的那一帧就把列表硬拽到底（"闪到底后弹回"），这里整体移除；
+        // 最后一块内容的可见性由跟随逻辑在流式最后一帧保证。
         // 滚动预取：提前在后台解析视口附近消息的 markdown/HTML/LaTeX 并写入进程级缓存，
         // 消息真正进入视口时 MarkdownBlock/MarkdownNew 命中缓存、不再主线程同步解析（快速滚动掉帧根因）。
         // 按"每跨过 PREFETCH_WINDOW 条才触发一次 + 取消上一次未完成任务"合并快速滚动时的并发任务，
@@ -588,7 +609,8 @@ private fun ChatListNormal(
                         CompressedHistoryCard(summary = history.summaryText)
                     }
                 }
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+            // 常驻（不随 loading 显隐）：生成结束不再插入新 item，避免 LazyColumn 锚点重排跳动
+            if (assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
                 item(key = "ConversationSystemPrompt") {
                     ConversationSystemPromptButton(
                         customSystemPrompt = conversation.customSystemPrompt,

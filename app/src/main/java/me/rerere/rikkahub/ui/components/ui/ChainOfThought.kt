@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -105,7 +106,9 @@ fun <T> ChainOfThought(
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 4.dp)
                     .animateContentSize(
-                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                        // 折叠/展开高度动画用短 tween 而非 expressive spring（~600ms）：
+                        // spring 收敛窗口长，折叠期间 LazyColumn 锚点随高度持续漂移，放大"上滑抖/被拽回"。
+                        animationSpec = tween(200)
                     ),
             ) {
                 // 对齐上游：折叠时直接截断步骤（visibleSteps），用 animateContentSize 平滑高度。

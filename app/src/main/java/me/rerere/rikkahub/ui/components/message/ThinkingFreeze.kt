@@ -42,6 +42,9 @@ class ThinkingFreezeState {
     /** 列表内容区顶边的窗口 Y（顶栏底边）；思考头部滚到其上方即进入冻结区 */
     var topBarBottomY by mutableIntStateOf(Int.MAX_VALUE)
 
+    /** 思考折叠/展开的程序滚动与高度动画进行中：自动跟随应跳过抢滚 */
+    var scrollingByProgram by mutableStateOf(false)
+
     /** 已注册的思考步骤，key 为 reasoning 节 key，由 ChatMessageReasoningStep 维护 */
     val sections = mutableStateMapOf<String, ThinkingFrozenBarSection>()
 
@@ -90,6 +93,16 @@ val LocalThinkingFreezeState = staticCompositionLocalOf<ThinkingFreezeState?> { 
  * 挂起函数：调用方（悬浮条点击等）在协程中调用，可等待滚动完成再继续。
  */
 val LocalScrollThinkingHeaderToPin = staticCompositionLocalOf<((suspend (Float) -> Unit)?)> { null }
+
+/** 由聊天页提供：当前列表是否钉在底部（折叠思考后判断是否需要重新贴底） */
+val LocalIsChatListAtBottom = staticCompositionLocalOf<(() -> Boolean)?> { null }
+
+/**
+ * 由聊天页提供：把列表滚回底部（折叠思考后抵消 LazyColumn scrollBack 的上移）。
+ * 挂起实现：内部检查用户是否已滑离底部，且可被取消（用户开始滚动时放弃贴底），
+ * 避免"看历史时突然被拽回底部"。
+ */
+val LocalScrollChatToBottom = staticCompositionLocalOf<(suspend () -> Unit)?> { null }
 
 /**
  * 悬浮吸顶条：位于聊天顶栏下方（列表内容区顶边），与顶栏无间距。

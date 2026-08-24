@@ -87,6 +87,8 @@ private class ReasoningState(
 private fun rememberReasoningState(
     reasoning: UIMessagePart.Reasoning,
     stateKey: String?,
+    /** 列表当前是否钉在底部：仅贴底时才自动折叠思考，避免高度骤减触发 LazyColumn scrollBack 吸底 */
+    atBottom: () -> Boolean,
 ): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
     val loading = reasoning.finishedAt == null
@@ -102,6 +104,16 @@ private fun rememberReasoningState(
                 val remembered = getSectionExpanded(stateKey)
                 if (remembered != null) {
                     s.expandState = if (remembered) ReasoningCardState.Expanded else ReasoningCardState.Collapsed
+                } else {
+                    // 无记忆：已完成消息按 autoCloseThinking 决定初始展开态。
+                    // 此前固定 Collapsed，消息被重新组合（打开历史对话/列表回收后回来）时
+                    // 生成完的展开逻辑（只在 expanded 时才处理）不会生效，思考被固定折叠，
+                    // 即"关闭自动折叠思考后内容仍自动折叠"的根因。
+                    s.expandState = if (reasoning.finishedAt != null && !settings.displaySetting.autoCloseThinking) {
+                        ReasoningCardState.Expanded
+                    } else {
+                        ReasoningCardState.Collapsed
+                    }
                 }
             }
         }
@@ -119,10 +131,16 @@ private fun rememberReasoningState(
             if (state.expandState.expanded) {
                 // 生成结束先让位一帧，再折叠，避免高度动画与 LazyColumn 锚点调整抢同一帧
                 withFrameNanos {}
-                state.expandState = if (settings.displaySetting.autoCollapseAllSteps || settings.displaySetting.autoCloseThinking) {
-                    ReasoningCardState.Collapsed
-                } else {
-                    ReasoningCardState.Expanded
+                // 对齐上游：思考内容自身的折叠只受"自动折叠思考"控制；
+                // "自动折叠所有步骤"负责过程内容（思考链/工具链）整体折叠，不掺进这里。
+                // 只有列表贴底时才自动折叠：贴底时折叠后由 scrollBack/贴底逻辑保持底部；
+                // 用户在看历史时保持展开，避免 item 高度骤减触发 LazyColumn scrollBack
+                // 把列表吸回底部（"生成完自动滚到底 + 下拉跳动"根因）。
+                val autoClose = settings.displaySetting.autoCloseThinking
+                state.expandState = when {
+                    autoClose && atBottom() -> ReasoningCardState.Collapsed
+                    !autoClose -> ReasoningCardState.Expanded
+                    else -> state.expandState
                 }
             }
         }
@@ -225,7 +243,14 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val stateKey = remember(reasoning.createdAt, conversationId) {
         conversationId?.let { "reasoning:$it:${reasoning.createdAt}" }
     }
-    val (state, loading) = rememberReasoningState(reasoning, stateKey)
+    // 折叠后重新贴底/自动折叠判断用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
+    val isChatListAtBottom = LocalIsChatListAtBottom.current
+    val scrollChatToBottom = LocalScrollChatToBottom.current
+    val (state, loading) = rememberReasoningState(
+        reasoning = reasoning,
+        stateKey = stateKey,
+        atBottom = { isChatListAtBottom?.invoke() == true },
+    )
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
     val chatFontFamily = LocalTextStyle.current.fontFamily
@@ -283,33 +308,56 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         val fs = freezeState
         if (fs != null) {
             val pin = fs.topBarBottomY
+            // 折叠/展开的程序滚动与高度动画窗口内置位 scrollingByProgram，
+            // 抑制自动跟随抢滚（避免折叠后上滑被拽回底部）。
+            suspend fun programScroll(block: suspend () -> Unit) {
+                fs.scrollingByProgram = true
+                try {
+                    block()
+                    // 等短高度动画（~200ms）窗口过去再释放
+                    delay(250)
+                } finally {
+                    fs.scrollingByProgram = false
+                }
+            }
             if (loading) {
                 if (section.folded.value) {
                     // 滚动展开：下滚，头部回到吸顶线下方，解除吸顶（条淡出、真实头部淡入）
                     stepScope.launch {
-                        scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
-                        section.folded.value = false
+                        programScroll {
+                            scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
+                            section.folded.value = false
+                        }
                     }
                 } else {
                     // 滚动折叠：上滚，思考内容滚出条上方，输出顶部落到条正下方
                     stepScope.launch {
-                        scrollHeaderToPin?.invoke(section.bottomY.value - (pin + frozenGapPx))
-                        section.folded.value = true
+                        programScroll {
+                            scrollHeaderToPin?.invoke(section.bottomY.value - (pin + frozenGapPx))
+                            section.folded.value = true
+                        }
                     }
                 }
             } else if (state.expandState != ReasoningCardState.Collapsed) {
                 // 真实折叠：把头部滚到吸顶线（纯滚动），再收起内容；头部在吸顶线停住
                 section.folded.value = false
                 val target = pin + frozenGapPx
+                val wasAtBottom = isChatListAtBottom?.invoke() == true
                 stepScope.launch {
-                    scrollHeaderToPin?.invoke(section.topY.value - target)
-                    state.onExpandedChange(false, loading)
-                    if (stateKey != null) setSectionExpanded(stateKey, false)
-                    // 等预滚动位置落定，按实测坐标做一次最终校准（漂移超阈值才补滚）
-                    withFrameNanos { }
-                    val drift = section.topY.value - target
-                    if (abs(drift) > foldDriftPx) {
-                        scrollHeaderToPin?.invoke(drift)
+                    programScroll {
+                        scrollHeaderToPin?.invoke(section.topY.value - target)
+                        state.onExpandedChange(false, loading)
+                        if (stateKey != null) setSectionExpanded(stateKey, false)
+                        // 等预滚动位置落定，按实测坐标做一次最终校准（漂移超阈值才补滚）
+                        withFrameNanos { }
+                        val drift = section.topY.value - target
+                        if (abs(drift) > foldDriftPx) {
+                            scrollHeaderToPin?.invoke(drift)
+                        }
+                    }
+                    // programScroll 内含 250ms 动画等待；若折叠前在底部，重新贴底抵消 scrollBack 上移
+                    if (wasAtBottom) {
+                        scrollChatToBottom?.invoke()
                     }
                 }
             } else {
@@ -317,9 +365,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 section.folded.value = false
                 val target = pin + frozenGapPx
                 stepScope.launch {
-                    scrollHeaderToPin?.invoke(section.topY.value - target)
-                    state.onExpandedChange(true, loading)
-                    if (stateKey != null) setSectionExpanded(stateKey, true)
+                    programScroll {
+                        scrollHeaderToPin?.invoke(section.topY.value - target)
+                        state.onExpandedChange(true, loading)
+                        if (stateKey != null) setSectionExpanded(stateKey, true)
+                    }
                 }
             }
         }
@@ -332,12 +382,17 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             section.folded.value = false
             val fs = freezeState
             if (fs != null) {
-                val target = fs.topBarBottomY + frozenGapPx
-                scrollHeaderToPin?.invoke(section.topY.value - target)
-                withFrameNanos { }
-                val drift = section.topY.value - target
-                if (abs(drift) > foldDriftPx) {
-                    scrollHeaderToPin?.invoke(drift)
+                fs.scrollingByProgram = true
+                try {
+                    val target = fs.topBarBottomY + frozenGapPx
+                    scrollHeaderToPin?.invoke(section.topY.value - target)
+                    withFrameNanos { }
+                    val drift = section.topY.value - target
+                    if (abs(drift) > foldDriftPx) {
+                        scrollHeaderToPin?.invoke(drift)
+                    }
+                } finally {
+                    fs.scrollingByProgram = false
                 }
             }
         }
@@ -378,9 +433,17 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { next ->
+            val wasAtBottom = !next && (isChatListAtBottom?.invoke() == true)
             state.onExpandedChange(next, loading)
             // 用户手动操作才记录；生成中自动 preview/autoClose 不经过此回调，不影响记忆
             if (stateKey != null) setSectionExpanded(stateKey, next)
+            // 折叠若发生在底部：等高度动画落定后重新贴底，抵消 LazyColumn scrollBack 的上移
+            if (wasAtBottom) {
+                stepScope.launch {
+                    delay(250)
+                    scrollChatToBottom?.invoke()
+                }
+            }
         },
         icon = {
             Icon(

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -214,25 +215,35 @@ fun ChatMessage(
             message.parts.isEmptyUIMessage().not()
         }
 
-        AnimatedVisibility(
-            visible = showActions,
-            enter = slideInVertically { it / 2 } + fadeIn(),
-            exit = slideOutVertically { it / 2 } + fadeOut()
+        // 末条消息的操作按钮行常驻占位高度（生成中也占位）：消除生成结束瞬间
+        // 消息高度突变导致的 LazyColumn 锚点重排跳动（无输入时列表自移 ~30px）。
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = if (lastMessage) 32.dp else 0.dp),
+            // 用户消息的按钮行保持右对齐（与气泡对齐），助手消息左对齐
+            horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         ) {
-            Column(
-                modifier = Modifier.animateContentSize()
+            AnimatedVisibility(
+                visible = showActions,
+                enter = slideInVertically { it / 2 } + fadeIn(),
+                exit = slideOutVertically { it / 2 } + fadeOut()
             ) {
-                ChatMessageActionButtons(
-                    message = message,
-                    onRegenerate = onRegenerate,
-                    node = node,
-                    onUpdate = onUpdate,
-                    onOpenActionSheet = {
-                        showActionsSheet = true
-                    },
-                    onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
-                )
+                Column(
+                    modifier = Modifier.animateContentSize()
+                ) {
+                    ChatMessageActionButtons(
+                        message = message,
+                        onRegenerate = onRegenerate,
+                        node = node,
+                        onUpdate = onUpdate,
+                        onOpenActionSheet = {
+                            showActionsSheet = true
+                        },
+                        onTranslate = onTranslate,
+                        onClearTranslation = onClearTranslation
+                    )
+                }
             }
         }
 
@@ -323,6 +334,11 @@ private fun MessagePartsBlock(
     val hapticFeedback = LocalHapticFeedback.current
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
+    // 折叠后重新贴底用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
+    val isChatListAtBottom = LocalIsChatListAtBottom.current
+    val scrollChatToBottom = LocalScrollChatToBottom.current
+    // 记录折叠瞬间是否在底部：动画落定后重新贴底，抵消 LazyColumn scrollBack 的上移
+    var collapseAtBottom by remember { mutableStateOf(false) }
 
     // 思考链"已处理"时长：消息创建到完成（AI 处理这条请求的总耗时），用于折叠态标题统计
     // 实时"已处理"时长：生成中每秒刷新，完成后固定为消息创建到完成
@@ -358,7 +374,12 @@ private fun MessagePartsBlock(
     // 流式中工具执行完成事件若与调用同批到达，step 级折叠可能漏触发，此处兜底保证一定生效。
     var prevLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, settings.displaySetting.autoCollapseAllSteps) {
-        if (!loading && prevLoading && settings.displaySetting.autoCollapseAllSteps) {
+        // 仅贴底时自动折叠：折叠会使消息高度骤减（含视口上方的历史消息），用户在看历史/
+        // 拖拽中触发会引发 LazyColumn 位置修正把列表吸回底部（"下拉被拽回"根因）；
+        // 贴底时折叠由底部锚定吸收，视觉无跳变。与 reasoning 的 autoCloseThinking 守卫对齐。
+        if (!loading && prevLoading && settings.displaySetting.autoCollapseAllSteps &&
+            (isChatListAtBottom?.invoke() != false)
+        ) {
             withFrameNanos {}
             parts.forEach { part ->
                 if (part is UIMessagePart.Tool && part.isExecuted) {
@@ -413,13 +434,19 @@ private fun MessagePartsBlock(
     var chainCollapsed by remember(nodeId, autoCollapseAll) {
         mutableStateOf(autoCollapseAll && !loading && hasProcessContent)
     }
-    // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态
+    // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态。
+    // 完成后折叠仅在列表贴底时执行：折叠会把本消息的过程内容收掉（高度骤减，含视口上方的历史消息），
+    // 用户在看历史/拖拽中触发会引发 LazyColumn 位置修正（"下拉被拽回"根因）；贴底时由底部锚定吸收。
     LaunchedEffect(loading, autoCollapseAll) {
         if (autoCollapseAll) {
             if (!loading) {
                 withFrameNanos {}
+                if (hasProcessContent && isChatListAtBottom?.invoke() != false) {
+                    chainCollapsed = true
+                }
+            } else {
+                chainCollapsed = false
             }
-            chainCollapsed = !loading && hasProcessContent
         }
     }
 
@@ -711,7 +738,10 @@ private fun MessagePartsBlock(
         // 普通布局下过程内容在卡片下方展开/收起，卡片本身顶部锚定不动。
         if (hasProcessContent) {
             Card(
-                onClick = { chainCollapsed = !chainCollapsed },
+                onClick = {
+                    collapseAtBottom = !chainCollapsed && (isChatListAtBottom?.invoke() == true)
+                    chainCollapsed = !chainCollapsed
+                },
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                 ),
@@ -735,6 +765,14 @@ private fun MessagePartsBlock(
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
+            }
+        }
+
+        // 过程内容折叠若发生在底部：等高度动画落定后重新贴底，抵消 scrollBack 上移
+        LaunchedEffect(chainCollapsed) {
+            if (chainCollapsed && collapseAtBottom) {
+                delay(250)
+                scrollChatToBottom?.invoke()
             }
         }
 

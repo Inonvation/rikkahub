@@ -148,10 +148,13 @@
         android:resource="@xml/file_paths" />
     </provider>
     <!-- Shizuku UserService：以 shell(ADB) 身份运行，执行白名单命令 -->
+    <!-- Instantiatable 误报：Shizuku UserService 是 AIDL Binder（IShizukuCommandService.Stub），
+         按官方模式以 <service> 声明但不继承 android.app.Service，lint 无法识别，显式忽略 -->
     <service
       android:name=".data.shizuku.UserService"
       android:exported="false"
-      android:process=":shizuku" />
+      android:process=":shizuku"
+      tools:ignore="Instantiatable" />
     <!-- Shizuku: 允许应用以 shell(ADB) 权限调用系统 API（设备能力层） -->
     <provider
       android:name="rikka.shizuku.ShizukuProvider"

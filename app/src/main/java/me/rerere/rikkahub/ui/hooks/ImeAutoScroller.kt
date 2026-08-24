@@ -30,7 +30,10 @@ fun ImeLazyListAutoScroller(
                 return@collect
             }
             if (keyboardHeight > 0) {
-                lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
+                // 手势进行中跳过补偿滚动，避免与用户滚动抢帧（手势结束后由跟随/布局自然调整）
+                if (!lazyListState.isScrollInProgress) {
+                    lazyListState.scrollBy((keyboardHeight - imeHeigh).toFloat())
+                }
                 imeHeigh = keyboardHeight
             } else {
                 imeHeigh = 0
