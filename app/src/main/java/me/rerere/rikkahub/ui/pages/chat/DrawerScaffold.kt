@@ -2,7 +2,8 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -11,7 +12,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -28,18 +28,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 private enum class DrawerState { Closed, LeftOpen, RightOpen }
 
@@ -114,7 +113,13 @@ fun DrawerScaffold(
             if (drawerWasOpen.value && (leftDrawerOpen || rightDrawerOpen)) {
                 progress.snapTo(target)
             } else {
-                progress.animateTo(target, tween(300, easing = FastOutSlowInEasing))
+                progress.animateTo(
+                    target,
+                    spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
             }
             drawerWasOpen.value = leftDrawerOpen || rightDrawerOpen
         }
@@ -125,22 +130,8 @@ fun DrawerScaffold(
         if (leftDrawerOpen || rightDrawerOpen) keyboardController?.hide()
     }
 
-    // 位移由 progress 派生，三元素同宽同步
-    val p = progress.value
-    val pAbs = abs(p)
-    // 卡片让位：正=左开（右移），负=右开（左移）
-    val cardOffsetX = when {
-        p > 0f -> leftWidthPx * p
-        p < 0f -> rightWidthPx * p
-        else -> 0f
-    }
-    // 抽屉滑入：左抽屉左缘从 -leftWidth 滑到 0，右抽屉右缘从 rightWidth 滑到 0
-    val leftSlide = -leftWidthPx * (1f - p)
-    val rightSlide = rightWidthPx * (1f + p)
-    // 卡片圆角随展开渐显（关闭 0、全开 24dp），让卡片呈浮起形态
-    val cardCornerRadius = 24.dp * FastOutSlowInEasing.transform(pAbs)
-    // 卡片真实阴影，投影自然落在底层抽屉上
-    val cardElevation = 12.dp * FastOutSlowInEasing.transform(pAbs)
+    // 位移/圆角/阴影全部由 progress 派生，但只在 graphicsLayer 的 draw 阶段 lambda 里读取，
+    // 避免在组合期读取 progress.value 导致每帧重组整个界面（聊天列表也随之参与重排）。
 
     fun beginDrag() {
         isDragging = true
@@ -182,7 +173,13 @@ fun DrawerScaffold(
         )
         settleJob?.cancel()
         settleJob = scope.launch {
-            progress.animateTo(settledTarget, tween(300, easing = FastOutSlowInEasing))
+            progress.animateTo(
+                settledTarget,
+                spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
             onLeftDrawerOpenChange(settledTarget > 0f)
             onRightDrawerOpenChange(settledTarget < 0f)
             if (settledTarget != 0f) {
@@ -224,7 +221,9 @@ fun DrawerScaffold(
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
                 .width(leftDrawerWidth)
-                .offset { IntOffset(leftSlide.roundToInt(), 0) }
+                .graphicsLayer {
+                    translationX = -leftWidthPx * (1f - progress.value)
+                }
                 .then(
                     if (leftDrawerOpen) {
                         Modifier.draggable(
@@ -238,7 +237,7 @@ fun DrawerScaffold(
                     }
                 )
                 .drawWithContent {
-                    if (p > 0.01f) drawContent()
+                    if (progress.value > 0.01f) drawContent()
                 },
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp),
@@ -252,7 +251,9 @@ fun DrawerScaffold(
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
                 .width(rightDrawerWidth)
-                .offset { IntOffset(rightSlide.roundToInt(), 0) }
+                .graphicsLayer {
+                    translationX = rightWidthPx * (1f + progress.value)
+                }
                 .then(
                     if (rightDrawerOpen) {
                         Modifier.draggable(
@@ -266,7 +267,7 @@ fun DrawerScaffold(
                     }
                 )
                 .drawWithContent {
-                    if (p < -0.01f) drawContent()
+                    if (progress.value < -0.01f) drawContent()
                 },
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp),
@@ -275,10 +276,24 @@ fun DrawerScaffold(
         }
 
         // 3. 内容卡片（顶层，圆角 + 真实阴影随展开渐显）
+        // 位移/圆角/阴影都在 graphicsLayer 的 draw 阶段读取 progress 派生，避免每帧重组。
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .offset { IntOffset(cardOffsetX.roundToInt(), 0) }
+                .graphicsLayer {
+                    val p = progress.value
+                    val eased = FastOutSlowInEasing.transform(abs(p))
+                    translationX = when {
+                        p > 0f -> leftWidthPx * p
+                        p < 0f -> rightWidthPx * p
+                        else -> 0f
+                    }
+                    // 圆角随展开渐显（关闭 0、全开 24dp），让卡片呈浮起形态
+                    shape = RoundedCornerShape(24.dp * eased)
+                    // 卡片真实阴影，投影自然落在底层抽屉上（单位为像素）
+                    shadowElevation = (12.dp * eased).toPx()
+                    clip = true
+                }
                 .then(cardDragModifier)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -294,8 +309,6 @@ fun DrawerScaffold(
                         else if (rightDrawerOpen) onRightDrawerOpenChange(false)
                     }
                 },
-            shape = RoundedCornerShape(cardCornerRadius),
-            shadowElevation = cardElevation,
             color = MaterialTheme.colorScheme.background,
         ) {
             Box(Modifier.fillMaxSize()) {

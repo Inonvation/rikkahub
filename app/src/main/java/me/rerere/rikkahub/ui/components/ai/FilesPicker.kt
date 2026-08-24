@@ -45,7 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -184,7 +183,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onShowInjectionSheetChange(true)
                 },
         )
@@ -218,7 +217,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismiss()
                     navController.navigate(Screen.TrustedFolders)
                 },
@@ -258,7 +257,7 @@ internal fun FilesPicker(
                 if (boundWorkspace != null) {
                     IconButton(
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onDismiss()
                             navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
                         },
@@ -277,7 +276,7 @@ internal fun FilesPicker(
                 .clip(MaterialTheme.shapes.large)
                 .combinedClickable(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         if (boundWorkspace != null) {
                             onDismiss()
                             navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
@@ -286,7 +285,7 @@ internal fun FilesPicker(
                         }
                     },
                     onLongClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         if (workspaceReady) showCwdSheet = true else showWorkspaceSheet = true
                     },
                 ),
@@ -334,7 +333,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable(enabled = settings.mcpServers.isNotEmpty() && modePolicy.allowMcpUse) {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     showMcpSheet = true
                 },
         )
@@ -356,7 +355,7 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable(enabled = modePolicy.allowKnowledge) {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     showKbSheet = true
                 },
         )
@@ -581,7 +580,7 @@ private fun BigIconTextButton(
             .clip(RoundedCornerShape(8.dp))
             .clickable(
                 interactionSource = interactionSource, indication = LocalIndication.current, onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onClick()
                 }
             )

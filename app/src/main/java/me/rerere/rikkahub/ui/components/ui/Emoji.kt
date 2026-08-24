@@ -40,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -246,7 +245,7 @@ private fun EmojiItem(
             .size(40.dp)
             .combinedClickable(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onClick()
                 },
                 onLongClick = onLongClick
@@ -307,7 +306,7 @@ private fun EmojiModifierPicker(
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onEmojiSelected(variant) }
+                                .clickable { hapticController.lightTap(); onEmojiSelected(variant) }
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                             contentAlignment = Alignment.Center

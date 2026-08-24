@@ -43,7 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -175,7 +174,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                             onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
                             // 长按卡片进入多选并选中该项
                             onLongPressSelect = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 selecting = true
                                 if (!selectedItems.contains(workspace.id)) {
                                     selectedItems.add(workspace.id)

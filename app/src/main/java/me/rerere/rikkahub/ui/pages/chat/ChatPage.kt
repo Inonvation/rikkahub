@@ -283,21 +283,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
         }
     }
 
-    // AI 消息生成过程中触发触感反馈
-    var lastMessageGenerationHapticTime by remember { mutableStateOf(0L) }
-    LaunchedEffect(conversation.currentMessages.size) {
-        if (loadingJob != null) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastMessageGenerationHapticTime > 150) {
-                if (setting.displaySetting.enableHapticFeedback &&
-                    setting.displaySetting.enableMessageGenerationHapticEffect) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                }
-                lastMessageGenerationHapticTime = now
-            }
-        }
-    }
-
     // AI 消息生成完成后触发一次触感反馈
     LaunchedEffect(Unit) {
         vm.generationDoneFlow.collect { _ ->
@@ -1324,7 +1309,7 @@ private fun TopBar(
         navigationIcon = {
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onOpenLeftDrawer()
                 }
             ) {
@@ -1335,7 +1320,7 @@ private fun TopBar(
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
             Surface(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     if (conversation.messageNodes.isNotEmpty()) {
                         titleState.open(conversation.title)
                     } else {
@@ -1379,7 +1364,7 @@ private fun TopBar(
             }
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onCompressClick()
                 },
                 modifier = Modifier.size(44.dp),
@@ -1406,7 +1391,7 @@ private fun TopBar(
 
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onOpenRightDrawer()
                 }
             ) {
@@ -1415,7 +1400,7 @@ private fun TopBar(
 
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onClickMenu()
                 }
             ) {
@@ -1424,7 +1409,7 @@ private fun TopBar(
 
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onNewChat()
                 }
             ) {
@@ -1451,7 +1436,7 @@ private fun TopBar(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         titleState.confirm()
                     }
                 ) {
@@ -1461,7 +1446,7 @@ private fun TopBar(
             dismissButton = {
                 TextButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         titleState.dismiss()
                     }
                 ) {

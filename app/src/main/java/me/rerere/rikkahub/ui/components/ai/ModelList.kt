@@ -187,7 +187,7 @@ fun ModelSelector(
         ) {
             TextButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     state.open()
                 },
                 modifier = modifier
@@ -230,7 +230,7 @@ fun ModelSelector(
                     interactionSource = interactionSource,
                     indication = LocalIndication.current,
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         state.open()
                     },
                     onLongClick = onLongClick,
@@ -754,7 +754,7 @@ private fun ModelItem(
                             )
                         },
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onSelect(model)
                         },
                         interactionSource = interactionSource,

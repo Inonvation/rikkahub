@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,7 +110,7 @@ internal fun WorkspaceSelectSheet(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.large)
-                    .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onManage() },
+                    .clickable { hapticController.lightTap(); onManage() },
             )
         }
     }
@@ -152,7 +151,7 @@ private fun WorkspaceSelectRow(
             {
                 IconButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         it()
                     },
                 ) {
@@ -173,6 +172,6 @@ private fun WorkspaceSelectRow(
         ),
         modifier = Modifier
             .clip(MaterialTheme.shapes.large)
-            .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() },
+            .clickable { hapticController.lightTap(); onClick() },
     )
 }

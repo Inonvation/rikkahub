@@ -37,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonPrimitive
@@ -175,7 +174,7 @@ fun AskUserSheet(
                     Tab(
                         selected = index == selectedIndex,
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             selectedIndex = index
                         },
                         text = {
@@ -348,7 +347,7 @@ private fun TextQuestionInput(question: AskUserQuestion, answer: String, onAnswe
                 FilterChip(
                     selected = answer == option,
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onAnswerChange(if (answer == option) "" else option)
                     },
                     label = { Text(option, style = MaterialTheme.typography.labelSmall) },
@@ -394,7 +393,7 @@ private fun SingleSelectInput(
             FilterChip(
                 selected = answer == option,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onAnswerChange(if (answer == option) "" else option)
                     onSelected()
                 },
@@ -417,7 +416,7 @@ private fun MultiSelectInput(question: AskUserQuestion, selected: Set<String>, o
             FilterChip(
                 selected = selected.contains(option),
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onToggle(option)
                 },
                 label = { Text(option, style = MaterialTheme.typography.labelSmall) },
@@ -435,7 +434,7 @@ private fun ConfirmationInput(answer: String, onAnswerChange: (String) -> Unit, 
             FilterChip(
                 selected = answer == label,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onAnswerChange(if (answer == label) "" else label)
                     onSelected()
                 },

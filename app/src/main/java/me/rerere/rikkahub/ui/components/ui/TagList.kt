@@ -26,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,7 +68,7 @@ fun TagsInput(
                     modifier = Modifier
                         .size(16.dp)
                         .clickable {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onValueChange(
                                 value.filter { it != tag.id }, tags
                             )
@@ -85,7 +84,7 @@ fun TagsInput(
             tonalElevation = 2.dp,
             modifier = Modifier
                 .clip(CircleShape)
-                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); showAddDialog = true }) {
+                .clickable { hapticController.lightTap(); showAddDialog = true }) {
             Icon(
                 imageVector = HugeIcons.Add01,
                 contentDescription = stringResource(R.string.add),
@@ -131,7 +130,7 @@ fun TagsInput(
                         unselectedTags.forEach { tag ->
                             InputChip(
                                 onClick = {
-                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                    hapticController.lightTap()
                                     onValueChange(value + tag.id, tags)
                                     showAddDialog = false
                                     tagName = ""
@@ -179,7 +178,7 @@ fun TagsInput(
         }, confirmButton = {
             TextButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     if (tagName.isNotBlank()) {
                         val trimmedName = tagName.trim()
                         // 检查是否已存在同名标签

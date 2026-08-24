@@ -28,7 +28,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
@@ -82,7 +81,7 @@ fun TTSController() {
 
                 IconButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         ttsState.stop()
                         isVisible = false
                     }
@@ -145,7 +144,7 @@ private fun PlayPauseButton(
     val hapticController = rememberHaptic()
     FilledTonalIconButton(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             when (playbackState.status) {
                 PlaybackStatus.Playing -> {
                     ttsState.pause()
@@ -203,7 +202,7 @@ private fun SpeedButton(
     val hapticController = rememberHaptic()
     TextButton(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             when (playbackState.speed) {
                 0.8f -> {
                     ttsState.setSpeed(1.0f)

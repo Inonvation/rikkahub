@@ -36,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -115,7 +114,7 @@ fun AssistantPicker(
         trailingContent = {
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onClickSetting()
                 }
             ) {
@@ -199,7 +198,7 @@ internal fun AssistantPickerSheet(
                     items(settings.assistantTags, key = { tag -> tag.id }) { tag ->
                         FilterChip(
                             onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 selectedTagIds = if (tag.id in selectedTagIds) {
                                     selectedTagIds - tag.id
                                 } else {
@@ -224,7 +223,7 @@ internal fun AssistantPickerSheet(
                 items(filteredAssistants, key = { it.id }) { assistant ->
                     val checked = assistant.id == currentAssistant.id
                     Card(
-                        onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onAssistantSelected(assistant) },
+                        onClick = { hapticController.lightTap(); onAssistantSelected(assistant) },
                         modifier = Modifier.animateItem(),
                         shape = MaterialTheme.shapes.large,
                         colors = CardDefaults.cardColors(
@@ -305,7 +304,7 @@ private fun AssistantItem(
         trailingContent = {
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onEdit()
                 }
             ) {

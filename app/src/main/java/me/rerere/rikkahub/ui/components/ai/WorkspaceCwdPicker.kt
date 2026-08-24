@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -111,7 +110,7 @@ fun WorkspaceCwdPickerSheet(
                 IconButton(
                     enabled = browsePath.isNotBlank(),
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         browsePath = browsePath.substringBeforeLast('/', missingDelimiterValue = "")
                     },
                 ) {
@@ -154,7 +153,7 @@ fun WorkspaceCwdPickerSheet(
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             browsePath = entry.path
                         },
                     )
@@ -181,7 +180,7 @@ fun WorkspaceCwdPickerSheet(
             ) {
                 if (currentCwd != null) {
                     TextButton(onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onSelectCwd(null)
                         onDismiss()
                     }) {
@@ -189,7 +188,7 @@ fun WorkspaceCwdPickerSheet(
                     }
                 }
                 FilledTonalButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onSelectCwd(toAbsolutePath(browsePath))
                     onDismiss()
                 }) {

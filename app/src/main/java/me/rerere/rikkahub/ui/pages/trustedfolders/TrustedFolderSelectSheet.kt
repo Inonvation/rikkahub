@@ -21,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -99,7 +98,7 @@ fun TrustedFolderSelectSheet(
                         modifier = Modifier
                             .clip(MaterialTheme.shapes.large)
                             .clickable {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 onSelect(project.id)
                             },
                     )
@@ -126,7 +125,7 @@ fun TrustedFolderSelectSheet(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.large)
-                    .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onManage() },
+                    .clickable { hapticController.lightTap(); onManage() },
             )
         }
     }

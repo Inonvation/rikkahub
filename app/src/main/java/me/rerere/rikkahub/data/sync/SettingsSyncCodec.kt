@@ -101,6 +101,8 @@ object SettingsSyncCodec {
         "subAgentMaxRetries",
         "subAgentMaxTokens",
         "enableAgentBehaviorPrompt",
+        // AI 请求重试
+        "aiRequestMaxRetries",
         // 费用
         "costCurrency",
         // 能力模式

@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -137,7 +136,7 @@ fun IosGroup(
                                         interactionSource = interactionSource,
                                         indication = LocalIndication.current,
                                         onClick = {
-                                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                            hapticController.lightTap()
                                             item.onClick()
                                         },
                                     )

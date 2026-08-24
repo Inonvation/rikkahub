@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontFamily
@@ -78,7 +77,7 @@ fun ErrorDetailDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                hapticController.lightTap()
                 scope.launch {
                     clipboard.setClipEntry(
                         ClipEntry(
@@ -92,7 +91,7 @@ fun ErrorDetailDialog(
         },
         dismissButton = {
             TextButton(onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                hapticController.lightTap()
                 onDismiss()
             }) {
                 Text("关闭")

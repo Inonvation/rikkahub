@@ -23,7 +23,6 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -65,7 +64,7 @@ fun ChatMessageCopySheet(
             ) {
                 IconButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onDismissRequest()
                     }
                 ) {
@@ -79,7 +78,7 @@ fun ChatMessageCopySheet(
 
                 TextButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         context.copyMessageToClipboard(message)
                         onDismissRequest()
                     }

@@ -14,7 +14,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File01
@@ -37,7 +36,7 @@ fun <T> ExportDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedCard(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         exporter.exportToFile()
                         onDismiss()
                     },
@@ -66,7 +65,7 @@ fun <T> ExportDialog(
                 }
                 OutlinedCard(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         exporter.exportAndShare()
                         onDismiss()
                     },

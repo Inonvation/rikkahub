@@ -27,7 +27,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -116,7 +115,7 @@ fun CostConfigSheet(
                     CostCurrency.entries.forEachIndexed { index, c ->
                         SegmentedButton(
                             selected = currency == c,
-                            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); currency = c },
+                            onClick = { hapticController.lightTap(); currency = c },
                             shape = SegmentedButtonDefaults.itemShape(index, CostCurrency.entries.size),
                         ) {
                             Text(if (c == CostCurrency.USD) "USD $" else "RMB ¥")
@@ -186,13 +185,13 @@ fun CostConfigSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismiss()
                 }) {
                     Text("取消")
                 }
                 FilledTonalButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     val rate = (rateStr.toDoubleOrNull() ?: 7.2).coerceAtLeast(1.0)
                     val multiplier = (multiplierStr.toDoubleOrNull() ?: 1.0).coerceAtLeast(0.01)
                     // 双货币保存：当前货币字段存编辑值，另一货币字段保留原覆盖/预置值，互不覆盖

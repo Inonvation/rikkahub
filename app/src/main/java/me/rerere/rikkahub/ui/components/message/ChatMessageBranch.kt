@@ -17,7 +17,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -51,7 +50,7 @@ fun ChatMessageBranchSelector(
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex > 0) {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 onUpdate(
                                     node.copy(
                                         selectIndex = node.selectIndex - 1
@@ -82,7 +81,7 @@ fun ChatMessageBranchSelector(
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex < node.messages.lastIndex) {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 onUpdate(
                                     node.copy(
                                         selectIndex = node.selectIndex + 1

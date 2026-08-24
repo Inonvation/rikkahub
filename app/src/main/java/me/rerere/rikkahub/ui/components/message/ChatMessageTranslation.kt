@@ -39,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -117,7 +116,7 @@ fun LanguageSelectionDialog(
                 items(languages) { language ->
                     Card(
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onLanguageSelected(language)
                         },
                         shape = MaterialTheme.shapes.medium
@@ -145,7 +144,7 @@ fun LanguageSelectionDialog(
                 item {
                     Card(
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onClearTranslation()
                         },
                         shape = MaterialTheme.shapes.medium
@@ -215,7 +214,7 @@ fun CollapsibleTranslationText(
 
             // 折叠/展开按钮
             IconButton(
-                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); isCollapsed = !isCollapsed },
+                onClick = { hapticController.lightTap(); isCollapsed = !isCollapsed },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(

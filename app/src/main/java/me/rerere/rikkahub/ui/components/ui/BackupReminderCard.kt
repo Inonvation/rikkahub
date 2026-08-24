@@ -19,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
@@ -43,7 +42,7 @@ fun BackupReminderCard(
     if (!isDue || dismissed) return
 
     Card(onClick = {
-        hapticController.perform(HapticFeedbackType.KeyboardTap)
+        hapticController.lightTap()
         onClick()
     }) {
         Row(
@@ -78,7 +77,7 @@ fun BackupReminderCard(
             }
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     dismissed = true
                 },
                 modifier = Modifier.size(32.dp),

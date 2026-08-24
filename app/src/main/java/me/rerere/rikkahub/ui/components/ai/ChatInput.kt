@@ -664,8 +664,8 @@ private fun SendButton(
             .clip(CircleShape)
             .combinedClickable(
                 enabled = loading || !empty,
-                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() },
-                onLongClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onLongClick() },
+                onClick = { hapticController.tap(); onClick() },
+                onLongClick = { hapticController.tap(); onLongClick() },
             )
     ) {
         Surface(
@@ -701,7 +701,7 @@ private fun ActionIconButton(
     val hapticController = rememberHaptic()
     Surface(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             onClick()
         },
         modifier = Modifier.size(30.dp),
@@ -767,7 +767,7 @@ private fun TextInputRow(
                     Icon(
                         imageVector = HugeIcons.Cancel01,
                         contentDescription = stringResource(R.string.cancel_edit),
-                        modifier = Modifier.clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); state.clearInput() }
+                        modifier = Modifier.clickable { hapticController.lightTap(); state.clearInput() }
                     )
                 }
             }
@@ -933,7 +933,7 @@ private fun TextInputRow(
                     if (isFocused) {
                         IconButton(
                             onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 isFullScreen = !isFullScreen
                             }) {
                             Icon(HugeIcons.Fullscreen, null)
@@ -1000,7 +1000,7 @@ private fun CompletionPopup(
                 key = { item -> "${item.label}:${item.insertText}" },
             ) { item ->
                 Surface(
-                    onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onItemClick(item) },
+                    onClick = { hapticController.lightTap(); onItemClick(item) },
                     modifier = Modifier.fillMaxWidth(),
                     color = Color.Transparent,
                 ) {
@@ -1067,7 +1067,7 @@ private fun SubAgentActiveButton(onClick: () -> Unit, count: Int) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                hapticController.lightTap()
                 onClick()
             },
         contentAlignment = Alignment.Center,
@@ -1105,7 +1105,7 @@ private fun QuickMessageButton(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                hapticController.lightTap()
                 expanded = !expanded
             },
         contentAlignment = Alignment.Center,
@@ -1123,7 +1123,7 @@ private fun QuickMessageButton(
             quickMessages.forEach { quickMessage ->
                 Surface(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         state.appendText(quickMessage.content)
                         expanded = false
                     },
@@ -1188,7 +1188,7 @@ private fun FullScreenEditor(
                     Row {
                         TextButton(
                             onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 onDone()
                             }) {
                             Text(stringResource(R.string.chat_page_save))

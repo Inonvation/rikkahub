@@ -8,7 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
@@ -29,7 +28,7 @@ fun ToggleSurface(
     }
     Surface(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.tap()
             onClick()
         },
         enabled = enabled,

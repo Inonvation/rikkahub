@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -76,7 +75,7 @@ fun ErrorCardsDisplay(
             if (errors.size > 1) {
                 Surface(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onClearAllErrors()
                     },
                     shape = RoundedCornerShape(8.dp),
@@ -221,7 +220,7 @@ fun ErrorCard(
             }
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch {
                         clipboard.setClipEntry(
                             ClipEntry(
@@ -241,7 +240,7 @@ fun ErrorCard(
             }
             IconButton(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismiss()
                 },
                 modifier = Modifier.size(32.dp),

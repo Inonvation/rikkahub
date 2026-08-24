@@ -48,6 +48,11 @@ import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.ai.ui.limitContext
 import me.rerere.ai.util.HttpException
+import me.rerere.ai.util.RETRY_STOP_DELAY
+import me.rerere.ai.util.RetryPolicy
+import me.rerere.ai.util.isRetryable
+import me.rerere.ai.util.retryBackoffDelay
+import me.rerere.ai.util.retryWithPolicy
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
 import me.rerere.rikkahub.data.ai.subagent.boundJson
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -55,7 +60,6 @@ import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
 import java.io.File
-import java.io.IOException
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
@@ -77,9 +81,9 @@ private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 
-// ---- 生成重试（429 / 5xx / 网络错误的指数退避）----
-private const val MAX_GENERATION_RETRIES = 2
-private const val RETRY_INITIAL_BACKOFF_MS = 1000L
+// ---- 生成重试 ----
+// 重试策略（429 / 5xx / 网络错误的有界指数退避 + jitter + 尊重 Retry-After）
+// 已抽到 me.rerere.ai.util.RetryPolicy，默认最多重试 5 次（对齐 DSH/Codex 做法）。
 
 // ---- 流式输出中断续答唤醒 ----
 // 网络中断等导致已开始输出的流式失败时，向模型发送「继续生成」指令尝试唤醒续答，
@@ -162,15 +166,6 @@ private suspend fun executeToolSerialized(
     }
 }
 
-private fun Throwable.isRetryable(): Boolean = when (this) {
-    is HttpException -> code != null && (code == 429 || code in 500..599)
-    is IOException -> true
-    else -> false
-}
-
-/** 指数退避：第 1 次重试前等 1s，第 2 次 2s，第 3 次 4s */
-private fun backoffDelay(attempt: Int): Long = RETRY_INITIAL_BACKOFF_MS * (1L shl (attempt - 1))
-
 /** 工具调用的指纹（toolName + 原始入参），用于检测「完全相同调用重复」的死循环 */
 private fun UIMessagePart.Tool.inputFingerprint(): String {
     return "$toolName:${input.trim()}"
@@ -201,6 +196,10 @@ internal fun buildStreamResumeInstruction(): String = buildString {
     appendLine("- If you were in the middle of a tool call or reasoning, finish it and then complete your answer.")
     appendLine("- Keep the same style and structure as your existing output.")
 }
+
+/** 构造重试可见状态文案（对齐 DSH llm/retry 事件的可读化）：`第 n/max 次重试 · 等待 Xs` */
+private fun buildRetryStatus(attempt: Int, maxRetries: Int, delayMs: Long): String =
+    "第 $attempt/$maxRetries 次重试 · 等待 ${(delayMs + 999) / 1000}s"
 
 @Serializable
 sealed interface GenerationChunk {
@@ -650,6 +649,7 @@ class GenerationHandler(
             },
             sessionId = conversationId?.toString(),
         )
+        val retryPolicy = RetryPolicy(maxRetries = settings.aiRequestMaxRetries.coerceIn(0, 10))
         if (stream) {
             // 指数退避重试：只重试「还没收到任何内容」的失败（429/5xx/网络错误）。
             // 已开始输出后失败不重试，避免重复输出；重试不丢已保留的内容。
@@ -670,6 +670,7 @@ class GenerationHandler(
                         messages = streamChunkHandler.handle(messages, it)
                         onUpdateMessages(messages)
                     }
+                    processingStatus.value = null
                     break
                 } catch (e: CancellationException) {
                     // 取消（用户停止生成/切会话）仍要把已生成的流式内容落盘，最后 emit 一次
@@ -735,16 +736,33 @@ class GenerationHandler(
                             role = MessageRole.USER,
                             parts = listOf(UIMessagePart.Text(buildStreamResumeInstruction())),
                         )
-                        delay(backoffDelay(attempt))
+                        val resumeAfterMs = (e as? HttpException)?.retryAfterMs
+                        val resumeDelayMs = retryBackoffDelay(retryPolicy, attempt, resumeAfterMs)
+                        if (resumeDelayMs == RETRY_STOP_DELAY) {
+                            processingStatus.value = null
+                            throw e
+                        }
+                        processingStatus.value = buildRetryStatus(attempt, retryPolicy.maxRetries, resumeDelayMs)
+                        delay(resumeDelayMs)
+                        processingStatus.value = null
                         continue
                     }
                     // 可重试且尚未产生实质输出（未开始或刚发出空文本就断流）：指数退避后重试整轮请求
-                    if (hasMeaningfulOutput || attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
+                    if (hasMeaningfulOutput || attempt >= retryPolicy.maxRetries || !e.isRetryable()) {
+                        processingStatus.value = null
                         throw e
                     }
                     attempt++
-                    Log.w(TAG, "stream retry #$attempt after ${e.message}")
-                    delay(backoffDelay(attempt))
+                    Log.w(TAG, "stream retry #$attempt/${retryPolicy.maxRetries} after ${e.message}")
+                    val streamRetryAfterMs = (e as? HttpException)?.retryAfterMs
+                    val streamRetryDelayMs = retryBackoffDelay(retryPolicy, attempt, streamRetryAfterMs)
+                    if (streamRetryDelayMs == RETRY_STOP_DELAY) {
+                        processingStatus.value = null
+                        throw e
+                    }
+                    processingStatus.value = buildRetryStatus(attempt, retryPolicy.maxRetries, streamRetryDelayMs)
+                    delay(streamRetryDelayMs)
+                    processingStatus.value = null
                 }
             }
         } else {
@@ -758,17 +776,27 @@ class GenerationHandler(
                     )
                     messages = messages.handleTextGenerationResult(result = result, model = model)
                     onUpdateMessages(messages)
+                    processingStatus.value = null
                     break
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     // 非流式无部分输出，失败即可整体重试
-                    if (attempt >= MAX_GENERATION_RETRIES || !e.isRetryable()) {
+                    if (attempt >= retryPolicy.maxRetries || !e.isRetryable()) {
+                        processingStatus.value = null
                         throw e
                     }
                     attempt++
-                    Log.w(TAG, "generateText retry #$attempt after ${e.message}")
-                    delay(backoffDelay(attempt))
+                    Log.w(TAG, "generateText retry #$attempt/${retryPolicy.maxRetries} after ${e.message}")
+                    val retryAfterMs = (e as? HttpException)?.retryAfterMs
+                    val delayMs = retryBackoffDelay(retryPolicy, attempt, retryAfterMs)
+                    if (delayMs == RETRY_STOP_DELAY) {
+                        processingStatus.value = null
+                        throw e
+                    }
+                    processingStatus.value = buildRetryStatus(attempt, retryPolicy.maxRetries, delayMs)
+                    delay(delayMs)
+                    processingStatus.value = null
                 }
             }
         }
@@ -954,50 +982,76 @@ class GenerationHandler(
                 "target_lang" to targetLanguage.toString(),
             )
 
-            var messages = listOf(UIMessage.user(prompt))
-            var translatedText = ""
-            val streamChunkHandler = StreamChunkHandler(model)
+            // 流式翻译：只在「还未输出任何译文」时重试，避免已输出片段后重试造成重复译文。
+            val translateRetryPolicy = RetryPolicy(maxRetries = 2, initialDelayMs = 400, maxDelayMs = 5_000)
+            var attempt = 0
+            while (true) {
+                var messages = listOf(UIMessage.user(prompt))
+                var translatedText = ""
+                val streamChunkHandler = StreamChunkHandler(model)
+                try {
+                    providerHandler.streamText(
+                        providerSetting = provider,
+                        messages = messages,
+                        params = TextGenerationParams(
+                            model = model,
+                            reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
+                        ),
+                    ).collect { chunk ->
+                        messages = streamChunkHandler.handle(messages, chunk)
+                        translatedText = messages.lastOrNull()?.toText() ?: ""
 
-            providerHandler.streamText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
-                ),
-            ).collect { chunk ->
-                messages = streamChunkHandler.handle(messages, chunk)
-                translatedText = messages.lastOrNull()?.toText() ?: ""
-
-                if (translatedText.isNotBlank()) {
-                    onStreamUpdate?.invoke(translatedText)
-                    emit(translatedText)
+                        if (translatedText.isNotBlank()) {
+                            onStreamUpdate?.invoke(translatedText)
+                            emit(translatedText)
+                        }
+                    }
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (translatedText.isNotBlank() ||
+                        attempt >= translateRetryPolicy.maxRetries ||
+                        !e.isRetryable()
+                    ) {
+                        throw e
+                    }
+                    attempt++
+                    val retryAfterMs = (e as? HttpException)?.retryAfterMs
+                    val delayMs = retryBackoffDelay(translateRetryPolicy, attempt, retryAfterMs)
+                    if (delayMs == RETRY_STOP_DELAY) throw e
+                    Log.w(TAG, "translate stream retry #$attempt/${translateRetryPolicy.maxRetries} after ${e.message}")
+                    delay(delayMs)
                 }
             }
         } else {
             // Use Qwen MT model with special translation options
             val messages = listOf(UIMessage.user(sourceText))
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = messages,
-                params = TextGenerationParams(
-                    model = model,
-                    temperature = 0.3f,
-                    topP = 0.95f,
-                    customBody = listOf(
-                        CustomBody(
-                            key = "translation_options",
-                            value = buildJsonObject {
-                                put("source_lang", JsonPrimitive("auto"))
-                                put(
-                                    "target_lang",
-                                    JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
-                                )
-                            }
+            val result = retryWithPolicy(
+                RetryPolicy(maxRetries = 2, initialDelayMs = 400, maxDelayMs = 5_000)
+            ) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = messages,
+                    params = TextGenerationParams(
+                        model = model,
+                        temperature = 0.3f,
+                        topP = 0.95f,
+                        customBody = listOf(
+                            CustomBody(
+                                key = "translation_options",
+                                value = buildJsonObject {
+                                    put("source_lang", JsonPrimitive("auto"))
+                                    put(
+                                        "target_lang",
+                                        JsonPrimitive(targetLanguage.getDisplayLanguage(Locale.ENGLISH))
+                                    )
+                                }
+                            )
                         )
-                    )
-                ),
-            )
+                    ),
+                )
+            }
             val translatedText = result.message.toText()
 
             if (translatedText.isNotBlank()) {

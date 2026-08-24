@@ -6,7 +6,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.Role
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 
@@ -18,7 +17,7 @@ fun Modifier.onClick(
     val hapticController = rememberHaptic()
     return this.then(Modifier.clickable(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             onClick()
         },
         interactionSource = remember { MutableInteractionSource() },

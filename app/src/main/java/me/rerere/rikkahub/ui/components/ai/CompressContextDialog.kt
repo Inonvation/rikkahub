@@ -25,7 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
@@ -193,7 +192,7 @@ fun CompressContextDialog(
         confirmButton = {
             if (isLoading) {
                 TextButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     currentJob?.cancel()
                     currentJob = null
                 }) {
@@ -201,7 +200,7 @@ fun CompressContextDialog(
                 }
             } else {
                 TextButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     // 兜底：删除或非法时恢复默认 128k
                     val effectiveLimit = contextLimit.takeIf { it > 0 } ?: DEFAULT_CONTEXT_TOKEN_LIMIT
                     onSaveContextTokenLimit(effectiveLimit)
@@ -219,7 +218,7 @@ fun CompressContextDialog(
         dismissButton = {
             if (!isLoading) {
                 TextButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismiss()
                 }) {
                     Text(stringResource(R.string.cancel))

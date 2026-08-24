@@ -19,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ExternalLink
@@ -201,7 +200,7 @@ private fun ManageButton(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.End,
     ) {
         TextButton(onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             onClick()
         }) {
             Icon(Lucide.ExternalLink, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -235,7 +234,7 @@ fun ExtensionEmptyState(
         )
         if (buttonText != null && onAction != null) {
             TextButton(onClick = {
-                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                hapticController.lightTap()
                 onAction()
             }) {
                 Icon(HugeIcons.Link01, contentDescription = null)

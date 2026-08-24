@@ -69,6 +69,8 @@ import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.ai.ui.isEmptyInputMessage
+import me.rerere.ai.util.RetryPolicy
+import me.rerere.ai.util.retryWithPolicy
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
@@ -165,6 +167,12 @@ internal fun filterSkillToolsByMode(tools: List<Tool>, policy: ChatModePolicy): 
     }
 
 private const val TAG = "ChatService"
+
+/** 后台微调用（标题/建议/压缩/OCR/检索改写等）的重试策略：更小预算、更短延迟，避免拉长后台任务。 */
+private val BACKGROUND_RETRY_POLICY = RetryPolicy(maxRetries = 2, initialDelayMs = 400, maxDelayMs = 5_000)
+
+/** 生成过程中「部分输出落库」的防抖间隔：崩溃/进程被杀时最多丢失该间隔内的增量。 */
+private const val GENERATION_AUTO_SAVE_INTERVAL_MS = 1_500L
 
 /**
  * 子代理完成时，若母代理正在生成，最多等它结束本回合的时间（毫秒）。
@@ -296,6 +304,9 @@ class ChatService(
     }
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
+
+    // 生成中的部分输出防抖落库任务：崩溃/进程被杀时保证部分回复不丢失
+    private val generationAutoSaveJobs = ConcurrentHashMap<Uuid, Job>()
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -1874,6 +1885,12 @@ class ChatService(
                         // 跳过 checkFilesDelete 的全表文件扫描（每 chunk O(n)→O(1)）。
                         updateConversation(conversationId, updatedConversation, checkFiles = false)
 
+                        // 防抖落库部分输出：崩溃/进程被杀时保住未输出完的会话。
+                        // 只在有 assistant 消息时调度，避免纯用户消息触发写库。
+                        if (chunk.messages.lastOrNull()?.role == MessageRole.ASSISTANT) {
+                            scheduleGenerationAutoSave(conversationId)
+                        }
+
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
                         // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链
                         chunk.messages.lastOrNull()?.let { lastMessage ->
@@ -1889,7 +1906,12 @@ class ChatService(
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
 
             if (it is CancellationException) {
-                // 用户主动停止生成 / resume 超时取消：不补唤醒，避免"已停止却自动续答复活"
+                // 用户主动停止生成 / resume 超时取消：不补唤醒，避免"已停止却自动续答复活"。
+                // 但仍把已生成的部分输出落库，避免停止/崩溃后部分回复丢失。
+                cancelGenerationAutoSave(conversationId)
+                runCatching {
+                    saveConversation(conversationId, getConversationFlow(conversationId).value)
+                }
             } else {
                 addError(it, conversationId, title = context.getString(R.string.error_title_generation))
                 Logging.log(TAG, "handleMessageComplete: $it")
@@ -1899,6 +1921,7 @@ class ChatService(
                 scheduleRoundEndResume(conversationId)
             }
         }.onSuccess {
+            cancelGenerationAutoSave(conversationId)
             val finalConversation = getConversationFlow(conversationId).value
             saveConversation(conversationId, finalConversation)
 
@@ -2101,21 +2124,23 @@ class ChatService(
                 ?: return query
             val provider = model.findProvider(settings.providers) ?: return query
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        DEFAULT_QUERY_REWRITE_PROMPT.applyPlaceholders(
-                            "query" to query,
-                            "history" to history,
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            DEFAULT_QUERY_REWRITE_PROMPT.applyPlaceholders(
+                                "query" to query,
+                                "history" to history,
+                            )
                         )
-                    )
-                ),
-                params = backgroundTextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.OFF,  // 改写不需要推理，省 token/延迟
-                ),
-            )
+                    ),
+                    params = backgroundTextGenerationParams(
+                        model = model,
+                        reasoningLevel = ReasoningLevel.OFF,  // 改写不需要推理，省 token/延迟
+                    ),
+                )
+            }
             result.message.toText().trim().takeIf { it.isNotBlank() } ?: query
         } catch (e: CancellationException) {
             throw e  // 不吞取消，让生成链正常中止
@@ -2140,20 +2165,22 @@ class ChatService(
                 ?: return null
             val provider = model.findProvider(settings.providers) ?: return null
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        DEFAULT_HYDE_PROMPT.applyPlaceholders(
-                            "query" to query,
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            DEFAULT_HYDE_PROMPT.applyPlaceholders(
+                                "query" to query,
+                            )
                         )
-                    )
-                ),
-                params = backgroundTextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.OFF,
-                ),
-            )
+                    ),
+                    params = backgroundTextGenerationParams(
+                        model = model,
+                        reasoningLevel = ReasoningLevel.OFF,
+                    ),
+                )
+            }
             result.message.toText().trim().takeIf { it.isNotBlank() }
         } catch (e: CancellationException) {
             throw e
@@ -2177,18 +2204,20 @@ class ChatService(
                 ?: return emptyList()
             val provider = model.findProvider(settings.providers) ?: return emptyList()
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        DEFAULT_MULTIQUERY_PROMPT.applyPlaceholders("query" to query)
-                    )
-                ),
-                params = backgroundTextGenerationParams(
-                    model = model,
-                    reasoningLevel = ReasoningLevel.OFF,
-                ),
-            )
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            DEFAULT_MULTIQUERY_PROMPT.applyPlaceholders("query" to query)
+                        )
+                    ),
+                    params = backgroundTextGenerationParams(
+                        model = model,
+                        reasoningLevel = ReasoningLevel.OFF,
+                    ),
+                )
+            }
             result.message.toText().trim()
                 ?.lines()
                 ?.map { it.trim() }
@@ -2322,18 +2351,20 @@ class ChatService(
             val provider = model.findProvider(settings.providers) ?: return@runCatching
 
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            prompt = settings.titlePrompt.applyPlaceholders(
+                                "locale" to Locale.getDefault().displayName,
+                                "content" to conversation.currentMessages
+                                    .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
+                        ),
                     ),
-                ),
-                params = backgroundTextGenerationParams(model),
-            )
+                    params = backgroundTextGenerationParams(model),
+                )
+            }
 
             // 生成完，conversation可能不是最新了，因此需要重新获取
             conversationRepo.getConversationById(conversation.id)?.let {
@@ -2385,17 +2416,19 @@ class ChatService(
         } ?: promptOptimizeSystemPrompt(scene, tone, depth)
         // 附加说明作为额外要求拼进 user 消息，不参与 {content} 占位符本体
         val userContent = if (extraNote.isNotBlank()) "$text\n\n【额外要求】$extraNote" else text
-        val result = providerHandler.generateText(
-            providerSetting = provider,
-            messages = listOf(
-                UIMessage.system(systemPrompt),
-                UIMessage.user(userContent),
-            ),
-            params = backgroundTextGenerationParams(
-                model,
-                reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.promptOptimizeThinkingBudgetForScene(scene)),
-            ),
-        )
+        val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+            providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(
+                    UIMessage.system(systemPrompt),
+                    UIMessage.user(userContent),
+                ),
+                params = backgroundTextGenerationParams(
+                    model,
+                    reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.promptOptimizeThinkingBudgetForScene(scene)),
+                ),
+            )
+        }
         result.message.toText().trim().orEmpty()
     }
 
@@ -2422,18 +2455,20 @@ class ChatService(
             }
 
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        settings.suggestionPrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(8).joinToString("\n\n") { it.summaryAsText(maxLength = 500) }),
-                    )
-                ),
-                params = backgroundTextGenerationParams(model),
-            )
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            settings.suggestionPrompt.applyPlaceholders(
+                                "locale" to Locale.getDefault().displayName,
+                                "content" to conversation.currentMessages
+                                    .takeLast(8).joinToString("\n\n") { it.summaryAsText(maxLength = 500) }),
+                        )
+                    ),
+                    params = backgroundTextGenerationParams(model),
+                )
+            }
             val suggestions =
                 result.message.toText().split("\n").map { it.trim() }
                     .filter { it.isNotBlank() }
@@ -2509,11 +2544,13 @@ class ChatService(
                 "locale" to Locale.getDefault().displayName
             )
 
-            val result = providerHandler.generateText(
-                providerSetting = provider,
-                messages = listOf(UIMessage.user(prompt)),
-                params = backgroundTextGenerationParams(model),
-            )
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(UIMessage.user(prompt)),
+                    params = backgroundTextGenerationParams(model),
+                )
+            }
 
             return result.message.toText().trim().takeIf { it.isNotBlank() }
                 ?: throw IllegalStateException("Failed to generate compressed summary")
@@ -2612,6 +2649,19 @@ class ChatService(
     }
 
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
+        persistConversation(conversationId, conversation, updateSessionState = true)
+    }
+
+    /**
+     * 落库会话；[updateSessionState] 控制是否同时把该对象写回内存会话态。
+     * 流式中的防抖落库必须传 false，否则会用「较旧的快照」覆盖正在流式更新的内存态，
+     * 导致 UI 回退（读到更早的部分输出）。
+     */
+    private suspend fun persistConversation(
+        conversationId: Uuid,
+        conversation: Conversation,
+        updateSessionState: Boolean,
+    ) {
         val exists = conversationRepo.existsConversationById(conversation.id)
         // 空会话不落库，但显式配置了模式（mode 非空）的空会话也保存，避免切换模式后重进丢失
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty() && conversation.mode == null) {
@@ -2619,13 +2669,39 @@ class ChatService(
         }
 
         val updatedConversation = conversation.copy()
-        updateConversation(conversationId, updatedConversation)
+        if (updateSessionState) {
+            updateConversation(conversationId, updatedConversation)
+        }
 
         if (!exists) {
             conversationRepo.insertConversation(updatedConversation)
         } else {
             conversationRepo.updateConversation(updatedConversation)
         }
+    }
+
+    /**
+     * 生成过程中对部分输出做防抖落库：每收到一个流式 chunk 都会重置计时，
+     * 只有在连续流式暂停达到 [GENERATION_AUTO_SAVE_INTERVAL_MS] 时才真正写库，
+     * 避免每个 chunk 都触发整会话重建 + FTS 重建。崩溃/进程被杀时最多丢失该间隔内的增量。
+     */
+    private fun scheduleGenerationAutoSave(conversationId: Uuid) {
+        generationAutoSaveJobs.remove(conversationId)?.cancel()
+        generationAutoSaveJobs[conversationId] = appScope.launch(Dispatchers.IO) {
+            delay(GENERATION_AUTO_SAVE_INTERVAL_MS)
+            runCatching {
+                persistConversation(
+                    conversationId = conversationId,
+                    conversation = getConversationFlow(conversationId).value,
+                    updateSessionState = false,
+                )
+            }
+            generationAutoSaveJobs.remove(conversationId)
+        }
+    }
+
+    private fun cancelGenerationAutoSave(conversationId: Uuid) {
+        generationAutoSaveJobs.remove(conversationId)?.cancel()
     }
 
     // ---- 翻译消息 ----

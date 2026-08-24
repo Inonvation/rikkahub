@@ -37,7 +37,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -136,7 +135,7 @@ fun <T> ChainOfThought(
                             )
                             .clip(MaterialTheme.shapes.small)
                             .clickable {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 expanded = !expanded
                                 // 用户手动操作才记录；key 为 null（无会话上下文）不记录
                                 if (stateKey != null) setSectionExpanded(stateKey, expanded)
@@ -361,11 +360,11 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         if (onClick != null) {
                             Modifier
                                 .clip(MaterialTheme.shapes.small)
-                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() }
+                                .clickable { hapticController.lightTap(); onClick() }
                         } else if (hasContent) {
                             Modifier
                                 .clip(MaterialTheme.shapes.small)
-                                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); onExpandedChange(!expanded) }
+                                .clickable { hapticController.lightTap(); onExpandedChange(!expanded) }
                         } else {
                             Modifier
                         }

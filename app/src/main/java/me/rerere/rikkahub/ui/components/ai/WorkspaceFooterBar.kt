@@ -2,14 +2,19 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +39,7 @@ import com.dokar.sonner.ToastType
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.SlidersVertical
 import me.rerere.hugeicons.stroke.ServerStack01
@@ -42,8 +47,10 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
 import me.rerere.rikkahub.data.ai.cost.CostCurrency
+import me.rerere.rikkahub.data.datastore.FooterIndicator
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 import me.rerere.rikkahub.data.model.Assistant
@@ -136,6 +143,26 @@ fun WorkspaceFooterBar(
         mainCost + subCost
     }
 
+    // 输入框下方指标条所需数据：当前模型 / 供应商余额 / 本会话用量
+    val currentModel = settings.getCurrentChatModel()
+    val currentProviderForBalance = currentModel?.findProvider(settings.providers)
+    val balanceSupported = currentProviderForBalance?.balanceOption?.enabled == true &&
+        currentProviderForBalance is ProviderSetting.OpenAI
+    val sessionTokenUsages = remember(conversation, subAgentUsages) {
+        conversation.currentMessages.map { it.usage } + subAgentUsages.map {
+            TokenUsage(
+                promptTokens = it.promptTokens.toInt(),
+                completionTokens = it.completionTokens.toInt(),
+                cachedTokens = it.cachedTokens.toInt(),
+                cacheWriteTokens = it.cacheWriteTokens.toInt(),
+            )
+        }
+    }
+    val sessionPromptTokens = sessionTokenUsages.sumOf { (it?.promptTokens ?: 0).toLong() }
+    val sessionCompletionTokens = sessionTokenUsages.sumOf { (it?.completionTokens ?: 0).toLong() }
+    val sessionCachedTokens = sessionTokenUsages.sumOf { (it?.cachedTokens ?: 0).toLong() }
+    val sessionMessageCount = conversation.currentMessages.size
+
     // 当前生效模式引用：null 表示「跟随助手配置」
     val modeLabel = modeRefDisplayName(conversation.mode, settings.customModes, settings.builtinModeOverrides)
     val effectivePolicy = resolveConversationPolicy(
@@ -187,7 +214,7 @@ fun WorkspaceFooterBar(
                         indication = null,
                         onClick = {
                             if (modeSwitchEnabled) {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 showModePicker = true
                             } else {
                                 // 有消息/生成中：模式锁定，给出提示而不是无响应
@@ -198,7 +225,7 @@ fun WorkspaceFooterBar(
                             }
                         },
                         onLongClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             navController.navigate(Screen.SettingModes)
                         }
                     )
@@ -224,7 +251,7 @@ fun WorkspaceFooterBar(
             if (!minimal) {
                 IconButton(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         navController.navigate(Screen.ManagementDashboard)
                     },
                     modifier = Modifier.size(30.dp),
@@ -236,33 +263,33 @@ fun WorkspaceFooterBar(
                         modifier = Modifier.size(14.dp),
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                // 右侧指标：平均缓存命中率 / 会话费用
+                // 右侧指标：由管理控制台「输入框下方显示」决定展示哪些信息
                 var showCostSheet by remember { mutableStateOf(false) }
-                val cacheStr = if (cacheHitRate != null) {
-                    "平均缓存 " + "%05.2f".format(cacheHitRate * 100) + "%"
-                } else {
-                    "平均缓存 00.00%"
-                }
                 val costSymbol = if (settings.costCurrency == CostCurrency.USD) "$" else "¥"
                 val costStr = costSymbol + "%05.2f".format(totalCost)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    IndicatorText(text = cacheStr)
-                    IndicatorText(
-                        text = costStr,
-                        onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
-                            showCostSheet = true
-                        },
-                    )
-                }
+                val tokensStr = "P ${formatK(sessionPromptTokens)} · O ${formatK(sessionCompletionTokens)}" +
+                    if (sessionCachedTokens > 0) " · C ${formatK(sessionCachedTokens)}" else ""
+                val messagesStr = "${formatCount(sessionMessageCount)} 条"
+                FooterIndicators(
+                    modifier = Modifier.weight(1f),
+                    indicators = settings.displaySetting.footerIndicators,
+                    limit = settings.displaySetting.footerIndicatorLimit,
+                    modelLabel = currentModel?.displayName ?: "-",
+                    providerForBalance = currentProviderForBalance,
+                    balanceSupported = balanceSupported,
+                    cacheHitRate = cacheHitRate,
+                    costStr = costStr,
+                    tokensStr = tokensStr,
+                    messagesStr = messagesStr,
+                    onOpenCostSheet = {
+                        hapticController.lightTap()
+                        showCostSheet = true
+                    },
+                )
                 if (showCostSheet) {
                     CostConfigSheet(
                         settings = settings,
-                        currentModelId = settings.getCurrentChatModel()?.modelId,
+                        currentModelId = currentModel?.modelId,
                         onDismiss = { showCostSheet = false },
                     )
                 }
@@ -313,4 +340,145 @@ private fun IndicatorText(
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )
+}
+
+/**
+ * 输入框下方可滚动指标条：按用户在管理控制台勾选的 [FooterIndicator] 顺序展示前 [limit] 个，
+ * 其余收进「+N」下拉菜单；单个指标过长时横向滚动，避免撑破单行布局。
+ */
+@Composable
+private fun FooterIndicators(
+    modifier: Modifier = Modifier,
+    indicators: List<FooterIndicator>,
+    limit: Int,
+    modelLabel: String,
+    providerForBalance: ProviderSetting?,
+    balanceSupported: Boolean,
+    cacheHitRate: Double?,
+    costStr: String,
+    tokensStr: String,
+    messagesStr: String,
+    onOpenCostSheet: () -> Unit,
+) {
+    val ordered = indicators.distinct()
+    val safeLimit = limit.coerceIn(1, FooterIndicator.entries.size)
+    val visible = ordered.take(safeLimit)
+    val hidden = ordered.drop(safeLimit)
+    var showOverflow by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            visible.forEach { indicator ->
+                FooterIndicatorView(
+                    indicator = indicator,
+                    modelLabel = modelLabel,
+                    providerForBalance = providerForBalance,
+                    balanceSupported = balanceSupported,
+                    cacheHitRate = cacheHitRate,
+                    costStr = costStr,
+                    tokensStr = tokensStr,
+                    messagesStr = messagesStr,
+                    onOpenCostSheet = onOpenCostSheet,
+                )
+            }
+            if (hidden.isNotEmpty()) {
+                Box {
+                    IndicatorText(
+                        text = "+${hidden.size}",
+                        onClick = { showOverflow = !showOverflow },
+                    )
+                    DropdownMenu(
+                        expanded = showOverflow,
+                        onDismissRequest = { showOverflow = false },
+                    ) {
+                        hidden.forEach { indicator ->
+                            DropdownMenuItem(
+                                text = {
+                                    FooterIndicatorView(
+                                        indicator = indicator,
+                                        modelLabel = modelLabel,
+                                        providerForBalance = providerForBalance,
+                                        balanceSupported = balanceSupported,
+                                        cacheHitRate = cacheHitRate,
+                                        costStr = costStr,
+                                        tokensStr = tokensStr,
+                                        messagesStr = messagesStr,
+                                        onOpenCostSheet = onOpenCostSheet,
+                                        clickable = false,
+                                    )
+                                },
+                                onClick = {
+                                    showOverflow = false
+                                    if (indicator == FooterIndicator.COST) {
+                                        onOpenCostSheet()
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FooterIndicatorView(
+    indicator: FooterIndicator,
+    modelLabel: String,
+    providerForBalance: ProviderSetting?,
+    balanceSupported: Boolean,
+    cacheHitRate: Double?,
+    costStr: String,
+    tokensStr: String,
+    messagesStr: String,
+    onOpenCostSheet: () -> Unit,
+    clickable: Boolean = true,
+) {
+    when (indicator) {
+        FooterIndicator.CURRENT_MODEL -> IndicatorText(text = modelLabel)
+        FooterIndicator.PROVIDER_BALANCE -> {
+            if (balanceSupported && providerForBalance != null) {
+                ProviderBalanceText(
+                    providerSetting = providerForBalance,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            } else {
+                IndicatorText(text = "余额 -")
+            }
+        }
+        FooterIndicator.CACHE_HIT_RATE -> {
+            val cacheStr = if (cacheHitRate != null) {
+                "平均缓存 " + "%05.2f".format(cacheHitRate * 100) + "%"
+            } else {
+                "平均缓存 -"
+            }
+            IndicatorText(text = cacheStr)
+        }
+        FooterIndicator.COST -> IndicatorText(
+            text = costStr,
+            onClick = if (clickable) onOpenCostSheet else null,
+        )
+        FooterIndicator.TOKENS -> IndicatorText(text = tokensStr)
+        FooterIndicator.MESSAGES -> IndicatorText(text = messagesStr)
+    }
+}
+
+private fun formatK(value: Long): String = when {
+    value >= 1_000_000 -> "%.2fM".format(value / 1_000_000.0)
+    value >= 1_000 -> "%.1fk".format(value / 1_000.0)
+    else -> value.toString()
+}
+
+private fun formatCount(value: Int): String = when {
+    value >= 1_000_000 -> "%.1fM".format(value / 1_000_000.0)
+    value >= 1_000 -> "%.1fk".format(value / 1_000.0)
+    else -> value.toString()
 }

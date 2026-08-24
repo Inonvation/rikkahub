@@ -3,13 +3,16 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
@@ -20,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -35,6 +39,9 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
+import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.FooterIndicator
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
@@ -57,8 +64,8 @@ import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.ai.modeRefDisplayName
 import me.rerere.rikkahub.ui.components.ai.note
 import me.rerere.rikkahub.ui.components.ui.IosGroup
-import me.rerere.rikkahub.ui.components.ui.IosGroupScope
 import me.rerere.rikkahub.ui.components.ui.SettingListScaffold
+import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -68,6 +75,7 @@ import org.koin.compose.koinInject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun ManagementPage(vm: SettingVM = koinViewModel()) {
@@ -130,23 +138,20 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
     ) {
         item("overview") {
             OverviewCard(
-                providers = settings.providers.size,
-                assistants = settings.assistants.size,
-                mcpConnected = mcpConnected,
-                mcpErrorCount = mcpErrorCount,
-                mcpTotal = mcpTotal,
-                workspaceCount = workspaceCount,
-                conversationCount = conversationCount,
-                activeTrusted = activeTrusted,
+                currentModelLabel = currentModel?.displayName ?: "-",
+                currentProviderForBalance = currentProvider,
+                balanceSupported = balanceSupported,
+                totalMessages = tokenStats.totalMessages,
+                promptTokens = totalPromptTokens,
+                completionTokens = totalCompletionTokens,
+                cachedTokens = totalCachedTokens,
+                onOpenStats = { navController.navigate(Screen.Stats) },
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
 
-        item("status") {
-            StatusGroup(
-                currentModelLabel = currentModel?.displayName ?: "-",
-                currentProviderForBalance = currentProvider,
-                balanceSupported = balanceSupported,
+        item("resources") {
+            ResourcesGroup(
                 providerCount = settings.providers.size,
                 modelCount = modelCount,
                 assistantCount = settings.assistants.size,
@@ -167,13 +172,12 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
             )
         }
 
-        item("usage") {
-            UsageGroup(
-                totalMessages = tokenStats.totalMessages,
-                promptTokens = totalPromptTokens,
-                completionTokens = totalCompletionTokens,
-                cachedTokens = totalCachedTokens,
-                onOpenStats = { navController.navigate(Screen.Stats) },
+        item("footer") {
+            FooterDisplayGroup(
+                settings = settings,
+                onUpdateDisplaySetting = { display ->
+                    vm.updateSettings(settings.copy(displaySetting = display))
+                },
             )
         }
 
@@ -191,12 +195,6 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
                 onViewAll = { navController.navigate(Screen.SettingDeviceAudit) },
             )
         }
-
-        item("quick") {
-            QuickNavGroup(
-                onNavigate = { screen -> navController.navigate(screen) },
-            )
-        }
     }
 }
 
@@ -204,14 +202,14 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
 
 @Composable
 private fun OverviewCard(
-    providers: Int,
-    assistants: Int,
-    mcpConnected: Int,
-    mcpErrorCount: Int,
-    mcpTotal: Int,
-    workspaceCount: Int,
-    conversationCount: Int?,
-    activeTrusted: Boolean,
+    currentModelLabel: String,
+    currentProviderForBalance: ProviderSetting?,
+    balanceSupported: Boolean,
+    totalMessages: Int,
+    promptTokens: Long,
+    completionTokens: Long,
+    cachedTokens: Long,
+    onOpenStats: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -226,42 +224,72 @@ private fun OverviewCard(
                 text = stringResource(R.string.setting_page_console_overview),
                 style = MaterialTheme.typography.titleSmall,
             )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.setting_page_console_current_model),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = currentModelLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (balanceSupported && currentProviderForBalance != null) {
+                    ProviderBalanceText(
+                        providerSetting = currentProviderForBalance,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.setting_page_console_balance_unsupported),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Text(
+                text = stringResource(R.string.setting_page_console_usage),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OverviewPill(
-                    label = stringResource(R.string.setting_page_providers),
-                    value = providers.toString(),
+                    label = stringResource(R.string.setting_page_console_usage_messages),
+                    value = formatCount(totalMessages),
                 )
                 OverviewPill(
-                    label = stringResource(R.string.setting_page_assistant),
-                    value = assistants.toString(),
+                    label = stringResource(R.string.setting_page_console_usage_prompt),
+                    value = formatTokens(promptTokens),
                 )
                 OverviewPill(
-                    label = stringResource(R.string.setting_page_mcp),
-                    value = if (mcpTotal == 0) "未配置" else "$mcpConnected/$mcpTotal 已连接",
-                    type = when {
-                        mcpErrorCount > 0 -> TagType.ERROR
-                        mcpConnected > 0 -> TagType.SUCCESS
-                        else -> TagType.WARNING
-                    },
+                    label = stringResource(R.string.setting_page_console_usage_completion),
+                    value = formatTokens(completionTokens),
                 )
                 OverviewPill(
-                    label = stringResource(R.string.extensions_page_workspace),
-                    value = workspaceCount.toString(),
+                    label = stringResource(R.string.setting_page_console_usage_cached),
+                    value = formatTokens(cachedTokens),
                 )
-                OverviewPill(
-                    label = stringResource(R.string.setting_page_conversation_history),
-                    value = (conversationCount?.toString() ?: "-") + " 个",
+            }
+            TextButton(onClick = onOpenStats) {
+                Icon(
+                    imageVector = HugeIcons.ArrowRight01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
                 )
-                if (activeTrusted) {
-                    OverviewPill(
-                        label = stringResource(R.string.setting_page_trusted_folders),
-                        value = "已激活",
-                        type = TagType.SUCCESS,
-                    )
-                }
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.setting_page_console_usage_detail))
             }
         }
     }
@@ -278,13 +306,10 @@ private fun OverviewPill(
     }
 }
 
-// ---------- 运行状态 ----------
+// ---------- 资源与配置 ----------
 
 @Composable
-private fun StatusGroup(
-    currentModelLabel: String,
-    currentProviderForBalance: ProviderSetting?,
-    balanceSupported: Boolean,
+private fun ResourcesGroup(
     providerCount: Int,
     modelCount: Int,
     assistantCount: Int,
@@ -305,37 +330,11 @@ private fun StatusGroup(
 ) {
     IosGroup(
         modifier = Modifier.padding(horizontal = 8.dp),
-        title = stringResource(R.string.setting_page_console_status),
+        title = stringResource(R.string.setting_page_console_resources),
     ) {
         item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_current_model)) },
-            supportingContent = {
-                Text(
-                    currentModelLabel,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            trailingContent = {
-                if (balanceSupported && currentProviderForBalance != null) {
-                    ProviderBalanceText(
-                        providerSetting = currentProviderForBalance,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.setting_page_console_balance_unsupported),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    )
-                }
-            },
-        )
-        item(
             headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
-            supportingContent = {
-                Text("${providerCount} 个提供商 · $modelCount 个模型")
-            },
+            supportingContent = { Text("${providerCount} 个 · $modelCount 个模型") },
             onClick = { onNavigate(Screen.SettingProvider) },
         )
         item(
@@ -397,51 +396,6 @@ private fun StatusGroup(
             headlineContent = { Text(stringResource(R.string.setting_page_conversation_history)) },
             supportingContent = { Text((conversationCount?.toString() ?: "-") + " 个会话") },
             onClick = { onNavigate(Screen.Stats) },
-        )
-    }
-}
-
-// ---------- 会话用量 ----------
-
-@Composable
-private fun UsageGroup(
-    totalMessages: Int,
-    promptTokens: Long,
-    completionTokens: Long,
-    cachedTokens: Long,
-    onOpenStats: () -> Unit,
-) {
-    IosGroup(
-        modifier = Modifier.padding(horizontal = 8.dp),
-        title = stringResource(R.string.setting_page_console_usage),
-    ) {
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_usage_messages)) },
-            supportingContent = { Text(formatCount(totalMessages)) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_usage_prompt)) },
-            supportingContent = { Text(formatTokens(promptTokens)) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_usage_completion)) },
-            supportingContent = { Text(formatTokens(completionTokens)) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_usage_cached)) },
-            supportingContent = { Text(formatTokens(cachedTokens)) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_console_usage_detail)) },
-            onClick = onOpenStats,
-            trailingContent = {
-                Icon(
-                    imageVector = HugeIcons.ArrowRight01,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
-                )
-            },
         )
     }
 }
@@ -621,50 +575,94 @@ private fun AuditGroup(
     }
 }
 
-// ---------- 快速跳转 ----------
+// ---------- 输入框下方显示 ----------
 
 @Composable
-private fun QuickNavGroup(onNavigate: (Screen) -> Unit) {
-    // 注意：IosGroup 的 content 是普通 DSL（非 @Composable），不能在块内直接调用
-    // stringResource（@Composable）。这里提前在 @Composable 函数体里取出文案，再传入块内。
-    val providersLabel = stringResource(R.string.setting_page_console_nav_providers)
-    val modesLabel = stringResource(R.string.setting_page_console_nav_modes)
-    val searchLabel = stringResource(R.string.setting_page_console_nav_search)
-    val mcpLabel = stringResource(R.string.setting_page_console_nav_mcp)
-    val filesLabel = stringResource(R.string.setting_page_console_nav_files)
-    val deviceAuditLabel = stringResource(R.string.setting_page_console_nav_device_audit)
-    val statsLabel = stringResource(R.string.setting_page_console_nav_stats)
+private fun FooterDisplayGroup(
+    settings: Settings,
+    onUpdateDisplaySetting: (DisplaySetting) -> Unit,
+) {
+    val display = settings.displaySetting
     IosGroup(
         modifier = Modifier.padding(horizontal = 8.dp),
-        title = stringResource(R.string.setting_page_console_quick_nav),
+        title = stringResource(R.string.setting_page_console_footer),
+        subtitle = stringResource(R.string.setting_page_console_footer_desc),
     ) {
-        quickItem(providersLabel) { onNavigate(Screen.SettingProvider) }
-        quickItem(modesLabel) { onNavigate(Screen.SettingModes) }
-        quickItem(searchLabel) { onNavigate(Screen.SettingSearch) }
-        quickItem(mcpLabel) { onNavigate(Screen.SettingMcp) }
-        quickItem(filesLabel) { onNavigate(Screen.SettingFiles) }
-        quickItem(deviceAuditLabel) { onNavigate(Screen.SettingDeviceAudit) }
-        quickItem(statsLabel) { onNavigate(Screen.Stats) }
+        FooterIndicator.entries.forEach { indicator ->
+            item(
+                headlineContent = { Text(footerIndicatorLabel(indicator)) },
+                supportingContent = { Text(footerIndicatorDesc(indicator)) },
+                trailingContent = {
+                    Switch(
+                        checked = indicator in display.footerIndicators,
+                        onCheckedChange = { checked ->
+                            val updated = if (checked) {
+                                display.footerIndicators + indicator
+                            } else {
+                                display.footerIndicators.filterNot { it == indicator }
+                            }
+                            onUpdateDisplaySetting(display.copy(footerIndicators = updated))
+                        },
+                    )
+                },
+            )
+        }
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_page_console_footer_limit)) },
+            supportingContent = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_page_console_footer_limit_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Slider(
+                            value = display.footerIndicatorLimit.toFloat(),
+                            onValueChange = {
+                                onUpdateDisplaySetting(
+                                    display.copy(footerIndicatorLimit = it.roundToInt())
+                                )
+                            },
+                            valueRange = 1f..FooterIndicator.entries.size.toFloat(),
+                            steps = FooterIndicator.entries.size - 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "${display.footerIndicatorLimit} 项",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            },
+        )
     }
 }
 
-private fun IosGroupScope.quickItem(
-    label: String,
-    onClick: () -> Unit,
-) {
-    item(
-        headlineContent = { Text(label) },
-        onClick = onClick,
-        trailingContent = {
-            Icon(
-                imageVector = HugeIcons.ArrowRight01,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-        },
-    )
-}
+@Composable
+private fun footerIndicatorLabel(indicator: FooterIndicator): String = stringResource(
+    when (indicator) {
+        FooterIndicator.CURRENT_MODEL -> R.string.setting_page_console_footer_model
+        FooterIndicator.PROVIDER_BALANCE -> R.string.setting_page_console_footer_balance
+        FooterIndicator.CACHE_HIT_RATE -> R.string.setting_page_console_footer_cache
+        FooterIndicator.COST -> R.string.setting_page_console_footer_cost
+        FooterIndicator.TOKENS -> R.string.setting_page_console_footer_tokens
+        FooterIndicator.MESSAGES -> R.string.setting_page_console_footer_messages
+    }
+)
+
+@Composable
+private fun footerIndicatorDesc(indicator: FooterIndicator): String = stringResource(
+    when (indicator) {
+        FooterIndicator.CURRENT_MODEL -> R.string.setting_page_console_footer_model_desc
+        FooterIndicator.PROVIDER_BALANCE -> R.string.setting_page_console_footer_balance_desc
+        FooterIndicator.CACHE_HIT_RATE -> R.string.setting_page_console_footer_cache_desc
+        FooterIndicator.COST -> R.string.setting_page_console_footer_cost_desc
+        FooterIndicator.TOKENS -> R.string.setting_page_console_footer_tokens_desc
+        FooterIndicator.MESSAGES -> R.string.setting_page_console_footer_messages_desc
+    }
+)
 
 // ---------- 数字格式化 ----------
 

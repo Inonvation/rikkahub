@@ -481,6 +481,9 @@
   <string name="setting_agent_action_max_concurrent_desc">允许同时运行的子代理数量上限</string>
   <string name="setting_agent_action_max_retries_title">自动重试次数</string>
   <string name="setting_agent_action_max_retries_desc">子代理超时或失败后自动重试的次数（0 为不重试，保留上下文）</string>
+  <string name="setting_ai_retry_title">AI 请求重试次数</string>
+  <string name="setting_ai_retry_desc">主对话/子代理生成遇到瞬态失败（429/5xx/断网）时自动重试的最大次数（0 为不重试，默认 5）</string>
+  <string name="setting_ai_request_group">AI 请求</string>
   <string name="setting_agent_action_max_tokens_title">每次任务 Token 预算</string>
   <string name="setting_agent_action_max_tokens_desc">子代理累计 Token 用量超过该值后停止运行；留空表示不限制</string>
   <string name="setting_agent_action_max_tokens_placeholder">不限制</string>

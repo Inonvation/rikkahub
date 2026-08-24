@@ -25,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
@@ -49,7 +48,7 @@ fun ConversationSystemPromptButton(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         TextButton(
-            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); expanded = !expanded },
+            onClick = { hapticController.lightTap(); expanded = !expanded },
         ) {
             Icon(
                 imageVector = HugeIcons.Setting07,
@@ -93,7 +92,7 @@ fun ConversationSystemPromptButton(
                     if (!customSystemPrompt.isNullOrBlank()) {
                         TextButton(
                             onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 editText = ""
                                 onSystemPromptChange(null)
                             },
@@ -103,7 +102,7 @@ fun ConversationSystemPromptButton(
                     }
                     TextButton(
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             onSystemPromptChange(editText.ifBlank { null })
                             expanded = false
                         },

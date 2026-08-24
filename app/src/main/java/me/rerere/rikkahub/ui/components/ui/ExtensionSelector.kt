@@ -18,7 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -87,7 +86,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 0,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch { pagerState.animateScrollToPage(0) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_skills)) }
@@ -95,7 +94,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 1,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch { pagerState.animateScrollToPage(1) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_quick_messages)) }
@@ -103,7 +102,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 2,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch { pagerState.animateScrollToPage(2) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_mode_injections)) }
@@ -111,7 +110,7 @@ fun ExtensionSelector(
             Tab(
                 selected = pagerState.currentPage == 3,
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch { pagerState.animateScrollToPage(3) }
                 },
                 text = { Text(stringResource(R.string.extension_selector_tab_lorebooks)) }

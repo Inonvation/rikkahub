@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -108,7 +107,7 @@ fun TrustedFolderMoveTargetSheet(
                 IconButton(
                     enabled = browsePath.isNotBlank(),
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         browsePath = browsePath.substringBeforeLast('/', missingDelimiterValue = "")
                     },
                 ) {
@@ -164,7 +163,7 @@ fun TrustedFolderMoveTargetSheet(
                         modifier = Modifier
                             .alpha(if (forbidden) 0.45f else 1f)
                             .clickable(enabled = !forbidden) {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 browsePath = dir.path
                             },
                     )
@@ -190,13 +189,13 @@ fun TrustedFolderMoveTargetSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismiss()
                 }) {
                     Text("取消")
                 }
                 FilledTonalButton(onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onSelectTarget(browsePath)
                     onDismiss()
                 }) {

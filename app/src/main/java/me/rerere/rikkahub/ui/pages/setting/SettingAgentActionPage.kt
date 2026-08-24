@@ -62,6 +62,31 @@ fun SettingAgentActionPage(vm: SettingVM = koinViewModel()) {
         item {
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
+                title = stringResource(R.string.setting_ai_request_group),
+            ) {
+                item(
+                    headlineContent = {
+                        NumberSettingContent(
+                            value = settings.aiRequestMaxRetries.toLong(),
+                            title = stringResource(R.string.setting_ai_retry_title),
+                            description = stringResource(R.string.setting_ai_retry_desc),
+                            placeholder = "5",
+                            onValueChange = {
+                                vm.updateSettings(
+                                    settings.copy(
+                                        aiRequestMaxRetries = it?.toInt()?.coerceIn(0, 10) ?: 5
+                                    )
+                                )
+                            },
+                        )
+                    },
+                )
+            }
+        }
+
+        item {
+            IosGroup(
+                modifier = Modifier.padding(horizontal = 8.dp),
                 title = stringResource(R.string.setting_agent_action_todo_group),
             ) {
                 item(

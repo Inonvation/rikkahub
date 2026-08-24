@@ -5,7 +5,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -20,7 +19,7 @@ fun BackButton(modifier: Modifier = Modifier) {
     val hapticController = rememberHaptic()
     FilledTonalIconButton(
         onClick = {
-            hapticController.perform(HapticFeedbackType.KeyboardTap)
+            hapticController.lightTap()
             navController.popBackStack()
         },
         modifier = modifier,

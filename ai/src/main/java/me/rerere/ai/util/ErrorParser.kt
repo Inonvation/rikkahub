@@ -15,6 +15,8 @@ import kotlinx.serialization.json.jsonPrimitive
 class HttpException(
     message: String,
     var code: Int? = null,
+    /** 服务端通过 Retry-After / retry-after-ms 建议的等待时长（毫秒），用于退避。 */
+    var retryAfterMs: Long? = null,
 ) : RuntimeException(message)
 
 fun JsonElement.parseErrorDetail(): HttpException {

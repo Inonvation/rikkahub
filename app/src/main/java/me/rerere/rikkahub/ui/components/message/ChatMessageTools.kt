@@ -39,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -331,7 +330,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                     if (isPending && onToolApproval != null) {
                         FilledTonalIconButton(
-                            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); showDenyDialog = true },
+                            onClick = { hapticController.lightTap(); showDenyDialog = true },
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
@@ -341,7 +340,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             )
                         }
                         FilledTonalIconButton(
-                            onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onToolApproval(tool.toolCallId, true, "") },
+                            onClick = { hapticController.lightTap(); onToolApproval(tool.toolCallId, true, "") },
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
@@ -396,7 +395,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                     Modifier
                                         .clip(MaterialTheme.shapes.small)
                                         .clickable {
-                                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                            hapticController.lightTap()
                                             showResult = true
                                         }
                                 } else {
@@ -439,7 +438,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 .fillMaxWidth()
                                 .clip(MaterialTheme.shapes.small)
                                 .clickable {
-                                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                    hapticController.lightTap()
                                     showResult = true
                                 }
                                 .padding(vertical = 6.dp),
@@ -651,12 +650,12 @@ private fun ToolDenyReasonDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onConfirm(reason) }) {
+            TextButton(onClick = { hapticController.lightTap(); onConfirm(reason) }) {
                 Text(stringResource(R.string.chat_message_tool_deny))
             }
         },
         dismissButton = {
-            TextButton(onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onDismiss() }) {
+            TextButton(onClick = { hapticController.lightTap(); onDismiss() }) {
                 Text(stringResource(android.R.string.cancel))
             }
         }

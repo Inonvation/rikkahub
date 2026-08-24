@@ -214,6 +214,9 @@ class SettingsStore(
         val SUB_AGENT_MAX_RETRIES = intPreferencesKey("sub_agent_max_retries")
         val SUB_AGENT_MAX_TOKENS = longPreferencesKey("sub_agent_max_tokens")
 
+        // AI 请求重试
+        val AI_REQ_MAX_RETRIES = intPreferencesKey("ai_req_max_retries")
+
         // 任务计划
         val TODO_LIST_ENABLED = booleanPreferencesKey("enable_todo_list")
 
@@ -361,6 +364,7 @@ class SettingsStore(
                 subAgentAllowGuidance = preferences[SUB_AGENT_ALLOW_GUIDANCE] == true,
                 subAgentMaxRetries = (preferences[SUB_AGENT_MAX_RETRIES] ?: 1).coerceIn(0, 3),
                 subAgentMaxTokens = preferences[SUB_AGENT_MAX_TOKENS]?.takeIf { it > 0 },
+                aiRequestMaxRetries = (preferences[AI_REQ_MAX_RETRIES] ?: 5).coerceIn(0, 10),
                 enableAgentBehaviorPrompt = preferences[AGENT_BEHAVIOR_PROMPT_ENABLED] != false,
                 enableTodoList = preferences[TODO_LIST_ENABLED] != false,
                 costCurrency = preferences[COST_CURRENCY]?.let {
@@ -593,6 +597,7 @@ class SettingsStore(
             preferences[SUB_AGENT_MAX_CONCURRENT] = settings.subAgentMaxConcurrent.coerceIn(1, 64)
             preferences[SUB_AGENT_ALLOW_GUIDANCE] = settings.subAgentAllowGuidance
             preferences[SUB_AGENT_MAX_RETRIES] = settings.subAgentMaxRetries.coerceIn(0, 3)
+            preferences[AI_REQ_MAX_RETRIES] = settings.aiRequestMaxRetries.coerceIn(0, 10)
             settings.subAgentMaxTokens?.takeIf { it > 0 }?.let {
                 preferences[SUB_AGENT_MAX_TOKENS] = it
             } ?: preferences.remove(SUB_AGENT_MAX_TOKENS)
@@ -923,6 +928,8 @@ data class Settings(
     val subAgentMaxRetries: Int = 1,
     /** per-task token 预算（null=不限）。累计 usage 超限置 TOKEN_LIMIT 终止 */
     val subAgentMaxTokens: Long? = null,
+    /** AI 请求（主对话/子代理生成）瞬态失败重试次数（0..10，默认 5；0=不重试） */
+    val aiRequestMaxRetries: Int = 5,
     val enableAgentBehaviorPrompt: Boolean = true,
     /** 会话费用显示货币（默认人民币，用户可在费用配置窗修改，全局持久化） */
     val costCurrency: CostCurrency = CostCurrency.RMB,
@@ -964,6 +971,17 @@ enum class ChatFontFamily {
 
     @SerialName("custom")
     CUSTOM,
+}
+
+/** 聊天输入框下方指标条可展示的信息项（顺序即默认展示顺序）。 */
+@Serializable
+enum class FooterIndicator {
+    @SerialName("model") CURRENT_MODEL,
+    @SerialName("balance") PROVIDER_BALANCE,
+    @SerialName("cache") CACHE_HIT_RATE,
+    @SerialName("cost") COST,
+    @SerialName("tokens") TOKENS,
+    @SerialName("messages") MESSAGES,
 }
 
 @Serializable
@@ -1015,6 +1033,14 @@ data class DisplaySetting(
     val volumeKeyScrollRatio: Float = 1.0f,
     /** 平板适配模式：平板横屏时保持普通界面，仅针对大屏优化显示（放宽消息/输入限宽）。默认关闭以免改变手机端逻辑 */
     val enableTabletAdaptation: Boolean = false,
+    /** 聊天输入框下方指标条：用户选择展示的信息项（按此列表顺序展示）。 */
+    val footerIndicators: List<FooterIndicator> = listOf(
+        FooterIndicator.CURRENT_MODEL,
+        FooterIndicator.CACHE_HIT_RATE,
+        FooterIndicator.COST,
+    ),
+    /** 输入框下方指标条同时展示的个数上限（1..条目数），超出部分收进 +N 菜单。 */
+    val footerIndicatorLimit: Int = 3,
 )
 
 @Serializable

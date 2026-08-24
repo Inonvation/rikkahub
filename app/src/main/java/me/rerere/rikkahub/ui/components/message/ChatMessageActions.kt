@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -103,7 +102,7 @@ fun ColumnScope.ChatMessageActionButtons(
             contentDescription = stringResource(R.string.copy),
             modifier = Modifier
                 .clip(CircleShape)
-                .clickable { hapticController.perform(HapticFeedbackType.KeyboardTap); context.copyMessageToClipboard(message) }
+                .clickable { hapticController.lightTap(); context.copyMessageToClipboard(message) }
                 .padding(8.dp)
                 .size(16.dp),
             tint = actionIconColor
@@ -115,7 +114,7 @@ fun ColumnScope.ChatMessageActionButtons(
             modifier = Modifier
                 .clip(CircleShape)
                 .clickable {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     if (message.role == MessageRole.USER) {
                         showRegenerateConfirm = true
                     } else {
@@ -141,7 +140,7 @@ fun ColumnScope.ChatMessageActionButtons(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
-                            hapticController.perform(HapticFeedbackType.KeyboardTap)
+                            hapticController.lightTap()
                             if (!isSpeaking) {
                                 val text = message.toText()
                                 var textToSpeak = text
@@ -173,7 +172,7 @@ fun ColumnScope.ChatMessageActionButtons(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = LocalIndication.current,
                             onClick = {
-                                hapticController.perform(HapticFeedbackType.KeyboardTap)
+                                hapticController.lightTap()
                                 showTranslateDialog = true
                             }
                         )
@@ -193,7 +192,7 @@ fun ColumnScope.ChatMessageActionButtons(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = LocalIndication.current,
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onOpenActionSheet()
                     }
                 )
@@ -278,7 +277,7 @@ fun ChatMessageActionsSheet(
             // Select and Copy
             Card(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismissRequest()
                     onSelectAndCopy()
                 },
@@ -310,7 +309,7 @@ fun ChatMessageActionsSheet(
             if (hasTextContent) {
                 Card(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onDismissRequest()
                         onWebViewPreview()
                     },
@@ -339,7 +338,7 @@ fun ChatMessageActionsSheet(
             // Edit
             Card(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismissRequest()
                     onEdit()
                 },
@@ -367,7 +366,7 @@ fun ChatMessageActionsSheet(
             // Share
             Card(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismissRequest()
                     onShare()
                 },
@@ -395,7 +394,7 @@ fun ChatMessageActionsSheet(
             // Create a Fork
             Card(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     onDismissRequest()
                     onFork()
                 },
@@ -423,7 +422,7 @@ fun ChatMessageActionsSheet(
             if (onToggleFavorite != null) {
                 Card(
                     onClick = {
-                        hapticController.perform(HapticFeedbackType.KeyboardTap)
+                        hapticController.lightTap()
                         onDismissRequest()
                         onToggleFavorite()
                     },
@@ -455,7 +454,7 @@ fun ChatMessageActionsSheet(
             // Delete
             Card(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.heavyTap()
                     onDismissRequest()
                     onDelete()
                 },

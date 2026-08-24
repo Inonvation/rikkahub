@@ -57,6 +57,7 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.removeElements
+import me.rerere.ai.util.retryAfterMillis
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
@@ -190,7 +191,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw HttpException("Failed to get response: ${response.code} ${response.body?.string()}", code = response.code)
+            throw HttpException(
+                "Failed to get response: ${response.code} ${response.body?.string()}",
+                code = response.code,
+                retryAfterMs = response.headers.retryAfterMillis(),
+            )
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -293,6 +298,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 } catch (e: Throwable) {
                     exception = e
                 } finally {
+                    if (exception is HttpException) {
+                        exception.retryAfterMs = response?.headers?.retryAfterMillis()
+                    }
                     close(exception ?: Exception("Stream failed"))
                 }
             }

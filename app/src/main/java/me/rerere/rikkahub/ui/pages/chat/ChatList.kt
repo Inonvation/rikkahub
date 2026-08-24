@@ -72,7 +72,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -1031,7 +1030,7 @@ private fun BoxScope.MessageJumper(
         ) {
             Surface(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch {
                         state.scrollToItem(0)
                     }
@@ -1051,7 +1050,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
@@ -1075,7 +1074,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex + 1).coerceAtMost(
@@ -1098,7 +1097,7 @@ private fun BoxScope.MessageJumper(
             }
             Surface(
                 onClick = {
-                    hapticController.perform(HapticFeedbackType.KeyboardTap)
+                    hapticController.lightTap()
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }

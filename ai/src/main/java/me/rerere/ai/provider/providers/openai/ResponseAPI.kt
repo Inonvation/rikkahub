@@ -52,6 +52,7 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.HttpException
 import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.retryAfterMillis
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
@@ -105,7 +106,8 @@ class ResponseAPI(
             // 抛裸 Exception 会导致 429/5xx 永不重试
             throw HttpException(
                 "Failed to get response: ${response.code} ${response.body?.string()}",
-                code = response.code
+                code = response.code,
+                retryAfterMs = response.headers.retryAfterMillis(),
             )
         }
 
@@ -184,6 +186,7 @@ class ResponseAPI(
                 } finally {
                     if (exception is HttpException) {
                         exception.code = response?.code
+                        exception.retryAfterMs = response?.headers?.retryAfterMillis()
                     }
                     // body 为空/不可读且无原始异常时，不能 close(null)=正常完成——HTTP 失败必须报错
                     close(exception ?: HttpException("Stream failed (HTTP ${response?.code})", code = response?.code))
