@@ -633,6 +633,7 @@ private fun SendButton(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hapticController = rememberHaptic()
     val containerColor = when {
         loading -> MaterialTheme.colorScheme.errorContainer
         empty -> MaterialTheme.colorScheme.surfaceContainerHigh
@@ -651,8 +652,8 @@ private fun SendButton(
             .clip(CircleShape)
             .combinedClickable(
                 enabled = loading || !empty,
-                onClick = onClick,
-                onLongClick = onLongClick,
+                onClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onClick() },
+                onLongClick = { hapticController.perform(HapticFeedbackType.KeyboardTap); onLongClick() },
             )
     ) {
         Surface(
