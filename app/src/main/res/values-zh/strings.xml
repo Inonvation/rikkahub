@@ -984,7 +984,6 @@
   <string name="setting_page_console_audit">管理审计</string>
   <string name="setting_page_console_no_audit">暂无管理操作</string>
   <string name="setting_page_console_bottom_hint">状态、审计与权限</string>
-  <string name="setting_page_conversation_history">历史会话</string>
   <string name="setting_page_trusted_folders">信任文件夹</string>
   <string name="setting_page_display_setting">显示设置</string>
   <string name="setting_page_display_setting_desc">管理显示设置</string>

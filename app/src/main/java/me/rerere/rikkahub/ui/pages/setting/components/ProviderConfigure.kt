@@ -150,6 +150,17 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
     }
 }
 
+/**
+ * ChatGPT 订阅（Codex / "GPT 登录"）资格：仅官方 OpenAI 端点（chatgpt.com /
+ * api.openai.com）或已处于订阅态/已有凭据的供应商可用。第三方兼容端点
+ * （DeepSeek、MIMO 等预设供应商）不提供该认证方式，UI 上隐藏对应选项。
+ */
+internal fun ProviderSetting.OpenAI.supportsChatGptSubscription(): Boolean {
+    if (authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || codexCredentials != null) return true
+    val host = baseUrl.toHttpUrlOrNull()?.host?.lowercase() ?: return false
+    return host == OPENAI_CODEX_HOST || host == OPENAI_OFFICIAL_HOST
+}
+
 internal fun ProviderSetting.defaultBaseUrlForReset(): String {
     // ChatGPT 订阅（Codex）重置回官方 Codex 端点，而不是 API Key 默认端点。
     if (this is ProviderSetting.OpenAI && authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
@@ -273,6 +284,16 @@ private fun ProviderConfigureOpenAI(
     val signedInText = stringResource(R.string.setting_provider_page_signed_in)
     val signOutText = stringResource(R.string.setting_provider_page_sign_out)
     val selectedAuthType = provider.authType
+    // ChatGPT 订阅（GPT 登录）仅对官方 OpenAI 端点有意义：订阅态请求固定走
+    // https://chatgpt.com/backend-api/codex（见 ai 模块 effectiveBaseUrl），第三方
+    // 兼容端点（DeepSeek、MIMO 等预设供应商）无法使用。非官方端点只保留 API Key
+    // 一种认证方式并隐藏选择行，避免误导；已处于订阅态/已有凭据的供应商仍显示
+    // 选择行（允许退出/续期，且 baseUrl 显示为官方 Codex 端点）。
+    val authOptions = if (provider.supportsChatGptSubscription()) {
+        OpenAIAuthType.entries
+    } else {
+        listOf(OpenAIAuthType.API_KEY)
+    }
 
     provider.description()
 
@@ -284,38 +305,40 @@ private fun ProviderConfigureOpenAI(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    Text(stringResource(R.string.setting_provider_page_auth_method))
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        OpenAIAuthType.entries.forEachIndexed { index, authType ->
-            SegmentedButton(
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = OpenAIAuthType.entries.size,
-                ),
-                label = {
-                    Text(
-                        when (authType) {
-                            OpenAIAuthType.API_KEY -> stringResource(R.string.setting_provider_page_api_key)
-                            OpenAIAuthType.CHATGPT_SUBSCRIPTION -> stringResource(R.string.setting_provider_page_chatgpt_subscription)
-                        }
-                    )
-                },
-                selected = provider.authType == authType,
-                onClick = {
-                    hapticController.lightTap()
-                    authJob?.cancel()
-                    authError = null
-                    deviceCode = null
-                    // 切换认证方式不改写 baseUrl：订阅模式下请求统一走官方 Codex 端点
-                    // （ai 模块 effectiveBaseUrl），切回 API Key 时原 baseUrl 原样保留。
-                    onEdit(
-                        provider.copy(
-                            authType = authType,
-                            useResponseApi = authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || provider.useResponseApi,
+    if (authOptions.size > 1) {
+        Text(stringResource(R.string.setting_provider_page_auth_method))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            authOptions.forEachIndexed { index, authType ->
+                SegmentedButton(
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = authOptions.size,
+                    ),
+                    label = {
+                        Text(
+                            when (authType) {
+                                OpenAIAuthType.API_KEY -> stringResource(R.string.setting_provider_page_api_key)
+                                OpenAIAuthType.CHATGPT_SUBSCRIPTION -> stringResource(R.string.setting_provider_page_chatgpt_subscription)
+                            }
                         )
-                    )
-                },
-            )
+                    },
+                    selected = provider.authType == authType,
+                    onClick = {
+                        hapticController.lightTap()
+                        authJob?.cancel()
+                        authError = null
+                        deviceCode = null
+                        // 切换认证方式不改写 baseUrl：订阅模式下请求统一走官方 Codex 端点
+                        // （ai 模块 effectiveBaseUrl），切回 API Key 时原 baseUrl 原样保留。
+                        onEdit(
+                            provider.copy(
+                                authType = authType,
+                                useResponseApi = authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || provider.useResponseApi,
+                            )
+                        )
+                    },
+                )
+            }
         }
     }
 

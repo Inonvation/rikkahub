@@ -16,8 +16,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.BalanceOption
+import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.ClaudePromptCacheTtl
+import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
@@ -93,6 +99,137 @@ private fun errorText(message: String): List<UIMessagePart> =
 private fun maskSecret(value: String): String =
     if (value.isBlank()) "(not set)" else "***"
 
+// ---- 模型基本设置解析（model_add / model_update 共用，值来自 AI 参数） ----
+
+internal fun parseModelType(value: String): ModelType? = when (value.lowercase()) {
+    "chat" -> ModelType.CHAT
+    "image" -> ModelType.IMAGE
+    "embedding" -> ModelType.EMBEDDING
+    "reranking" -> ModelType.RERANKING
+    else -> null
+}
+
+internal fun parseAbilities(values: List<String>?): List<ModelAbility>? =
+    values?.mapNotNull { v ->
+        ModelAbility.entries.firstOrNull { it.name.equals(v, ignoreCase = true) }
+    }
+
+internal fun parseModalities(values: List<String>?): List<Modality>? =
+    values?.mapNotNull { v ->
+        Modality.entries.firstOrNull { it.name.equals(v, ignoreCase = true) }
+    }
+
+internal fun parseBuiltInTools(values: List<String>?): Set<BuiltInTools>? =
+    values?.mapNotNull { it.toBuiltInTool() }?.toSet()
+
+internal fun String.toBuiltInTool(): BuiltInTools? = when (lowercase()) {
+    "search" -> BuiltInTools.Search
+    "url_context" -> BuiltInTools.UrlContext
+    "image_generation" -> BuiltInTools.ImageGeneration
+    else -> null
+}
+
+internal fun BuiltInTools.configName(): String = when (this) {
+    BuiltInTools.Search -> "search"
+    BuiltInTools.UrlContext -> "url_context"
+    BuiltInTools.ImageGeneration -> "image_generation"
+}
+
+internal fun parseCustomHeaders(element: JsonElement?): List<CustomHeader>? {
+    if (element == null || element is JsonNull) return null
+    val array = element as? JsonArray ?: return null
+    return array.mapNotNull { item ->
+        val obj = item as? JsonObject ?: return@mapNotNull null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val value = obj["value"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        CustomHeader(name = name, value = value)
+    }
+}
+
+// ---- model_add 智能默认：按 modelId 关键字推断模型基本设置 ----
+
+/** modelId 智能推断结果（AI 未显式传参时使用）。 */
+internal data class ModelBasicConfig(
+    val type: ModelType = ModelType.CHAT,
+    val abilities: List<ModelAbility> = emptyList(),
+    val inputModalities: List<Modality> = listOf(Modality.TEXT),
+    val outputModalities: List<Modality> = listOf(Modality.TEXT),
+)
+
+/** 推理类模型关键字（命中则附加 REASONING ability）。 */
+private val REASONING_KEYWORDS = listOf(
+    "o1", "o3", "o4", "gpt-5", "thinking", "reasoner", "deepseek-r1", "r1-", "gemini-2.5",
+    "claude-3-7", "claude-4", "grok-3", "qwq", "kimi-k",
+)
+
+/** 多模态输入关键字（命中则 inputModalities 含 image）。 */
+private val VISION_KEYWORDS = listOf(
+    "vision", "omni", "multimodal", "vl", "4o", "gemini", "claude", "nova-lite", "qwen2-vl", "llava",
+)
+
+internal fun inferModelBasicConfig(modelId: String): ModelBasicConfig {
+    val lower = modelId.lowercase()
+    val isEmbedding = lower.contains("embedding") || lower.startsWith("text-embedding")
+    val isImageGen = lower.contains("dall-e") || lower.contains("flux") ||
+        lower.contains("stable-diffusion") || lower.contains("imagen") || lower.contains("imagegen")
+    val isRerank = lower.contains("rerank")
+
+    if (isEmbedding) {
+        return ModelBasicConfig(type = ModelType.EMBEDDING)
+    }
+    if (isImageGen) {
+        return ModelBasicConfig(
+            type = ModelType.IMAGE,
+            outputModalities = listOf(Modality.IMAGE),
+        )
+    }
+    if (isRerank) {
+        return ModelBasicConfig(type = ModelType.RERANKING)
+    }
+
+    val abilities = buildList {
+        add(ModelAbility.TOOL)
+        if (REASONING_KEYWORDS.any { lower.contains(it) }) add(ModelAbility.REASONING)
+    }
+    val inputModalities = if (VISION_KEYWORDS.any { lower.contains(it) }) {
+        listOf(Modality.TEXT, Modality.IMAGE)
+    } else {
+        listOf(Modality.TEXT)
+    }
+    return ModelBasicConfig(
+        type = ModelType.CHAT,
+        abilities = abilities,
+        inputModalities = inputModalities,
+        outputModalities = listOf(Modality.TEXT),
+    )
+}
+
+/** 解析 balance 对象 {"enabled", "apiPath", "resultPath"}；未提供或全空返回 null（保持现值）。 */
+internal fun parseBalance(element: JsonElement?): BalanceOption? {
+    if (element == null || element !is JsonObject) return null
+    val enabled = element["enabled"]?.jsonPrimitive?.booleanOrNull
+    val apiPath = element["apiPath"]?.jsonPrimitive?.contentOrNull
+    val resultPath = element["resultPath"]?.jsonPrimitive?.contentOrNull
+    if (enabled == null && apiPath == null && resultPath == null) return null
+    return BalanceOption(
+        enabled = enabled ?: false,
+        apiPath = apiPath ?: "/credits",
+        resultPath = resultPath ?: "data.total_usage",
+    )
+}
+
+/** 解析 Claude 缓存 TTL："5m"/"1h"（@SerialName）或枚举名；非法返回 null。 */
+internal fun parsePromptCacheTtl(value: String?): ClaudePromptCacheTtl? {
+    if (value.isNullOrBlank()) return null
+    return when (value.trim().lowercase()) {
+        "5m" -> ClaudePromptCacheTtl.FIVE_MINUTES
+        "1h" -> ClaudePromptCacheTtl.ONE_HOUR
+        else -> ClaudePromptCacheTtl.entries.firstOrNull {
+            it.name.equals(value, ignoreCase = true)
+        }
+    }
+}
+
 private fun ProviderSetting.typeName(): String = when (this) {
     is ProviderSetting.OpenAI -> "openai"
     is ProviderSetting.Google -> "google"
@@ -113,6 +250,18 @@ private fun ProviderSetting.detail(): String = buildString {
     appendLine("type: ${typeName()}")
     appendLine("enabled: $enabled")
     appendLine("models: ${models.size}")
+    models.forEach { model ->
+        appendLine("model: id=${model.id} modelId=${model.modelId} displayName=${model.displayName} type=${model.type}")
+        appendLine("  abilities: ${model.abilities.joinToString { it.name.lowercase() }}")
+        appendLine(
+            "  input: ${model.inputModalities.joinToString { it.name.lowercase() }} " +
+                "output: ${model.outputModalities.joinToString { it.name.lowercase() }}"
+        )
+        appendLine("  builtInTools: ${model.tools.joinToString { it.configName() }}")
+        if (model.customHeaders.isNotEmpty()) {
+            appendLine("  customHeaders: ${model.customHeaders.size} (masked)")
+        }
+    }
     when (this@detail) {
         is ProviderSetting.OpenAI -> {
             appendLine("baseUrl: $baseUrl")
@@ -220,7 +369,8 @@ private fun convertProviderType(
     }
 }
 
-private suspend fun audited(
+/** 管理模式写操作包装：成功记录审计 + 可回滚快照，异常记录 error 并上抛。 */
+internal suspend fun audited(
     auditStore: ManagementAuditStore,
     tool: String,
     target: String,
@@ -394,7 +544,7 @@ fun createProviderAdminTools(
         ),
         Tool(
             name = "provider_update",
-            description = "Update an existing provider. Supported types: openai, google, claude. type converts the provider type; omitted fields keep their current value. models replaces the whole list; addModels/removeModels adjust it. Removing a model used by any assistant or global model setting is rejected. Requires user approval.",
+            description = "Update an existing provider. Supported types: openai, google, claude. type converts the provider type; omitted fields keep their current value. models replaces the whole list; addModels/removeModels adjust it. Advanced settings per type: OpenAI useResponseApi/includeHistoryReasoning/chatCompletionsPath/embeddingsPath/rerankPath, Claude promptCaching/promptCacheTtl, Google vertexAI/useServiceAccount/location/projectId; balance works for all types. Removing a model used by any assistant or global model setting is rejected. Requires user approval.",
             needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
@@ -430,6 +580,50 @@ fun createProviderAdminTools(
                             put("type", "boolean")
                             put("description", "OpenAI only")
                         })
+                        put("includeHistoryReasoning", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "OpenAI only")
+                        })
+                        put("chatCompletionsPath", buildJsonObject {
+                            put("type", "string")
+                            put("description", "OpenAI only, e.g. /chat/completions")
+                        })
+                        put("embeddingsPath", buildJsonObject {
+                            put("type", "string")
+                            put("description", "OpenAI only, e.g. /embeddings")
+                        })
+                        put("rerankPath", buildJsonObject {
+                            put("type", "string")
+                            put("description", "OpenAI only, e.g. /rerank")
+                        })
+                        put("balance", buildJsonObject {
+                            put("type", "object")
+                            put("description", "Balance fetch config: {\"enabled\": bool, \"apiPath\": str, \"resultPath\": str}")
+                        })
+                        put("promptCaching", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Claude only")
+                        })
+                        put("promptCacheTtl", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Claude only: 5m or 1h")
+                        })
+                        put("vertexAI", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Google only")
+                        })
+                        put("useServiceAccount", buildJsonObject {
+                            put("type", "boolean")
+                            put("description", "Google only")
+                        })
+                        put("location", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Google only, e.g. us-central1")
+                        })
+                        put("projectId", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Google only")
+                        })
                     },
                     required = listOf("id"),
                 )
@@ -463,6 +657,17 @@ fun createProviderAdminTools(
                 val apiKey = input.str("apiKey")?.takeIf { it.isNotBlank() }
                 val enabled = input.bool("enabled")
                 val useResponseApi = input.bool("useResponseApi")
+                val includeHistoryReasoning = input.bool("includeHistoryReasoning")
+                val promptCaching = input.bool("promptCaching")
+                val promptCacheTtl = parsePromptCacheTtl(input.str("promptCacheTtl"))
+                val vertexAI = input.bool("vertexAI")
+                val useServiceAccount = input.bool("useServiceAccount")
+                val location = input.str("location")?.trim()?.ifEmpty { null }
+                val projectId = input.str("projectId")?.trim()?.ifEmpty { null }
+                val chatCompletionsPath = input.str("chatCompletionsPath")?.trim()?.ifEmpty { null }
+                val embeddingsPath = input.str("embeddingsPath")?.trim()?.ifEmpty { null }
+                val rerankPath = input.str("rerankPath")?.trim()?.ifEmpty { null }
+                val balance = parseBalance(input["balance"])
                 val updated = when (targetProvider) {
                     is ProviderSetting.OpenAI -> targetProvider.copy(
                         name = name ?: targetProvider.name,
@@ -470,6 +675,11 @@ fun createProviderAdminTools(
                         apiKey = apiKey ?: targetProvider.apiKey,
                         enabled = enabled ?: targetProvider.enabled,
                         useResponseApi = useResponseApi ?: targetProvider.useResponseApi,
+                        includeHistoryReasoning = includeHistoryReasoning ?: targetProvider.includeHistoryReasoning,
+                        chatCompletionsPath = chatCompletionsPath ?: targetProvider.chatCompletionsPath,
+                        embeddingsPath = embeddingsPath ?: targetProvider.embeddingsPath,
+                        rerankPath = rerankPath ?: targetProvider.rerankPath,
+                        balanceOption = balance ?: targetProvider.balanceOption,
                         models = newModels,
                     )
                     is ProviderSetting.Google -> targetProvider.copy(
@@ -477,6 +687,11 @@ fun createProviderAdminTools(
                         baseUrl = baseUrl ?: targetProvider.baseUrl,
                         apiKey = apiKey ?: targetProvider.apiKey,
                         enabled = enabled ?: targetProvider.enabled,
+                        vertexAI = vertexAI ?: targetProvider.vertexAI,
+                        useServiceAccount = useServiceAccount ?: targetProvider.useServiceAccount,
+                        location = location ?: targetProvider.location,
+                        projectId = projectId ?: targetProvider.projectId,
+                        balanceOption = balance ?: targetProvider.balanceOption,
                         models = newModels,
                     )
                     is ProviderSetting.Claude -> targetProvider.copy(
@@ -484,6 +699,9 @@ fun createProviderAdminTools(
                         baseUrl = baseUrl ?: targetProvider.baseUrl,
                         apiKey = apiKey ?: targetProvider.apiKey,
                         enabled = enabled ?: targetProvider.enabled,
+                        promptCaching = promptCaching ?: targetProvider.promptCaching,
+                        promptCacheTtl = promptCacheTtl ?: targetProvider.promptCacheTtl,
+                        balanceOption = balance ?: targetProvider.balanceOption,
                         models = newModels,
                     )
                 }
@@ -533,6 +751,157 @@ fun createProviderAdminTools(
                 ) {
                     settingsStore.updateProviders(settings.providers.filterNot { it.id == provider.id })
                     listOf(UIMessagePart.Text("Provider \"${provider.name}\" deleted."))
+                }
+            },
+        ),
+        Tool(
+            name = "model_add",
+            description = "Add a model with full basic settings to a provider: type (chat/image/embedding/reranking), abilities (tool/reasoning), input/output modalities (text/image), built-in tools (search/url_context/image_generation) and optional custom headers. When type/abilities/modalities are omitted they are inferred from the modelId (e.g. *-vision → image input, o1/thinking → reasoning). Requires user approval.",
+            needsApproval = { true },
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("providerId", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Provider id from provider_list")
+                        })
+                        put("modelId", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Model identifier, e.g. gpt-4o")
+                        })
+                        put("displayName", buildJsonObject { put("type", "string") })
+                        put("type", buildJsonObject {
+                            put("type", "string")
+                            put("description", "chat / image / embedding / reranking (default chat)")
+                        })
+                        put("abilities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"tool\", \"reasoning\"]")
+                        })
+                        put("inputModalities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"text\", \"image\"]")
+                        })
+                        put("outputModalities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"text\"]")
+                        })
+                        put("builtInTools", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"search\"]")
+                        })
+                        put("customHeaders", buildJsonObject {
+                            put("type", "array")
+                            put("description", "Optional list of {\"name\": ..., \"value\": ...} objects")
+                        })
+                    },
+                    required = listOf("providerId", "modelId"),
+                )
+            },
+            execute = { args ->
+                val input = args.jsonObject
+                val settings = settingsStore.settingsFlow.value
+                val provider = findProvider(input.str("providerId").orEmpty())
+                    ?: return@Tool errorText("provider not found")
+                val modelId = input.str("modelId")?.trim().orEmpty()
+                if (modelId.isEmpty()) return@Tool errorText("modelId is required")
+                if (provider.models.any { it.modelId.equals(modelId, ignoreCase = true) }) {
+                    return@Tool errorText("model '$modelId' already exists on this provider")
+                }
+                val inferred = inferModelBasicConfig(modelId)
+                val model = Model(
+                    modelId = modelId,
+                    displayName = input.str("displayName")?.trim()?.ifEmpty { null } ?: modelId,
+                    type = input.str("type")?.let { parseModelType(it) } ?: inferred.type,
+                    abilities = parseAbilities(input.strArray("abilities")) ?: inferred.abilities,
+                    inputModalities = parseModalities(input.strArray("inputModalities")) ?: inferred.inputModalities,
+                    outputModalities = parseModalities(input.strArray("outputModalities")) ?: inferred.outputModalities,
+                    tools = parseBuiltInTools(input.strArray("builtInTools")) ?: emptySet(),
+                    customHeaders = parseCustomHeaders(input["customHeaders"]) ?: emptyList(),
+                )
+                audited(
+                    auditStore = auditStore,
+                    tool = "model_add",
+                    target = "${provider.name}/$modelId",
+                    rollbackStore = rollbackStore,
+                    captureSettings = { settingsStore.settingsFlow.value },
+                ) {
+                    settingsStore.updateProviders(
+                        settings.providers.map { if (it.id == provider.id) provider.addModel(model) else it }
+                    )
+                    listOf(UIMessagePart.Text("Model \"$modelId\" added to provider \"${provider.name}\"."))
+                }
+            },
+        ),
+        Tool(
+            name = "model_update",
+            description = "Update basic settings of an existing model: displayName, type, abilities, input/output modalities, built-in tools and custom headers. Omitted fields keep their current value. Requires user approval.",
+            needsApproval = { true },
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("providerId", buildJsonObject { put("type", "string") })
+                        put("id", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Model id from provider_get or config_read")
+                        })
+                        put("displayName", buildJsonObject { put("type", "string") })
+                        put("type", buildJsonObject {
+                            put("type", "string")
+                            put("description", "chat / image / embedding / reranking")
+                        })
+                        put("abilities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"tool\", \"reasoning\"]")
+                        })
+                        put("inputModalities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"text\", \"image\"]")
+                        })
+                        put("outputModalities", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"text\"]")
+                        })
+                        put("builtInTools", buildJsonObject {
+                            put("type", "array")
+                            put("description", "e.g. [\"search\"]")
+                        })
+                        put("customHeaders", buildJsonObject {
+                            put("type", "array")
+                            put("description", "Optional list of {\"name\": ..., \"value\": ...} objects")
+                        })
+                    },
+                    required = listOf("providerId", "id"),
+                )
+            },
+            execute = { args ->
+                val input = args.jsonObject
+                val settings = settingsStore.settingsFlow.value
+                val provider = findProvider(input.str("providerId").orEmpty())
+                    ?: return@Tool errorText("provider not found")
+                val id = input.str("id").orEmpty()
+                val model = provider.models.firstOrNull { it.id.toString() == id }
+                    ?: return@Tool errorText("model '$id' not found")
+                val updatedModel = model.copy(
+                    displayName = input.str("displayName")?.trim()?.ifEmpty { null } ?: model.displayName,
+                    type = input.str("type")?.let { parseModelType(it) } ?: model.type,
+                    abilities = parseAbilities(input.strArray("abilities")) ?: model.abilities,
+                    inputModalities = parseModalities(input.strArray("inputModalities")) ?: model.inputModalities,
+                    outputModalities = parseModalities(input.strArray("outputModalities")) ?: model.outputModalities,
+                    tools = parseBuiltInTools(input.strArray("builtInTools")) ?: model.tools,
+                    customHeaders = parseCustomHeaders(input["customHeaders"]) ?: model.customHeaders,
+                )
+                audited(
+                    auditStore = auditStore,
+                    tool = "model_update",
+                    target = "${provider.name}/${model.modelId}",
+                    rollbackStore = rollbackStore,
+                    captureSettings = { settingsStore.settingsFlow.value },
+                ) {
+                    settingsStore.updateProviders(
+                        settings.providers.map { if (it.id == provider.id) provider.editModel(updatedModel) else it }
+                    )
+                    listOf(UIMessagePart.Text("Model \"${updatedModel.modelId}\" updated."))
                 }
             },
         ),

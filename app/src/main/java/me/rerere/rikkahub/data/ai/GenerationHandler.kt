@@ -401,20 +401,26 @@ class GenerationHandler(
                 var hasPendingApproval = false
                 val updatedTools = tools.map { tool ->
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
+                    // 填充工具目的说明（审批卡片/详情展示用）；旧消息已带则保留
+                    val withDescription = if (tool.description.isBlank() && toolDef != null) {
+                        tool.copy(description = toolDef.description)
+                    } else {
+                        tool
+                    }
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
                             hasPendingApproval = true
-                            tool.copy(approvalState = ToolApprovalState.Pending)
+                            withDescription.copy(approvalState = ToolApprovalState.Pending)
                         }
                         // State is Pending -> keep waiting
                         tool.approvalState is ToolApprovalState.Pending -> {
                             hasPendingApproval = true
-                            tool
+                            withDescription
                         }
 
-                        else -> tool
+                        else -> withDescription
                     }
                 }
 

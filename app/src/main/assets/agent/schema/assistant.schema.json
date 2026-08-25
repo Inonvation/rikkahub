@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent://schema/assistant.schema.json",
+  "title": "RikkaHub Agent Assistant Config",
+  "description": "agent/config/assistants/<id>.json — 助手配置（脱敏视图）。字段对应设置页助手可见项；密钥类只出现 keystore:* 引用。",
+  "type": "object",
+  "required": ["schemaVersion", "assistant"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "assistant": {
+      "$ref": "#/definitions/assistant"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "assistant": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "chatModelRef": { "type": ["string", "null"], "pattern": "^[0-9a-f-]+:[0-9a-f-]+$" },
+        "systemPrompt": { "type": "string" },
+        "temperature": { "type": ["number", "null"] },
+        "topP": { "type": ["number", "null"] },
+        "maxTokens": { "type": ["integer", "null"] },
+        "streamOutput": { "type": "boolean" },
+        "enableMemory": { "type": "boolean" },
+        "useGlobalMemory": { "type": "boolean" },
+        "enableWebSearch": { "type": "boolean" },
+        "workspaceId": { "type": ["string", "null"] },
+        "mcpServerIds": { "type": "array", "items": { "type": "string" } },
+        "enabledSkills": { "type": "array", "items": { "type": "string" } },
+        "knowledgeBaseIds": { "type": "array", "items": { "type": "string" } },
+        "modeInjectionIds": { "type": "array", "items": { "type": "string" } },
+        "lorebookIds": { "type": "array", "items": { "type": "string" } },
+        "defaultMode": { "type": ["string", "null"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "avatar": { "type": ["string", "null"], "pattern": "^(emoji:.+|image:.+)$" },
+        "useAssistantAvatar": { "type": "boolean" },
+        "background": { "type": ["string", "null"] },
+        "backgroundOpacity": { "type": ["number", "null"] },
+        "useGradientBackground": { "type": "boolean" },
+        "contextMessageLimit": { "type": "integer", "minimum": 0 },
+        "contextTokenLimit": { "type": "integer", "minimum": 0 },
+        "messageTemplate": { "type": "string" },
+        "reasoningLevel": {
+          "type": ["string", "null"],
+          "enum": ["off", "auto", "low", "medium", "high", "xhigh", null]
+        },
+        "regexes": { "type": "array", "items": { "$ref": "#/definitions/regex" } },
+        "presetMessages": { "type": "array", "items": { "$ref": "#/definitions/presetMessage" } },
+        "localTools": { "type": "array", "items": { "type": "string" } },
+        "quickMessageIds": { "type": "array", "items": { "type": "string" } },
+        "customHeadersRef": { "type": ["string", "null"], "pattern": "^keystore:assistant:.+:headers$" },
+        "customBodiesRef": { "type": ["string", "null"], "pattern": "^keystore:assistant:.+:bodies$" },
+        "enableTimeReminder": { "type": "boolean" },
+        "allowConversationSystemPrompt": { "type": "boolean" },
+        "allowConversationPromptInjection": { "type": "boolean" },
+        "enableKnowledgeQueryRewrite": { "type": "boolean" },
+        "enabledStudyTools": { "type": "array", "items": { "type": "string" } },
+        "studySubject": { "type": "string" },
+        "defaultWorkspaceCwd": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "regex": {
+      "type": "object",
+      "required": ["id", "name", "enabled"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "findRegex": { "type": "string" },
+        "replaceString": { "type": "string" },
+        "affectingScope": { "type": "array", "items": { "type": "string", "enum": ["user", "assistant"] } },
+        "visualOnly": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "presetMessage": {
+      "type": "object",
+      "required": ["role", "text"],
+      "properties": {
+        "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

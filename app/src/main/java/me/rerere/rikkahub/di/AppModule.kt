@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.management.ManagementRollbackStore
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.ui.hooks.ChatDraftStore
+import me.rerere.rikkahub.ui.hooks.ChatScrollStore
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -77,6 +78,11 @@ val appModule = module {
     // 会话级输入草稿缓存：切换会话/助手时保存未发送的输入，重新进入时恢复
     single {
         ChatDraftStore()
+    }
+
+    // 会话级消息列表滚动位置缓存：切换会话时保存，重新进入时恢复（短暂记忆）
+    single {
+        ChatScrollStore()
     }
 
     single {
@@ -177,6 +183,7 @@ val appModule = module {
             json = get(),
             managementAuditStore = get(),
             managementRollbackStore = get(),
+            agentConfigRepository = get(),
         )
     }
 
@@ -190,5 +197,14 @@ val appModule = module {
             settingsStore = get(),
             filesManager = get()
         )
+    }
+
+    // 设置变更自动导出到 agent/（createdAtStart 保证进程启动即监听）
+    single(createdAtStart = true) {
+        me.rerere.rikkahub.data.config.AgentConfigAutoSync(
+            settingsStore = get(),
+            repository = get(),
+            appScope = get(),
+        ).also { it.start() }
     }
 }

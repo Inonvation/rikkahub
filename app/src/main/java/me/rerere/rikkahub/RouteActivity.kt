@@ -109,6 +109,7 @@ import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.chat.SubAgentPanelPage
 import me.rerere.rikkahub.ui.pages.chat.SubAgentDetailPage
+import me.rerere.rikkahub.ui.pages.setting.AgentConfigFilePage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentActionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
@@ -530,6 +531,13 @@ class RouteActivity : ComponentActivity() {
                                 SettingAgentActionPage()
                             }
 
+                            entry<Screen.AgentConfigFile> { key ->
+                                AgentConfigFilePage(
+                                    path = key.path,
+                                    title = key.title,
+                                )
+                            }
+
                             entry<Screen.SettingProvider> {
                                 SettingProviderPage()
                             }
@@ -887,6 +895,14 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAgentAction : Screen
+
+    @Serializable
+    data class AgentConfigFile(
+        /** 相对 agent/ 的配置文件路径（白名单内） */
+        val path: String,
+        /** 顶栏展示名；null 时回退为文件名 */
+        val title: String? = null,
+    ) : Screen
 
     @Serializable
     data object SettingProvider : Screen

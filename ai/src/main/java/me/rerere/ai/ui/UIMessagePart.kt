@@ -184,6 +184,11 @@ sealed class UIMessagePart {
     data class Tool(
         val toolCallId: String,
         val toolName: String,
+        /**
+         * 工具调用的目的说明（来自 Tool 定义的 description，生成时填充）。
+         * 用于审批卡片/详情展示"这个操作是干什么的"；旧数据缺省为空串，向后兼容。
+         */
+        val description: String = "",
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
@@ -232,6 +237,7 @@ sealed class UIMessagePart {
             return Tool(
                 toolCallId = toolCallId,
                 toolName = toolName + other.toolName,
+                description = description.ifBlank { other.description },
                 input = input + other.input,
                 output = output + other.output,
                 approvalState = approvalState,

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent://schema/mcp.schema.json",
+  "title": "RikkaHub Agent MCP Config",
+  "description": "agent/config/mcp.json — 全局 MCP Server 配置（脱敏视图）。结构对齐 MCP 配置规范与 Claude Desktop claude_desktop_config.json：type 取值 sse / streamable_http；headers/oauth 只出现 keystore:* 引用。",
+  "type": "object",
+  "required": ["schemaVersion", "servers"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "servers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/server"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "server": {
+      "type": "object",
+      "required": ["id", "type", "enable"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "description": "服务器显示名" },
+        "type": { "type": "string", "enum": ["sse", "streamable_http"] },
+        "url": { "type": "string" },
+        "enable": { "type": "boolean" },
+        "toolCount": { "type": "integer", "minimum": 0 },
+        "oauthEnabled": { "type": "boolean" },
+        "headersRef": { "type": "string", "pattern": "^keystore:mcp:.+:secrets$" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

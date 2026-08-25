@@ -233,6 +233,8 @@ class SkillManager(
                 name = name,
                 description = description,
                 compatibility = frontmatter["compatibility"],
+                // Anthropic Agent Skills 规范的可选字段：技能可用的工具白名单
+                allowedTools = frontmatter.getStringList("allowed-tools") ?: emptyList(),
                 skillDir = skillDir,
             )
         }.getOrElse {
@@ -246,6 +248,8 @@ data class SkillMetadata(
     val name: String,
     val description: String,
     val compatibility: String? = null,
+    /** 技能可用的工具白名单（Anthropic Agent Skills allowed-tools，可空） */
+    val allowedTools: List<String> = emptyList(),
     val skillDir: File,
 ) {
     val skillFile: File get() = skillDir.resolve("SKILL.md")

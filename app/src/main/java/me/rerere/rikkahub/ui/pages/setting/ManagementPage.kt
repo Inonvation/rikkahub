@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -9,27 +13,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dokar.sonner.ToastType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -37,8 +48,10 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.mcp.McpStatus
+import me.rerere.rikkahub.data.config.AgentConfigArchive
+import me.rerere.rikkahub.data.config.AgentConfigFileCategory
+import me.rerere.rikkahub.data.config.AgentConfigRepository
+import me.rerere.rikkahub.data.config.AgentConfigView
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.FooterIndicator
 import me.rerere.rikkahub.data.datastore.Settings
@@ -56,10 +69,6 @@ import me.rerere.rikkahub.data.model.Capability
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.resolveModePolicy
 import me.rerere.rikkahub.data.model.restrictedCapabilities
-import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
-import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.ai.modeRefDisplayName
 import me.rerere.rikkahub.ui.components.ai.note
@@ -69,38 +78,104 @@ import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/**
+ * 管理控制台：
+ * - 运行概览：当前模型 / 余额 / 会话用量（纯展示，不做跳转）；
+ * - 配置文件：agent/ 导出文件按分类（导出状态 / 提供商 / MCP / 助手 / 其他）分组，
+ *   点击条目以工作区同款方式打开只读预览；
+ * - 当前模式权限、管理审计、输入框下方显示设置。
+ */
 @Composable
-fun ManagementPage(vm: SettingVM = koinViewModel()) {
+fun ManagementPage(
+    vm: SettingVM = koinViewModel(),
+    agentConfigVM: AgentConfigVM = koinViewModel(),
+) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val trustedFolderRepository: TrustedFolderRepository = koinInject()
-    val trustedSettings by trustedFolderRepository.settingsFlow
-        .collectAsState(initial = TrustedFolderSettings())
-    val conversationRepository: ConversationRepository = koinInject()
-    val mcpManager: McpManager = koinInject()
-    val mcpStatus by mcpManager.syncingStatus.collectAsStateWithLifecycle()
     val auditStore: ManagementAuditStore = koinInject()
     val auditEntries by auditStore.entries.collectAsStateWithLifecycle()
-    val workspaceRepository: WorkspaceRepository = koinInject()
-    val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
     val messageNodeDAO: MessageNodeDAO = koinInject()
     val subAgentUsageDAO: SubAgentUsageDAO = koinInject()
     val navController = LocalNavController.current
+    val context = LocalContext.current
+    val repository: AgentConfigRepository = koinInject()
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
 
-    var conversationCount by remember { mutableStateOf<Int?>(null) }
+    // 导出 agent/ 配置为 zip（SAF）
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri == null || exporting) return@rememberLauncherForActivityResult
+        exporting = true
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    AgentConfigArchive.exportZip(repository.root, out)
+                } ?: false
+            }.getOrDefault(false)
+            withContext(Dispatchers.Main) {
+                toaster.show(
+                    if (ok) {
+                        context.getString(R.string.agent_config_page_export_success)
+                    } else {
+                        context.getString(R.string.agent_config_page_export_failed)
+                    },
+                    type = if (ok) ToastType.Success else ToastType.Error,
+                )
+                exporting = false
+            }
+        }
+    }
+
+    // 导入 agent/ 配置 zip（SAF）
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val count = runCatching {
+                val tmp = File(context.cacheDir, "agent-import-${System.currentTimeMillis()}.zip")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    tmp.outputStream().use { input.copyTo(it) }
+                }
+                val imported = AgentConfigArchive.importZip(repository.root, tmp)
+                tmp.delete()
+                imported
+            }.getOrDefault(-1)
+            withContext(Dispatchers.Main) {
+                if (count >= 0) {
+                    toaster.show(
+                        context.getString(R.string.agent_config_page_import_count, count),
+                        type = ToastType.Success,
+                    )
+                    agentConfigVM.refresh()
+                } else {
+                    toaster.show(
+                        context.getString(R.string.agent_config_page_import_failed),
+                        type = ToastType.Error,
+                    )
+                }
+            }
+        }
+    }
+
+    val configView by agentConfigVM.view.collectAsStateWithLifecycle()
+    val refreshing by agentConfigVM.refreshing.collectAsStateWithLifecycle()
+
     var tokenStats by remember { mutableStateOf(MessageTokenStats()) }
     var subTokenStats by remember { mutableStateOf(SubAgentTokenStats()) }
 
-    LaunchedEffect(Unit) {
-        conversationCount = conversationRepository.countConversations()
-    }
     LaunchedEffect(Unit) {
         tokenStats = messageNodeDAO.getTokenStats()
         subTokenStats = subAgentUsageDAO.getTokenStats()
@@ -108,21 +183,12 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
 
     val currentAssistant = settings.getCurrentAssistant()
     val modelCount = settings.providers.sumOf { it.models.size }
-    val knowledgeCount = settings.assistants.flatMap { it.knowledgeBaseIds }.distinct().size
-    val workspaceCount = settings.assistants.count { it.workspaceId != null }
-    val customModeCount = settings.customModes.size
-    val builtinOverrideCount = settings.builtinModeOverrides.size
     val modeRef = currentAssistant.defaultMode ?: settings.defaultMode
     val modePolicy = resolveModePolicy(modeRef, settings) ?: ChatModePolicy.UNRESTRICTED
     val restricted = modePolicy.restrictedCapabilities(settings)
     val managementCapabilities = Capability.entries.filter {
         it.managementOnly && it in modePolicy.capabilities
     }
-    val mcpConnected = settings.mcpServers.count { mcpStatus[it.id] is McpStatus.Connected }
-    val mcpErrorCount = settings.mcpServers.count { mcpStatus[it.id] is McpStatus.Error }
-    val mcpTotal = settings.mcpServers.size
-    val activeTrusted = trustedSettings.activeProjectId != null
-    val shellEnabledCount = workspaces.count { !it.shellStatus.equals("DISABLED", ignoreCase = true) }
     val totalPromptTokens = tokenStats.promptTokens + subTokenStats.promptTokens
     val totalCompletionTokens = tokenStats.completionTokens + subTokenStats.completionTokens
     val totalCachedTokens = tokenStats.cachedTokens + subTokenStats.cachedTokens
@@ -145,38 +211,24 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
                 promptTokens = totalPromptTokens,
                 completionTokens = totalCompletionTokens,
                 cachedTokens = totalCachedTokens,
-                onOpenStats = { navController.navigate(Screen.Stats) },
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
 
-        item("resources") {
-            ResourcesGroup(
-                providerCount = settings.providers.size,
+        item("config") {
+            ConfigFilesGroup(
+                view = configView,
                 modelCount = modelCount,
-                assistantCount = settings.assistants.size,
-                customModeCount = customModeCount,
-                builtinOverrideCount = builtinOverrideCount,
-                mcpConnected = mcpConnected,
-                mcpErrorCount = mcpErrorCount,
-                mcpTotal = mcpTotal,
-                searchCount = settings.searchServices.size,
-                skillCount = currentAssistant.enabledSkills.size,
-                knowledgeCount = knowledgeCount,
-                workspaceCount = workspaceCount,
-                shellEnabledCount = shellEnabledCount,
-                activeTrusted = activeTrusted,
-                trustedProjectCount = trustedSettings.projects.size,
-                conversationCount = conversationCount,
-                onNavigate = { screen -> navController.navigate(screen) },
-            )
-        }
-
-        item("footer") {
-            FooterDisplayGroup(
-                settings = settings,
-                onUpdateDisplaySetting = { display ->
-                    vm.updateSettings(settings.copy(displaySetting = display))
+                refreshing = refreshing,
+                onOpenFile = { path, title ->
+                    navController.navigate(Screen.AgentConfigFile(path = path, title = title))
+                },
+                onRefresh = { agentConfigVM.refresh() },
+                onExportConfig = {
+                    exportLauncher.launch("agent-config-${System.currentTimeMillis()}.zip")
+                },
+                onImportConfig = {
+                    importLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
                 },
             )
         }
@@ -195,6 +247,15 @@ fun ManagementPage(vm: SettingVM = koinViewModel()) {
                 onViewAll = { navController.navigate(Screen.SettingDeviceAudit) },
             )
         }
+
+        item("footer") {
+            FooterDisplayGroup(
+                settings = settings,
+                onUpdateDisplaySetting = { display ->
+                    vm.updateSettings(settings.copy(displaySetting = display))
+                },
+            )
+        }
     }
 }
 
@@ -209,7 +270,6 @@ private fun OverviewCard(
     promptTokens: Long,
     completionTokens: Long,
     cachedTokens: Long,
-    onOpenStats: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -282,15 +342,6 @@ private fun OverviewCard(
                     value = formatTokens(cachedTokens),
                 )
             }
-            TextButton(onClick = onOpenStats) {
-                Icon(
-                    imageVector = HugeIcons.ArrowRight01,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.setting_page_console_usage_detail))
-            }
         }
     }
 }
@@ -306,98 +357,276 @@ private fun OverviewPill(
     }
 }
 
-// ---------- 资源与配置 ----------
+// ---------- 配置文件（按分类分组展示） ----------
 
 @Composable
-private fun ResourcesGroup(
-    providerCount: Int,
+private fun ConfigFilesGroup(
+    view: AgentConfigView,
     modelCount: Int,
-    assistantCount: Int,
-    customModeCount: Int,
-    builtinOverrideCount: Int,
-    mcpConnected: Int,
-    mcpErrorCount: Int,
-    mcpTotal: Int,
-    searchCount: Int,
-    skillCount: Int,
-    knowledgeCount: Int,
-    workspaceCount: Int,
-    shellEnabledCount: Int,
-    activeTrusted: Boolean,
-    trustedProjectCount: Int,
-    conversationCount: Int?,
-    onNavigate: (Screen) -> Unit,
+    refreshing: Boolean,
+    onOpenFile: (path: String, title: String?) -> Unit,
+    onRefresh: () -> Unit,
+    onExportConfig: () -> Unit,
+    onImportConfig: () -> Unit,
 ) {
+    val files = view.files
+
+    // 尚未导出：给出空态 + 刷新入口
+    if (files.isEmpty()) {
+        IosGroup(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            title = stringResource(R.string.agent_config_page_files),
+        ) {
+            item(
+                headlineContent = { Text(stringResource(R.string.agent_config_page_not_exported)) },
+                supportingContent = { Text(stringResource(R.string.agent_config_page_refresh_hint)) },
+            )
+            item(
+                headlineContent = { Text(stringResource(R.string.agent_config_page_refresh)) },
+                onClick = onRefresh,
+                trailingContent = {
+                    if (refreshing) CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                },
+            )
+            item(
+                headlineContent = { Text(stringResource(R.string.agent_config_page_import)) },
+                supportingContent = { Text(stringResource(R.string.agent_config_page_import_desc)) },
+                onClick = onImportConfig,
+                trailingContent = { FileRowChevron() },
+            )
+        }
+        return
+    }
+
+    val manifest = files.firstOrNull { it.category == AgentConfigFileCategory.MANIFEST }
+    val providers = files.firstOrNull { it.category == AgentConfigFileCategory.PROVIDERS }
+    val mcp = files.firstOrNull { it.category == AgentConfigFileCategory.MCP }
+    val assistants = files
+        .filter { it.category == AgentConfigFileCategory.ASSISTANT }
+        // UUID 文件名排序无意义，按助手显示名排序（无名回退路径）
+        .sortedBy { it.displayName?.takeIf { name -> name.isNotBlank() } ?: it.path }
+    val others = files.filter { info ->
+        info.category != AgentConfigFileCategory.MANIFEST &&
+            info.category != AgentConfigFileCategory.PROVIDERS &&
+            info.category != AgentConfigFileCategory.MCP &&
+            info.category != AgentConfigFileCategory.ASSISTANT
+    }
+
+    // 导出状态 + 操作（清单 / 刷新 / 导出 / 导入 同一组，减少组数）
     IosGroup(
         modifier = Modifier.padding(horizontal = 8.dp),
-        title = stringResource(R.string.setting_page_console_resources),
+        title = stringResource(R.string.agent_config_page_status),
     ) {
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
-            supportingContent = { Text("${providerCount} 个 · $modelCount 个模型") },
-            onClick = { onNavigate(Screen.SettingProvider) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_assistant)) },
-            supportingContent = { Text("$assistantCount 个助手") },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_default_mode)) },
-            supportingContent = {
-                Text("自定义 $customModeCount · 覆盖 $builtinOverrideCount")
-            },
-            onClick = { onNavigate(Screen.SettingModes) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_mcp)) },
-            supportingContent = {
-                Text(
-                    if (mcpTotal == 0) {
-                        "未配置"
-                    } else if (mcpErrorCount > 0) {
-                        "$mcpConnected/$mcpTotal 已连接 · $mcpErrorCount 个异常"
-                    } else {
-                        "$mcpConnected/$mcpTotal 已连接"
+        if (manifest != null) {
+            item(
+                headlineContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FileStatusDot(manifest.status, manifest.dirty)
+                        Text(stringResource(R.string.management_page_config_manifest))
                     }
-                )
-            },
-            onClick = { onNavigate(Screen.SettingMcp) },
-        )
+                },
+                supportingContent = {
+                    Text(
+                        text = buildString {
+                            append("schema v${view.schemaVersion}")
+                            view.source?.let { append(" · 来源 $it") }
+                            view.settingsDataVersion?.let { append(" · 设置 v$it") }
+                            view.exportedAt?.let { append(" · ${formatEpochMillis(it)}") }
+                        }
+                    )
+                },
+                onClick = { onOpenFile(manifest.path, null) },
+                trailingContent = { FileRowChevron() },
+            )
+        }
         item(
-            headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
-            supportingContent = { Text("$searchCount 个服务") },
-            onClick = { onNavigate(Screen.SettingSearch) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.extensions_page_agent_skills)) },
-            supportingContent = { Text("$skillCount 个已启用") },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_knowledge_bases)) },
-            supportingContent = { Text("$knowledgeCount 个已绑定") },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.extensions_page_workspace)) },
-            supportingContent = {
-                Text("$workspaceCount 个已绑定 · 启用 shell $shellEnabledCount")
-            },
-            onClick = { onNavigate(Screen.SettingFiles) },
-        )
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_page_trusted_folders)) },
-            supportingContent = {
-                Text(
-                    "$trustedProjectCount 个项目" +
-                        if (activeTrusted) " · 已激活" else ""
-                )
+            headlineContent = { Text(stringResource(R.string.agent_config_page_refresh)) },
+            supportingContent = { Text(stringResource(R.string.agent_config_page_refresh_hint)) },
+            onClick = onRefresh,
+            trailingContent = {
+                if (refreshing) CircularProgressIndicator(modifier = Modifier.size(20.dp))
             },
         )
         item(
-            headlineContent = { Text(stringResource(R.string.setting_page_conversation_history)) },
-            supportingContent = { Text((conversationCount?.toString() ?: "-") + " 个会话") },
-            onClick = { onNavigate(Screen.Stats) },
+            headlineContent = { Text(stringResource(R.string.agent_config_page_export)) },
+            supportingContent = { Text(stringResource(R.string.agent_config_page_export_desc)) },
+            onClick = onExportConfig,
+            trailingContent = { FileRowChevron() },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.agent_config_page_import)) },
+            supportingContent = { Text(stringResource(R.string.agent_config_page_import_desc)) },
+            onClick = onImportConfig,
+            trailingContent = { FileRowChevron() },
         )
     }
+
+    // 提供商配置
+    if (providers != null) {
+        IosGroup(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            title = stringResource(R.string.management_page_config_providers),
+        ) {
+            item(
+                headlineContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FileStatusDot(providers.status, providers.dirty)
+                        Text(
+                            text = providers.path,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            R.string.management_page_config_providers_desc,
+                            view.providerCount,
+                            modelCount,
+                            formatBytes(providers.bytes),
+                        )
+                    )
+                },
+                onClick = { onOpenFile(providers.path, null) },
+                trailingContent = { FileRowChevron() },
+            )
+        }
+    }
+
+    // MCP 配置
+    if (mcp != null) {
+        IosGroup(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            title = stringResource(R.string.management_page_config_mcp),
+        ) {
+            item(
+                headlineContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FileStatusDot(mcp.status, mcp.dirty)
+                        Text(
+                            text = mcp.path,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            R.string.management_page_config_mcp_desc,
+                            view.mcpServerCount,
+                            formatBytes(mcp.bytes),
+                        )
+                    )
+                },
+                onClick = { onOpenFile(mcp.path, null) },
+                trailingContent = { FileRowChevron() },
+            )
+        }
+    }
+
+    // 助手配置（文件名是 UUID，展示助手名）
+    if (assistants.isNotEmpty()) {
+        IosGroup(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            title = stringResource(R.string.management_page_config_assistants, assistants.size),
+        ) {
+            assistants.forEach { info ->
+                item(
+                    headlineContent = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FileStatusDot(info.status, info.dirty)
+                            Text(
+                                text = info.displayName?.takeIf { it.isNotBlank() } ?: info.path,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    supportingContent = {
+                        Text("${info.path} · ${formatBytes(info.bytes)}")
+                    },
+                    onClick = { onOpenFile(info.path, info.displayName) },
+                    trailingContent = { FileRowChevron() },
+                )
+            }
+        }
+    }
+
+    // 其他配置（policies / state / 未归类；backups 快照已在 Repository.view 排除）
+    if (others.isNotEmpty()) {
+        IosGroup(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            title = stringResource(R.string.management_page_config_others, others.size),
+        ) {
+            others.forEach { info ->
+                item(
+                    headlineContent = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FileStatusDot(info.status, info.dirty)
+                            Text(
+                                text = info.path,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    supportingContent = { Text(formatBytes(info.bytes)) },
+                    onClick = { onOpenFile(info.path, null) },
+                    trailingContent = { FileRowChevron() },
+                )
+            }
+        }
+    }
+
+    Text(
+        text = stringResource(R.string.agent_config_page_masked_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun FileRowChevron() {
+    Icon(
+        imageVector = HugeIcons.ArrowRight01,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(16.dp),
+    )
+}
+
+/** 文件状态圆点：ok=主色、error=错误色、untracked=弱化灰、dirty（导出后被手动改）=警示色。 */
+@Composable
+private fun FileStatusDot(status: String, dirty: Boolean = false) {
+    val color = when {
+        dirty -> MaterialTheme.colorScheme.tertiary
+        status == "ok" -> MaterialTheme.colorScheme.primary
+        status.startsWith("error") -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+    }
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .background(color = color, shape = CircleShape),
+    )
 }
 
 // ---------- 模式与权限 ----------
@@ -677,3 +906,12 @@ private fun formatTokens(value: Long): String = when {
     value >= 1_000 -> "%.1fk".format(value / 1_000.0)
     else -> value.toString()
 }
+
+private fun formatBytes(value: Int): String = when {
+    value >= 1024 * 1024 -> "%.1f MB".format(value / 1024.0 / 1024.0)
+    value >= 1024 -> "%.1f KB".format(value / 1024.0)
+    else -> "$value B"
+}
+
+private fun formatEpochMillis(epochMillis: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(epochMillis))

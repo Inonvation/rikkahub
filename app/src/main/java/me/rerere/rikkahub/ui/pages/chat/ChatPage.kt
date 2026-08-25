@@ -185,6 +185,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.ChatScrollStore
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -322,12 +323,38 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     }
 
     // 普通布局下首次组合就把滚动位置定位到最后一条消息的开头（切换历史会话的统一落点）。
-    // 若会话异步加载（首帧为空），这里先落在 0，数据到达后由下方 LaunchedEffect 补滚到
-    // 最后一条消息开头（避免"先渲染顶部再滚动"的闪动）。
+    // 有会话级滚动位置存档（短暂记忆：切换会话时由 ChatScrollStore 保存）时优先恢复存档位置，
+    // 否则落最后一条消息开头。若会话异步加载（首帧为空），这里先落在 0，数据到达后由下方
+    // LaunchedEffect 补滚到目标位置（避免"先渲染顶部再滚动"的闪动）。
+    val scrollStore = koinInject<ChatScrollStore>()
+    val savedScroll = remember(conversation.id) { scrollStore.load(conversation.id) }
     val chatListState = remember(conversation.id) {
         LazyListState(
-            firstVisibleItemIndex = conversation.messageNodes.lastIndex.coerceAtLeast(0)
+            firstVisibleItemIndex = (savedScroll?.firstVisibleItemIndex
+                ?: conversation.messageNodes.lastIndex).coerceIn(0, conversation.messageNodes.lastIndex.coerceAtLeast(0)),
+            firstVisibleItemScrollOffset = savedScroll?.firstVisibleItemScrollOffset ?: 0,
         )
+    }
+    // 首次定位完成标记：保存 effect 等待它再开始记录滚动位置。
+    // 否则会话数据加载前（首帧空列表）snapshotFlow 会把 (0,0) 写成假存档，
+    // 恢复逻辑读到它就把会话钉在开头（"刚打开软件切历史会话落到最前"bug 根因）。
+    var chatPositionReady by remember(conversation.id) { mutableStateOf(false) }
+    // 页面存活期间持续保存当前会话的滚动位置（切换会话/页面销毁后重新进入时恢复）。
+    // 先等 chatPositionReady（首次定位完成）再收集：确保记下的都是"真实停留位置"，
+    // 而非加载前的初始 (0,0)。chatListState 随 conversation.id 重建，effect 随会话
+    // 自动重启，不会把其他会话的位置串写进来。程序滚动（定位/自动跟随）产生的
+    // 中间位置也会被记录，语义上等同于"离开时停留在哪就回到哪"。
+    LaunchedEffect(chatListState, conversation.id) {
+        if (!chatPositionReady) {
+            snapshotFlow { chatPositionReady }.first { it }
+        }
+        snapshotFlow {
+            chatListState.firstVisibleItemIndex to chatListState.firstVisibleItemScrollOffset
+        }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                scrollStore.save(conversation.id, index, offset)
+            }
     }
     // 用户手指是否正按在消息列表区域（由 ChatList 列表盒的 pointerInput 实时维护）。
     // 所有"被动/后台"程序滚动（打开定位、自动跟随、发送贴底）在用户触碰列表期间一律不发起，
@@ -349,6 +376,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                 } != null
             if (!waitForFirstLayout()) {
                 vm.chatListInitialized = true
+                chatPositionReady = true
                 return@LaunchedEffect
             }
             // 用户已触碰列表或滚动进行中 → 放弃定位。scrollToItem 是挂起调用，若在这里排队
@@ -361,19 +389,33 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                     chatListState.scrollToItem(index)
                 }
             } else {
-                // 历史会话打开：统一定位到最后一条消息的开头（视口顶部 = 最后一条消息起始）。
+                // 历史会话打开：有存档位置则恢复（短暂记忆），否则定位到最后一条消息的开头
+                // （视口顶部 = 最后一条消息起始）。存档索引钳制到当前消息数（离开期间可能有
+                // 新消息追加/删除），offset 交给 LazyColumn 布局钳制。
                 // 用可取消的挂起 scrollToItem 而非 requestScrollToItem（后者滚动中会硬跳并钉死）。
                 // 不贴"列表底部"：贴底依赖"内容总高"，而视口上方条目在打开时尚未测量，
                 // 内容总高按估算值算会落偏，用户上拉时条目首次真实测量变高触发 LazyColumn
                 // 锚点修正，把列表往下拽（"下拉被拽回"根因）。定位到最后一条消息开头只需
-                // 把锚点条目放到视口顶部，不依赖总高，机制上无此问题。
+                // 把锚点条目放到视口顶部，不依赖总高，机制上无此问题；恢复存档位置同理
+                // （index + offset 是视口锚点描述，不依赖内容总高）。
                 if (canScroll) {
-                    chatListState.scrollToItem(conversation.messageNodes.lastIndex.coerceAtLeast(0))
+                    val lastIndex = conversation.messageNodes.lastIndex.coerceAtLeast(0)
+                    val saved = scrollStore.load(conversation.id)
+                    if (saved != null && saved.firstVisibleItemIndex in 0..lastIndex) {
+                        chatListState.scrollToItem(
+                            saved.firstVisibleItemIndex,
+                            saved.firstVisibleItemScrollOffset,
+                        )
+                    } else {
+                        chatListState.scrollToItem(lastIndex)
+                    }
                 }
             }
             // 无论是否被用户互动打断都视为已初始化：定位只做一次，不做补偿重试
             // （否则加载稍慢时会反复尝试滚动，撞上用户手势概率更高）。
             vm.chatListInitialized = true
+            // 首次定位（或放弃定位）完成，允许保存 effect 开始记录真实滚动位置
+            chatPositionReady = true
         }
     }
 

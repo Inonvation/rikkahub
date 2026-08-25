@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent://schema/manifest.schema.json",
+  "title": "RikkaHub Agent Config Manifest",
+  "description": "agent/manifest.json — 目录版本与导出元信息。对齐 Claude Code settings.json 带 JSON Schema 的惯例。",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": ["datastore", "file"]
+    },
+    "settingsDataVersion": {
+      "type": "integer"
+    },
+    "exportedAt": {
+      "type": "integer",
+      "description": "导出时间 epoch millis"
+    },
+    "files": {
+      "type": "object",
+      "description": "相对路径 -> 导出校验状态 (ok / error: ...)",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

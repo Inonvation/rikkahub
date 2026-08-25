@@ -246,6 +246,18 @@ fun DefaultToolPreview(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // 工具目的说明（审批/详情时清楚"这个操作是干什么的"；中文映射优先）
+                if (context.tool.description.isNotBlank()) {
+                    Text(
+                        text = toolApprovalPurpose(
+                            context.tool.toolName,
+                            context.tool.description,
+                            context.arguments,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
                 JsonFieldView(
                     remember(context.arguments) {
                         runCatching { JsonInstant.parseToJsonElement(context.arguments.toString()) }
@@ -579,6 +591,59 @@ private val FIELD_NAME_MAP = mapOf(
 
 /** 字段名中文化，未匹配时原样返回 */
 private fun displayFieldName(key: String): String = FIELD_NAME_MAP[key] ?: key
+
+/**
+ * 审批/详情时的工具「目的说明」：
+ * 优先返回高频审批工具的中文映射（带关键参数摘要，如 config_write 的路径、model_add 的模型名），
+ * 未注册的工具回退到工具自带描述（英文，面向 LLM）。
+ */
+internal fun toolApprovalPurpose(
+    toolName: String,
+    description: String,
+    arguments: JsonElement,
+): String {
+    val base = PURPOSE_MAP[toolName] ?: return description
+    val argObj = arguments.jsonObjectOrNull
+    val detail = when (toolName) {
+        "config_write" -> {
+            val path = argObj?.get("path")?.jsonPrimitiveOrNull?.contentOrNull
+            val apply = argObj?.get("applyToSettings")?.jsonPrimitiveOrNull?.contentOrNull
+            buildString {
+                append(base)
+                if (!path.isNullOrBlank()) append("：$path")
+                if (apply == "true") append("（并同步到应用设置）")
+            }
+        }
+        "model_add", "model_update" -> {
+            val modelId = argObj?.get("modelId")?.jsonPrimitiveOrNull?.contentOrNull
+            if (modelId.isNullOrBlank()) base else "$base：$modelId"
+        }
+        else -> base
+    }
+    return detail
+}
+
+/** 高频审批工具的中文目的映射（审批时直接告诉用户"这是要干什么"）。 */
+private val PURPOSE_MAP = mapOf(
+    "config_write" to "修改统一配置文件",
+    "provider_create" to "创建新的 AI 提供商",
+    "provider_update" to "修改 AI 提供商配置",
+    "provider_delete" to "删除 AI 提供商及其全部模型",
+    "provider_test" to "测试 AI 提供商连通性",
+    "model_add" to "添加新模型",
+    "model_update" to "修改模型配置",
+    "model_delete" to "删除模型",
+    "trusted_folder_write" to "写入信任文件夹中的文件",
+    "trusted_folder_edit" to "修改信任文件夹中的文件",
+    "trusted_folder_rename" to "重命名信任文件夹中的文件",
+    "trusted_folder_move" to "移动信任文件夹中的文件",
+    "trusted_folder_delete" to "删除信任文件夹中的文件",
+    "trusted_folder_create_folder" to "在信任文件夹中创建目录",
+    "workspace_write" to "写入工作区文件",
+    "workspace_edit" to "编辑工作区文件",
+    "workspace_shell" to "在工作区执行命令",
+    "subagent_spawn" to "派发子代理任务",
+)
 
 /**
  * 工具入参/输出的结构化展示：

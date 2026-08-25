@@ -67,6 +67,7 @@ import me.rerere.rikkahub.ui.components.ai.AskUserQuestion
 import me.rerere.rikkahub.ui.components.ai.AskUserSheet
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
+import me.rerere.rikkahub.ui.components.message.tools.toolApprovalPurpose
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
@@ -313,6 +314,17 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // 审批等待中：直接展示工具目的说明（中文映射 + 参数摘要），
+                // 让用户清楚这个操作是干什么的再决定；未映射工具回退工具自带描述
+                if (isPending && tool.description.isNotBlank()) {
+                    Text(
+                        text = toolApprovalPurpose(tool.toolName, tool.description, arguments),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 subtitle?.invoke()
             }
         },

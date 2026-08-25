@@ -4,6 +4,8 @@ import android.content.Context
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.config.AgentConfigPaths
+import me.rerere.rikkahub.data.config.AgentConfigRepository
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
@@ -94,6 +96,14 @@ val repositoryModule = module {
 
     single {
         TrustedFolderStore(get())
+    }
+
+    // agent/ 统一配置只读门面（filesDir/agent）
+    single {
+        AgentConfigRepository(
+            agentRoot = File(get<Context>().filesDir, AgentConfigPaths.ROOT_DIR),
+            assets = get<Context>().assets,
+        )
     }
 
     single {

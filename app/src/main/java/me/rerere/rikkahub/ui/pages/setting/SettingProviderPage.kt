@@ -188,6 +188,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         ProviderItem(
                             modifier = Modifier
                                 .scale(if (isDragging) 0.95f else 1f)
+                                .animateItem()
                                 .fillMaxWidth(),
                             provider = provider,
                             dragHandle = {

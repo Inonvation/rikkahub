@@ -9,6 +9,7 @@ import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.DragDropHorizontal
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -301,7 +303,10 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
 
                 1 -> {
                     SettingProviderModelPage(
-                        provider = provider,
+                        // 传编辑态 internalProvider 而非 settings 里的已保存值：
+                        // 拖放/增删模型先落到本地编辑态，立即反映到列表，避免
+                        // "松手回弹 → 400ms 防抖保存后再跳位"的两次跳变（闪烁根因）。
+                        provider = internalProvider,
                         onEdit = onEdit
                     )
                 }
@@ -371,8 +376,12 @@ private fun ModelList(
     onUpdateProvider: (ProviderSetting) -> Unit
 ) {
     val providerManager = koinInject<ProviderManager>()
-    var modelListError by remember(providerSetting) { mutableStateOf<String?>(null) }
-    val modelList by produceState(emptyList(), providerSetting) {
+    // key 用供应商 id + 类型而非整个 providerSetting：编辑态 internalProvider 每次
+    // 增删改/拖放都会变，若以整个对象为 key，produceState 会反复重启 listModels()
+    // （网络请求）导致列表重载闪烁；id + 类型才代表"可拉取的模型目录"（切换类型
+    // 或进入另一供应商时重拉，编辑字段/拖放排序不重拉）。
+    var modelListError by remember(providerSetting.id, providerSetting::class) { mutableStateOf<String?>(null) }
+    val modelList by produceState(emptyList(), providerSetting.id, providerSetting::class) {
         modelListError = null
         value = runCatching {
             providerManager.getProviderByType(providerSetting)
@@ -389,6 +398,7 @@ private fun ModelList(
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
         onUpdateProvider(providerSetting.moveMove(from.index, to.index))
     }
+    val hapticController = rememberHaptic()
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -441,8 +451,30 @@ private fun ModelList(
                                 onUpdateProvider(providerSetting.editModel(editedModel))
                             },
                             parentProvider = providerSetting,
+                            // 拖动把手独立成图标（与供应商列表页一致）：整卡长按与
+                            // SwipeToDismissBox 横向滑动手势互抢，易误触；图标把手
+                            // 让"长按拖动"与"横滑删除"各占各的手势区域。
+                            dragHandle = {
+                                IconButton(
+                                    onClick = {},
+                                    modifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = {
+                                            hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                        },
+                                        onDragStopped = {
+                                            hapticController.perform(HapticFeedbackType.GestureEnd)
+                                        },
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.DragDropHorizontal,
+                                        contentDescription = null,
+                                    )
+                                }
+                            },
                             modifier = Modifier
-                                .longPressDraggableHandle()
+                                // 兄弟项随拖放平滑移动，避免列表位置硬跳（闪烁来源之一）
+                                .animateItem()
                                 .graphicsLayer {
                                     if (isDragging) {
                                         scaleX = 1.05f
@@ -1184,7 +1216,8 @@ private fun ModelCard(
     modifier: Modifier = Modifier,
     onDelete: () -> Unit,
     onEdit: (Model) -> Unit,
-    parentProvider: ProviderSetting
+    parentProvider: ProviderSetting,
+    dragHandle: @Composable () -> Unit = {},
 ) {
     val dialogState = useEditState<Model> {
         onEdit(it)
@@ -1370,6 +1403,8 @@ private fun ModelCard(
                 ) {
                     Icon(HugeIcons.Tools, "Edit")
                 }
+
+                dragHandle()
             }
         }
     }

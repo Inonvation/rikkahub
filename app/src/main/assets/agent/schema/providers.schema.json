@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "agent://schema/providers.schema.json",
+  "title": "RikkaHub Agent Providers Config",
+  "description": "agent/config/providers.json — 全局 Provider 配置（脱敏视图）。字段命名对齐 OpenAI SDK / Claude Code settings.json / Cherry Studio 导出惯例（camelCase）；密钥只出现 keystore:* 引用占位。",
+  "type": "object",
+  "required": ["schemaVersion", "providers"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/provider"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "provider": {
+      "type": "object",
+      "required": ["id", "type", "name", "enabled", "builtIn", "models"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["openai", "google", "claude"] },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "builtIn": { "type": "boolean" },
+        "baseUrl": { "type": "string" },
+        "authType": { "type": "string", "enum": ["api_key", "chatgpt_subscription"] },
+        "apiKeyRef": { "type": "string", "pattern": "^keystore:provider:.+:secret$" },
+        "balance": { "$ref": "#/definitions/balance" },
+        "modelCount": { "type": "integer", "minimum": 0 },
+        "models": { "type": "array", "items": { "$ref": "#/definitions/model" } },
+        "chatCompletionsPath": { "type": "string" },
+        "embeddingsPath": { "type": "string" },
+        "rerankPath": { "type": "string" },
+        "useResponseApi": { "type": "boolean" },
+        "includeHistoryReasoning": { "type": "boolean" },
+        "promptCaching": { "type": "boolean" },
+        "promptCacheTtl": { "type": ["string", "null"], "enum": ["5m", "1h", null] },
+        "vertexAI": { "type": "boolean" },
+        "useServiceAccount": { "type": "boolean" },
+        "location": { "type": "string" },
+        "projectId": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "balance": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "apiPath": { "type": "string" },
+        "resultPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "modelId", "displayName", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "modelId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "type": { "type": "string", "enum": ["chat", "image", "embedding", "reranking"] },
+        "inputModalities": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["text", "image"] }
+        },
+        "outputModalities": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["text", "image"] }
+        },
+        "abilities": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["tool", "reasoning"] }
+        },
+        "builtInTools": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["search", "url_context", "image_generation"] }
+        },
+        "customHeadersRef": { "type": "string", "pattern": "^keystore:model:.+:headers$" },
+        "customBodiesRef": { "type": "string", "pattern": "^keystore:model:.+:bodies$" },
+        "providerOverwrite": { "$ref": "#/definitions/provider" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

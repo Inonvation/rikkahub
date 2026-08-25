@@ -51,6 +51,10 @@ class SkillFrontmatter internal constructor(
 ) {
     operator fun get(key: String): String? = values[key] as? String
 
+    /** 解析 YAML 字符串列表（如 Anthropic Skills 规范的 allowed-tools）。 */
+    fun getStringList(key: String): List<String>? =
+        (values[key] as? List<*>)?.mapNotNull { it as? String }?.takeIf { it.isNotEmpty() }
+
     companion object {
         internal val Empty = SkillFrontmatter(emptyMap())
     }

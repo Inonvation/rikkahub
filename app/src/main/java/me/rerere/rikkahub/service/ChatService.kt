@@ -93,6 +93,7 @@ import me.rerere.rikkahub.data.ai.tools.createKnowledgeAdminTools
 import me.rerere.rikkahub.data.ai.tools.createConversationAdminTools
 import me.rerere.rikkahub.data.ai.tools.createRollbackTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
+import me.rerere.rikkahub.data.ai.tools.createAgentConfigTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createSubAgentTools
@@ -123,6 +124,7 @@ import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.management.ManagementAuditStore
 import me.rerere.rikkahub.data.management.ManagementRollbackStore
+import me.rerere.rikkahub.data.config.AgentConfigRepository
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -281,6 +283,7 @@ class ChatService(
     private val json: kotlinx.serialization.json.Json,
     private val managementAuditStore: ManagementAuditStore,
     private val managementRollbackStore: ManagementRollbackStore,
+    private val agentConfigRepository: AgentConfigRepository,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -1811,6 +1814,15 @@ class ChatService(
                                 rollbackStore = managementRollbackStore,
                                 settingsStore = settingsStore,
                                 auditStore = managementAuditStore,
+                            )
+                        )
+                        // 统一配置读写（config_view / config_read / config_refresh / config_schema / config_validate / config_write）
+                        addAll(
+                            createAgentConfigTools(
+                                agentConfigRepository,
+                                settingsStore,
+                                managementAuditStore,
+                                managementRollbackStore,
                             )
                         )
                     }
