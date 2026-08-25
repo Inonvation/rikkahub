@@ -4,6 +4,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Upload02
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,16 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
@@ -69,6 +68,7 @@ import me.rerere.rikkahub.utils.onSuccess
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.Instant
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WebDavTab(
     vm: BackupVM,
@@ -195,38 +195,38 @@ fun WebDavTab(
                 item(
                     headlineContent = { Text(stringResource(R.string.backup_page_backup_items)) },
                     supportingContent = {
-                    MultiChoiceSegmentedButtonRow(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        val selectableItems = WebDavConfig.BackupItem.entries.filter { it != WebDavConfig.BackupItem.FILES }
-                        selectableItems.forEachIndexed { index, item ->
-                            SegmentedButton(
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = selectableItems.size
-                                ),
-                                onCheckedChange = { checked ->
-                                    val newItems = if (checked) {
-                                        webDavConfig.items + item
-                                    } else {
-                                        webDavConfig.items - item
-                                    }
-                                    updateWebDavConfig(webDavConfig.copy(items = newItems))
-                                },
-                                checked = item in webDavConfig.items
-                            ) {
-                                Text(
-                                    when (item) {
-                                        WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                        WebDavConfig.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
-                                        WebDavConfig.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
-                                        WebDavConfig.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
-                                        WebDavConfig.BackupItem.FILES -> ""
-                                    }
+                        // 备份内容用 FlowRow + FilterChip：条目多、中文标签长，
+                        // 单行分段按钮在窄屏会溢出/挤压，换行展示更稳
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            val selectableItems = WebDavConfig.BackupItem.entries.filter { it != WebDavConfig.BackupItem.FILES }
+                            selectableItems.forEach { item ->
+                                FilterChip(
+                                    selected = item in webDavConfig.items,
+                                    onClick = {
+                                        val newItems = if (item in webDavConfig.items) {
+                                            webDavConfig.items - item
+                                        } else {
+                                            webDavConfig.items + item
+                                        }
+                                        updateWebDavConfig(webDavConfig.copy(items = newItems))
+                                    },
+                                    label = {
+                                        Text(
+                                            when (item) {
+                                                WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
+                                                WebDavConfig.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
+                                                WebDavConfig.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
+                                                WebDavConfig.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
+                                                WebDavConfig.BackupItem.FILES -> ""
+                                            }
+                                        )
+                                    },
                                 )
                             }
                         }
-                    }
                     },
                 )
             }

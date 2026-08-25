@@ -98,6 +98,13 @@ val LocalScrollThinkingHeaderToPin = staticCompositionLocalOf<((suspend (Float) 
 val LocalIsChatListAtBottom = staticCompositionLocalOf<(() -> Boolean)?> { null }
 
 /**
+ * 由聊天页提供：用户当前是否正在控制列表（触碰中 / 滚动中 / 最近 350ms 内刚触碰或滚动过）。
+ * 自动折叠（思考 / 工具气泡 / 过程内容）在用户控制列表时一律暂缓——折叠会改变 item 高度，
+ * 触发 LazyColumn 锚点修正，把正在看历史的用户拽回（"生成完后下滑查看上方消息回弹抽搐"根因）。
+ */
+val LocalIsChatListUserControlled = staticCompositionLocalOf<(() -> Boolean)?> { null }
+
+/**
  * 由聊天页提供：把列表滚回底部（折叠思考后抵消 LazyColumn scrollBack 的上移）。
  * 挂起实现：内部检查用户是否已滑离底部，且可被取消（用户开始滚动时放弃贴底），
  * 避免"看历史时突然被拽回底部"。

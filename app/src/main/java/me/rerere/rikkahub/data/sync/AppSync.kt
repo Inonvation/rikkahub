@@ -15,6 +15,21 @@ import java.io.File
 
 private const val TAG = "CloudSync"
 
+/** 数据库操作抽象（App 侧用 AppDatabase + context，测试侧用临时文件）。 */
+interface DbSyncAccess {
+    /** WAL checkpoint，保证 -wal 合并进主文件。 */
+    fun checkpoint()
+    /** 数据库主文件。 */
+    fun dbFile(): File
+    /**
+     * 本地数据库是否已有真实数据（默认 false：测试 fake / 未知场景视为空库）。
+     * 首次同步（无 syncedFiles 记录）时据此决定 DB 是 pull 还是 push：
+     * 本地已有数据 → push（以本机为准），本地为空 → pull（吸收远端），
+     * 避免自动同步用远端旧库覆盖本机现有聊天记录。
+     */
+    suspend fun hasLocalData(): Boolean = false
+}
+
 /** App 侧 DbSyncAccess：包装 AppDatabase + context 获取 DB 文件。 */
 class AppDbSyncAccess(
     private val context: Context,
@@ -22,6 +37,11 @@ class AppDbSyncAccess(
 ) : DbSyncAccess {
     override fun checkpoint() = database.checkpointWal()
     override fun dbFile(): File = context.getDatabasePath("rikka_hub")
+    override suspend fun hasLocalData(): Boolean = try {
+        database.conversationDao().countAll() > 0
+    } catch (e: Exception) {
+        false
+    }
 }
 
 /** App 侧 SyncSettingsAccess：包装 SettingsStore。 */

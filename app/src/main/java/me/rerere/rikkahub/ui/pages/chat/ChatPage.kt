@@ -92,7 +92,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -173,6 +172,7 @@ import me.rerere.rikkahub.ui.components.message.getSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListAtBottom
+import me.rerere.rikkahub.ui.components.message.LocalIsChatListUserControlled
 import me.rerere.rikkahub.ui.components.message.LocalScrollChatToBottom
 import me.rerere.rikkahub.ui.components.message.LocalScrollThinkingHeaderToPin
 import me.rerere.rikkahub.ui.components.message.ThinkingFreezeState
@@ -329,7 +329,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             firstVisibleItemIndex = conversation.messageNodes.lastIndex.coerceAtLeast(0)
         )
     }
-    // 用户手指是否正按在消息列表区域（由 ChatPageContent 消息列表盒子的 pointerInput 实时维护）。
+    // 用户手指是否正按在消息列表区域（由 ChatList 列表盒的 pointerInput 实时维护）。
     // 所有"被动/后台"程序滚动（打开定位、自动跟随、发送贴底）在用户触碰列表期间一律不发起，
     // 避免拖拽途中/松手瞬间被程序滚动拽回（"闪到底又弹回"的另一支根因）：
     // isScrollInProgress 只在滚动真正开始（越过 touch slop）后才为 true，帧级竞态下挡不住"手指已
@@ -449,6 +449,14 @@ private fun ChatPageContent(
         pendingSendScroll = true
     }
 
+    // 记录用户最近一次触碰/滚动的时刻（elapsedRealtime）：贴底/发送贴底在阈值内主动放弃，
+    // 兜底防止"刚上拉就被贴底/被拽回"的竞态。
+    // 只在闩锁收集器里由"真实用户手势"（inProgress 且非程序滚动）刷新：程序跟随滚动会置
+    // scrollingByProgram（见 ChatList 跟随逻辑），不会误记为用户交互——否则生成结束前最后
+    // 一次跟随会把自动折叠的"用户未控制列表"判断误杀（折叠被跳过）。纯点击（无滚动）不刷新，
+    // 保证"点折叠卡→重贴底"的既有行为不被 350ms 窗口误伤。
+    var lastUserScrollAt by remember { mutableLongStateOf(0L) }
+
     // 发送后贴底：等新消息节点真正进入列表（size 变化）再滚到底（index 越界会钳制到末尾）。
     // 用 requestScrollToItem 而非 animateScrollToItem，避免与流式布局/用户手势抢动画帧。
     LaunchedEffect(conversation.messageNodes.size) {
@@ -457,7 +465,11 @@ private fun ChatPageContent(
             // 发送瞬间用户可能仍在 fling/拖拽：requestScrollToItem 在滚动进行中会把列表
             // 立即拽到底部（Compose foundation 1.12 行为），跳过本次 snap，由自动跟随接管。
             // 触点守护：用户手指正按在列表上时不发起，避免"发送后正在翻历史被拽回"。
-            if (!chatListState.isScrollInProgress && !listInteracting.value) {
+            // 冷却守护：最近 350ms 内刚触碰/滚动过列表也不发起——松手窗口内排队滚动会在
+            // 用户翻历史时执行把列表拽回；新用户消息已复位自动跟随闩锁，由跟随接管贴底。
+            val recentlyTouched =
+                android.os.SystemClock.elapsedRealtime() - lastUserScrollAt < 350L
+            if (!chatListState.isScrollInProgress && !listInteracting.value && !recentlyTouched) {
                 // 用真实最后一项索引：越界 +10 会先落到 bogus 索引再重锚，产生位置闪变
                 val target = (chatListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
                 chatListState.requestScrollToItem(target)
@@ -483,8 +495,6 @@ private fun ChatPageContent(
     // 但尚未消费滚动"的窗口，且不受 programScroll（折叠动画的程序滚动）抑制：
     // 否则折叠动画期间用户上拉会被当成"程序滚动"而漏掉，折叠后的延迟贴底仍会拽回（历史回跳根因）。
     var userScrolledLatch by remember { mutableStateOf(false) }
-    // 记录用户最近一次触碰/滚动的时刻，贴底在阈值内主动放弃，兜底防止"刚上拉就被贴底"的竞态。
-    var lastUserScrollAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(chatListState, thinkingFreezeState, listInteracting) {
         snapshotFlow {
             val info = chatListState.layoutInfo
@@ -504,7 +514,9 @@ private fun ChatPageContent(
         }.collect { (inProgress, pinned, programScroll) ->
             val userInteracting = listInteracting.value
             if (userInteracting || (inProgress && !programScroll)) {
-                // 用户手指在列表上，或用户手势已开始（非程序滚动）→ 本次折叠不再贴底
+                // 用户手指在列表上，或用户手势已开始（非程序滚动）→ 本次折叠不再贴底。
+                // 仅用户手势刷新 lastUserScrollAt：程序跟随滚动会置 scrollingByProgram，
+                // 走不到这个分支，不会把"刚跟随完"误当成用户在看历史（生成结束自动折叠不被跳过）。
                 userScrolledLatch = true
                 lastUserScrollAt = android.os.SystemClock.elapsedRealtime()
             } else if (!inProgress && pinned && !userInteracting) {
@@ -704,14 +716,31 @@ private fun ChatPageContent(
                         afterContentPadding = info.afterContentPadding,
                     )
                 },
+                LocalIsChatListUserControlled provides {
+                    // 用户触碰中 / 用户手势滚动中（非程序滚动）/ 最近 350ms 内刚触碰或滚动过
+                    // → 视为用户正在控制列表。自动折叠（思考/工具气泡/过程内容）据此暂缓：
+                    // 折叠会改变 item 高度，触发 LazyColumn 锚点修正把正在看历史的用户拽回
+                    // （"生成完后下滑查看上方消息回弹抽搐"根因）。
+                    // 手势判定排除程序滚动：跟随滚动/折叠动画已置 scrollingByProgram，
+                    // 否则生成末帧的最后一次跟随会把自动折叠误判为"用户在看历史"而跳过。
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    listInteracting.value ||
+                        (chatListState.isScrollInProgress && !thinkingFreezeState.scrollingByProgram) ||
+                        (now - lastUserScrollAt < 350L)
+                },
                 LocalScrollChatToBottom provides {
                     // 消费闩锁（无论是否贴底都复位，让下一次折叠重新武装）；
-                    // 用户已滑离底部、正在滚动、或刚滚动过（350ms 内）→ 放弃贴底，避免拽回正在看历史的用户
+                    // 用户已滑离底部、正在滚动、或刚滚动过（350ms 内）→ 放弃贴底，避免拽回正在看历史的用户。
+                    // 关键：手指已按下但尚未消费滚动（touch-slop 窗口）也必须放弃——闩锁/时间戳
+                    // 都靠布局事件触发，覆盖不了该窗口；触点状态（listInteracting）down 即置位，
+                    // 直接读它把这个窗口封死（"生成完折叠后 250ms 的重贴底撞上用户刚起手"根因）。
                     val interrupted = userScrolledLatch
                     userScrolledLatch = false
                     val recentlyScrolled =
                         android.os.SystemClock.elapsedRealtime() - lastUserScrollAt < 350L
-                    if (interrupted || recentlyScrolled || chatListState.isScrollInProgress) return@provides
+                    val userGesture =
+                        chatListState.isScrollInProgress && !thinkingFreezeState.scrollingByProgram
+                    if (interrupted || recentlyScrolled || userGesture || listInteracting.value) return@provides
                     // 程序滚动标记：贴底滚动本身不算用户滚动（避免反向武装闩锁/自动跟随抢滚）
                     thinkingFreezeState.scrollingByProgram = true
                     try {
@@ -734,18 +763,6 @@ private fun ChatPageContent(
                         .weight(1f)
                         .onGloballyPositioned { coords ->
                             thinkingFreezeState.topBarBottomY = coords.positionInWindow().y.roundToInt()
-                        }
-                        // 触点追踪：消息列表区域的任一下落都标记"用户正在操作列表"，
-                        // 全部抬起后清除。程序滚动（打开定位/自动跟随/发送贴底）据此在
-                        // 用户触碰期间绝不开抢——isScrollInProgress 要到越过 touch slop 才置位，
-                        // 无法覆盖"手指已按下但尚未消费滚动"的竞态窗口。
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    listInteracting.value = event.changes.any { it.pressed }
-                                }
-                            }
                         }
                 ) {
                     AnimatedContent(

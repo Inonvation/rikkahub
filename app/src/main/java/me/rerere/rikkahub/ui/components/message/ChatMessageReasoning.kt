@@ -246,10 +246,15 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     // 折叠后重新贴底/自动折叠判断用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val scrollChatToBottom = LocalScrollChatToBottom.current
+    // 用户是否正在控制列表（触碰中/滚动中/刚操作过）：自动折叠据此暂缓
+    val isUserControlled = LocalIsChatListUserControlled.current
     val (state, loading) = rememberReasoningState(
         reasoning = reasoning,
         stateKey = stateKey,
-        atBottom = { isChatListAtBottom?.invoke() == true },
+        // 仅"钉在底部且用户未在控制列表"时才自动折叠：用户正在翻历史/刚触碰过列表时
+        // 保持展开，避免 item 高度骤减触发 LazyColumn 锚点修正把列表吸回底部
+        // （"生成完后下滑查看上方消息回弹抽搐"根因）。
+        atBottom = { isChatListAtBottom?.invoke() == true && isUserControlled?.invoke() != true },
     )
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null

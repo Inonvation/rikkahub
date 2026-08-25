@@ -9,6 +9,7 @@ import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -59,6 +60,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,6 +71,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
@@ -141,12 +144,17 @@ const val PREFETCH_WINDOW = 8
 const val PREFETCH_AHEAD = 20
 const val PREFETCH_BEHIND = 8
 
+// 用户触碰/滚动列表后的冷却窗口：窗口内自动跟随一律不发起。
+// 封死两个竞态：手指已按下但尚未消费滚动（touch-slop 窗口）、手指抬起后
+// 排队中的 scrollToItem 才执行（松手窗口）——"生成完后下滑查看上方消息被拽回/回弹"根因。
+private const val USER_SCROLL_COOLDOWN_MS = 400L
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
     conversation: Conversation,
     state: LazyListState,
-    // 用户手指是否正按在消息列表上（由 ChatPage 的 pointerInput 维护）：程序滚动
+    // 用户手指是否正按在消息列表上（由本列表盒的 pointerInput 维护）：程序滚动
     // （自动跟随）在用户触碰列表期间绝不发起，避免拖拽中被拽回。
     isUserInteracting: MutableState<Boolean>? = null,
     loading: Boolean,
@@ -255,6 +263,9 @@ private fun ChatListNormal(
     // 用户是否主动上滑离开底部：上滑置 true 取消跟随，滚回真正底部置 false 恢复跟随。
     // 持久 remember（而非局部变量），避免 LaunchedEffect 因 loadingState 变化重启时丢状态。
     var userScrolledUp by remember { mutableStateOf(false) }
+    // 用户最近一次触碰/滚动列表的时刻（elapsedRealtime）：跟随冷却与松手窗口共用。
+    // 持久 remember：effect 因 loadingState 变化重启时不丢，避免冷却窗口被重启冲掉。
+    var lastUserScrollAt by remember { mutableLongStateOf(0L) }
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
@@ -272,6 +283,7 @@ private fun ChatListNormal(
                 // 音量上=往历史滚（普通布局负 delta）；reverseLayout 时代被翻转，这里还原。
                 // 音量键滚动视为手动滚动：解除跟随，回底后由"稳定回底"重新武装。
                 userScrolledUp = true
+                lastUserScrollAt = SystemClock.elapsedRealtime()
                 scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
@@ -280,6 +292,14 @@ private fun ChatListNormal(
         onDispose {
             activity?.volumeKeyListeners?.remove(listener)
         }
+    }
+
+    // 触点冷却跟踪：手指按下/抬起都刷新"最近交互"时刻。
+    // isScrollInProgress 要越过 touch-slop 才置位，覆盖不了"按下但未消费滚动"与
+    // "抬起后排队滚动才执行"两个窗口；触点状态（down 即置位、up 即清除）在两边各刷新一次
+    // 时刻，把这两个窗口一并封死（"生成完后下滑查看上方消息被拽回/回弹"根因）。
+    LaunchedEffect(isUserInteracting?.value) {
+        lastUserScrollAt = SystemClock.elapsedRealtime()
     }
 
     // 自动跟随键盘：普通布局下键盘弹起时把列表底部滚到可见
@@ -332,9 +352,28 @@ private fun ChatListNormal(
     val currentOnAssistantNameClick = rememberUpdatedState(onAssistantNameClick)
     val currentConversation = rememberUpdatedState(conversation)
 
+    // 触点追踪（原在 ChatPage 列表盒上）：消息列表区域的任一下落都标记"用户正在操作列表"，
+    // 全部抬起后清除。程序滚动（打开定位/自动跟随/发送贴底）据此在用户触碰期间绝不开抢——
+    // isScrollInProgress 要到越过 touch slop 才置位，无法覆盖"手指已按下但尚未消费滚动"的竞态窗口。
+    // 放在 ChatList 而非 ChatPage：悬浮吸顶条（冻结条）等列表外 UI 的点击不误判为列表操作。
+    val interact = isUserInteracting
     Box(
         modifier = Modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .then(
+                if (interact != null) {
+                    Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                interact.value = event.changes.any { it.pressed }
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            ),
     ) {
         // 仅当新增节点是用户消息（用户主动发送）时复位跟随闩锁：
         // 发送后应跟随新输出；生成中追加的助手/工具节点不复位，避免读历史时被重新武装拽回。
@@ -391,15 +430,27 @@ private fun ChatListNormal(
                     // touch-slop 后才置位，覆盖不了"手指已按下但尚未消费滚动"的帧级竞态；
                     // down 事件即置位的触点状态把这个窗口封死，杜绝在拖拽期间发起
                     // scrollToItem 排队到松手后执行（"生成完/切会话后下拉被拽回"根因）。
+                    // 冷却守护：手指抬起后的松手窗口内同样不跟随——排队中的 scrollToItem
+                    // 会在用户开始翻历史时执行把列表拽回（"生成完后下滑回弹抽搐"根因）。
+                    val followCooledDown =
+                        SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
                     val requestNow = !inProgress && !liveScrolling && !folding && shouldFollow &&
-                        (isUserInteracting?.value != true)
+                        followCooledDown && (isUserInteracting?.value != true)
                     lastIdx = idx
                     lastOff = off
                     // 3) 跟随：仅当"生成中、用户未上滑、列表已离开底部"时发请求。
                     //    已钉底/正在滚动/思考折叠动画/用户触碰中都不发。发请求前用实时
                     //    isScrollInProgress 二次校验，挡住 snapshotFlow 的陈旧快照。
                     if (requestNow && !state.isScrollInProgress) {
-                        state.scrollToItem(info.totalItemsCount - 1)
+                        // 跟随滚动期间置 scrollingByProgram：闩锁收集器据此不把程序滚动记作
+                        // 用户交互（不置闩锁、不刷新 lastUserScrollAt），保证生成结束的自动折叠
+                        // 不被"刚跟随过"误杀；collectLatest 取消在途滚动时 finally 复位。
+                        thinkingFreezeState?.scrollingByProgram = true
+                        try {
+                            state.scrollToItem(info.totalItemsCount - 1)
+                        } finally {
+                            thinkingFreezeState?.scrollingByProgram = false
+                        }
                     }
                 }
             }

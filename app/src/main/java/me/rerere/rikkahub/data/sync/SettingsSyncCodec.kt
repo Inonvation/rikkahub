@@ -181,7 +181,9 @@ object SettingsSyncCodec {
                 val localById = local.mapNotNull { el ->
                     (el as? JsonObject)?.get("id")?.let { it to el }
                 }.toMap()
-                val remoteMapped = remote.map { rel ->
+                val remoteIds = remote.mapNotNull { (it as? JsonObject)?.get("id") }.toSet()
+                // 远程元素按 id 与本地合并（远端字段生效、本地密钥字段保留）
+                val mergedRemote = remote.map { rel ->
                     if (rel is JsonObject) {
                         val id = rel["id"] as? JsonPrimitive
                         val lcl = id?.let { localById[it] }
@@ -190,7 +192,13 @@ object SettingsSyncCodec {
                         rel
                     }
                 }
-                JsonArray(remoteMapped)
+                // 本地独有元素（远端没有该 id）必须保留：否则 pull/冲突合并会把本机
+                // 新增的 provider/assistant/自定义模式等整项丢弃，造成「自动同步丢失当前设置」。
+                val localOnly = local.filter { el ->
+                    val id = (el as? JsonObject)?.get("id")
+                    id != null && id !in remoteIds
+                }
+                JsonArray(mergedRemote + localOnly)
             }
 
             else -> remote

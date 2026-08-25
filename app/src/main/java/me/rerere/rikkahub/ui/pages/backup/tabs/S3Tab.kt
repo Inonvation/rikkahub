@@ -4,6 +4,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Upload02
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,16 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
@@ -70,6 +69,7 @@ import me.rerere.rikkahub.utils.onSuccess
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.Instant
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun S3Tab(
     vm: BackupVM,
@@ -213,36 +213,36 @@ fun S3Tab(
                 item(
                     headlineContent = { Text(stringResource(R.string.backup_page_backup_items)) },
                     supportingContent = {
-                        MultiChoiceSegmentedButtonRow(
-                            modifier = Modifier.fillMaxWidth(),
+                        // 备份内容用 FlowRow + FilterChip：条目多、中文标签长，
+                        // 单行分段按钮在窄屏会溢出/挤压，换行展示更稳
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             val selectableItems = S3Config.BackupItem.entries.filter { it != S3Config.BackupItem.FILES }
-                            selectableItems.forEachIndexed { index, item ->
-                                SegmentedButton(
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = selectableItems.size
-                                    ),
-                                    onCheckedChange = { checked ->
-                                        val newItems = if (checked) {
-                                            s3Config.items + item
-                                        } else {
+                            selectableItems.forEach { item ->
+                                FilterChip(
+                                    selected = item in s3Config.items,
+                                    onClick = {
+                                        val newItems = if (item in s3Config.items) {
                                             s3Config.items - item
+                                        } else {
+                                            s3Config.items + item
                                         }
                                         updateS3Config(s3Config.copy(items = newItems))
                                     },
-                                    checked = item in s3Config.items
-                                ) {
-                                    Text(
-                                        when (item) {
-                                            S3Config.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                            S3Config.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
-                                            S3Config.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
-                                            S3Config.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
-                                            S3Config.BackupItem.FILES -> ""
-                                        }
-                                    )
-                                }
+                                    label = {
+                                        Text(
+                                            when (item) {
+                                                S3Config.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
+                                                S3Config.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
+                                                S3Config.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
+                                                S3Config.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
+                                                S3Config.BackupItem.FILES -> ""
+                                            }
+                                        )
+                                    },
+                                )
                             }
                         }
                     },

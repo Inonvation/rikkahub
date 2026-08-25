@@ -143,6 +143,65 @@ class SettingsSyncCodecTest {
     }
 
     @Test
+    fun mergeKeepsLocalOnlyArrayElements() {
+        val local = sampleSettings()
+        // 远端只有另一个 provider（id 不同）：本地独有 provider 必须在合并后保留，
+        // 否则自动同步的 pull/冲突合并会把本机新增的 provider 整项丢弃（丢设置 bug）
+        val remoteSettings = local.copy(
+            providers = listOf(
+                ProviderSetting.OpenAI(
+                    id = Uuid.random(),
+                    name = "Remote Only",
+                    apiKey = "sk-remote-secret",
+                    baseUrl = "https://remote.example.com/v1",
+                )
+            )
+        )
+        val remoteJson = SettingsSyncCodec.toSyncableJson(remoteSettings)
+        val restored = SettingsSyncCodec.fromSyncableJson(remoteJson, local)
+
+        assertEquals(2, restored.providers.size)
+        val localProvider = restored.providers.first {
+            (it as ProviderSetting.OpenAI).name == "My OpenAI"
+        } as ProviderSetting.OpenAI
+        val remoteProvider = restored.providers.first {
+            (it as ProviderSetting.OpenAI).name == "Remote Only"
+        } as ProviderSetting.OpenAI
+        // 本地 provider 与其 apiKey 均保留
+        assertEquals("sk-verysecret123", localProvider.apiKey)
+        // 远端 provider 正常并入（远端无 apiKey 可保留）
+        assertEquals("https://remote.example.com/v1", remoteProvider.baseUrl)
+    }
+
+    @Test
+    fun mergeOnConflictKeepsLocalOnlyAssistants() {
+        val local = sampleSettings().copy(
+            assistants = listOf(
+                me.rerere.rikkahub.data.model.Assistant(
+                    id = Uuid.random(),
+                    name = "Local Assistant",
+                )
+            )
+        )
+        // 双端都改过（冲突走 pull+merge）时，本地独有 assistant 不能被远端列表冲掉
+        val remoteSettings = local.copy(
+            assistants = listOf(
+                me.rerere.rikkahub.data.model.Assistant(
+                    id = Uuid.random(),
+                    name = "Remote Assistant",
+                )
+            )
+        )
+        val remoteJson = SettingsSyncCodec.toSyncableJson(remoteSettings)
+        val restored = SettingsSyncCodec.fromSyncableJson(remoteJson, local)
+
+        // 本地独有 assistant 仍在，远端新增 assistant 也并入
+        assertEquals(2, restored.assistants.size)
+        assertTrue(restored.assistants.any { it.name == "Local Assistant" })
+        assertTrue(restored.assistants.any { it.name == "Remote Assistant" })
+    }
+
+    @Test
     fun roundtripPreservesAllowlistedValues() {
         val settings = sampleSettings()
         val restored = SettingsSyncCodec.fromSyncableJson(

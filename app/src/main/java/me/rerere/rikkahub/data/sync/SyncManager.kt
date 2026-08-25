@@ -77,14 +77,6 @@ interface SyncSettingsAccess {
     suspend fun saveSettings(settings: Settings)
 }
 
-/** 数据库操作抽象（App 侧用 AppDatabase + context，测试侧用临时文件）。 */
-interface DbSyncAccess {
-    /** WAL checkpoint，保证 -wal 合并进主文件。 */
-    fun checkpoint()
-    /** 数据库主文件。 */
-    fun dbFile(): File
-}
-
 /**
  * 远端增量同步引擎（决策表 + 增量编排 + 冲突处理）。
  *
@@ -592,6 +584,7 @@ class SyncManager(
                     localSha = sha256OfUnit(unit),
                     remoteMeta = remoteDbMeta,
                     record = record,
+                    localHasData = dbAccess.hasLocalData(),
                 )
 
                 else -> SyncDecision.decide(
@@ -801,14 +794,19 @@ class SyncManager(
      * - 本地 == 记录 sha && 远端 != 记录 sha → pull（远端被改）
      * - 本地 != 记录 sha && 远端 == 记录 sha → push（本地被改）
      * - 双端都变 → 冲突，按 timestamp 大者胜
+     * - 首次见远端 db（无记录）：本地已有真实数据 → push（以本机为准）；
+     *   本地为空库（全新设备）→ pull（吸收远端），防止自动同步用远端旧库覆盖本机现有数据
      */
     private fun decideDatabase(
         localSha: String,
         remoteMeta: DbMeta?,
         record: FileSyncRecord?,
+        localHasData: Boolean,
     ): SyncDecision.Action {
         if (remoteMeta == null) return SyncDecision.Action.Push
-        if (record == null) return SyncDecision.Action.Pull // 首次见远端 db
+        if (record == null) {
+            return if (localHasData) SyncDecision.Action.Push else SyncDecision.Action.Pull
+        }
         return when {
             localSha == record.sha256 && remoteMeta.sha256 == record.remoteTag -> SyncDecision.Action.Skip
             localSha == record.sha256 -> SyncDecision.Action.Pull

@@ -1,16 +1,16 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +26,7 @@ import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.Instant
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReminderTab(vm: BackupVM) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -60,21 +61,20 @@ fun ReminderTab(vm: BackupVM) {
                 item(
                     headlineContent = { Text(stringResource(R.string.backup_page_reminder_interval)) },
                     supportingContent = {
+                        // 5 档间隔用 FlowRow + FilterChip：单行分段按钮在窄屏易溢出
                         val intervals = listOf(1, 3, 7, 14, 30)
-                        SingleChoiceSegmentedButtonRow(
-                            modifier = Modifier.fillMaxWidth(),
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            intervals.forEachIndexed { index, days ->
-                                SegmentedButton(
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = intervals.size,
-                                    ),
-                                    onClick = { updateConfig(config.copy(intervalDays = days)) },
+                            intervals.forEach { days ->
+                                FilterChip(
                                     selected = config.intervalDays == days,
-                                ) {
-                                    Text(stringResource(R.string.backup_page_reminder_interval_days, days))
-                                }
+                                    onClick = { updateConfig(config.copy(intervalDays = days)) },
+                                    label = {
+                                        Text(stringResource(R.string.backup_page_reminder_interval_days, days))
+                                    },
+                                )
                             }
                         }
                     },

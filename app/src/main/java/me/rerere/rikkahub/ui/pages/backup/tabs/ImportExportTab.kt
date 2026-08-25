@@ -6,8 +6,10 @@ import me.rerere.hugeicons.stroke.File01
 import me.rerere.hugeicons.stroke.FileImport
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,11 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MultiChoiceSegmentedButtonRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,6 +51,7 @@ import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ImportExportTab(
     vm: BackupVM,
@@ -174,35 +175,35 @@ fun ImportExportTab(
                 item(
                     headlineContent = { Text(stringResource(R.string.backup_page_backup_items)) },
                     supportingContent = {
-                        MultiChoiceSegmentedButtonRow(
-                            modifier = Modifier.fillMaxWidth(),
+                        // 备份内容共 5 项（数据库/文件/聊天文件/技能/字体），单行分段按钮在窄屏
+                        // 必然溢出挤压；改用 FlowRow + FilterChip 自动换行
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            WebDavConfig.BackupItem.entries.forEachIndexed { index, item ->
-                                SegmentedButton(
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = WebDavConfig.BackupItem.entries.size
-                                    ),
-                                    onCheckedChange = { checked ->
-                                        val newItems = if (checked) {
-                                            selectedBackupItems + item
-                                        } else {
+                            WebDavConfig.BackupItem.entries.forEach { item ->
+                                FilterChip(
+                                    selected = item in selectedBackupItems,
+                                    onClick = {
+                                        val newItems = if (item in selectedBackupItems) {
                                             selectedBackupItems - item
+                                        } else {
+                                            selectedBackupItems + item
                                         }
                                         vm.updateLocalBackupItems(newItems)
                                     },
-                                    checked = item in selectedBackupItems
-                                ) {
-                                    Text(
-                                        when (item) {
-                                            WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                            WebDavConfig.BackupItem.FILES -> stringResource(R.string.backup_page_files)
-                                            WebDavConfig.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
-                                            WebDavConfig.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
-                                            WebDavConfig.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
-                                        }
-                                    )
-                                }
+                                    label = {
+                                        Text(
+                                            when (item) {
+                                                WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
+                                                WebDavConfig.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                                WebDavConfig.BackupItem.CHAT_FILES -> stringResource(R.string.backup_page_chat_files)
+                                                WebDavConfig.BackupItem.SKILLS -> stringResource(R.string.backup_page_skills)
+                                                WebDavConfig.BackupItem.FONTS -> stringResource(R.string.backup_page_fonts)
+                                            }
+                                        )
+                                    },
+                                )
                             }
                         }
                     },

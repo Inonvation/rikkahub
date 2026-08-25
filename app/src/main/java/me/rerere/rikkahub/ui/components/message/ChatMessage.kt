@@ -333,6 +333,8 @@ private fun MessagePartsBlock(
     // 折叠后重新贴底用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val scrollChatToBottom = LocalScrollChatToBottom.current
+    // 用户是否正在控制列表（触碰中/滚动中/刚操作过）：自动折叠据此暂缓
+    val isUserControlled = LocalIsChatListUserControlled.current
     // 记录折叠瞬间是否在底部：动画落定后重新贴底，抵消 LazyColumn scrollBack 的上移
     var collapseAtBottom by remember { mutableStateOf(false) }
 
@@ -370,11 +372,11 @@ private fun MessagePartsBlock(
     // 流式中工具执行完成事件若与调用同批到达，step 级折叠可能漏触发，此处兜底保证一定生效。
     var prevLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, settings.displaySetting.autoCollapseAllSteps) {
-        // 仅贴底时自动折叠：折叠会使消息高度骤减（含视口上方的历史消息），用户在看历史/
-        // 拖拽中触发会引发 LazyColumn 位置修正把列表吸回底部（"下拉被拽回"根因）；
+        // 仅贴底且用户未在控制列表时自动折叠：折叠会使消息高度骤减（含视口上方的历史消息），
+        // 用户在看历史/拖拽中触发会引发 LazyColumn 位置修正把列表吸回底部（"下拉被拽回"根因）；
         // 贴底时折叠由底部锚定吸收，视觉无跳变。与 reasoning 的 autoCloseThinking 守卫对齐。
         if (!loading && prevLoading && settings.displaySetting.autoCollapseAllSteps &&
-            (isChatListAtBottom?.invoke() != false)
+            (isChatListAtBottom?.invoke() != false) && (isUserControlled?.invoke() != true)
         ) {
             withFrameNanos {}
             parts.forEach { part ->
@@ -427,7 +429,10 @@ private fun MessagePartsBlock(
         if (autoCollapseAll) {
             if (!loading) {
                 withFrameNanos {}
-                if (hasProcessContent && isChatListAtBottom?.invoke() != false) {
+                // 用户在看历史/刚触碰过列表时同样暂缓整体折叠（见 isUserControlled 说明）
+                if (hasProcessContent && isChatListAtBottom?.invoke() != false &&
+                    isUserControlled?.invoke() != true
+                ) {
                     chainCollapsed = true
                 }
             } else {

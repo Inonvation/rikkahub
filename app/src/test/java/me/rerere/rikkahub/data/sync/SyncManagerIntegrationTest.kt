@@ -12,6 +12,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -108,9 +109,13 @@ class FakeSettingsAccess(private var settings: Settings = Settings()) : SyncSett
 }
 
 /** 临时文件版 DB 访问。 */
-class FakeDbAccess(private val dbFile: File) : DbSyncAccess {
+class FakeDbAccess(
+    private val dbFile: File,
+    private val localHasData: Boolean = false,
+) : DbSyncAccess {
     override fun checkpoint() {}
     override fun dbFile(): File = dbFile
+    override suspend fun hasLocalData(): Boolean = localHasData
 }
 
 class SyncManagerIntegrationTest {
@@ -141,11 +146,12 @@ class SyncManagerIntegrationTest {
         settings: FakeSettingsAccess,
         stateStore: SyncStateStore,
         dbFile: File,
+        localHasData: Boolean = false,
     ): SyncManager {
         return SyncManager(
             settings = settings,
             stateStore = stateStore,
-            dbAccess = FakeDbAccess(dbFile),
+            dbAccess = FakeDbAccess(dbFile, localHasData),
             filesRoot = filesRoot,
             syncPendingDir = pendingDir,
         )
@@ -367,6 +373,33 @@ class SyncManagerIntegrationTest {
         val pendingFile = File(pending!!)
         assertTrue(pendingFile.exists())
         assertEquals(3, pendingFile.readBytes().size)
+    }
+
+    @Test
+    fun `db first sync with existing local data pushes instead of pulling remote`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        this@SyncManagerIntegrationTest.scope = scope
+        val store = createStore("db-first-push.preferences_pb", scope)
+        val settings = FakeSettingsAccess()
+        val dbFile = File(tmpDir, "rikka_hub.db")
+        dbFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+        val provider = InMemorySyncProvider()
+        // 远端已有一份 db（本地从未同步过、但本地已有真实聊天数据）
+        provider.seedDatabase(byteArrayOf(9, 9), timestamp = System.currentTimeMillis() + 100000)
+        provider.seedRemote("settings.json", "{}".toByteArray(), mtime = System.currentTimeMillis() + 100000)
+
+        // 本地已有数据：首次同步必须以本地为准（push），绝不 pull 覆盖本机数据
+        val manager = createManager(settings, store, dbFile, localHasData = true)
+        val result = manager.sync(provider, SyncConfig())
+
+        assertTrue(result.success)
+        assertTrue(result.pushed.contains("db/rikka_hub.db"))
+        assertFalse(result.pulled.contains("db/rikka_hub.db"))
+        // 不产生 dbRestorePending（不会在下次启动用远端库覆盖本地）
+        assertNull(store.current().dbRestorePending)
+        // 远端 db 已被本机内容覆盖
+        assertEquals(byteArrayOf(1, 2, 3, 4).toList(), provider.remoteFiles["db/rikka_hub.db"]!!.toList())
     }
 
     @Test
