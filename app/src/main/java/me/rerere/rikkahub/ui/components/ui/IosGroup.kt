@@ -3,13 +3,16 @@ package me.rerere.rikkahub.ui.components.ui
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -19,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
@@ -125,11 +129,12 @@ fun IosGroup(
                     val interactionSource = remember { MutableInteractionSource() }
                     val hapticController = rememberHaptic()
 
-                    ListItem(
-                        headlineContent = item.headlineContent,
+                    // 鑷畾涔夎甯冨眬锛歭eading 鍥炬爣銆佹爣棰?鎻忚堪銆乼railing 鎺т欢缁熶竴鍨傜洿灞呬腑锛?
+                    // 閬垮厤 M3 ListItem 鍦ㄦ弿杩版枃鏈緝闀挎椂鍥炬爣/寮€鍏抽敊浣嶏紱鍑犱綍鍙傛暟澶嶅埢 M3 ListItem銆?
+                    Row(
                         modifier = item.modifier
                             .fillMaxWidth()
-                            .heightIn(min = 44.dp)
+                            .heightIn(min = 56.dp)
                             .then(
                                 if (item.onClick != null) {
                                     Modifier.clickable(
@@ -141,13 +146,46 @@ fun IosGroup(
                                         },
                                     )
                                 } else Modifier
-                            ),
-                        overlineContent = item.overlineContent,
-                        supportingContent = item.supportingContent,
-                        leadingContent = item.leadingContent,
-                        trailingContent = item.trailingContent,
-                        colors = item.colors ?: CustomColors.listItemColors,
-                    )
+                            )
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (item.leadingContent != null) {
+                            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                                item.leadingContent()
+                            }
+                            Spacer(Modifier.width(16.dp))
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            item.overlineContent?.let {
+                                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                                    ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                                        it()
+                                    }
+                                }
+                            }
+                            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                                ProvideTextStyle(MaterialTheme.typography.bodyLarge) {
+                                    item.headlineContent()
+                                }
+                            }
+                            item.supportingContent?.let {
+                                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                                    ProvideTextStyle(MaterialTheme.typography.bodySmall) {
+                                        it()
+                                    }
+                                }
+                            }
+                        }
+                        if (item.trailingContent != null) {
+                            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                                item.trailingContent()
+                            }
+                        }
+                    }
                     if (index != count - 1) {
                         HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 16.dp),

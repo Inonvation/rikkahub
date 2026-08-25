@@ -95,6 +95,7 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
@@ -329,10 +330,12 @@ private fun SettingProviderConfigPage(
             onEdit = onEdit,
         )
 
-        if (internalProvider is ProviderSetting.OpenAI) {
+        val openAIProvider = internalProvider as? ProviderSetting.OpenAI
+        // ChatGPT 订阅（Codex）没有余额概念，隐藏余额配置与余额展示。
+        if (openAIProvider != null && openAIProvider.authType == OpenAIAuthType.API_KEY) {
             SettingProviderBalanceOption(
-                provider = internalProvider,
-                balanceOption = internalProvider.balanceOption,
+                provider = openAIProvider,
+                balanceOption = openAIProvider.balanceOption,
                 onEdit = {
                     onEdit(internalProvider.copyProvider(balanceOption = it))
                 }
@@ -368,15 +371,18 @@ private fun ModelList(
     onUpdateProvider: (ProviderSetting) -> Unit
 ) {
     val providerManager = koinInject<ProviderManager>()
+    var modelListError by remember(providerSetting) { mutableStateOf<String?>(null) }
     val modelList by produceState(emptyList(), providerSetting) {
-        runCatching {
-            value = providerManager.getProviderByType(providerSetting)
+        modelListError = null
+        value = runCatching {
+            providerManager.getProviderByType(providerSetting)
                 .listModels(providerSetting)
                 .sortedBy { it.modelId }
                 .toList()
         }.onFailure {
+            modelListError = it.message ?: it.javaClass.simpleName
             it.printStackTrace()
-        }
+        }.getOrDefault(emptyList())
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
@@ -459,6 +465,7 @@ private fun ModelList(
         ) {
             AddModelButton(
                 models = modelList,
+                modelListError = modelListError,
                 selectedModels = providerSetting.models,
                 onAddModel = {
                     onUpdateProvider(providerSetting.addModel(it))
@@ -662,6 +669,7 @@ private fun ModelSettingsForm(
 @Composable
 private fun AddModelButton(
     models: List<Model>,
+    modelListError: String?,
     selectedModels: List<Model>,
     expanded: Boolean,
     onAddModel: (Model) -> Unit,
@@ -679,6 +687,7 @@ private fun AddModelButton(
     ) {
         ModelPicker(
             models = models,
+            modelListError = modelListError,
             selectedModels = selectedModels,
             onModelSelected = { model ->
                 val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
@@ -828,6 +837,7 @@ private fun AddModelButton(
 @Composable
 private fun ModelPicker(
     models: List<Model>,
+    modelListError: String?,
     selectedModels: List<Model>,
     onModelSelected: (Model) -> Unit,
     onModelDeselected: (Model) -> Unit,
@@ -895,6 +905,15 @@ private fun ModelPicker(
                             ) else stringResource(R.string.setting_provider_page_deselect_models)
                         )
                     }
+                }
+
+                if (models.isEmpty() && modelListError != null) {
+                    Text(
+                        text = modelListError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
                 }
 
                 LazyColumn(

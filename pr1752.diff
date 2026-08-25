@@ -1,0 +1,2156 @@
+diff --git a/ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt b/ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt
+index 932947e5f8..2680e25466 100644
+--- a/ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt
++++ b/ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt
+@@ -3,19 +3,27 @@ package me.rerere.ai.provider
+ import android.content.Context
+ import me.rerere.ai.provider.providers.claude.ClaudeProvider
+ import me.rerere.ai.provider.providers.google.GoogleProvider
++import me.rerere.ai.provider.providers.openai.OpenAICodexTokenProvider
+ import me.rerere.ai.provider.providers.openai.OpenAIProvider
+ import okhttp3.OkHttpClient
+ 
+ /**
+  * Provider管理器，负责注册和获取Provider实例
+  */
+-class ProviderManager(client: OkHttpClient, context: Context) {
++class ProviderManager(
++    client: OkHttpClient,
++    context: Context,
++    openAICodexTokenProvider: OpenAICodexTokenProvider? = null,
++) {
+     // 存储已注册的Provider实例
+     private val providers = mutableMapOf<String, Provider<*>>()
+ 
+     init {
+         // 注册默认Provider
+-        registerProvider("openai", OpenAIProvider(client, context))
++        registerProvider(
++            "openai",
++            OpenAIProvider(client, context, openAICodexTokenProvider),
++        )
+         registerProvider("google", GoogleProvider(client, context))
+         registerProvider("claude", ClaudeProvider(client, context))
+     }
+diff --git a/ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt b/ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt
+index c36df35f6a..3a80d4da18 100644
+--- a/ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt
++++ b/ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt
+@@ -22,6 +22,35 @@ enum class ClaudePromptCacheTtl(val apiValue: String?) {
+     ONE_HOUR("1h")
+ }
+ 
++/** Authentication methods supported by an OpenAI-compatible provider. */
++@Serializable
++enum class OpenAIAuthType {
++    @SerialName("api_key")
++    API_KEY,
++
++    /** ChatGPT subscription credentials used by the OpenAI Codex backend. */
++    @SerialName("chatgpt_subscription")
++    CHATGPT_SUBSCRIPTION,
++}
++
++/**
++ * OAuth credentials returned by OpenAI's Codex device authorization flow.
++ *
++ * The refresh token is persisted with the provider settings so a subscription session can be
++ * renewed without asking the user to sign in every hour.
++ */
++@Serializable
++data class OpenAICodexCredentials(
++    val accessToken: String,
++    val refreshToken: String,
++    val accountId: String,
++    val expiresAt: Long = 0L,
++    val email: String? = null,
++    val planType: String? = null,
++)
++
++const val OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
++
+ @Serializable
+ sealed class ProviderSetting {
+     abstract val id: Uuid
+@@ -65,6 +94,8 @@ sealed class ProviderSetting {
+         var chatCompletionsPath: String = "/chat/completions",
+         var useResponseApi: Boolean = false,
+         var includeHistoryReasoning: Boolean = true,
++        var authType: OpenAIAuthType = OpenAIAuthType.API_KEY,
++        var codexCredentials: OpenAICodexCredentials? = null,
+     ) : ProviderSetting() {
+         override fun addModel(model: Model): ProviderSetting {
+             return copy(models = models + model)
+diff --git a/ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt b/ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt
+index d66afeb74d..04303cad79 100644
+--- a/ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt
++++ b/ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt
+@@ -73,8 +73,11 @@ private const val TAG = "ChatCompletionsAPI"
+ 
+ class ChatCompletionsAPI(
+     private val client: OkHttpClient,
+-    private val keyRoulette: KeyRoulette
++    keyRoulette: KeyRoulette,
++    codexTokenProvider: OpenAICodexTokenProvider? = null,
+ ) : OpenAIImpl {
++    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
++
+     override suspend fun generateText(
+         providerSetting: ProviderSetting.OpenAI,
+         messages: List<UIMessage>,
+@@ -87,13 +90,12 @@ class ChatCompletionsAPI(
+                 providerSetting = providerSetting
+             )
+ 
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+             .headers(params.customHeaders.toHeaders())
+             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+ 
+@@ -138,14 +140,13 @@ class ChatCompletionsAPI(
+             stream = true,
+         )
+ 
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+             .headers(params.customHeaders.toHeaders())
+             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+             .addHeader("Content-Type", "application/json")
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+ 
+diff --git a/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIProvider.kt b/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIProvider.kt
+index cbddad43c9..92f9ea28c1 100644
+--- a/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIProvider.kt
++++ b/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIProvider.kt
+@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.flow
+ import kotlinx.coroutines.withContext
+ import kotlinx.serialization.json.buildJsonObject
++import kotlinx.serialization.json.booleanOrNull
+ import kotlinx.serialization.json.contentOrNull
+ import kotlinx.serialization.json.jsonArray
+ import kotlinx.serialization.json.jsonObject
+@@ -19,6 +20,7 @@ import me.rerere.ai.provider.EmbeddingGenerationResult
+ import me.rerere.ai.provider.ImageEditParams
+ import me.rerere.ai.provider.ImageGenerationParams
+ import me.rerere.ai.provider.Model
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.Provider
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.ai.provider.TextGenerationResult
+@@ -33,8 +35,10 @@ import me.rerere.ai.util.mergeCustomBody
+ import me.rerere.ai.util.toHeaders
+ import me.rerere.common.http.await
+ import me.rerere.common.http.getByKey
+-import okhttp3.MultipartBody
++import okhttp3.HttpUrl
++import okhttp3.HttpUrl.Companion.toHttpUrl
+ import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.MultipartBody
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+ import okhttp3.RequestBody.Companion.asRequestBody
+@@ -44,58 +48,53 @@ import kotlin.io.encoding.Base64
+ import kotlin.io.encoding.ExperimentalEncodingApi
+ 
+ private const val TAG = "OpenAIProvider"
++private const val CODEX_MODELS_CLIENT_VERSION = "0.148.0"
+ 
+ class OpenAIProvider(
+     private val client: OkHttpClient,
+-    context: Context? = null
++    context: Context? = null,
++    codexTokenProvider: OpenAICodexTokenProvider? = null,
+ ) : Provider<ProviderSetting.OpenAI> {
+     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
++    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+ 
+-    private val chatCompletionsAPI = ChatCompletionsAPI(client = client, keyRoulette = keyRoulette)
+-    private val responseAPI = ResponseAPI(client = client, keyRoulette = keyRoulette)
++    private val chatCompletionsAPI = ChatCompletionsAPI(
++        client = client,
++        keyRoulette = keyRoulette,
++        codexTokenProvider = codexTokenProvider,
++    )
++    private val responseAPI = ResponseAPI(
++        client = client,
++        keyRoulette = keyRoulette,
++        codexTokenProvider = codexTokenProvider,
++    )
+ 
+ 
+     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
+         withContext(Dispatchers.IO) {
+-            val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+-            val request = Request.Builder()
+-                .url("${providerSetting.baseUrl}/models")
+-                .addHeader("Authorization", "Bearer $key")
++            val requestBuilder = Request.Builder()
++                .url(openAIModelsUrl(providerSetting))
+                 .get()
+-                .build()
++            val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+             val response = client.newCall(request).await()
+             if (!response.isSuccessful) {
+                 error("Failed to get models: ${response.code} ${response.body?.string()}")
+             }
+ 
+-            val bodyStr = response.body?.string() ?: ""
+-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+-            val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
+-
+-            data.mapNotNull { modelJson ->
+-                val modelObj = modelJson.jsonObject
+-                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+-
+-                Model(
+-                    modelId = id,
+-                    displayName = id,
+-                )
+-            }
++            parseOpenAIModels(response.body.string())
+         }
+ 
+     override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
+-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
+             providerSetting.balanceOption.apiPath
+         } else {
+             "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
+         }
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url(url)
+-            .addHeader("Authorization", "Bearer $key")
+             .get()
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+         val response = client.newCall(request).await()
+         if (!response.isSuccessful) {
+             error("Failed to get balance: ${response.code} ${response.body?.string()}")
+@@ -154,7 +153,6 @@ class OpenAIProvider(
+     ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
+         require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
+ 
+-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+         val requestBody = json.encodeToString(
+             buildJsonObject {
+                 put("model", params.model.modelId)
+@@ -169,13 +167,12 @@ class OpenAIProvider(
+             }.mergeCustomBody(params.customBody)
+         )
+ 
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}/embeddings")
+             .headers(params.customHeaders.toHeaders())
+-            .addHeader("Authorization", "Bearer $key")
+             .addHeader("Content-Type", "application/json")
+             .post(requestBody.toRequestBody("application/json".toMediaType()))
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         val response = client.newCall(request).await()
+         if (!response.isSuccessful) {
+@@ -207,8 +204,6 @@ class OpenAIProvider(
+             "Expected OpenAI provider setting"
+         }
+ 
+-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+-
+         val requestBody = json.encodeToString(
+             buildJsonObject {
+                 put("model", params.model.modelId)
+@@ -227,14 +222,13 @@ class OpenAIProvider(
+ 
+         Log.i(TAG, "generateImage: $requestBody")
+ 
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}/images/generations")
+             .headers(params.customHeaders.toHeaders())
+-            .addHeader("Authorization", "Bearer $key")
+             .addHeader("Content-Type", "application/json")
+             .post(requestBody.toRequestBody("application/json".toMediaType()))
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         val items = withContext(Dispatchers.IO) {
+             val response = client.newCall(request).await()
+@@ -258,7 +252,6 @@ class OpenAIProvider(
+             "At least one image is required"
+         }
+ 
+-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+         val bodyBuilder = MultipartBody.Builder()
+             .setType(MultipartBody.FORM)
+             .addFormDataPart("model", params.model.modelId)
+@@ -292,13 +285,12 @@ class OpenAIProvider(
+             bodyBuilder.addFormDataPart(customBody.key, value)
+         }
+ 
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}/images/edits")
+             .headers(params.customHeaders.toHeaders())
+-            .addHeader("Authorization", "Bearer $key")
+             .post(bodyBuilder.build())
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         val items = withContext(Dispatchers.IO) {
+             val response = client.newCall(request).await()
+@@ -370,3 +362,41 @@ class OpenAIProvider(
+         private val SUPPORTED_EDIT_IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp")
+     }
+ }
++
++internal fun openAIModelsUrl(providerSetting: ProviderSetting.OpenAI): HttpUrl =
++    "${providerSetting.baseUrl.trimEnd('/')}/models"
++        .toHttpUrl()
++        .newBuilder()
++        .apply {
++            if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
++                addQueryParameter("client_version", CODEX_MODELS_CLIENT_VERSION)
++            }
++        }
++        .build()
++
++internal fun parseOpenAIModels(body: String): List<Model> {
++    val bodyJson = json.parseToJsonElement(body).jsonObject
++    val data = bodyJson["data"]?.jsonArray
++        ?: bodyJson["models"]?.jsonArray
++        ?: return emptyList()
++
++    return data.mapNotNull { modelJson ->
++        val modelObj = modelJson.jsonObject
++        if (modelObj["supported_in_api"]?.jsonPrimitive?.booleanOrNull == false) {
++            return@mapNotNull null
++        }
++        if (modelObj["visibility"]?.jsonPrimitive?.contentOrNull == "hide") {
++            return@mapNotNull null
++        }
++        val id = modelObj["id"]?.jsonPrimitive?.contentOrNull
++            ?: modelObj["slug"]?.jsonPrimitive?.contentOrNull
++            ?: modelObj["model"]?.jsonPrimitive?.contentOrNull
++            ?: return@mapNotNull null
++        val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
++
++        Model(
++            modelId = id,
++            displayName = displayName,
++        )
++    }
++}
+diff --git a/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticator.kt b/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticator.kt
+new file mode 100644
+index 0000000000..51382f0e66
+--- /dev/null
++++ b/ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticator.kt
+@@ -0,0 +1,65 @@
++package me.rerere.ai.provider.providers.openai
++
++import me.rerere.ai.provider.OpenAIAuthType
++import me.rerere.ai.provider.OpenAICodexCredentials
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.ProviderSetting
++import me.rerere.ai.util.KeyRoulette
++import okhttp3.HttpUrl.Companion.toHttpUrl
++import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
++import okhttp3.Request
++
++/** Supplies a fresh ChatGPT subscription token to the provider request layer. */
++fun interface OpenAICodexTokenProvider {
++    suspend fun getCredentials(providerSetting: ProviderSetting.OpenAI): OpenAICodexCredentials
++}
++
++/** Centralizes authentication headers so every OpenAI endpoint uses the selected auth mode. */
++internal class OpenAIRequestAuthenticator(
++    private val keyRoulette: KeyRoulette,
++    private val codexTokenProvider: OpenAICodexTokenProvider? = null,
++) {
++    suspend fun authenticate(
++        builder: Request.Builder,
++        providerSetting: ProviderSetting.OpenAI,
++    ): Request.Builder {
++        return when (providerSetting.authType) {
++            OpenAIAuthType.API_KEY -> {
++                val key = keyRoulette.next(
++                    providerSetting.apiKey,
++                    providerSetting.id.toString(),
++                )
++                builder.header(AUTHORIZATION_HEADER, "Bearer $key")
++            }
++
++            OpenAIAuthType.CHATGPT_SUBSCRIPTION -> {
++                val configuredHost = providerSetting.baseUrl.toHttpUrlOrNull()?.host
++                val requestHost = builder.build().url.host
++                val codexHost = OPENAI_CODEX_BASE_URL.toHttpUrl().host
++                require(configuredHost == codexHost && requestHost == codexHost) {
++                    "ChatGPT subscription authentication is only available for the official OpenAI Codex endpoint."
++                }
++                val credentials = codexTokenProvider?.getCredentials(providerSetting)
++                    ?: providerSetting.codexCredentials
++                    ?: error("OpenAI Codex is not signed in. Sign in with ChatGPT first.")
++                require(credentials.accessToken.isNotBlank()) {
++                    "OpenAI Codex access token is empty. Sign in with ChatGPT again."
++                }
++                require(credentials.accountId.isNotBlank()) {
++                    "OpenAI Codex account is missing. Sign in with ChatGPT again."
++                }
++                builder
++                    .header(AUTHORIZATION_HEADER, "Bearer ${credentials.accessToken}")
++                    .header(CHATGPT_ACCOUNT_HEADER, credentials.accountId)
++                    .header(ORIGINATOR_HEADER, ORIGINATOR_VALUE)
++            }
++        }
++    }
++
++    private companion object {
++        const val AUTHORIZATION_HEADER = "Authorization"
++        const val CHATGPT_ACCOUNT_HEADER = "ChatGPT-Account-Id"
++        const val ORIGINATOR_HEADER = "originator"
++        const val ORIGINATOR_VALUE = "rikkahub"
++    }
++}
+diff --git a/ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt b/ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt
+index bbe5a5b569..be7bdf7173 100644
+--- a/ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt
++++ b/ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt
+@@ -7,6 +7,7 @@ import kotlinx.coroutines.channels.onFailure
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.buffer
+ import kotlinx.coroutines.flow.callbackFlow
++import kotlinx.coroutines.flow.collect
+ import kotlinx.serialization.json.Json
+ import kotlinx.serialization.json.JsonArrayBuilder
+ import kotlinx.serialization.json.JsonObject
+@@ -28,6 +29,7 @@ import me.rerere.ai.core.TokenUsage
+ import me.rerere.ai.provider.BuiltInTools
+ import me.rerere.ai.provider.Model
+ import me.rerere.ai.provider.ModelAbility
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.ai.provider.TextGenerationResult
+ import me.rerere.ai.provider.TextGenerationParams
+@@ -36,6 +38,7 @@ import me.rerere.ai.provider.providers.PartGroup
+ import me.rerere.ai.provider.providers.groupPartsByToolBoundary
+ import me.rerere.ai.registry.ModelRegistry
+ import me.rerere.ai.ui.StreamChunk
++import me.rerere.ai.ui.StreamChunkHandler
+ import me.rerere.ai.ui.OpenAIReasoningMetadata
+ import me.rerere.ai.ui.ReasoningType
+ import me.rerere.ai.ui.ServerToolMetadata
+@@ -46,6 +49,7 @@ import me.rerere.ai.ui.UIMessagePart
+ import me.rerere.ai.ui.metadataAs
+ import me.rerere.ai.ui.toMetadata
+ import me.rerere.ai.util.KeyRoulette
++import me.rerere.ai.util.SSEEventSource
+ import me.rerere.ai.util.configureReferHeaders
+ import me.rerere.ai.util.encodeBase64
+ import me.rerere.ai.util.json
+@@ -64,37 +68,47 @@ import okhttp3.RequestBody.Companion.toRequestBody
+ import okhttp3.Response
+ import okhttp3.sse.EventSource
+ import okhttp3.sse.EventSourceListener
+-import okhttp3.sse.EventSources
+ import kotlin.time.Clock
+ 
+ private const val TAG = "ResponseAPI"
++private const val EVENT_STREAM_MEDIA_TYPE = "text/event-stream"
++
++internal fun Request.Builder.acceptEventStream(): Request.Builder {
++    return header("Accept", EVENT_STREAM_MEDIA_TYPE)
++}
+ 
+ class ResponseAPI(
+     private val client: OkHttpClient,
+-    private val keyRoulette: KeyRoulette = KeyRoulette.default()
++    keyRoulette: KeyRoulette = KeyRoulette.default(),
++    codexTokenProvider: OpenAICodexTokenProvider? = null,
+ ) : OpenAIImpl {
++    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
++
+     override suspend fun generateText(
+         providerSetting: ProviderSetting.OpenAI,
+         messages: List<UIMessage>,
+         params: TextGenerationParams
+     ): TextGenerationResult {
++        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
++            return collectStreamingTextGeneration(
++                model = params.model,
++                stream = streamText(providerSetting, messages, params),
++            )
++        }
++
+         val requestBody = buildRequestBody(
+             providerSetting = providerSetting,
+             messages = messages,
+             params = params,
+             stream = false,
+         )
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}/responses")
+             .headers(params.customHeaders.toHeaders())
+             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+-            .addHeader(
+-                "Authorization",
+-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+-            )
+             .addHeader("Content-Type", "application/json")
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+ 
+@@ -122,16 +136,15 @@ class ResponseAPI(
+             params = params,
+             stream = true,
+         )
+-        val request = Request.Builder()
++        val requestBuilder = Request.Builder()
+             .url("${providerSetting.baseUrl}/responses")
+             .headers(params.customHeaders.toHeaders())
++            // OkHttp's EventSource does not add this header for us. Without it the Codex
++            // backend may return a successful response without an SSE Content-Type.
++            .acceptEventStream()
+             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+-            .addHeader(
+-                "Authorization",
+-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+-            )
+             .configureReferHeaders(providerSetting.baseUrl)
+-            .build()
++        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+ 
+         Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+ 
+@@ -190,7 +203,10 @@ class ResponseAPI(
+             }
+         }
+ 
+-        val eventSource = EventSources.createFactory(client)
++        val eventSource = SSEEventSource.factory(
++            callFactory = client,
++            allowMissingContentType = providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++        )
+             .newEventSource(request, listener)
+ 
+         awaitClose {
+@@ -208,7 +224,7 @@ class ResponseAPI(
+     ): JsonObject {
+         val host = providerSetting.baseUrl.toHttpUrl().host
+         val capabilities = resolveResponseProviderCapabilities(host)
+-        return buildJsonObject {
++        val body = buildJsonObject {
+             put("model", params.model.modelId)
+             put("stream", stream)
+             put("store", false)
+@@ -292,6 +308,12 @@ class ResponseAPI(
+                 }
+             }
+         }.mergeCustomBody(params.customBody)
++
++        return if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
++            JsonObject(body + ("stream" to JsonPrimitive(true)))
++        } else {
++            body
++        }
+     }
+ 
+     internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
+@@ -657,6 +679,30 @@ class ResponseAPI(
+     }
+ }
+ 
++internal suspend fun collectStreamingTextGeneration(
++    model: Model,
++    stream: Flow<StreamChunk>,
++): TextGenerationResult {
++    val handler = StreamChunkHandler(model)
++    var messages = listOf(UIMessage(role = MessageRole.USER, parts = emptyList()))
++    var finish: StreamChunk.Finish? = null
++
++    stream.collect { chunk ->
++        messages = handler.handle(messages, chunk)
++        if (chunk is StreamChunk.Finish) finish = chunk
++    }
++
++    val message = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
++        ?: error("Streaming response completed without an assistant message")
++    return TextGenerationResult(
++        id = finish?.responseId.orEmpty(),
++        model = finish?.model ?: model.modelId,
++        message = message,
++        finishReason = finish?.finishReason,
++        usage = message.usage,
++    )
++}
++
+ internal fun isOpenAIServerToolCall(type: String): Boolean =
+     type.endsWith("_call") && type !in setOf(
+         "function_call",
+diff --git a/ai/src/main/java/me/rerere/ai/util/SSE.kt b/ai/src/main/java/me/rerere/ai/util/SSE.kt
+index e0904d85f5..f1d41d46a9 100644
+--- a/ai/src/main/java/me/rerere/ai/util/SSE.kt
++++ b/ai/src/main/java/me/rerere/ai/util/SSE.kt
+@@ -14,6 +14,7 @@ import java.io.IOException
+ class SSEEventSource(
+     private val request: Request,
+     private val listener: EventSourceListener,
++    private val allowMissingContentType: Boolean = false,
+ ) : EventSource,
+     ServerSentEventReader.Callback,
+     Callback {
+@@ -45,7 +46,7 @@ class SSEEventSource(
+ 
+             val body = response.body
+ 
+-            if (!body.isEventStream()) {
++            if (!body.isEventStream() && !(allowMissingContentType && body.contentType() == null)) {
+                 listener.onFailure(
+                     this,
+                     IllegalStateException("Invalid content-type: ${body.contentType()}"),
+@@ -116,7 +117,10 @@ class SSEEventSource(
+     }
+ 
+     companion object {
+-        fun factory(callFactory: Call.Factory) = EventSource.Factory { request, listener ->
++        fun factory(
++            callFactory: Call.Factory,
++            allowMissingContentType: Boolean = false,
++        ) = EventSource.Factory { request, listener ->
+             val actualRequest =
+                 if (request.header("Accept") == null) {
+                     request.newBuilder().addHeader("Accept", "text/event-stream").build()
+@@ -124,7 +128,11 @@ class SSEEventSource(
+                     request
+                 }
+ 
+-            SSEEventSource(actualRequest, listener).apply {
++            SSEEventSource(
++                request = actualRequest,
++                listener = listener,
++                allowMissingContentType = allowMissingContentType,
++            ).apply {
+                 connect(callFactory)
+             }
+         }
+diff --git a/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIProviderModelsTest.kt b/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIProviderModelsTest.kt
+new file mode 100644
+index 0000000000..a5a36e3b22
+--- /dev/null
++++ b/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIProviderModelsTest.kt
+@@ -0,0 +1,68 @@
++package me.rerere.ai.provider.providers.openai
++
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.OpenAIAuthType
++import me.rerere.ai.provider.ProviderSetting
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++class OpenAIProviderModelsTest {
++    @Test
++    fun `Codex subscription model URL includes client version`() {
++        val setting = ProviderSetting.OpenAI(
++            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            baseUrl = OPENAI_CODEX_BASE_URL,
++        )
++
++        val url = openAIModelsUrl(setting)
++
++        assertEquals("$OPENAI_CODEX_BASE_URL/models", url.toString().substringBefore('?'))
++        assertEquals("0.148.0", url.queryParameter("client_version"))
++    }
++
++    @Test
++    fun `API key model URL keeps standard shape`() {
++        val setting = ProviderSetting.OpenAI(
++            authType = OpenAIAuthType.API_KEY,
++            baseUrl = "https://api.openai.com/v1",
++        )
++
++        val url = openAIModelsUrl(setting)
++
++        assertEquals("https://api.openai.com/v1/models", url.toString())
++        assertNull(url.queryParameter("client_version"))
++    }
++
++    @Test
++    fun `Codex model response uses visible API supported slugs`() {
++        val models = parseOpenAIModels(
++            """
++            {
++              "models": [
++                {
++                  "slug": "gpt-5.6-sol",
++                  "display_name": "GPT-5.6 Sol",
++                  "supported_in_api": true,
++                  "visibility": "list"
++                },
++                {
++                  "slug": "hidden-model",
++                  "supported_in_api": true,
++                  "visibility": "hide"
++                },
++                {
++                  "slug": "unsupported-model",
++                  "supported_in_api": false,
++                  "visibility": "list"
++                }
++              ]
++            }
++            """.trimIndent()
++        )
++
++        assertEquals(1, models.size)
++        assertEquals("gpt-5.6-sol", models.single().modelId)
++        assertEquals("GPT-5.6 Sol", models.single().displayName)
++    }
++}
+diff --git a/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticatorTest.kt b/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticatorTest.kt
+new file mode 100644
+index 0000000000..746d5e8184
+--- /dev/null
++++ b/ai/src/test/java/me/rerere/ai/provider/providers/openai/OpenAIRequestAuthenticatorTest.kt
+@@ -0,0 +1,78 @@
++package me.rerere.ai.provider.providers.openai
++
++import kotlinx.coroutines.runBlocking
++import me.rerere.ai.provider.OpenAIAuthType
++import me.rerere.ai.provider.OpenAICodexCredentials
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.ProviderSetting
++import me.rerere.ai.util.KeyRoulette
++import okhttp3.Request
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class OpenAIRequestAuthenticatorTest {
++    @Test
++    fun `API key auth adds bearer token`() = runBlocking {
++        val setting = ProviderSetting.OpenAI(apiKey = "sk-test")
++        val request = OpenAIRequestAuthenticator(KeyRoulette.default())
++            .authenticate(
++                Request.Builder().url("https://api.openai.com/v1/responses"),
++                setting,
++            )
++            .build()
++
++        assertEquals("Bearer sk-test", request.header("Authorization"))
++    }
++
++    @Test
++    fun `subscription auth uses fresh token and account headers`() = runBlocking {
++        val setting = ProviderSetting.OpenAI(
++            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            baseUrl = OPENAI_CODEX_BASE_URL,
++            codexCredentials = OpenAICodexCredentials(
++                accessToken = "stale-token",
++                refreshToken = "refresh-token",
++                accountId = "account-old",
++            ),
++        )
++        val provider = OpenAICodexTokenProvider {
++            OpenAICodexCredentials(
++                accessToken = "fresh-token",
++                refreshToken = "refresh-token-2",
++                accountId = "account-new",
++            )
++        }
++        val request = OpenAIRequestAuthenticator(KeyRoulette.default(), provider)
++            .authenticate(
++                Request.Builder()
++                    .url("https://chatgpt.com/backend-api/codex/responses")
++                    .header("Authorization", "Bearer custom-token"),
++                setting,
++            )
++            .build()
++
++        assertEquals("Bearer fresh-token", request.header("Authorization"))
++        assertEquals("account-new", request.header("ChatGPT-Account-Id"))
++        assertEquals("rikkahub", request.header("originator"))
++    }
++
++    @Test(expected = IllegalArgumentException::class)
++    fun `subscription auth rejects third-party endpoints`() = runBlocking {
++        val setting = ProviderSetting.OpenAI(
++            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            baseUrl = "https://gateway.example.com/v1",
++            codexCredentials = OpenAICodexCredentials(
++                accessToken = "subscription-token",
++                refreshToken = "refresh-token",
++                accountId = "account-id",
++            ),
++        )
++
++        OpenAIRequestAuthenticator(KeyRoulette.default())
++            .authenticate(
++                Request.Builder().url("https://gateway.example.com/v1/responses"),
++                setting,
++            )
++        Unit
++    }
++}
+diff --git a/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiRequestMessageTest.kt b/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiRequestMessageTest.kt
+index 56d2fd3cb8..00226032ca 100644
+--- a/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiRequestMessageTest.kt
++++ b/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiRequestMessageTest.kt
+@@ -14,6 +14,7 @@ import me.rerere.ai.core.Tool
+ import me.rerere.ai.provider.BuiltInTools
+ import me.rerere.ai.provider.Model
+ import me.rerere.ai.provider.ModelAbility
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.ai.provider.TextGenerationParams
+ import me.rerere.ai.ui.OpenAIReasoningMetadata
+@@ -400,6 +401,32 @@ class ResponseApiRequestMessageTest {
+         assertEquals("auto", reasoning!!["summary"]?.jsonPrimitive?.content)
+     }
+ 
++    @Test
++    fun `Codex subscription should force streaming responses`() {
++        val requestBody = invokeBuildRequestBody(
++            providerSetting = ProviderSetting.OpenAI(
++                authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            ),
++            params = createReasoningParams(),
++            stream = false,
++        )
++
++        assertEquals("true", requestBody["stream"]?.jsonPrimitive?.content)
++    }
++
++    @Test
++    fun `API key response should preserve non streaming mode`() {
++        val requestBody = invokeBuildRequestBody(
++            providerSetting = ProviderSetting.OpenAI(
++                authType = OpenAIAuthType.API_KEY,
++            ),
++            params = createReasoningParams(),
++            stream = false,
++        )
++
++        assertEquals("false", requestBody["stream"]?.jsonPrimitive?.content)
++    }
++
+     @Test
+     fun `volc response api should keep reasoning effort when non auto`() {
+         val providerSetting = ProviderSetting.OpenAI(
+diff --git a/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiStreamingGenerationTest.kt b/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiStreamingGenerationTest.kt
+new file mode 100644
+index 0000000000..4223ce9ca9
+--- /dev/null
++++ b/ai/src/test/java/me/rerere/ai/provider/providers/openai/ResponseApiStreamingGenerationTest.kt
+@@ -0,0 +1,51 @@
++package me.rerere.ai.provider.providers.openai
++
++import kotlinx.coroutines.flow.flowOf
++import kotlinx.coroutines.runBlocking
++import me.rerere.ai.core.TokenUsage
++import me.rerere.ai.provider.Model
++import me.rerere.ai.ui.StreamChunk
++import me.rerere.ai.ui.UIMessagePart
++import okhttp3.Request
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class ResponseApiStreamingGenerationTest {
++    @Test
++    fun `streaming request requires SSE response content type`() {
++        val request = Request.Builder()
++            .url("https://chatgpt.com/backend-api/codex/responses")
++            .header("Accept", "application/json")
++            .acceptEventStream()
++            .build()
++
++        assertEquals("text/event-stream", request.header("Accept"))
++    }
++
++    @Test
++    fun `streaming generation aggregates chunks into non streaming result`() = runBlocking {
++        val usage = TokenUsage(promptTokens = 3, completionTokens = 2, totalTokens = 5)
++
++        val result = collectStreamingTextGeneration(
++            model = Model(modelId = "gpt-5.6-sol", displayName = "GPT-5.6 Sol"),
++            stream = flowOf(
++                StreamChunk.TextStart("text-1"),
++                StreamChunk.TextDelta("text-1", "Hello"),
++                StreamChunk.TextDelta("text-1", " world"),
++                StreamChunk.TextEnd("text-1"),
++                StreamChunk.Usage(usage),
++                StreamChunk.Finish(
++                    finishReason = "completed",
++                    responseId = "resp_123",
++                    model = "gpt-5.6-sol",
++                ),
++            ),
++        )
++
++        assertEquals("resp_123", result.id)
++        assertEquals("gpt-5.6-sol", result.model)
++        assertEquals("completed", result.finishReason)
++        assertEquals(usage, result.usage)
++        assertEquals("Hello world", result.message.parts.filterIsInstance<UIMessagePart.Text>().single().text)
++    }
++}
+diff --git a/ai/src/test/java/me/rerere/ai/util/SSEEventSourceTest.kt b/ai/src/test/java/me/rerere/ai/util/SSEEventSourceTest.kt
+new file mode 100644
+index 0000000000..276fbfa927
+--- /dev/null
++++ b/ai/src/test/java/me/rerere/ai/util/SSEEventSourceTest.kt
+@@ -0,0 +1,127 @@
++package me.rerere.ai.util
++
++import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.Protocol
++import okhttp3.Request
++import okhttp3.Response
++import okhttp3.ResponseBody.Companion.toResponseBody
++import okhttp3.sse.EventSource
++import okhttp3.sse.EventSourceListener
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++class SSEEventSourceTest {
++    @Test
++    fun `allows an SSE body without content type when explicitly enabled`() {
++        val request = Request.Builder()
++            .url("https://chatgpt.com/backend-api/codex/responses")
++            .build()
++        var receivedData: String? = null
++        var failure: Throwable? = null
++        var closed = false
++        val eventSource = SSEEventSource(
++            request = request,
++            listener = object : EventSourceListener() {
++                override fun onEvent(
++                    eventSource: EventSource,
++                    id: String?,
++                    type: String?,
++                    data: String,
++                ) {
++                    receivedData = data
++                }
++
++                override fun onFailure(
++                    eventSource: EventSource,
++                    t: Throwable?,
++                    response: Response?,
++                ) {
++                    failure = t
++                }
++
++                override fun onClosed(eventSource: EventSource) {
++                    closed = true
++                }
++            },
++            allowMissingContentType = true,
++        )
++
++        eventSource.processResponse(
++            Response.Builder()
++                .request(request)
++                .protocol(Protocol.HTTP_1_1)
++                .code(200)
++                .message("OK")
++                .body("data: {\"type\":\"response.completed\"}\n\n".toResponseBody(null))
++                .build()
++        )
++
++        assertEquals("{\"type\":\"response.completed\"}", receivedData)
++        assertNull(failure)
++        assertEquals(true, closed)
++    }
++
++    @Test
++    fun `still rejects a missing content type by default`() {
++        val request = Request.Builder().url("https://example.com/responses").build()
++        var failure: Throwable? = null
++        val eventSource = SSEEventSource(
++            request = request,
++            listener = object : EventSourceListener() {
++                override fun onFailure(
++                    eventSource: EventSource,
++                    t: Throwable?,
++                    response: Response?,
++                ) {
++                    failure = t
++                }
++            },
++        )
++
++        eventSource.processResponse(
++            Response.Builder()
++                .request(request)
++                .protocol(Protocol.HTTP_1_1)
++                .code(200)
++                .message("OK")
++                .body("data: {}\n\n".toResponseBody(null))
++                .build()
++        )
++
++        assertEquals("Invalid content-type: null", failure?.message)
++    }
++
++    @Test
++    fun `still rejects an incorrect content type when compatibility is enabled`() {
++        val request = Request.Builder()
++            .url("https://chatgpt.com/backend-api/codex/responses")
++            .build()
++        var failure: Throwable? = null
++        val eventSource = SSEEventSource(
++            request = request,
++            listener = object : EventSourceListener() {
++                override fun onFailure(
++                    eventSource: EventSource,
++                    t: Throwable?,
++                    response: Response?,
++                ) {
++                    failure = t
++                }
++            },
++            allowMissingContentType = true,
++        )
++
++        eventSource.processResponse(
++            Response.Builder()
++                .request(request)
++                .protocol(Protocol.HTTP_1_1)
++                .code(200)
++                .message("OK")
++                .body("{}".toResponseBody("application/json".toMediaType()))
++                .build()
++        )
++
++        assertEquals("Invalid content-type: application/json; charset=utf-8", failure?.message)
++    }
++}
+diff --git a/app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt b/app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt
+index 068bb1e061..a98ae0b4e4 100644
+--- a/app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt
++++ b/app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt
+@@ -16,10 +16,14 @@ class RequestLoggingInterceptor : Interceptor {
+         val startTime = System.currentTimeMillis()
+ 
+         val requestHeaders = request.headers.toMap()
+-        val requestBody = request.body?.let { body ->
+-            val buffer = Buffer()
+-            body.writeTo(buffer)
+-            buffer.readUtf8()
++        val requestBody = if (request.url.host == OPENAI_AUTH_HOST) {
++            REDACTED
++        } else {
++            request.body?.let { body ->
++                val buffer = Buffer()
++                body.writeTo(buffer)
++                buffer.readUtf8()
++            }
+         }
+ 
+         val response: Response
+@@ -63,6 +67,21 @@ class RequestLoggingInterceptor : Interceptor {
+     }
+ 
+     private fun okhttp3.Headers.toMap(): Map<String, String> {
+-        return names().associateWith { get(it) ?: "" }
++        return names().associateWith { name ->
++            if (name.lowercase() in SENSITIVE_HEADERS) REDACTED else get(name) ?: ""
++        }
++    }
++
++    private companion object {
++        const val OPENAI_AUTH_HOST = "auth.openai.com"
++        const val REDACTED = "[REDACTED]"
++        val SENSITIVE_HEADERS = setOf(
++            "authorization",
++            "proxy-authorization",
++            "x-api-key",
++            "cookie",
++            "set-cookie",
++            "chatgpt-account-id",
++        )
+     }
+ }
+diff --git a/app/src/main/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthService.kt b/app/src/main/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthService.kt
+new file mode 100644
+index 0000000000..71797eb9be
+--- /dev/null
++++ b/app/src/main/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthService.kt
+@@ -0,0 +1,358 @@
++package me.rerere.rikkahub.data.ai.openai
++
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
++import kotlinx.coroutines.withContext
++import kotlinx.serialization.SerialName
++import kotlinx.serialization.Serializable
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.JsonElement
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.JsonPrimitive
++import kotlinx.serialization.json.buildJsonObject
++import kotlinx.serialization.json.contentOrNull
++import kotlinx.serialization.json.jsonObject
++import kotlinx.serialization.json.jsonPrimitive
++import kotlinx.serialization.json.longOrNull
++import kotlinx.serialization.json.put
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.OpenAIAuthType
++import me.rerere.ai.provider.OpenAICodexCredentials
++import me.rerere.ai.provider.ProviderSetting
++import me.rerere.ai.provider.providers.openai.OpenAICodexTokenProvider
++import me.rerere.common.http.await
++import me.rerere.rikkahub.data.datastore.SettingsStore
++import okhttp3.FormBody
++import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++import java.util.Base64
++import java.util.concurrent.ConcurrentHashMap
++import kotlin.uuid.Uuid
++
++private const val AUTH_BASE_URL = "https://auth.openai.com"
++private const val DEVICE_AUTH_BASE_URL = "$AUTH_BASE_URL/api/accounts/deviceauth"
++private const val DEVICE_VERIFICATION_URL = "$AUTH_BASE_URL/codex/device"
++private const val TOKEN_URL = "$AUTH_BASE_URL/oauth/token"
++private const val DEVICE_CALLBACK_URL = "$AUTH_BASE_URL/deviceauth/callback"
++
++// Public OAuth client identifier used by the open-source Codex client. It is not a client secret.
++private const val CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
++private const val DEFAULT_POLL_INTERVAL_SECONDS = 5L
++private const val DEVICE_AUTH_TIMEOUT_MS = 15 * 60 * 1000L
++private const val TOKEN_REFRESH_LEEWAY_MS = 5 * 60 * 1000L
++private val JSON_MEDIA_TYPE = "application/json".toMediaType()
++
++/** Device-code information shown while the user authorizes RikkaHub in a browser. */
++data class OpenAICodexDeviceCode(
++    val userCode: String,
++    val verificationUrl: String = DEVICE_VERIFICATION_URL,
++)
++
++/** Implements Codex device login and keeps subscription access tokens fresh. */
++class OpenAICodexAuthService(
++    private val httpClient: OkHttpClient,
++    private val settingsStore: SettingsStore,
++) : OpenAICodexTokenProvider {
++    private val json = Json {
++        ignoreUnknownKeys = true
++        explicitNulls = false
++    }
++    private val credentialCache = ConcurrentHashMap<Uuid, OpenAICodexCredentials>()
++    private val refreshLocks = ConcurrentHashMap<Uuid, Mutex>()
++
++    @Serializable
++    private data class DeviceAuthorizationResponse(
++        @SerialName("authorization_code") val authorizationCode: String,
++        @SerialName("code_verifier") val codeVerifier: String,
++    )
++
++    @Serializable
++    private data class TokenResponse(
++        @SerialName("access_token") val accessToken: String,
++        @SerialName("refresh_token") val refreshToken: String? = null,
++        @SerialName("id_token") val idToken: String? = null,
++        @SerialName("expires_in") val expiresIn: Long? = null,
++        @SerialName("account_id") val accountId: String? = null,
++    )
++
++    suspend fun signIn(
++        providerId: Uuid,
++        onDeviceCodeReady: (OpenAICodexDeviceCode) -> Unit,
++    ): OpenAICodexCredentials {
++        val credentials = withContext(Dispatchers.IO) {
++            val deviceCode = requestDeviceCode()
++            withContext(Dispatchers.Main) {
++                onDeviceCodeReady(OpenAICodexDeviceCode(deviceCode.userCode))
++            }
++            val authorization = awaitDeviceAuthorization(deviceCode)
++            val token = exchangeAuthorizationCode(authorization)
++            token.toCredentials(previous = null)
++        }
++        credentialCache[providerId] = credentials
++        persistCredentials(providerId, credentials, activateSubscription = true)
++        return credentials
++    }
++
++    suspend fun signOut(providerId: Uuid) {
++        credentialCache.remove(providerId)
++        refreshLocks.remove(providerId)
++        persistCredentials(providerId, credentials = null, activateSubscription = false)
++    }
++
++    override suspend fun getCredentials(
++        providerSetting: ProviderSetting.OpenAI,
++    ): OpenAICodexCredentials {
++        val initial = credentialCache[providerSetting.id]
++            ?: providerSetting.codexCredentials
++            ?: error("OpenAI Codex is not signed in. Sign in with ChatGPT first.")
++        if (!initial.needsRefresh()) return initial
++
++        val lock = refreshLocks.computeIfAbsent(providerSetting.id) { Mutex() }
++        return lock.withLock {
++            val latestSetting = settingsStore.settingsFlow.value.providers
++                .filterIsInstance<ProviderSetting.OpenAI>()
++                .firstOrNull { it.id == providerSetting.id }
++            val current = credentialCache[providerSetting.id]
++                ?: latestSetting?.codexCredentials
++                ?: initial
++            if (!current.needsRefresh()) return@withLock current
++
++            val refreshed = refresh(current)
++            credentialCache[providerSetting.id] = refreshed
++            persistCredentials(
++                providerId = providerSetting.id,
++                credentials = refreshed,
++                activateSubscription = false,
++            )
++            refreshed
++        }
++    }
++
++    private suspend fun requestDeviceCode(): DeviceCodeResponse {
++        val requestBody = json.encodeToString(
++            buildJsonObject { put("client_id", CODEX_CLIENT_ID) }
++        )
++        val request = Request.Builder()
++            .url("$DEVICE_AUTH_BASE_URL/usercode")
++            .header("Accept", "application/json")
++            .post(requestBody.toRequestBody(JSON_MEDIA_TYPE))
++            .build()
++        val response = execute(request)
++        if (response.code !in 200..299) {
++            error(httpError("Failed to start OpenAI Codex sign-in", response))
++        }
++        return json.decodeFromString(response.body)
++    }
++
++    private suspend fun awaitDeviceAuthorization(
++        deviceCode: DeviceCodeResponse,
++    ): DeviceAuthorizationResponse {
++        val deadline = System.currentTimeMillis() + DEVICE_AUTH_TIMEOUT_MS
++        val intervalMs = deviceCode.intervalSeconds.coerceAtLeast(1L) * 1000L
++        while (System.currentTimeMillis() < deadline) {
++            val requestBody = json.encodeToString(
++                buildJsonObject {
++                    put("device_auth_id", deviceCode.deviceAuthId)
++                    put("user_code", deviceCode.userCode)
++                }
++            )
++            val request = Request.Builder()
++                .url("$DEVICE_AUTH_BASE_URL/token")
++                .header("Accept", "application/json")
++                .post(requestBody.toRequestBody(JSON_MEDIA_TYPE))
++                .build()
++            val response = execute(request)
++            if (response.code in 200..299) {
++                return json.decodeFromString(response.body)
++            }
++            if (!response.isAuthorizationPending()) {
++                error(httpError("OpenAI Codex sign-in was rejected", response))
++            }
++            delay(intervalMs)
++        }
++        error("OpenAI Codex sign-in timed out. Start the sign-in flow again.")
++    }
++
++    private suspend fun exchangeAuthorizationCode(
++        authorization: DeviceAuthorizationResponse,
++    ): TokenResponse {
++        val form = FormBody.Builder()
++            .add("grant_type", "authorization_code")
++            .add("code", authorization.authorizationCode)
++            .add("redirect_uri", DEVICE_CALLBACK_URL)
++            .add("client_id", CODEX_CLIENT_ID)
++            .add("code_verifier", authorization.codeVerifier)
++            .build()
++        return executeTokenRequest(form, "Failed to finish OpenAI Codex sign-in")
++    }
++
++    private suspend fun refresh(previous: OpenAICodexCredentials): OpenAICodexCredentials {
++        val form = FormBody.Builder()
++            .add("client_id", CODEX_CLIENT_ID)
++            .add("grant_type", "refresh_token")
++            .add("refresh_token", previous.refreshToken)
++            .build()
++        val token = executeTokenRequest(form, "Failed to refresh OpenAI Codex sign-in")
++        return token.toCredentials(previous)
++    }
++
++    private suspend fun executeTokenRequest(form: FormBody, errorPrefix: String): TokenResponse {
++        val request = Request.Builder()
++            .url(TOKEN_URL)
++            .header("Accept", "application/json")
++            .post(form)
++            .build()
++        val response = execute(request)
++        if (response.code !in 200..299) error(httpError(errorPrefix, response))
++        return json.decodeFromString(response.body)
++    }
++
++    private suspend fun execute(request: Request): HttpResult {
++        return httpClient.newCall(request).await().use { response ->
++            HttpResult(response.code, response.body.string())
++        }
++    }
++
++    private fun TokenResponse.toCredentials(
++        previous: OpenAICodexCredentials?,
++    ): OpenAICodexCredentials {
++        val accessClaims = decodeJwtPayload(accessToken)
++        val idClaims = idToken?.let(::decodeJwtPayload)
++        val authClaims = idClaims?.get("https://api.openai.com/auth")?.jsonObject
++            ?: accessClaims?.get("https://api.openai.com/auth")?.jsonObject
++        val resolvedAccountId = accountId
++            ?: authClaims?.get("chatgpt_account_id")?.jsonPrimitive?.contentOrNull
++            ?: idClaims?.get("chatgpt_account_id")?.jsonPrimitive?.contentOrNull
++            ?: accessClaims?.get("chatgpt_account_id")?.jsonPrimitive?.contentOrNull
++            ?: previous?.accountId
++            ?: error("OpenAI Codex sign-in did not return a ChatGPT account ID.")
++        val expiresAt = expiresIn?.takeIf { it > 0 }?.let {
++            System.currentTimeMillis() + it * 1000L
++        } ?: accessClaims?.get("exp")?.jsonPrimitive?.longOrNull?.times(1000L)
++            ?: previous?.expiresAt
++            ?: 0L
++
++        return OpenAICodexCredentials(
++            accessToken = accessToken,
++            refreshToken = refreshToken ?: previous?.refreshToken
++                ?: error("OpenAI Codex sign-in did not return a refresh token."),
++            accountId = resolvedAccountId,
++            expiresAt = expiresAt,
++            email = idClaims?.get("email")?.jsonPrimitive?.contentOrNull
++                ?: accessClaims?.get("email")?.jsonPrimitive?.contentOrNull
++                ?: previous?.email,
++            planType = authClaims?.get("chatgpt_plan_type")?.jsonPrimitive?.contentOrNull
++                ?: previous?.planType,
++        )
++    }
++
++    private fun decodeJwtPayload(token: String): kotlinx.serialization.json.JsonObject? {
++        val payload = token.split('.').getOrNull(1) ?: return null
++        return runCatching {
++            val decoded = Base64.getUrlDecoder().decode(payload).decodeToString()
++            json.parseToJsonElement(decoded).jsonObject
++        }.getOrNull()
++    }
++
++    private fun OpenAICodexCredentials.needsRefresh(): Boolean =
++        expiresAt > 0L && System.currentTimeMillis() >= expiresAt - TOKEN_REFRESH_LEEWAY_MS
++
++    private suspend fun persistCredentials(
++        providerId: Uuid,
++        credentials: OpenAICodexCredentials?,
++        activateSubscription: Boolean,
++    ) {
++        settingsStore.update { settings ->
++            settings.copy(
++                providers = settings.providers.map { provider ->
++                    if (provider !is ProviderSetting.OpenAI || provider.id != providerId) {
++                        provider
++                    } else {
++                        provider.copy(
++                            authType = if (activateSubscription) {
++                                OpenAIAuthType.CHATGPT_SUBSCRIPTION
++                            } else {
++                                provider.authType
++                            },
++                            codexCredentials = credentials,
++                            baseUrl = if (activateSubscription) OPENAI_CODEX_BASE_URL else provider.baseUrl,
++                            useResponseApi = if (activateSubscription) true else provider.useResponseApi,
++                        )
++                    }
++                }
++            )
++        }
++    }
++
++    private fun HttpResult.isAuthorizationPending(): Boolean {
++        if (code !in setOf(400, 403, 404, 409, 429)) return false
++        val error = errorMessage().lowercase()
++        return error.isBlank() ||
++            error.contains("pending") ||
++            error.contains("authorization") ||
++            error.contains("not found") ||
++            error.contains("slow_down")
++    }
++
++    private fun httpError(prefix: String, response: HttpResult): String {
++        val detail = response.errorMessage().takeIf { it.isNotBlank() }
++            ?: if (response.code == 403) {
++                "OpenAI denied this network request. Make sure the emulator can access auth.openai.com and uses the same proxy or VPN as the host."
++            } else {
++                null
++            }
++        return buildString {
++            append(prefix)
++            append(" (HTTP ${response.code})")
++            if (detail != null) append(": $detail")
++        }
++    }
++
++    private fun HttpResult.errorMessage(): String = runCatching {
++        extractOpenAIAuthError(body)
++    }.getOrDefault("")
++
++    private data class HttpResult(val code: Int, val body: String)
++}
++
++@Serializable
++internal data class DeviceCodeResponse(
++    @SerialName("device_auth_id") val deviceAuthId: String,
++    @SerialName("user_code") val userCode: String,
++    @SerialName("interval") private val rawInterval: JsonElement? = null,
++) {
++    val intervalSeconds: Long
++        get() = (rawInterval as? JsonPrimitive)?.longOrNull
++            ?: DEFAULT_POLL_INTERVAL_SECONDS
++}
++
++internal fun extractOpenAIAuthError(body: String): String {
++    val normalizedBody = body.trim()
++    if (normalizedBody.isBlank()) return ""
++
++    val root = runCatching {
++        Json.parseToJsonElement(normalizedBody) as? JsonObject
++    }.getOrNull()
++    val message = root?.firstString("error_description", "message", "detail")
++        ?: when (val error = root?.get("error")) {
++            is JsonPrimitive -> error.contentOrNull
++            is JsonObject -> error.firstString("message", "error_description", "code", "type")
++            else -> null
++        }
++    if (!message.isNullOrBlank()) return message.normalizedForError()
++
++    return normalizedBody
++        .replace(Regex("<[^>]+>"), " ")
++        .normalizedForError()
++}
++
++private fun JsonObject.firstString(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
++    (get(key) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
++}
++
++private fun String.normalizedForError(): String =
++    replace(Regex("\\s+"), " ").trim().take(500)
+diff --git a/app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt b/app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt
+index ac805ce06a..73eec4406d 100644
+--- a/app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt
++++ b/app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt
+@@ -16,6 +16,7 @@ import me.rerere.common.http.AcceptLanguageBuilder
+ import me.rerere.rikkahub.BuildConfig
+ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
+ import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
++import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
+ import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
+ import me.rerere.rikkahub.data.ai.GenerationHandler
+ import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+@@ -203,6 +204,12 @@ val dataSourceModule = module {
+             .addInterceptor(AIRequestInterceptor())
+             .addInterceptor(HttpLoggingInterceptor().apply {
+                 level = HttpLoggingInterceptor.Level.HEADERS
++                redactHeader("Authorization")
++                redactHeader("Proxy-Authorization")
++                redactHeader("X-Api-Key")
++                redactHeader("Cookie")
++                redactHeader("Set-Cookie")
++                redactHeader("ChatGPT-Account-Id")
+             })
+             .build().also { SearchService.init(it, get()) }
+     }
+@@ -212,7 +219,18 @@ val dataSourceModule = module {
+     }
+ 
+     single {
+-        ProviderManager(client = get(), context = get())
++        OpenAICodexAuthService(
++            httpClient = get(),
++            settingsStore = get(),
++        )
++    }
++
++    single {
++        ProviderManager(
++            client = get(),
++            context = get(),
++            openAICodexTokenProvider = get<OpenAICodexAuthService>(),
++        )
+     }
+ 
+     single {
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt b/app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt
+index 28b00eb3bb..820ff6d4a0 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt
+@@ -91,7 +91,14 @@ fun ProviderSetting.encodeForShare(): String {
+         append("ai-provider:")
+         append("v1:")
+ 
+-        val value = JsonInstant.encodeToString(this@encodeForShare.copyProvider(models = emptyList()))
++        val withoutModels = this@encodeForShare.copyProvider(models = emptyList())
++        // Subscription refresh tokens grant account access and must never leave the device via QR/share.
++        val shareable = if (withoutModels is ProviderSetting.OpenAI) {
++            withoutModels.copy(codexCredentials = null)
++        } else {
++            withoutModels
++        }
++        val value = JsonInstant.encodeToString(shareable)
+         append(Base64.encode(value.encodeToByteArray()))
+     }
+ }
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt b/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt
+index 5b15bd8269..719ad4bd02 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt
+@@ -96,6 +96,7 @@ import me.rerere.ai.provider.Modality
+ import me.rerere.ai.provider.Model
+ import me.rerere.ai.provider.ModelAbility
+ import me.rerere.ai.provider.ModelType
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.ProviderManager
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.ai.provider.TextGenerationParams
+@@ -279,10 +280,11 @@ private fun SettingProviderConfigPage(
+             }
+         )
+ 
+-        if (internalProvider is ProviderSetting.OpenAI) {
++        val openAIProvider = internalProvider as? ProviderSetting.OpenAI
++        if (openAIProvider?.authType == OpenAIAuthType.API_KEY) {
+             SettingProviderBalanceOption(
+-                provider = internalProvider,
+-                balanceOption = internalProvider.balanceOption,
++                provider = openAIProvider,
++                balanceOption = openAIProvider.balanceOption,
+                 onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
+             )
+             ProviderBalanceText(providerSetting = provider, style = MaterialTheme.typography.labelSmall)
+@@ -386,16 +388,19 @@ private fun ModelList(
+     onUpdateProvider: (ProviderSetting) -> Unit
+ ) {
+     val providerManager = koinInject<ProviderManager>()
++    var modelListError by remember(providerSetting) { mutableStateOf<String?>(null) }
+     val modelList by produceState(emptyList(), providerSetting) {
+-        runCatching {
++        modelListError = null
++        value = runCatching {
+             println("loading models...")
+-            value = providerManager.getProviderByType(providerSetting)
++            providerManager.getProviderByType(providerSetting)
+                 .listModels(providerSetting)
+                 .sortedBy { it.modelId }
+                 .toList()
+         }.onFailure {
++            modelListError = it.message ?: it.javaClass.simpleName
+             it.printStackTrace()
+-        }
++        }.getOrDefault(emptyList())
+     }
+     var expanded by rememberSaveable { mutableStateOf(true) }
+     val lazyListState = rememberLazyListState()
+@@ -478,6 +483,7 @@ private fun ModelList(
+         ) {
+             AddModelButton(
+                 models = modelList,
++                modelListError = modelListError,
+                 selectedModels = providerSetting.models,
+                 onAddModel = {
+                     onUpdateProvider(providerSetting.addModel(it))
+@@ -677,6 +683,7 @@ private fun ModelSettingsForm(
+ @Composable
+ private fun AddModelButton(
+     models: List<Model>,
++    modelListError: String?,
+     selectedModels: List<Model>,
+     expanded: Boolean,
+     onAddModel: (Model) -> Unit,
+@@ -693,6 +700,7 @@ private fun AddModelButton(
+     ) {
+         ModelPicker(
+             models = models,
++            modelListError = modelListError,
+             selectedModels = selectedModels,
+             onModelSelected = { model ->
+                 val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
+@@ -838,6 +846,7 @@ private fun AddModelButton(
+ @Composable
+ private fun ModelPicker(
+     models: List<Model>,
++    modelListError: String?,
+     selectedModels: List<Model>,
+     onModelSelected: (Model) -> Unit,
+     onModelDeselected: (Model) -> Unit,
+@@ -905,6 +914,15 @@ private fun ModelPicker(
+                     }
+                 }
+ 
++                if (models.isEmpty() && modelListError != null) {
++                    Text(
++                        text = modelListError,
++                        color = MaterialTheme.colorScheme.error,
++                        style = MaterialTheme.typography.bodySmall,
++                        modifier = Modifier.padding(horizontal = 8.dp),
++                    )
++                }
++
+                 LazyColumn(
+                     modifier = Modifier
+                         .fillMaxWidth()
+diff --git a/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt b/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt
+index 1dbcfdf6fe..2b75d90b18 100644
+--- a/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt
++++ b/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt
+@@ -1,5 +1,7 @@
+ package me.rerere.rikkahub.ui.pages.setting.components
+ 
++import android.content.ClipData
++import android.content.ClipboardManager
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.compose.foundation.layout.Arrangement
+@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.IconButton
+ import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.AlertDialog
+ import androidx.compose.material3.OutlinedButton
+ import androidx.compose.material3.OutlinedTextField
+ import androidx.compose.material3.SegmentedButton
+@@ -16,10 +19,13 @@ import androidx.compose.material3.SegmentedButtonDefaults
+ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+ import androidx.compose.material3.Switch
+ import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+@@ -30,8 +36,13 @@ import androidx.compose.ui.text.input.VisualTransformation
+ import androidx.compose.ui.unit.dp
+ import com.dokar.sonner.ToastType
+ import me.rerere.ai.provider.ClaudePromptCacheTtl
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.rikkahub.R
++import me.rerere.rikkahub.data.ai.mcp.launchOAuthAuthorization
++import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
++import me.rerere.rikkahub.data.ai.openai.OpenAICodexDeviceCode
+ import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
+ import me.rerere.hugeicons.HugeIcons
+ import me.rerere.hugeicons.stroke.View
+@@ -43,6 +54,9 @@ import kotlinx.serialization.json.Json
+ import kotlinx.serialization.json.contentOrNull
+ import kotlinx.serialization.json.jsonObject
+ import kotlinx.serialization.json.jsonPrimitive
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.launch
++import org.koin.compose.koinInject
+ import kotlin.reflect.KClass
+ 
+ @Composable
+@@ -124,6 +138,9 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
+ }
+ 
+ internal fun ProviderSetting.defaultBaseUrlForReset(): String {
++    if (this is ProviderSetting.OpenAI && authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
++        return OPENAI_CODEX_BASE_URL
++    }
+     val defaultProvider = DEFAULT_PROVIDERS.find { it.id == id }
+     if (defaultProvider != null) {
+         when (this) {
+@@ -188,22 +205,55 @@ private fun String.normalizePath(): String {
+ private fun String.isValidBaseUrl(): Boolean = this.toHttpUrlOrNull() != null
+ 
+ private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
++private const val OPENAI_CODEX_HOST = "chatgpt.com"
+ private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
+ private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
+ private const val V1_SUFFIX = "/v1"
+ private const val V1_BETA_SUFFIX = "/v1beta"
+ private val OFFICIAL_PROVIDER_HOSTS = setOf(
+     OPENAI_OFFICIAL_HOST,
++    OPENAI_CODEX_HOST,
+     GOOGLE_OFFICIAL_HOST,
+     CLAUDE_OFFICIAL_HOST
+ )
+ 
++internal fun ProviderSetting.OpenAI.supportsChatGPTSubscription(): Boolean {
++    return baseUrl.toHttpUrlOrNull()?.host?.lowercase() in setOf(
++        OPENAI_OFFICIAL_HOST,
++        OPENAI_CODEX_HOST,
++    )
++}
++
+ @Composable
+ private fun ProviderConfigureOpenAI(
+     provider: ProviderSetting.OpenAI,
+     onEdit: (provider: ProviderSetting.OpenAI) -> Unit
+ ) {
+     val toaster = LocalToaster.current
++    val context = LocalContext.current
++    val scope = rememberCoroutineScope()
++    val codexAuthService = koinInject<OpenAICodexAuthService>()
++    var authJob by remember(provider.id) { mutableStateOf<Job?>(null) }
++    var deviceCode by remember(provider.id) { mutableStateOf<OpenAICodexDeviceCode?>(null) }
++    var authError by remember(provider.id) { mutableStateOf<String?>(null) }
++    var signingIn by remember(provider.id) { mutableStateOf(false) }
++    val supportsChatGPTSubscription = provider.supportsChatGPTSubscription()
++    val selectedAuthType = if (supportsChatGPTSubscription) {
++        provider.authType
++    } else {
++        OpenAIAuthType.API_KEY
++    }
++
++    LaunchedEffect(provider.authType, supportsChatGPTSubscription) {
++        if (!supportsChatGPTSubscription && provider.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
++            onEdit(
++                provider.copy(
++                    authType = OpenAIAuthType.API_KEY,
++                    codexCredentials = null,
++                )
++            )
++        }
++    }
+ 
+     provider.description()
+ 
+@@ -214,20 +264,148 @@ private fun ProviderConfigureOpenAI(
+         modifier = Modifier.fillMaxWidth(),
+     )
+ 
+-    var keyVisible by remember { mutableStateOf(false) }
+-    OutlinedTextField(
+-        value = provider.apiKey,
+-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+-        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
+-        modifier = Modifier.fillMaxWidth(),
+-        maxLines = 3,
+-        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+-        trailingIcon = {
+-            IconButton(onClick = { keyVisible = !keyVisible }) {
+-                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
++    if (supportsChatGPTSubscription) {
++        Text(stringResource(R.string.setting_provider_page_auth_method))
++        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
++            OpenAIAuthType.entries.forEachIndexed { index, authType ->
++                SegmentedButton(
++                    shape = SegmentedButtonDefaults.itemShape(
++                        index = index,
++                        count = OpenAIAuthType.entries.size,
++                    ),
++                    label = {
++                        Text(
++                            when (authType) {
++                                OpenAIAuthType.API_KEY -> stringResource(R.string.setting_provider_page_api_key)
++                                OpenAIAuthType.CHATGPT_SUBSCRIPTION -> stringResource(R.string.setting_provider_page_chatgpt_subscription)
++                            }
++                        )
++                    },
++                    selected = provider.authType == authType,
++                    onClick = {
++                        val baseUrl = when {
++                            authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION -> OPENAI_CODEX_BASE_URL
++                            provider.baseUrl == OPENAI_CODEX_BASE_URL -> ProviderSetting.OpenAI().baseUrl
++                            else -> provider.baseUrl
++                        }
++                        onEdit(
++                            provider.copy(
++                                authType = authType,
++                                baseUrl = baseUrl,
++                                useResponseApi = authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || provider.useResponseApi,
++                            )
++                        )
++                    },
++                )
+             }
+-        },
+-    )
++        }
++    }
++
++    when (selectedAuthType) {
++        OpenAIAuthType.API_KEY -> {
++            var keyVisible by remember { mutableStateOf(false) }
++            OutlinedTextField(
++                value = provider.apiKey,
++                onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
++                label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
++                modifier = Modifier.fillMaxWidth(),
++                maxLines = 3,
++                visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
++                trailingIcon = {
++                    IconButton(onClick = { keyVisible = !keyVisible }) {
++                        Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
++                    }
++                },
++            )
++        }
++
++        OpenAIAuthType.CHATGPT_SUBSCRIPTION -> {
++            Text(
++                text = stringResource(R.string.setting_provider_page_chatgpt_subscription_desc),
++                style = MaterialTheme.typography.bodySmall,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++            )
++            val credentials = provider.codexCredentials
++            if (credentials != null) {
++                val accountLabel = listOfNotNull(credentials.email, credentials.planType)
++                    .joinToString(" · ")
++                    .ifBlank { stringResource(R.string.setting_provider_page_signed_in) }
++                Text(
++                    text = accountLabel,
++                    style = MaterialTheme.typography.bodyMedium,
++                    color = MaterialTheme.colorScheme.primary,
++                )
++            }
++            Row(
++                modifier = Modifier.fillMaxWidth(),
++                horizontalArrangement = Arrangement.spacedBy(8.dp),
++                verticalAlignment = Alignment.CenterVertically,
++            ) {
++                OutlinedButton(
++                    enabled = !signingIn,
++                    onClick = {
++                        authJob?.cancel()
++                        authJob = scope.launch {
++                            signingIn = true
++                            authError = null
++                            try {
++                                val credentials = codexAuthService.signIn(provider.id) { code ->
++                                    deviceCode = code
++                                    context.getSystemService(ClipboardManager::class.java)
++                                        ?.setPrimaryClip(
++                                            ClipData.newPlainText("OpenAI Codex device code", code.userCode)
++                                        )
++                                    launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
++                                }
++                                deviceCode = null
++                                onEdit(
++                                    provider.copy(
++                                        authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++                                        codexCredentials = credentials,
++                                        baseUrl = OPENAI_CODEX_BASE_URL,
++                                        useResponseApi = true,
++                                    )
++                                )
++                            } catch (error: kotlinx.coroutines.CancellationException) {
++                                throw error
++                            } catch (error: Exception) {
++                                authError = error.message ?: error.javaClass.simpleName
++                            } finally {
++                                signingIn = false
++                                authJob = null
++                            }
++                        }
++                    },
++                ) {
++                    Text(
++                        stringResource(
++                            if (signingIn) R.string.setting_provider_page_signing_in
++                            else R.string.setting_provider_page_sign_in_chatgpt
++                        )
++                    )
++                }
++                if (credentials != null) {
++                    TextButton(
++                        onClick = {
++                            scope.launch {
++                                codexAuthService.signOut(provider.id)
++                                onEdit(provider.copy(codexCredentials = null))
++                            }
++                        }
++                    ) {
++                        Text(stringResource(R.string.setting_provider_page_sign_out))
++                    }
++                }
++            }
++            authError?.let { error ->
++                Text(
++                    text = error,
++                    style = MaterialTheme.typography.bodySmall,
++                    color = MaterialTheme.colorScheme.error,
++                )
++            }
++        }
++    }
+ 
+     OutlinedTextField(
+         value = provider.baseUrl,
+@@ -235,9 +413,10 @@ private fun ProviderConfigureOpenAI(
+         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
+         modifier = Modifier.fillMaxWidth(),
+         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
++        enabled = selectedAuthType == OpenAIAuthType.API_KEY,
+     )
+ 
+-    if (!provider.useResponseApi) {
++    if (!provider.useResponseApi && selectedAuthType == OpenAIAuthType.API_KEY) {
+         OutlinedTextField(
+             value = provider.chatCompletionsPath,
+             onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
+@@ -268,6 +447,7 @@ private fun ProviderConfigureOpenAI(
+         Text(stringResource(R.string.setting_provider_page_response_api))
+         Switch(
+             checked = provider.useResponseApi,
++            enabled = selectedAuthType == OpenAIAuthType.API_KEY,
+             onCheckedChange = {
+                 onEdit(provider.copy(useResponseApi = it))
+                 if (it && provider.baseUrl.toHttpUrlOrNull()?.host != "api.openai.com") {
+@@ -288,6 +468,45 @@ private fun ProviderConfigureOpenAI(
+             onCheckedChange = { onEdit(provider.copy(includeHistoryReasoning = it)) }
+         )
+     }
++
++    deviceCode?.let { code ->
++        AlertDialog(
++            onDismissRequest = {
++                authJob?.cancel()
++                deviceCode = null
++            },
++            title = { Text(stringResource(R.string.setting_provider_page_device_code_title)) },
++            text = {
++                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                    Text(stringResource(R.string.setting_provider_page_device_code_desc))
++                    Text(
++                        text = code.userCode,
++                        style = MaterialTheme.typography.headlineMedium,
++                        fontFamily = JetbrainsMono,
++                    )
++                }
++            },
++            dismissButton = {
++                TextButton(
++                    onClick = {
++                        authJob?.cancel()
++                        deviceCode = null
++                    }
++                ) {
++                    Text(stringResource(R.string.cancel))
++                }
++            },
++            confirmButton = {
++                TextButton(
++                    onClick = {
++                        launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
++                    }
++                ) {
++                    Text(stringResource(R.string.setting_provider_page_open_browser))
++                }
++            },
++        )
++    }
+ }
+ 
+ @Composable
+diff --git a/app/src/main/res/values-zh/strings.xml b/app/src/main/res/values-zh/strings.xml
+index 93d12bc523..e3f0521aca 100644
+--- a/app/src/main/res/values-zh/strings.xml
++++ b/app/src/main/res/values-zh/strings.xml
+@@ -910,6 +910,16 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过
+   <string name="setting_provider_page_advanced_settings">高级设置</string>
+   <string name="setting_provider_page_api_base_url">API Base Url</string>
+   <string name="setting_provider_page_api_key">API Key</string>
++  <string name="setting_provider_page_auth_method">认证方式</string>
++  <string name="setting_provider_page_chatgpt_subscription">ChatGPT 订阅</string>
++  <string name="setting_provider_page_chatgpt_subscription_desc">使用符合条件的 ChatGPT 订阅所包含的 Codex 用量。登录会在 OpenAI 官方网页中完成，不消耗 API 余额。</string>
++  <string name="setting_provider_page_signed_in">已登录</string>
++  <string name="setting_provider_page_sign_in_chatgpt">使用 ChatGPT 登录</string>
++  <string name="setting_provider_page_signing_in">等待登录…</string>
++  <string name="setting_provider_page_sign_out">退出登录</string>
++  <string name="setting_provider_page_device_code_title">登录 OpenAI Codex</string>
++  <string name="setting_provider_page_device_code_desc">下方的一次性代码已复制到剪贴板，请粘贴到浏览器中打开的 OpenAI 页面。</string>
++  <string name="setting_provider_page_open_browser">打开浏览器</string>
+   <string name="setting_provider_page_api_path">API 路径</string>
+   <string name="setting_provider_page_avaliable_models">可用模型</string>
+   <string name="setting_provider_page_balance_api_path">余额 API 路径</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 9d597cd29e..0a509e459d 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -931,6 +931,16 @@
+   <string name="setting_provider_page_advanced_settings">Advanced Settings</string>
+   <string name="setting_provider_page_api_base_url">API Base Url</string>
+   <string name="setting_provider_page_api_key">API Key</string>
++  <string name="setting_provider_page_auth_method">Authentication</string>
++  <string name="setting_provider_page_chatgpt_subscription">ChatGPT plan</string>
++  <string name="setting_provider_page_chatgpt_subscription_desc">Use the Codex access included with an eligible ChatGPT subscription. This signs in through OpenAI in your browser and does not use API credits.</string>
++  <string name="setting_provider_page_signed_in">Signed in</string>
++  <string name="setting_provider_page_sign_in_chatgpt">Sign in with ChatGPT</string>
++  <string name="setting_provider_page_signing_in">Waiting for sign-in…</string>
++  <string name="setting_provider_page_sign_out">Sign out</string>
++  <string name="setting_provider_page_device_code_title">Sign in to OpenAI Codex</string>
++  <string name="setting_provider_page_device_code_desc">The one-time code below was copied to your clipboard. Paste it into the OpenAI page opened in your browser.</string>
++  <string name="setting_provider_page_open_browser">Open browser</string>
+   <string name="setting_provider_page_api_path">API Path</string>
+   <string name="setting_provider_page_avaliable_models">Avaliable Models</string>
+   <string name="setting_provider_page_balance_api_path">Balance API Path</string>
+diff --git a/app/src/test/java/me/rerere/rikkahub/ShareSheetTest.kt b/app/src/test/java/me/rerere/rikkahub/ShareSheetTest.kt
+index 370eec85a7..1e14092816 100644
+--- a/app/src/test/java/me/rerere/rikkahub/ShareSheetTest.kt
++++ b/app/src/test/java/me/rerere/rikkahub/ShareSheetTest.kt
+@@ -2,6 +2,8 @@ package me.rerere.rikkahub
+ 
+ import me.rerere.ai.provider.BalanceOption
+ import me.rerere.ai.provider.Model
++import me.rerere.ai.provider.OpenAIAuthType
++import me.rerere.ai.provider.OpenAICodexCredentials
+ import me.rerere.ai.provider.ProviderSetting
+ import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
+ import me.rerere.rikkahub.ui.components.ui.encodeForShare
+@@ -11,6 +13,24 @@ import org.junit.Test
+ import kotlin.uuid.Uuid
+ 
+ class ShareSheetTest {
++    @Test
++    fun `sharing Codex provider strips subscription credentials`() {
++        val original = ProviderSetting.OpenAI(
++            name = "OpenAI Codex",
++            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            codexCredentials = OpenAICodexCredentials(
++                accessToken = "access-secret",
++                refreshToken = "refresh-secret",
++                accountId = "account-id",
++            ),
++        )
++
++        val decoded = decodeProviderSetting(original.encodeForShare()) as ProviderSetting.OpenAI
++
++        assertEquals(OpenAIAuthType.CHATGPT_SUBSCRIPTION, decoded.authType)
++        assertEquals(null, decoded.codexCredentials)
++    }
++
+     @Test
+     fun `share round trip should restore OpenAI settings without models`() {
+         val originalId = Uuid.random()
+diff --git a/app/src/test/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthServiceTest.kt b/app/src/test/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthServiceTest.kt
+new file mode 100644
+index 0000000000..8a38b96adc
+--- /dev/null
++++ b/app/src/test/java/me/rerere/rikkahub/data/ai/openai/OpenAICodexAuthServiceTest.kt
+@@ -0,0 +1,41 @@
++package me.rerere.rikkahub.data.ai.openai
++
++import kotlinx.serialization.json.Json
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class OpenAICodexAuthServiceTest {
++    private val json = Json { ignoreUnknownKeys = true }
++
++    @Test
++    fun `device code accepts string poll interval returned by OpenAI`() {
++        val response = json.decodeFromString<DeviceCodeResponse>(
++            """{"device_auth_id":"deviceauth_123","user_code":"ABCD-EFGH","interval":"5"}"""
++        )
++
++        assertEquals(5L, response.intervalSeconds)
++    }
++
++    @Test
++    fun `device code accepts numeric poll interval`() {
++        val response = json.decodeFromString<DeviceCodeResponse>(
++            """{"device_auth_id":"deviceauth_123","user_code":"ABCD-EFGH","interval":7}"""
++        )
++
++        assertEquals(7L, response.intervalSeconds)
++    }
++
++    @Test
++    fun `auth error extracts nested OpenAI message`() {
++        val body = """{"error":{"code":"access_denied","message":"Region is not supported"}}"""
++
++        assertEquals("Region is not supported", extractOpenAIAuthError(body))
++    }
++
++    @Test
++    fun `auth error converts html response to readable text`() {
++        val body = """<html><body><h1>Access denied</h1><p>Request blocked</p></body></html>"""
++
++        assertEquals("Access denied Request blocked", extractOpenAIAuthError(body))
++    }
++}
+diff --git a/app/src/test/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigureConvertToTest.kt b/app/src/test/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigureConvertToTest.kt
+index 67f5180f7b..95ea76ad10 100644
+--- a/app/src/test/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigureConvertToTest.kt
++++ b/app/src/test/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigureConvertToTest.kt
+@@ -2,15 +2,50 @@ package me.rerere.rikkahub.ui.pages.setting.components
+ 
+ import me.rerere.ai.provider.BalanceOption
+ import me.rerere.ai.provider.Model
++import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
++import me.rerere.ai.provider.OpenAIAuthType
+ import me.rerere.ai.provider.ProviderSetting
+ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+ import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
+ import org.junit.Assert.assertSame
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+ import kotlin.uuid.Uuid
+ 
+ class ProviderConfigureConvertToTest {
++    @Test
++    fun `ChatGPT subscription is only offered for official OpenAI endpoints`() {
++        assertTrue(
++            ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1")
++                .supportsChatGPTSubscription()
++        )
++        assertTrue(
++            ProviderSetting.OpenAI(baseUrl = OPENAI_CODEX_BASE_URL)
++                .supportsChatGPTSubscription()
++        )
++        assertFalse(
++            ProviderSetting.OpenAI(baseUrl = "https://openrouter.ai/api/v1")
++                .supportsChatGPTSubscription()
++        )
++        assertFalse(
++            ProviderSetting.OpenAI(baseUrl = "not-a-url")
++                .supportsChatGPTSubscription()
++        )
++    }
++
++    @Test
++    fun `convertTo treats Codex subscription endpoint as an official OpenAI endpoint`() {
++        val original = ProviderSetting.OpenAI(
++            authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
++            baseUrl = OPENAI_CODEX_BASE_URL,
++        )
++
++        val converted = original.convertTo(ProviderSetting.Google::class) as ProviderSetting.Google
++
++        assertEquals("https://generativelanguage.googleapis.com/v1beta", converted.baseUrl)
++    }
++
+     @Test
+     fun `convertTo should keep common fields and switch official endpoint to target default`() {
+         val model = Model(

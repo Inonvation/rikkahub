@@ -7,6 +7,7 @@ import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
@@ -28,6 +29,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
@@ -36,6 +38,7 @@ import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolMetadata
@@ -70,33 +73,46 @@ import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ResponseAPI"
+private const val EVENT_STREAM_MEDIA_TYPE = "text/event-stream"
+
+/** 显式声明接受 SSE 流；Codex 后端在缺少该头时可能返回无 Content-Type 的成功响应。 */
+internal fun Request.Builder.acceptEventStream(): Request.Builder {
+    return header("Accept", EVENT_STREAM_MEDIA_TYPE)
+}
 
 class ResponseAPI(
     private val client: OkHttpClient,
-    private val keyRoulette: KeyRoulette = KeyRoulette.default()
+    keyRoulette: KeyRoulette = KeyRoulette.default(),
+    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): TextGenerationResult {
+        // Codex 后端只支持流式 Responses 请求；订阅模式下非流式调用改走流式聚合。
+        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+            return collectStreamingTextGeneration(
+                model = params.model,
+                stream = streamText(providerSetting, messages, params),
+            )
+        }
+
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
             params = params,
             stream = false,
         )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
+        val requestBuilder = Request.Builder()
+            .url("${providerSetting.effectiveBaseUrl()}/responses")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
             .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            .configureReferHeaders(providerSetting.effectiveBaseUrl())
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
@@ -130,16 +146,15 @@ class ResponseAPI(
             params = params,
             stream = true,
         )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
+        val requestBuilder = Request.Builder()
+            .url("${providerSetting.effectiveBaseUrl()}/responses")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            .configureReferHeaders(providerSetting.effectiveBaseUrl())
+        if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+            requestBuilder.acceptEventStream()
+        }
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
@@ -215,18 +230,21 @@ class ResponseAPI(
         params: TextGenerationParams,
         stream: Boolean
     ): JsonObject {
-        val host = providerSetting.baseUrl.toHttpUrl().host
+        val host = providerSetting.effectiveBaseUrl().toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
-        return buildJsonObject {
+        val subscription = providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION
+        val body = buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
             put("store", false)
 
-            if (isModelAllowTemperature(params.model)) {
+            // Codex 后端不接受 temperature / top_p / max_output_tokens（会 400），
+            // 订阅模式下不发送这些参数。
+            if (!subscription && isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+            if (!subscription && params.maxTokens != null) put("max_output_tokens", params.maxTokens)
 
             // system instructions
             if (messages.any { it.role == MessageRole.SYSTEM }) {
@@ -301,6 +319,14 @@ class ResponseAPI(
                 }
             }
         }.mergeCustomBody(params.customBody)
+
+        // Codex 后端要求 Responses 请求必须启用流式；订阅模式下即使调用方
+        // 传入 stream=false，也强制改为流式。
+        return if (subscription) {
+            JsonObject(body + ("stream" to JsonPrimitive(true)))
+        } else {
+            body
+        }
     }
 
     internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
@@ -733,4 +759,34 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
 
         else -> ResponseProviderCapabilities()
     }
+}
+
+/**
+ * 将流式响应聚合为单次 TextGenerationResult。
+ *
+ * Codex 后端只接受流式 Responses 请求，因此订阅模式下的「非流式」调用
+ * 通过收集完整流来构造结果，语义与非流式响应一致。
+ */
+internal suspend fun collectStreamingTextGeneration(
+    model: Model,
+    stream: Flow<StreamChunk>,
+): TextGenerationResult {
+    val handler = StreamChunkHandler(model)
+    var messages = listOf(UIMessage(role = MessageRole.USER, parts = emptyList()))
+    var finish: StreamChunk.Finish? = null
+
+    stream.collect { chunk ->
+        messages = handler.handle(messages, chunk)
+        if (chunk is StreamChunk.Finish) finish = chunk
+    }
+
+    val message = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+        ?: error("Streaming response completed without an assistant message")
+    return TextGenerationResult(
+        id = finish?.responseId.orEmpty(),
+        model = finish?.model ?: model.modelId,
+        message = message,
+        finishReason = finish?.finishReason,
+        usage = message.usage,
+    )
 }

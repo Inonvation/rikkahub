@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置页调整 · UI 草图</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --sub: #8e8e93;
+    --sep: #e5e5ea;
+    --accent: #007aff;
+    --chevron: #c7c7cc;
+    --frame: #1c1c1e;
+    --group-title: #6e6e73;
+    --switch-on: #34c759;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; }
+  body {
+    background: #d9dce3;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .phone {
+    width: 393px;
+    height: 852px;
+    background: var(--bg);
+    border-radius: 44px;
+    border: 10px solid var(--frame);
+    box-shadow: 0 24px 60px rgba(0,0,0,.35);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .statusbar {
+    height: 54px;
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 26px 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .statusbar .icons { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .topbar { flex: none; padding: 0 16px 14px; }
+  .topbar .back {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(120,120,128,.14);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 17px; color: var(--accent); cursor: pointer;
+    border: none; margin-bottom: 8px;
+  }
+  .topbar h1 { font-size: 32px; font-weight: 700; letter-spacing: -.5px; color: var(--text); }
+  .view { flex: 1; overflow-y: auto; padding: 0 8px 24px; scrollbar-width: none; }
+  .view::-webkit-scrollbar { display: none; }
+  .banner {
+    background: #ffd6d6; border-radius: 14px; padding: 12px 14px; margin: 0 8px 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .banner .icon { font-size: 22px; }
+  .banner .txt { font-size: 13px; color: #7a2e2e; line-height: 1.4; }
+  .banner button {
+    margin-left: auto; background: #7a2e2e; color: #fff; border: none;
+    border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .group { margin: 0 0 20px; }
+  .group-title { font-size: 13px; color: var(--group-title); padding: 0 18px 6px; font-weight: 500; }
+  .card { background: var(--card); border-radius: 14px; margin: 0 8px; overflow: hidden; }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; cursor: pointer; min-height: 58px;
+    position: relative;
+  }
+  .row + .row::before {
+    content: ""; position: absolute; left: 58px; right: 0; top: 0; height: .5px;
+    background: var(--sep);
+  }
+  .row .ic {
+    width: 36px; height: 36px; border-radius: 9px; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 19px; color: #fff;
+  }
+  .row .body { flex: 1; min-width: 0; }
+  .row .title { font-size: 16px; color: var(--text); font-weight: 400; }
+  .row .sub { font-size: 13px; color: var(--sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .trailing { display: flex; align-items: center; gap: 6px; flex: none; }
+  .row .chev { color: var(--chevron); font-size: 18px; font-weight: 600; }
+  .switch { width: 51px; height: 31px; border-radius: 16px; background: #e9e9eb; position: relative; flex: none; transition: background .2s; }
+  .switch.on { background: var(--switch-on); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px;
+    border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.25); transition: left .2s;
+  }
+  .switch.on::after { left: 22px; }
+  .seg { display: flex; background: #e9e9eb; border-radius: 10px; padding: 2px; gap: 2px; }
+  .seg span {
+    flex: 1; text-align: center; font-size: 13px; padding: 6px 8px; border-radius: 8px;
+    color: var(--sub); cursor: pointer; white-space: nowrap;
+  }
+  .seg span.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .slider-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+  .slider { flex: 1; height: 4px; border-radius: 2px; background: #e9e9eb; position: relative; }
+  .slider .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 60%; background: var(--accent); border-radius: 2px; }
+  .slider .knob { position: absolute; top: 50%; left: 60%; width: 22px; height: 22px; border-radius: 50%; background: #fff; transform: translate(-50%,-50%); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  .slider-val { font-size: 14px; color: var(--text); width: 40px; text-align: right; }
+  .field {
+    width: 100%; border: 1px solid #d1d1d6; border-radius: 10px; padding: 10px 12px;
+    font-size: 15px; color: var(--text); background: #fff; outline: none;
+  }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .hint { font-size: 12px; color: var(--sub); margin-top: 6px; line-height: 1.5; }
+  .theme-toggle {
+    position: fixed; top: 20px; left: 20px; z-index: 10;
+    background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 20px;
+    padding: 10px 16px; font-size: 14px; cursor: pointer;
+  }
+  .legend {
+    max-width: 320px; background: #fff; border-radius: 16px; padding: 20px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.18); font-size: 13px; color: #3a3a3c; line-height: 1.7;
+  }
+  .legend h2 { font-size: 15px; margin-bottom: 8px; color: #111; }
+  .legend ul { padding-left: 18px; }
+  .legend b { color: #007aff; }
+  body.dark {
+    --bg: #000000; --card: #1c1c1e; --text: #ffffff; --sub: #98989e;
+    --sep: #38383a; --group-title: #8e8e93; --chevron: #48484a; --frame: #000;
+  }
+  body.dark .switch { background: #39393d; }
+  body.dark .seg { background: #2c2c2e; }
+  body.dark .seg span.on { background: #48484a; color: #fff; }
+  body.dark .banner { background: #5a2222; }
+  body.dark .banner .txt { color: #ffb3b3; }
+  body.dark .field { background: #1c1c1e; border-color: #3a3a3c; color: #fff; }
+  body.dark .legend { background: #1c1c1e; color: #c7c7cc; }
+  body.dark .legend h2 { color: #fff; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="document.body.classList.toggle('dark')">🌗 深色/浅色</button>
+
+<div class="phone" id="phone">
+  <div class="statusbar">
+    <span class="time" id="time">9:41</span>
+    <span class="icons">📶 🔋</span>
+  </div>
+  <div class="topbar">
+    <button class="back" id="backBtn" onclick="goBack()" style="visibility:hidden">‹</button>
+    <h1 id="pageTitle">设置</h1>
+  </div>
+  <div class="view" id="view"></div>
+</div>
+
+<div class="legend">
+  <h2>📐 v3 草图对应方案</h2>
+  <ul>
+    <li><b>3 组</b>：偏好设置 / 模型与服务 / 通用（简洁低调）</li>
+    <li>偏好设置组：<b>颜色与主题 / 界面偏好设置 / 行为与通知</b>（通知已并入行为）</li>
+    <li>界面偏好设置为<b>二级分类页</b>：布局、消息气泡、消息信息、思考、字体、渲染、代码显示、TTS 播放、触觉反馈 9 个二级入口，点进去才显示具体设置项</li>
+    <li>模型与服务按重要性排序：<b>提供商 → 助手</b> → 模型 → 模式 → MCP → 搜索 → 语音 → Web → <b>扩展管理（末位）</b></li>
+    <li>扩展管理聚合 9 项：工作区、知识库、快捷消息、提示词、技能、Agent 动作、学习工具、信任文件夹、设备能力</li>
+    <li>「通用」含：数据备份、聊天记录与文件、<b>网络</b>、关于、请求日志；已删除：赞助、回收站、管理控制台</li>
+    <li>设置项开关统一带图标、对齐一致（如平板适配、PDF OCR）</li>
+  </ul>
+</div>
+
+<script>
+  const stack = [];
+  const $ = (id) => document.getElementById(id);
+  const I = (e) => `<div class="ic" style="background:${e.c}">${e.i}</div>`;
+
+  function row(e) {
+    const trail = e.switch
+      ? `<span class="switch ${e.on ? 'on' : ''}" onclick="event.stopPropagation();this.classList.toggle('on')"></span>`
+      : `<span class="chev">›</span>`;
+    const click = e.to ? ` onclick="nav('${e.to}')"` : '';
+    return `<div class="row"${click}>
+      ${I(e)}<div class="body"><div class="title">${e.t}</div>${e.s ? `<div class="sub">${e.s}</div>` : ''}</div>
+      <div class="trailing">${trail}</div></div>`;
+  }
+
+  function group(title, rows) {
+    return `<div class="group"><div class="group-title">${title}</div><div class="card">${rows.map(row).join('')}</div></div>`;
+  }
+
+  const main = () => `
+    <div class="banner"><span class="icon">⚠️</span><div class="txt">尚未配置 API 与模型，部分功能不可用</div><button>去配置</button></div>
+
+    ${group('偏好设置', [
+      { i: '🎨', c: '#ff9500', t: '颜色与主题', s: '颜色模式、动态颜色、主题、AMOLED 深色', to: 'appearance' },
+      { i: '🖥️', c: '#007aff', t: '界面偏好设置', s: '布局、气泡、字体、思考等 9 类', to: 'ui' },
+      { i: '⚙️', c: '#8e8e93', t: '行为与通知', s: '会话、输入、文档处理、通知', to: 'general' }
+    ])}
+    ${group('模型与服务', [
+      { i: '🧠', c: '#af52de', t: '提供商', s: '配置 AI 提供商与 API Key', to: 'providers' },
+      { i: '👤', c: '#007aff', t: '助手', s: '个性化助手与智能体', to: 'assistant' },
+      { i: '🤖', c: '#5856d6', t: '模型与提示词', s: '各功能默认模型与提示词', to: 'models' },
+      { i: '🎛️', c: '#5ac8fa', t: '模式', s: '默认模式与权限策略', to: 'modes' },
+      { i: '🔌', c: '#ff2d55', t: 'MCP 服务器', s: '配置 MCP 服务器', to: 'mcp' },
+      { i: '🔎', c: '#00c7be', t: '搜索服务', s: '多提供商搜索', to: 'search' },
+      { i: '🎙️', c: '#ff9500', t: '语音服务', s: 'TTS 与 ASR 服务', to: 'speech' },
+      { i: '🖧', c: '#636366', t: 'Web 服务器', s: '局域网访问 Inova', to: 'web' },
+      { i: '🧩', c: '#af52de', t: '扩展管理', s: '工作区、知识库、技能等 9 项', to: 'extensions' }
+    ])}
+    ${group('通用', [
+      { i: '🗄️', c: '#5856d6', t: '数据备份', s: '备份与恢复应用数据', to: 'backup' },
+      { i: '🖼️', c: '#00c7be', t: '聊天记录与文件', s: '清理聊天文件与存储', to: 'files' },
+      { i: '🌐', c: '#34c759', t: '网络', s: 'User-Agent、代理服务器', to: 'network' },
+      { i: '💬', c: '#007aff', t: '关于', s: '版本、社区、分享', to: 'about' },
+      { i: '📜', c: '#636366', t: '请求日志', s: '查看 HTTP 请求日志', to: 'log' }
+    ])}`;
+
+  const appearance = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="body"><div class="title">颜色模式</div><div class="sub">深色</div></div>
+        <div class="trailing" style="width:150px"><div class="seg"><span>跟随系统</span><span>浅色</span><span class="on">深色</span></div></div></div>
+      <div class="row"><div class="body"><div class="title">动态颜色</div><div class="sub">基于壁纸动态生成主题配色</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="body"><div class="title">主题</div><div class="sub">自定义应用配色方案</div></div>
+        <div class="trailing"><span class="chev">›</span></div></div>
+      <div class="row"><div class="body"><div class="title">AMOLED 深色模式</div><div class="sub">纯黑背景降低 OLED 功耗</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const ui = () => `
+    <div class="group"><div class="card">
+      ${row({ i: '🎚️', c: '#5856d6', t: '布局', s: '平板适配、消息跳转、自动滚动', to: 'layout' })}
+      ${row({ i: '💬', c: '#007aff', t: '消息气泡', s: '头像、气泡、透明度', to: 'bubbles' })}
+      ${row({ i: 'ℹ️', c: '#8e8e93', t: '消息信息', s: '模型图标、模型名、时间、Token 用量', to: 'info' })}
+      ${row({ i: '🧠', c: '#af52de', t: '思考', s: '思考内容显示与自动折叠', to: 'thinking' })}
+      ${row({ i: '🔤', c: '#5856d6', t: '字体', s: '字体族、自定义字体、字号', to: 'font' })}
+      ${row({ i: '✨', c: '#00c7be', t: '渲染', s: 'LaTeX、加载指示、模糊效果', to: 'render' })}
+      ${row({ i: '👨‍💻', c: '#636366', t: '代码显示', s: '代码换行、折叠、行号', to: 'code' })}
+      ${row({ i: '🔊', c: '#ff9500', t: 'TTS 播放', s: '朗读范围与自动播放', to: 'tts' })}
+      ${row({ i: '📳', c: '#ff2d55', t: '触觉反馈', s: '系统与界面触觉反馈', to: 'haptic' })}
+    </div></div>
+    <div class="group"><div class="group-title">提示</div><div class="card">
+      <div class="row"><div class="body"><div class="title" style="font-size:14px;color:var(--sub)">每个分类是二级入口，点进去才显示具体设置项（如 TTS 播放）。</div></div></div>
+    </div></div>`;
+
+  const layout = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#5856d6">📱</div><div class="body"><div class="title">平板适配</div><div class="sub">大屏设备启用双栏布局</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#007aff">⬆️</div><div class="body"><div class="title">消息跳转器</div><div class="sub">快速定位历史消息</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#007aff">⬇️</div><div class="body"><div class="title">自动滚动</div><div class="sub">新消息到达时自动滚到底部</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const bubbles = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#007aff">👥</div><div class="body"><div class="title">显示用户头像</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#007aff">💬</div><div class="body"><div class="title">显示助手气泡</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">🎚️</div><div class="body"><div class="title">气泡透明度</div></div>
+        <div class="trailing" style="width:150px"><div class="slider-row"><div class="slider"><div class="fill"></div><div class="knob"></div></div><span class="slider-val">80%</span></div></div></div>
+    </div></div>`;
+
+  const info = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#af52de">🤖</div><div class="body"><div class="title">模型图标</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#af52de">🏷️</div><div class="body"><div class="title">模型名</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#8e8e93">🕐</div><div class="body"><div class="title">消息时间</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#00c7be">📊</div><div class="body"><div class="title">Token 用量</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const thinking = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#af52de">💡</div><div class="body"><div class="title">显示思考内容</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#af52de">⬆️</div><div class="body"><div class="title">自动折叠思考</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#af52de">📌</div><div class="body"><div class="title">思考冻结条</div><div class="sub">思考过程中固定显示进度条</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const font = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#5856d6">🔤</div><div class="body"><div class="title">聊天字体</div><div class="sub">系统默认 · Aa</div></div>
+        <div class="trailing"><span class="chev">›</span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">📥</div><div class="body"><div class="title">自定义字体</div><div class="sub">尚未导入</div></div>
+        <div class="trailing"><span class="chev">›</span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">🔠</div><div class="body"><div class="title">字号</div></div>
+        <div class="trailing" style="width:150px"><div class="slider-row"><div class="slider"><div class="fill" style="width:45%"></div><div class="knob" style="left:45%"></div></div><span class="slider-val">120%</span></div></div></div>
+    </div></div>`;
+
+  const rendering = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#00c7be">∑</div><div class="body"><div class="title">LaTeX 渲染</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#00c7be">🚀</div><div class="body"><div class="title">应用图标风格加载指示</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#00c7be">✨</div><div class="body"><div class="title">模糊效果</div><div class="sub">界面毛玻璃效果</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const code = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#636366">↔️</div><div class="body"><div class="title">代码自动换行</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#636366">⬇️</div><div class="body"><div class="title">代码自动折叠</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#636366">☰</div><div class="body"><div class="title">显示行号</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const tts = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#ff9500">❝</div><div class="body"><div class="title">仅朗读引用内容</div><div class="sub">TTS 只朗读被引用的部分</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#ff9500">❓</div><div class="body"><div class="title">朗读括号外内容</div><div class="sub">跳过括号内的补充说明</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#ff9500">▶️</div><div class="body"><div class="title">生成后自动播放</div><div class="sub">回复生成完成后自动朗读</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>
+    <div class="group"><div class="group-title">提示</div><div class="card">
+      <div class="row"><div class="body"><div class="title" style="font-size:14px;color:var(--sub)">这就是"TTS 播放"二级入口点进去后的界面：3 个设置项集中展示。</div></div></div>
+    </div></div>`;
+
+  const haptic = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="ic" style="background:#ff2d55">📳</div><div class="body"><div class="title">触觉反馈</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#ff2d55">👆</div><div class="body"><div class="title">界面触觉反馈</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#ff2d55">✨</div><div class="body"><div class="title">生成开始/完成反馈</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const general = () => `
+    <div class="group"><div class="group-title">会话</div><div class="card">
+      <div class="row"><div class="ic" style="background:#007aff">➕</div><div class="body"><div class="title">启动时创建新会话</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>
+    <div class="group"><div class="group-title">输入</div><div class="card">
+      <div class="row"><div class="ic" style="background:#5856d6">⏎</div><div class="body"><div class="title">回车发送</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">📋</div><div class="body"><div class="title">长文本粘贴为文件</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">🖼️</div><div class="body"><div class="title">跳过图片裁剪</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#5856d6">🔊</div><div class="body"><div class="title">音量键滚动</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>
+    <div class="group"><div class="group-title">文档处理</div><div class="card">
+      <div class="row"><div class="ic" style="background:#00c7be">📄</div><div class="body"><div class="title">扫描 PDF 文字识别</div><div class="sub">离线本地识别扫描版 PDF</div></div>
+        <div class="trailing"><span class="switch" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>
+    <div class="group"><div class="group-title">通知</div><div class="card">
+      <div class="row"><div class="ic" style="background:#ff3b30">🔔</div><div class="body"><div class="title">消息生成完成通知</div><div class="sub">后台生成完成时发送通知</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="ic" style="background:#ff3b30">🔄</div><div class="body"><div class="title">实时更新通知</div><div class="sub">生成过程中实时更新进度</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const notification = () => `
+    <div class="group"><div class="card">
+      <div class="row"><div class="body"><div class="title">消息生成完成通知</div><div class="sub">后台生成完成时发送通知</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+      <div class="row"><div class="body"><div class="title">实时更新通知</div><div class="sub">生成过程中实时更新进度</div></div>
+        <div class="trailing"><span class="switch on" onclick="this.classList.toggle('on')"></span></div></div>
+    </div></div>`;
+
+  const network = () => `
+    <div class="group"><div class="group-title">User-Agent</div><div class="card">
+      <div class="row" style="display:block"><div class="body">
+        <input class="field" value="RikkaHub-Android/1.0.0">
+        <div class="hint">留空使用默认值</div>
+        <div style="text-align:right;margin-top:6px"><button class="btn ghost">恢复默认</button></div>
+      </div></div>
+    </div></div>
+    <div class="group"><div class="group-title">代理</div><div class="card">
+      <div class="row"><div class="body"><div class="title">配置代理</div><div class="sub">http://127.0.0.1:7890</div></div>
+        <div class="trailing"><span class="chev">›</span></div></div>
+      <div class="row"><div class="body"><div class="title">测试连接</div></div>
+        <div class="trailing"><button class="btn ghost">测试</button></div></div>
+    </div></div>`;
+
+  const extensions = () => `
+    <div class="group"><div class="card">
+      ${row({ i: '📁', c: '#ff9500', t: '工作区', s: '沙箱工作区与文件' })}
+      ${row({ i: '📚', c: '#34c759', t: '知识库', s: 'RAG 知识库' })}
+      ${row({ i: '⚡', c: '#ff9500', t: '快捷消息', s: '预设快捷指令' })}
+      ${row({ i: '📝', c: '#007aff', t: '提示词', s: '提示词注入与模板' })}
+      ${row({ i: '🧩', c: '#af52de', t: '技能', s: 'Agent 技能扩展' })}
+      ${row({ i: '🤖', c: '#5856d6', t: 'Agent 动作', s: '自定义 Agent 行为' })}
+      ${row({ i: '🎓', c: '#34c759', t: '学习工具', s: '生词、笔记、错题权限' })}
+      ${row({ i: '🔐', c: '#5ac8fa', t: '信任文件夹', s: 'AI 可访问的文件夹项目' })}
+      ${row({ i: '📱', c: '#8e8e93', t: '设备能力', s: 'Shizuku 授权 / 冻结 / 存储 / 诊断' })}
+    </div></div>`;
+
+  const pages = { main, appearance, ui, general, notification, network, extensions, layout, bubbles, info, thinking, font, rendering, code, tts, haptic };
+  const titles = {
+    main: '设置', appearance: '颜色与主题', ui: '界面偏好设置', general: '行为与通知',
+    notification: '通知', network: '网络', extensions: '扩展管理',
+    layout: '布局', bubbles: '消息气泡', info: '消息信息', thinking: '思考',
+    font: '字体', render: '渲染', code: '代码显示', tts: 'TTS 播放', haptic: '触觉反馈'
+  };
+
+  function render(name) {
+    $('pageTitle').textContent = titles[name];
+    $('backBtn').style.visibility = stack.length ? 'visible' : 'hidden';
+    $('view').innerHTML = pages[name]();
+    $('view').scrollTop = 0;
+  }
+
+  function nav(name) {
+    stack.push(true);
+    render(name);
+  }
+  function goBack() {
+    if (stack.length) { stack.pop(); render('main'); }
+  }
+  window.nav = nav;
+
+  function tick() { const d = new Date(); $('time').textContent = d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', hour12:false}); }
+  tick(); setInterval(tick, 30000);
+
+  render('main');
+</script>
+</body>
+</html>

@@ -13,9 +13,11 @@ import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import io.requery.android.database.sqlite.SQLiteCustomExtension
 import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.providers.openai.CodexSseContentTypeInterceptor
 import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
@@ -350,6 +352,7 @@ val dataSourceModule = module {
                 }
             }
             .addNetworkInterceptor(RequestLoggingInterceptor())
+            .addInterceptor(CodexSseContentTypeInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 // 请求头日志仅在 debug 生效；release 关闭，避免 API key / 用户内容进 logcat。
                 // 即便 debug，也把含密钥的请求头脱敏（Authorization、x-api-key 等）。
@@ -363,6 +366,9 @@ val dataSourceModule = module {
                 redactHeader("api-key")
                 redactHeader("x-goog-api-key")
                 redactHeader("Proxy-Authorization")
+                redactHeader("Cookie")
+                redactHeader("Set-Cookie")
+                redactHeader("ChatGPT-Account-Id")
             })
             .build()
         client.also { SearchService.init(it, get()) }
@@ -382,7 +388,18 @@ val dataSourceModule = module {
     }
 
     single {
-        ProviderManager(client = get<OkHttpClient>(named("aiClient")), context = get())
+        OpenAICodexAuthService(
+            httpClient = get(),
+            settingsStore = get(),
+        )
+    }
+
+    single {
+        ProviderManager(
+            client = get<OkHttpClient>(named("aiClient")),
+            context = get(),
+            openAICodexTokenProvider = get<OpenAICodexAuthService>(),
+        )
     }
 
     single {

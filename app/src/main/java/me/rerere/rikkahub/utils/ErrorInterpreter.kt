@@ -65,6 +65,20 @@ private val KEYWORD_RULES = listOf(
     ),
     Rule(
         keywords = listOf(
+            "chatgpt subscription",
+            "openai codex",
+            "codex is not signed in",
+            "auth.json",
+            "refresh_token",
+            "官方 codex",
+            "codex 后端",
+            "订阅凭据",
+        ),
+        reason = "ChatGPT 订阅凭据无效或已过期",
+        suggestion = "请重新登录，或导入包含 refresh_token 的官方 auth.json（中转站/网页会话 token 无法用于官方 Codex 后端）",
+    ),
+    Rule(
+        keywords = listOf(
             "insufficient_quota",
             "insufficient balance",
             "insufficient credits",

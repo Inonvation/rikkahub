@@ -22,6 +22,36 @@ enum class ClaudePromptCacheTtl(val apiValue: String?) {
     ONE_HOUR("1h")
 }
 
+/** OpenAI-compatible Provider 支持的认证方式。默认 API Key，保持原有行为。 */
+@Serializable
+enum class OpenAIAuthType {
+    @SerialName("api_key")
+    API_KEY,
+
+    /** 使用 ChatGPT 订阅登录态访问官方 Codex 后端。 */
+    @SerialName("chatgpt_subscription")
+    CHATGPT_SUBSCRIPTION,
+}
+
+/**
+ * ChatGPT 订阅（Codex）登录后的 OAuth 凭据。
+ *
+ * refresh token 随 Provider 配置持久化，用于在 access token 过期前自动续期，
+ * 避免用户每小时都要重新登录。
+ */
+@Serializable
+data class OpenAICodexCredentials(
+    val accessToken: String,
+    val refreshToken: String,
+    val accountId: String,
+    val expiresAt: Long = 0L,
+    val email: String? = null,
+    val planType: String? = null,
+)
+
+/** OpenAI Codex 官方后端地址（订阅登录态只能使用该端点）。 */
+const val OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+
 @Serializable
 sealed class ProviderSetting {
     abstract val id: Uuid
@@ -67,6 +97,8 @@ sealed class ProviderSetting {
         var rerankPath: String = "/rerank",
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
+        var authType: OpenAIAuthType = OpenAIAuthType.API_KEY,
+        var codexCredentials: OpenAICodexCredentials? = null,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

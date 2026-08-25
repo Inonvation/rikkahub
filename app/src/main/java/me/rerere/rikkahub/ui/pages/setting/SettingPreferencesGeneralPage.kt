@@ -1,11 +1,11 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Slider
-import me.rerere.rikkahub.ui.components.ui.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,11 +19,18 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.SettingListScaffold
+import me.rerere.rikkahub.ui.components.ui.Switch
+import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
+import me.rerere.rikkahub.ui.components.ui.permission.PermissionNotification
+import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import org.koin.androidx.compose.koinViewModel
 
+/**
+ * 行为与通知设置页：会话行为、输入交互、文档处理、通知。
+ * 消息跳转/自动滚动/思考冻结条/触觉反馈/显示效果等界面类设置已归入「界面偏好设置」页。
+ */
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -34,11 +41,18 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
         vm.updateSettings(settings.copy(displaySetting = setting))
     }
 
+    val permissionState = rememberPermissionState(
+        permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setOf(
+            PermissionNotification
+        ) else emptySet(),
+    )
+    PermissionManager(permissionState = permissionState)
+
     SettingListScaffold(
-        title = stringResource(R.string.setting_page_preferences_general),
+        title = stringResource(R.string.setting_page_behavior_notifications),
         loading = settings.init,
     ) {
-        // Conversation
+        // 会话
         item {
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -56,81 +70,10 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         )
                     },
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.showMessageJumper,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(showMessageJumper = it))
-                            }
-                        )
-                    },
-                )
-                if (displaySetting.showMessageJumper) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.messageJumperOnLeft,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(messageJumperOnLeft = it))
-                                }
-                            )
-                        },
-                    )
-                }
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.enableAutoScroll,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(enableAutoScroll = it))
-                            }
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_thinking_frozen_bar_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_thinking_frozen_bar_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.thinkingFrozenBar,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(thinkingFrozenBar = it))
-                            }
-                        )
-                    },
-                )
             }
         }
 
-        // Document processing
-        item {
-            IosGroup(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                title = stringResource(R.string.setting_page_document_processing),
-            ) {
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_page_pdf_ocr)) },
-                    supportingContent = { Text(stringResource(R.string.setting_page_pdf_ocr_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.pdfOcrEnabled,
-                            onCheckedChange = {
-                                vm.updateSettings(settings.copy(pdfOcrEnabled = it))
-                            }
-                        )
-                    },
-                )
-            }
-        }
-
-        // Input
+        // 输入
         item {
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -226,52 +169,26 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                 )
                                 Text(text = "${(displaySetting.volumeKeyScrollRatio * 100).toInt()}%")
                             }
-                        }
+                        },
                     )
                 }
             }
         }
 
-        // Haptic Feedback
+        // 文档处理
         item {
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
-                title = stringResource(R.string.setting_display_page_enable_haptic_feedback_title),
+                title = stringResource(R.string.setting_page_document_processing),
             ) {
                 item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_haptic_feedback_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_haptic_feedback_desc)) },
+                    headlineContent = { Text(stringResource(R.string.setting_page_pdf_ocr)) },
+                    supportingContent = { Text(stringResource(R.string.setting_page_pdf_ocr_desc)) },
                     trailingContent = {
                         Switch(
-                            checked = displaySetting.enableHapticFeedback,
+                            checked = settings.pdfOcrEnabled,
                             onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(enableHapticFeedback = it))
-                            }
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_ui_haptic_feedback_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_ui_haptic_feedback_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.enableUiHapticFeedback,
-                            enabled = displaySetting.enableHapticFeedback,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(enableUiHapticFeedback = it))
-                            }
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_and_finished_haptic_effect_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_started_and_finished_haptic_effect_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.enableMessageGenerationStartedAndFinishedHapticEffect,
-                            enabled = displaySetting.enableHapticFeedback,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(enableMessageGenerationStartedAndFinishedHapticEffect = it))
+                                vm.updateSettings(settings.copy(pdfOcrEnabled = it))
                             }
                         )
                     },
@@ -279,38 +196,41 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             }
         }
 
-        // Display
+        // 通知
         item {
             IosGroup(
                 modifier = Modifier.padding(horizontal = 8.dp),
-                title = stringResource(R.string.setting_page_display),
+                title = stringResource(R.string.setting_page_notifications),
             ) {
                 item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_title)) },
-                    supportingContent = {
-                        Text(stringResource(R.string.setting_display_page_use_app_icon_style_loading_indicator_desc))
-                    },
+                    headlineContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated)) },
+                    supportingContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated_desc)) },
                     trailingContent = {
                         Switch(
-                            checked = displaySetting.useAppIconStyleLoadingIndicator,
+                            checked = displaySetting.enableNotificationOnMessageGeneration,
                             onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(useAppIconStyleLoadingIndicator = it))
+                                if (it && !permissionState.allPermissionsGranted) {
+                                    permissionState.requestPermissions()
+                                }
+                                updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = it))
                             }
                         )
                     },
                 )
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
-                    supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = displaySetting.enableBlurEffect,
-                            onCheckedChange = {
-                                updateDisplaySetting(displaySetting.copy(enableBlurEffect = it))
-                            }
-                        )
-                    },
-                )
+                if (displaySetting.enableNotificationOnMessageGeneration) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_live_update_notification)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_live_update_notification_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.enableLiveUpdateNotification,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(enableLiveUpdateNotification = it))
+                                }
+                            )
+                        },
+                    )
+                }
             }
         }
     }

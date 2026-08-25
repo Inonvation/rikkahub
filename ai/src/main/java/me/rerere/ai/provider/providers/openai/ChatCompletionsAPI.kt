@@ -75,8 +75,11 @@ private const val TAG = "ChatCompletionsAPI"
 
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
-    private val keyRoulette: KeyRoulette
+    keyRoulette: KeyRoulette,
+    codexTokenProvider: OpenAICodexTokenProvider? = null,
 ) : OpenAIImpl {
+    private val authenticator = OpenAIRequestAuthenticator(keyRoulette, codexTokenProvider)
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -89,13 +92,12 @@ class ChatCompletionsAPI(
                 providerSetting = providerSetting
             )
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
@@ -144,14 +146,13 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")
 

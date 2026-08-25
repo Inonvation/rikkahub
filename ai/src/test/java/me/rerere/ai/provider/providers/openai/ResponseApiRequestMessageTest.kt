@@ -14,6 +14,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
@@ -408,6 +409,32 @@ class ResponseApiRequestMessageTest {
         )
 
         assertFalse("tools key should not be written", requestBody.containsKey("tools"))
+    }
+
+    @Test
+    fun `Codex subscription should force streaming responses`() {
+        val requestBody = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(
+                authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
+            ),
+            params = createReasoningParams(),
+            stream = false,
+        )
+
+        assertEquals("true", requestBody["stream"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `API key response should preserve non streaming mode`() {
+        val requestBody = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(
+                authType = OpenAIAuthType.API_KEY,
+            ),
+            params = createReasoningParams(),
+            stream = false,
+        )
+
+        assertEquals("false", requestBody["stream"]?.jsonPrimitive?.content)
     }
 
     @Test

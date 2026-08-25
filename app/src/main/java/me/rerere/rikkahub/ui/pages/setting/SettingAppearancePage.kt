@@ -33,7 +33,7 @@ fun SettingAppearancePage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
 
     SettingListScaffold(
-        title = stringResource(R.string.setting_page_appearance),
+        title = stringResource(R.string.setting_page_color_and_theme),
         loading = settings.init,
     ) {
         item {

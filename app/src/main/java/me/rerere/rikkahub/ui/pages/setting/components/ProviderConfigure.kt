@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -11,6 +13,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -21,10 +25,12 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,9 +40,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ClaudePromptCacheTtl
+import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
+import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.mcp.launchOAuthAuthorization
+import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
+import me.rerere.rikkahub.data.ai.openai.OpenAICodexDeviceCode
+import me.rerere.rikkahub.data.ai.openai.parseCodexCredentialImport
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.hugeicons.HugeIcons
@@ -51,6 +65,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.koin.compose.koinInject
 import kotlin.reflect.KClass
 
 @Composable
@@ -136,6 +151,10 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
 }
 
 internal fun ProviderSetting.defaultBaseUrlForReset(): String {
+    // ChatGPT 订阅（Codex）重置回官方 Codex 端点，而不是 API Key 默认端点。
+    if (this is ProviderSetting.OpenAI && authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+        return OPENAI_CODEX_BASE_URL
+    }
     val defaultProvider = DEFAULT_PROVIDERS.find { it.id == id }
     if (defaultProvider != null) {
         when (this) {
@@ -222,12 +241,14 @@ private fun String.normalizePath(): String {
 private fun String.isValidBaseUrl(): Boolean = this.toHttpUrlOrNull() != null
 
 private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
+private const val OPENAI_CODEX_HOST = "chatgpt.com"
 private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
 private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
 private const val V1_SUFFIX = "/v1"
 private const val V1_BETA_SUFFIX = "/v1beta"
 private val OFFICIAL_PROVIDER_HOSTS = setOf(
     OPENAI_OFFICIAL_HOST,
+    OPENAI_CODEX_HOST,
     GOOGLE_OFFICIAL_HOST,
     CLAUDE_OFFICIAL_HOST
 )
@@ -239,6 +260,19 @@ private fun ProviderConfigureOpenAI(
 ) {
     val toaster = LocalToaster.current
     val hapticController = rememberHaptic()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val codexAuthService = koinInject<OpenAICodexAuthService>()
+    var authJob by remember(provider.id) { mutableStateOf<Job?>(null) }
+    var deviceCode by remember(provider.id) { mutableStateOf<OpenAICodexDeviceCode?>(null) }
+    var authError by remember(provider.id) { mutableStateOf<String?>(null) }
+    var signingIn by remember(provider.id) { mutableStateOf(false) }
+    var importDialogVisible by remember(provider.id) { mutableStateOf(false) }
+    var importText by remember(provider.id) { mutableStateOf("") }
+    var importError by remember(provider.id) { mutableStateOf<String?>(null) }
+    val signedInText = stringResource(R.string.setting_provider_page_signed_in)
+    val signOutText = stringResource(R.string.setting_provider_page_sign_out)
+    val selectedAuthType = provider.authType
 
     provider.description()
 
@@ -250,41 +284,192 @@ private fun ProviderConfigureOpenAI(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    var keyVisible by remember { mutableStateOf(false) }
-    OutlinedTextField(
-        value = provider.apiKey,
-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
-        modifier = Modifier.fillMaxWidth(),
-        maxLines = 3,
-        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(
+    Text(stringResource(R.string.setting_provider_page_auth_method))
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        OpenAIAuthType.entries.forEachIndexed { index, authType ->
+            SegmentedButton(
+                shape = SegmentedButtonDefaults.itemShape(
+                    index = index,
+                    count = OpenAIAuthType.entries.size,
+                ),
+                label = {
+                    Text(
+                        when (authType) {
+                            OpenAIAuthType.API_KEY -> stringResource(R.string.setting_provider_page_api_key)
+                            OpenAIAuthType.CHATGPT_SUBSCRIPTION -> stringResource(R.string.setting_provider_page_chatgpt_subscription)
+                        }
+                    )
+                },
+                selected = provider.authType == authType,
                 onClick = {
                     hapticController.lightTap()
-                    keyVisible = !keyVisible
+                    authJob?.cancel()
+                    authError = null
+                    deviceCode = null
+                    // 切换认证方式不改写 baseUrl：订阅模式下请求统一走官方 Codex 端点
+                    // （ai 模块 effectiveBaseUrl），切回 API Key 时原 baseUrl 原样保留。
+                    onEdit(
+                        provider.copy(
+                            authType = authType,
+                            useResponseApi = authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION || provider.useResponseApi,
+                        )
+                    )
+                },
+            )
+        }
+    }
+
+    when (selectedAuthType) {
+        OpenAIAuthType.API_KEY -> {
+            var keyVisible by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = provider.apiKey,
+                onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
+                label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+                visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            hapticController.lightTap()
+                            keyVisible = !keyVisible
+                        }
+                    ) {
+                        Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
+                    }
+                },
+            )
+        }
+
+        OpenAIAuthType.CHATGPT_SUBSCRIPTION -> {
+            Text(
+                text = stringResource(R.string.setting_provider_page_chatgpt_subscription_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val credentials = provider.codexCredentials
+            if (credentials != null) {
+                val accountLabel = listOfNotNull(credentials.email, credentials.planType)
+                    .joinToString(" · ")
+                    .ifBlank { stringResource(R.string.setting_provider_page_signed_in) }
+                Text(
+                    text = accountLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (credentials.refreshToken.isBlank()) {
+                    Text(
+                        text = stringResource(R.string.setting_provider_page_no_refresh_token_warning),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
-            ) {
-                Icon(if (keyVisible) HugeIcons.ViewOff else HugeIcons.View, contentDescription = null)
             }
-        },
-    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    enabled = !signingIn,
+                    onClick = {
+                        authJob?.cancel()
+                        authJob = scope.launch {
+                            signingIn = true
+                            authError = null
+                            try {
+                                val credentials = codexAuthService.signIn(provider.id) { code ->
+                                    deviceCode = code
+                                    context.getSystemService(ClipboardManager::class.java)
+                                        ?.setPrimaryClip(
+                                            ClipData.newPlainText("OpenAI Codex device code", code.userCode)
+                                        )
+                                    launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
+                                }
+                                deviceCode = null
+                                onEdit(
+                                    provider.copy(
+                                        authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
+                                        codexCredentials = credentials,
+                                        useResponseApi = true,
+                                    )
+                                )
+                                toaster.show(signedInText, type = ToastType.Success)
+                            } catch (error: kotlinx.coroutines.CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                authError = error.message ?: error.javaClass.simpleName
+                            } finally {
+                                signingIn = false
+                                authJob = null
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        stringResource(
+                            if (signingIn) R.string.setting_provider_page_signing_in
+                            else R.string.setting_provider_page_sign_in_chatgpt
+                        )
+                    )
+                }
+                OutlinedButton(
+                    enabled = !signingIn,
+                    onClick = {
+                        importText = ""
+                        importError = null
+                        importDialogVisible = true
+                    },
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_import_credentials))
+                }
+                if (credentials != null) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                codexAuthService.signOut(provider.id)
+                                onEdit(provider.copy(codexCredentials = null))
+                                toaster.show(signOutText, type = ToastType.Info)
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.setting_provider_page_sign_out))
+                    }
+                }
+            }
+            authError?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
 
     OutlinedTextField(
-        value = provider.baseUrl,
+        value = if (selectedAuthType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
+            OPENAI_CODEX_BASE_URL
+        } else {
+            provider.baseUrl
+        },
         onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
         placeholder = { Text(provider.defaultBaseUrlForReset()) },
         modifier = Modifier.fillMaxWidth(),
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
+        enabled = selectedAuthType == OpenAIAuthType.API_KEY,
     )
 
-    OutlinedTextField(
-        value = provider.chatCompletionsPath,
-        onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
-        label = { Text(stringResource(R.string.setting_provider_page_api_path)) },
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (selectedAuthType == OpenAIAuthType.API_KEY) {
+        OutlinedTextField(
+            value = provider.chatCompletionsPath,
+            onValueChange = { onEdit(provider.copy(chatCompletionsPath = it.trim())) },
+            label = { Text(stringResource(R.string.setting_provider_page_api_path)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 
     // Embedding / Rerank 路径属于进阶项，默认折叠
     var expandAdvanced by remember { mutableStateOf(false) }
@@ -358,6 +543,7 @@ private fun ProviderConfigureOpenAI(
         Text(stringResource(R.string.setting_provider_page_response_api))
         Switch(
             checked = provider.useResponseApi,
+            enabled = selectedAuthType == OpenAIAuthType.API_KEY,
             onCheckedChange = {
                 hapticController.tap()
                 onEdit(provider.copy(useResponseApi = it))
@@ -380,6 +566,147 @@ private fun ProviderConfigureOpenAI(
                 hapticController.tap()
                 onEdit(provider.copy(includeHistoryReasoning = it))
             }
+        )
+    }
+
+    deviceCode?.let { code ->
+        AlertDialog(
+            onDismissRequest = {
+                authJob?.cancel()
+                deviceCode = null
+            },
+            title = { Text(stringResource(R.string.setting_provider_page_device_code_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.setting_provider_page_device_code_desc))
+                    Text(
+                        text = code.userCode,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontFamily = JetbrainsMono,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_provider_page_device_code_verify_url),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // 可长按复制网址，方便在电脑等其它设备浏览器中打开验证页
+                        SelectionContainer {
+                            Text(
+                                text = code.verificationUrl,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = JetbrainsMono,
+                            )
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.setting_provider_page_device_code_other_device_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        authJob?.cancel()
+                        deviceCode = null
+                    }
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
+                    }
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_open_browser))
+                }
+            },
+        )
+    }
+
+    if (importDialogVisible) {
+        AlertDialog(
+            onDismissRequest = {
+                importDialogVisible = false
+                importError = null
+            },
+            title = { Text(stringResource(R.string.setting_provider_page_import_credentials)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_provider_page_import_credentials_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = importText,
+                        onValueChange = {
+                            importText = it
+                            importError = null
+                        },
+                        label = { Text(stringResource(R.string.setting_provider_page_import_credentials_placeholder)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 6,
+                        maxLines = 12,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                    )
+                    importError?.let { error ->
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        importDialogVisible = false
+                        importError = null
+                    }
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val parsed = parseCodexCredentialImport(importText)
+                                val credentials = codexAuthService.importCredentials(
+                                    providerId = provider.id,
+                                    accessToken = parsed.accessToken,
+                                    refreshToken = parsed.refreshToken,
+                                    accountId = parsed.accountId,
+                                    email = parsed.email,
+                                    planType = parsed.planType,
+                                )
+                                importDialogVisible = false
+                                importError = null
+                                onEdit(
+                                    provider.copy(
+                                        authType = OpenAIAuthType.CHATGPT_SUBSCRIPTION,
+                                        codexCredentials = credentials,
+                                        useResponseApi = true,
+                                    )
+                                )
+                                toaster.show(signedInText, type = ToastType.Success)
+                            } catch (error: kotlinx.coroutines.CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                importError = error.message ?: error.javaClass.simpleName
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_import_credentials_confirm))
+                }
+            },
         )
     }
 }

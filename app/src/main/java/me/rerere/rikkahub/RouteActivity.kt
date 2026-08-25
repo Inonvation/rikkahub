@@ -114,9 +114,12 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAgentActionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
+import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNetworkPage
 import me.rerere.rikkahub.ui.pages.setting.SettingStudyToolsPage
 import me.rerere.rikkahub.ui.pages.recyclebin.RecycleBinPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
+import me.rerere.rikkahub.ui.pages.setting.SettingDisplayGroupPage
+import me.rerere.rikkahub.ui.pages.setting.SettingExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
@@ -511,6 +514,18 @@ class RouteActivity : ComponentActivity() {
                                 SettingPreferencesUIPage()
                             }
 
+                            entry<Screen.SettingDisplayGroup> { key ->
+                                SettingDisplayGroupPage(key.group)
+                            }
+
+                            entry<Screen.SettingPreferencesNetwork> {
+                                SettingPreferencesNetworkPage()
+                            }
+
+                            entry<Screen.SettingExtensions> {
+                                SettingExtensionsPage()
+                            }
+
                             entry<Screen.SettingAgentAction> {
                                 SettingAgentActionPage()
                             }
@@ -860,6 +875,15 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferencesUI : Screen
+
+    @Serializable
+    data class SettingDisplayGroup(val group: String) : Screen
+
+    @Serializable
+    data object SettingPreferencesNetwork : Screen
+
+    @Serializable
+    data object SettingExtensions : Screen
 
     @Serializable
     data object SettingAgentAction : Screen
