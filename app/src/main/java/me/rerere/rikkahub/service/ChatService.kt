@@ -142,6 +142,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.ChatModePolicy
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.resolveConversationPolicy
 import me.rerere.rikkahub.data.model.resolveModeRef
 import me.rerere.rikkahub.data.model.AssistantAffectScope
@@ -236,6 +237,24 @@ internal fun displayMessagesForChunk(
     }
     return result
 }
+
+/**
+ * 从源会话创建一个 fork 会话，继承其 folder id 与 workspace cwd，
+ * 让镜像分支继续落在同一个目录/工作区内。
+ */
+internal fun createForkConversation(
+    source: Conversation,
+    messageNodes: List<MessageNode>,
+): Conversation = Conversation(
+    id = Uuid.random(),
+    assistantId = source.assistantId,
+    messageNodes = messageNodes,
+    customSystemPrompt = source.customSystemPrompt,
+    modeInjectionIds = source.modeInjectionIds,
+    lorebookIds = source.lorebookIds,
+    workspaceCwd = source.workspaceCwd,
+    folderId = source.folderId,
+)
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -2938,14 +2957,7 @@ class ChatService(
                 )
             }
 
-        val forkConversation = Conversation(
-            id = Uuid.random(),
-            assistantId = currentConversation.assistantId,
-            messageNodes = copiedNodes,
-            customSystemPrompt = currentConversation.customSystemPrompt,
-            modeInjectionIds = currentConversation.modeInjectionIds,
-            lorebookIds = currentConversation.lorebookIds,
-        )
+        val forkConversation = createForkConversation(currentConversation, copiedNodes)
 
         saveConversation(forkConversation.id, forkConversation)
         return forkConversation
