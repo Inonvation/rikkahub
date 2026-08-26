@@ -421,6 +421,15 @@ private fun ChatListNormal(
         // 且会在列表内部作用域排一个手势结束后的补正协程（"闪到底又弹回"根因）。
         LaunchedEffect(state, loadingState, settings.displaySetting.enableAutoScroll, thinkingFreezeState) {
             if (settings.displaySetting.enableAutoScroll) {
+                // 记录"上一次快照是否在滚动中"与"本次滚动是否由用户手指驱动"：
+                // 用于在用户亲手滚回底部并停下（手势结束）时立刻重新武装跟随。
+                // 若只用下方 2 的"冷却窗 + 稳定回底"，流式追加会在 400ms 窗内持续把
+                // pinned 打成 false，导致"打断跟随后再手动滑到底部不会恢复跟随"。
+                // 但也不能在任意"恰好贴底"帧复位——那会把内容突变造成的贴底误判成用户
+                // 回底，下一帧就把正在看历史的用户拽回（"工具调用后下拉回弹"根因）。
+                // 所以只在"一次由用户驱动的滚动手势刚结束、且当前确实贴底"时复位。
+                var wasScrollInProgress = false
+                var scrollWasUserDriven = false
                 snapshotFlow {
                     Pair(
                         state.layoutInfo,
@@ -435,6 +444,16 @@ private fun ChatListNormal(
                         viewportEnd = info.viewportEndOffset,
                         afterContentPadding = info.afterContentPadding,
                     )
+                    val userTouching = isUserInteracting?.value == true
+                    // 本次滚动过程中任一转场看到"手指按在列表上"即记为用户驱动。
+                    // 抬起后 fling 仍算用户手势（isScrollInProgress 继续但手指已抬起）。
+                    if (inProgress && userTouching) {
+                        scrollWasUserDriven = true
+                    }
+                    // 手势结束 = 上一次快照在滚动、本次快照已停。用上一帧的 wasScrollInProgress，
+                    // 并在读取后立刻更新，避免块在中途被 collectLatest 取消时丢状态。
+                    val scrollEnded = wasScrollInProgress && !inProgress
+                    wasScrollInProgress = inProgress
                     // 1) 解除跟随：用户手指按在列表上且列表正因手势滚动 → 立即解除。
                     //    - 不做方向判断（movedUp）：快速 fling / 与程序滚动重叠时 collectLatest
                     //      会丢中间帧，方向判定会漏闩 → 跟随重新武装 → 生成结束瞬间把正在看
@@ -443,7 +462,6 @@ private fun ChatListNormal(
                     //    - 不判 scrollingByProgram：该标志只用于抑制"发起跟随"（下方 requestNow
                     //      的 folding），不能否定"用户此刻正在拖拽"的事实；用户拖拽时在途的
                     //      程序滚动会被 collectLatest 取消。
-                    val userTouching = isUserInteracting?.value == true
                     if (inProgress && userTouching) {
                         userScrolledUp = true
                         lastUserScrollAt = SystemClock.elapsedRealtime()
@@ -457,6 +475,20 @@ private fun ChatListNormal(
                         SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
                     if (!inProgress && !liveScrolling && pinned && settledAfterInteraction) {
                         userScrolledUp = false
+                    }
+                    // 2b) 用户驱动的滚动手势刚结束且正停在底部 → 立即恢复跟随（不等冷却窗）。
+                    //     冷却窗本是为防"内容突变恰好贴底"的误复位；这里用"用户亲手滚回底部"
+                    //     这一手势结束信号代替，非用户驱动（程序滚动/内容突变）不会走到这里，
+                    //     因此不会把正在读历史的用户误武装。复位后刷新 lastUserScrollAt，
+                    //     让下方跟随仍走冷却守护，避免在同帧抢滚。
+                    if (scrollEnded && scrollWasUserDriven && !liveScrolling && pinned) {
+                        userScrolledUp = false
+                        lastUserScrollAt = SystemClock.elapsedRealtime()
+                    }
+                    // 滚动停止后清空用户驱动标记，避免上一个手势的标记串到下一次程序滚动；
+                    // 放在任何挂起点之前，保证即使后续被 cancel 也已清空。
+                    if (!inProgress) {
+                        scrollWasUserDriven = false
                     }
                     // 思考折叠/展开的程序滚动与高度动画期间不跟随，避免抢滚
                     val folding = thinkingFreezeState?.scrollingByProgram == true
@@ -873,11 +905,18 @@ private fun ChatListNormal(
             val captureProgress = LocalScrollCaptureInProgress.current
 
             // 消息快速跳转
+            // 手动点"滚到底"按钮同样视为用户主动回到底部：清除上滑闩锁并刷新冷却，
+            // 使流式生成能立即重新接管跟随（与手势回底一致），避免点击后仍停在原地。
+            val reArmFollowOnJumpToBottom: () -> Unit = {
+                userScrolledUp = false
+                lastUserScrollAt = SystemClock.elapsedRealtime()
+            }
             MessageJumper(
                 show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
                 state = state,
+                onJumpToBottom = reArmFollowOnJumpToBottom,
             )
 
             // Suggestion
@@ -1126,6 +1165,7 @@ private fun BoxScope.MessageJumper(
     onLeft: Boolean,
     scope: CoroutineScope,
     state: LazyListState,
+    onJumpToBottom: () -> Unit = {},
 ) {
     val hapticController = rememberHaptic()
     AnimatedVisibility(
@@ -1212,6 +1252,8 @@ private fun BoxScope.MessageJumper(
             Surface(
                 onClick = {
                     hapticController.lightTap()
+                    // 用户主动滚到底：清除上滑闩锁，让流式生成重新接管跟随
+                    onJumpToBottom()
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }
