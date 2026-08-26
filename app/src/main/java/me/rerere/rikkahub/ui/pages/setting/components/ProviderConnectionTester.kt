@@ -28,10 +28,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.EmbeddingGenerationParams
@@ -61,6 +62,7 @@ fun ProviderConnectionTester(
     var showSheet by remember { mutableStateOf(false) }
     val providerManager = koinInject<ProviderManager>()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val hapticController = rememberHaptic()
 
     IconButton(onClick = {
@@ -145,9 +147,9 @@ fun ProviderConnectionTester(
                 if (model != null) {
                     when (model.type) {
                         ModelType.CHAT -> {
-                            TestResultItem("非流式", chatNonStreaming, (chatNonStreaming as? UiState.Success)?.data ?: "")
-                            TestResultItem("流式", chatStreaming, chatStreamingText)
-                            TestResultItem("工具调用", chatTools, (chatTools as? UiState.Success)?.data ?: "")
+                            TestResultItem(stringResource(R.string.setting_provider_page_test_non_streaming), chatNonStreaming, (chatNonStreaming as? UiState.Success)?.data ?: "")
+                            TestResultItem(stringResource(R.string.setting_provider_page_test_streaming), chatStreaming, chatStreamingText)
+                            TestResultItem(stringResource(R.string.setting_provider_page_test_tool_call), chatTools, (chatTools as? UiState.Success)?.data ?: "")
                         }
                         ModelType.EMBEDDING -> {
                             TestResultItem("嵌入", embeddingState, (embeddingState as? UiState.Success)?.data ?: "")
@@ -207,8 +209,15 @@ fun ProviderConnectionTester(
                                                 )
                                                 val message = result.message
                                                 val toolCall = message.parts.filterIsInstance<UIMessagePart.Tool>().firstOrNull()
-                                                val resultText = if (toolCall != null) "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
-                                                else "未调用工具，响应: " + (message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text })
+                                                val resultText = if (toolCall != null) context.getString(
+                                                    R.string.setting_provider_page_test_tool_called,
+                                                    toolCall.toolName,
+                                                    toolCall.input,
+                                                )
+                                                else context.getString(
+                                                    R.string.setting_provider_page_test_tool_not_called,
+                                                    message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text },
+                                                )
                                                 chatTools = UiState.Success(resultText)
                                             }.onFailure { chatTools = UiState.Error(it) }
                                         }

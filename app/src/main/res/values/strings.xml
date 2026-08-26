@@ -1773,4 +1773,9 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="search_picker_model_description">Cloud search built into the model provider</string>
   <string name="search_picker_select_provider">Select search provider</string>
   <string name="search_picker_turn_off">Turn off search</string>
+  <string name="setting_provider_page_test_non_streaming">Non-streaming</string>
+  <string name="setting_provider_page_test_streaming">Streaming</string>
+  <string name="setting_provider_page_test_tool_call">Tool Call</string>
+  <string name="setting_provider_page_test_tool_called">Called: %1$s  Args: %2$s</string>
+  <string name="setting_provider_page_test_tool_not_called">Tool not called, response: %s</string>
 </resources>
