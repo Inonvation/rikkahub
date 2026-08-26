@@ -1036,6 +1036,10 @@
   <string name="setting_tts_page_voice_name">Название голоса</string>
   <string name="setting_tts_page_voice_name_description">Название голоса</string>
   <string name="setting_tts_page_voice_name_placeholder">Коре</string>
+  <string name="setting_tts_page_audio_format">Формат аудио</string>
+  <string name="setting_tts_page_audio_format_description">Формат кодирования аудио, возвращаемый Qwen TTS</string>
+  <string name="setting_tts_page_sample_rate">Частота дискретизации</string>
+  <string name="setting_tts_page_sample_rate_description">Частота дискретизации аудио (Гц)</string>
   <string name="settings">Настройки</string>
   <string name="share">Поделиться</string>
   <string name="share_handler_page_title">Выбрать ассистента</string>

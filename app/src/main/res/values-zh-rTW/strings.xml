@@ -1034,6 +1034,10 @@
   <string name="setting_tts_page_voice_name">語音名稱</string>
   <string name="setting_tts_page_voice_name_description">語音的名稱</string>
   <string name="setting_tts_page_voice_name_placeholder">Kore</string>
+  <string name="setting_tts_page_audio_format">音訊格式</string>
+  <string name="setting_tts_page_audio_format_description">Qwen TTS 傳回的音訊編碼格式</string>
+  <string name="setting_tts_page_sample_rate">取樣率</string>
+  <string name="setting_tts_page_sample_rate_description">音訊取樣率（Hz）</string>
   <string name="settings">設定</string>
   <string name="share">分享</string>
   <string name="share_handler_page_title">選擇一個助手處理分享</string>

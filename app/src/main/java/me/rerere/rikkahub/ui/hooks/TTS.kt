@@ -36,7 +36,8 @@ fun englishWordVoiceFor(provider: TTSProviderSetting?): String? = when (provider
     // OpenAI alloy 是英文音色，读单词强制用它（不受用户改过音色影响）
     is TTSProviderSetting.OpenAI -> "alloy"
     is TTSProviderSetting.Gemini -> "Kore" // Gemini 内置英文 voice
-    is TTSProviderSetting.Qwen -> "Serena" // Qwen 英文 voice（避免默认中文音色读英文）
+    // qwen-audio-3.0 系列为多语言模型，已无独立英文音色；不覆盖，用配置音色即可读英文
+    is TTSProviderSetting.Qwen -> null
     is TTSProviderSetting.MiniMax -> "male-qn-qingse" // MiniMax 英文音色
     is TTSProviderSetting.Groq -> provider.voice.ifBlank { null } // 本来就是英文语音
     is TTSProviderSetting.XAI -> provider.voiceId.ifBlank { null } // 英文语音

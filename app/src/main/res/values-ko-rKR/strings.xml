@@ -1036,6 +1036,10 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="setting_tts_page_voice_name">음성 이름</string>
   <string name="setting_tts_page_voice_name_description">음성의 이름</string>
   <string name="setting_tts_page_voice_name_placeholder">Kore</string>
+  <string name="setting_tts_page_audio_format">오디오 형식</string>
+  <string name="setting_tts_page_audio_format_description">Qwen TTS가 반환하는 오디오 인코딩 형식</string>
+  <string name="setting_tts_page_sample_rate">샘플 레이트</string>
+  <string name="setting_tts_page_sample_rate_description">오디오 샘플 레이트(Hz)</string>
   <string name="settings">설정</string>
   <string name="share">공유</string>
   <string name="share_handler_page_title">어시스턴트 선택</string>

@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import com.dokar.sonner.ToastType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -28,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -38,6 +38,7 @@ import me.rerere.hugeicons.stroke.Forward02
 import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.rikkahub.ui.context.LocalTTSState
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.tts.model.PlaybackState
@@ -45,11 +46,19 @@ import me.rerere.tts.model.PlaybackStatus
 
 @Composable
 fun TTSController() {
-    val context = LocalContext.current
     val ttsState = LocalTTSState.current
+    val toaster = LocalToaster.current
 
     val isSpeaking by ttsState.isSpeaking.collectAsState()
     var isVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(ttsState, toaster) {
+        ttsState.error.collect { error ->
+            if (error != null) {
+                toaster.show(message = error, type = ToastType.Error)
+            }
+        }
+    }
 
     LaunchedEffect(isSpeaking) {
         if (isSpeaking) {
