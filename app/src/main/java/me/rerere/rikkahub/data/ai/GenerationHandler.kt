@@ -620,7 +620,7 @@ class GenerationHandler(
                     "approxTokens=${system.length / 4} tools=${tools.size} " +
                     "toolSchemaChars=${PromptMetrics.lastToolSchemaChars} families=${PromptMetrics.lastToolFamilies}"
             )
-            if (system.isNotBlank()) add(UIMessage.system(prompt = system))
+            if (system.isNotBlank()) add(UIMessage.system(prompt = system).copy(isSynthetic = true))
             addAll(messages.limitContext(assistant.contextMessageLimit))
         }.transforms(
             transformers = transformers,

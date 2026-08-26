@@ -112,10 +112,12 @@ class TodoReminderTransformer(
         val systemIndex = messages.indexOfFirst { it.role == MessageRole.SYSTEM }
         return if (systemIndex >= 0) {
             messages.toMutableList().apply {
-                this[systemIndex] = this[systemIndex].appendText("\n\n$reminder")
+                this[systemIndex] = this[systemIndex]
+                    .appendText("\n\n$reminder")
+                    .copy(isSynthetic = true)
             }
         } else {
-            listOf(UIMessage.system(reminder)) + messages
+            listOf(UIMessage.system(reminder).copy(isSynthetic = true)) + messages
         }
     }
 }

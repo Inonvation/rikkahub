@@ -5,6 +5,7 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.util.json
@@ -25,6 +26,9 @@ data class UIMessage(
     val modelId: Uuid? = null,
     val usage: TokenUsage? = null,
     val translation: String? = null,
+    // 请求期间生成的内部消息（系统提示/注入/提醒等）；仅内存中使用，不参与持久化
+    @Transient
+    val isSynthetic: Boolean = false,
     // 群组讨论：发言者标识。普通会话恒为 null；群聊会话里为成员 Assistant id + 名称快照。
     // 新增可空字段，JSON blob 老数据缺省即反序列化为 null，向后兼容。
     val speakerId: Uuid? = null,
