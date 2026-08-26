@@ -109,6 +109,15 @@ class McpManager(
 
     fun getStatus(config: McpServerConfig): Flow<McpStatus> = sessionRegistry.getStatus(config.id)
 
+    /**
+     * 所有已配置服务器的 id -> 一句话描述（仅非空项）。
+     * 供 `mcp_list` 输出服务器摘要，帮助 AI 判断何时使用该服务器。
+     */
+    fun getServerDescriptions(): Map<Uuid, String> =
+        settingsStore.settingsFlow.value.mcpServers
+            .filter { it.commonOptions.description.isNotBlank() }
+            .associate { it.id to it.commonOptions.description }
+
     fun getAllAvailableTools(assistant: Assistant): List<Triple<Uuid, String, McpTool>> {
         val settings = settingsStore.settingsFlow.value
         // 使用当前对话的 assistant 过滤 MCP 工具可见性，避免隐式依赖全局当前助手

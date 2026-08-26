@@ -736,10 +736,17 @@
   <string name="setting_files_page_title">ファイル管理</string>
   <string name="setting_mcp_page_add_header">ヘッダーを追加</string>
   <string name="setting_mcp_page_add_one_to_get_started">1つ追加して始める</string>
+  <string name="setting_mcp_page_ai_generate_description">AI で生成</string>
+  <string name="setting_mcp_page_ai_generate_description_error">説明の生成に失敗しました：%1$s</string>
+  <string name="setting_mcp_page_ai_generate_description_hint_no_tools">接続後にツール一覧から自動生成できます</string>
+  <string name="setting_mcp_page_ai_generate_description_success">説明を生成しました</string>
   <string name="setting_mcp_page_basic_settings">基本設定</string>
   <string name="setting_mcp_page_custom_headers">カスタムヘッダー</string>
   <string name="setting_mcp_page_custom_headers_desc">MCPサーバーリクエストにカスタムHTTPヘッダーを追加</string>
   <string name="setting_mcp_page_delete_header">ヘッダーを削除</string>
+  <string name="setting_mcp_page_description">説明</string>
+  <string name="setting_mcp_page_description_desc">このサーバーの用途を一行でまとめ、AI が発見・利用しやすくします</string>
+  <string name="setting_mcp_page_description_placeholder">例：GitHub リポジトリ検索、Issue/PR 管理</string>
   <string name="setting_mcp_page_enable">有効</string>
   <string name="setting_mcp_page_enable_desc">このMCPサーバーを有効にするかどうか</string>
   <string name="setting_mcp_page_header_name">ヘッダー名</string>

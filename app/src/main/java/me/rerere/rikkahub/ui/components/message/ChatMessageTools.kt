@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.message
 
 import android.os.SystemClock
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -127,7 +128,9 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
+                // 标题固定单行 + 省略号：避免长标题（如 shell 多行命令）被右侧 extra 宽窄变化
+                // 挤到一行/两行之间反复切换，触发 animateContentSize 高度动画 + LazyColumn 锚点跳动。
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
@@ -172,28 +175,34 @@ internal fun toolFailed(tool: UIMessagePart.Tool): Boolean {
 
 @Composable
 private fun ToolDurationText(tool: UIMessagePart.Tool) {
-    val startedAtMs = tool.startedAtMs
-    val startedAt = tool.startedAt
-    if (startedAtMs == null && startedAt == null) return
+    val finished = tool.isFinished
+    val started = tool.hasStarted
+    val queued = tool.isQueued
+    // 无开始时间也无排队时间：不展示时长（如 denied/answered 等直接结束的工具）
+    if (!started && !queued) return
     val finishedAtMs = tool.finishedAtMs
     val finishedAt = tool.finishedAt
-    var durationMs by remember(startedAtMs, finishedAtMs, startedAt, finishedAt) {
+    // 基准点：已开始用 startedAt，排队等待中用 queuedAt
+    val baseMs = if (started) tool.startedAtMs else tool.queuedAtMs
+    val baseWall = if (started) tool.startedAt else tool.queuedAt
+    if (baseMs == null && baseWall == null) return
+    var durationMs by remember(baseMs, baseWall, finishedAtMs, finishedAt) {
         mutableLongStateOf(
-            if (startedAtMs != null) {
-                (finishedAtMs ?: SystemClock.elapsedRealtime()) - startedAtMs
+            if (baseMs != null) {
+                (finishedAtMs ?: SystemClock.elapsedRealtime()) - baseMs
             } else {
-                ((finishedAt ?: Clock.System.now()) - startedAt!!).inWholeMilliseconds
+                ((finishedAt ?: Clock.System.now()) - baseWall!!).inWholeMilliseconds
             }
         )
     }
-    LaunchedEffect(startedAtMs, finishedAtMs, startedAt, finishedAt) {
+    LaunchedEffect(baseMs, baseWall, finishedAtMs, finishedAt) {
         if (finishedAtMs == null && finishedAt == null) {
             while (true) {
                 delay(200)
-                durationMs = if (startedAtMs != null) {
-                    SystemClock.elapsedRealtime() - startedAtMs
+                durationMs = if (baseMs != null) {
+                    SystemClock.elapsedRealtime() - baseMs
                 } else {
-                    (Clock.System.now() - startedAt!!).inWholeMilliseconds
+                    (Clock.System.now() - baseWall!!).inWholeMilliseconds
                 }
             }
         }
@@ -202,6 +211,7 @@ private fun ToolDurationText(tool: UIMessagePart.Tool) {
     val failed = toolFailed(tool)
     Text(
         text = when {
+            queued -> "等待中 ${formatToolDuration(durationMs)}"
             !tool.isFinished -> "执行中 ${formatToolDuration(durationMs)}"
             failed -> "失败 · ${formatToolDuration(durationMs)}${if (exitCode != null) " (exit $exitCode)" else ""}"
             else -> "完成 · ${formatToolDuration(durationMs)}"
@@ -232,6 +242,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 仅列表贴底且用户未控制列表时才折叠；否则保持展开，回底后由生成结束兜底折叠。
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val isUserControlled = LocalIsChatListUserControlled.current
+    // 用户手动展开/收起工具气泡时通知列表取消自动跟随（主聊天列表加载中生效）
+    val onManualContentToggle = LocalOnManualContentToggle.current
     val settings = LocalSettings.current
     var wasExecuted by remember(tool.toolCallId) { mutableStateOf(tool.isExecuted) }
     LaunchedEffect(tool.isExecuted) {
@@ -275,6 +287,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         // 始终写入显式值：初始默认按工具类型推导，用户一旦操作就记录真实意图。
         // 不能 remove 后回落默认——折叠类工具默认 false，remove 会让"展开"操作丢失。
         toolBubbleExpanded[tool.toolCallId] = value
+        // 用户手动展开/收起工具气泡：通知列表取消自动跟随，避免高度骤增被拽到底部
+        onManualContentToggle?.invoke()
     }
     val hapticController = rememberHaptic()
     val isPending = tool.approvalState is ToolApprovalState.Pending
@@ -306,7 +320,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         // LazyColumn 锚点修正、与用户拖拽/自动跟随打架（"工具调用后列表跳动"根因）。
         // 步骤自身高度动画平滑：流式中外层过程内容无动画（避免追 chunk），工具步骤
         // 变化频率低（执行中仅时长文本、完成后内容一次性出现），动画成本可忽略。
-        modifier = Modifier.animateContentSize(),
+        // 用与外层 ChainOfThought 一致的短 tween：避免默认 spring 与外层 200ms tween 双重
+        // 高度动画不同步造成回弹/抖动（"工具展开/完成时轻微抖一下"根因）。
+        modifier = Modifier.animateContentSize(animationSpec = tween(200)),
         icon = {
             if (rendererLoading) {
                 DotLoading(
@@ -330,7 +346,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     style = MaterialTheme.typography.titleSmall,
                     color = statusColor,
                     modifier = Modifier.shimmer(isLoading = rendererLoading),
-                    maxLines = 2,
+                    // 标题固定单行 + 省略号：右侧 extra（执行时长/审批按钮/等待中）宽度会随时长步进
+                    // 变化，若标题可两行换行会在一行/两行间切换，使步骤高度抖动。
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 // 审批等待中：直接展示工具目的说明（中文映射 + 参数摘要），
@@ -349,6 +367,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         },
         extra = if (
             (isPending && onToolApproval != null) ||
+            (tool.isQueued && loading) ||
             (tool.hasStarted && (tool.isFinished || loading))
         ) {
             {
@@ -356,7 +375,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (tool.hasStarted && (tool.isFinished || loading)) {
+                    if ((tool.isQueued && loading) || (tool.hasStarted && (tool.isFinished || loading))) {
                         ToolDurationText(tool)
                     }
                     if (isPending && onToolApproval != null) {
@@ -578,6 +597,8 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isAnswered = tool.approvalState is ToolApprovalState.Answered
     val arguments = tool.inputAsJson()
+    // 用户手动展开/收起问答气泡时通知列表取消自动跟随（主聊天列表加载中生效）
+    val onManualContentToggle = LocalOnManualContentToggle.current
 
     val title = remember(arguments) {
         arguments.jsonObject["title"]?.jsonPrimitive?.contentOrNull
@@ -601,8 +622,13 @@ private fun ChainOfThoughtScope.AskUserToolStep(
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.animateContentSize(),
+        onExpandedChange = {
+            expanded = it
+            // 用户手动展开/收起问答气泡：通知列表取消自动跟随，避免高度骤增被拽到底部
+            onManualContentToggle?.invoke()
+        },
+        // 与外层 ChainOfThought / 工具气泡一致的短 tween，避免默认 spring 双重高度动画不同步
+        modifier = Modifier.animateContentSize(animationSpec = tween(200)),
         icon = {
             if (loading) {
                 DotLoading(size = 10.dp)

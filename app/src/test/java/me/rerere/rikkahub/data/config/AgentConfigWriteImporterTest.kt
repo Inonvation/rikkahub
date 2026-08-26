@@ -342,6 +342,24 @@ class AgentConfigWriteImporterTest {
         }
     }
 
+    @Test
+    fun applyMcpMergesDescription() {
+        val (root, cleanup) = tempAgentRoot()
+        try {
+            val settings = sampleSettings()
+            AgentConfigExporter.export(settings, root)
+            val mcpFile = File(root, AgentConfigPaths.MCP_FILE)
+            val modified = mcpFile.readText()
+                .replace("\"description\": \"\"", "\"description\": \"SSE streaming events server\"")
+            assertNull(repositoryFor(root).writeConfigFile(AgentConfigPaths.MCP_FILE, modified))
+
+            val applied = AgentConfigImporter.applyMcpServers(settings, root)
+            assertEquals("SSE streaming events server", applied.mcpServers.single().commonOptions.description)
+        } finally {
+            cleanup()
+        }
+    }
+
     // ---- config_write 核心（writeAgentConfigFile / applyFileToSettings） ----
 
     @Test

@@ -107,4 +107,63 @@ class UIMessagePartTest {
 
         assertEquals(5_000L, tool.durationMs)
     }
+
+    @Test
+    fun `tool queued state before start`() {
+        val queuedAt = Clock.System.now()
+        val queuedAtMs = 1_000L
+        val queued = UIMessagePart.Tool(
+            toolCallId = "tool_q",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 1"}""",
+            queuedAt = queuedAt,
+            queuedAtMs = queuedAtMs,
+        )
+
+        assertTrue(queued.hasQueued)
+        assertTrue(queued.isQueued)
+        assertFalse(queued.hasStarted)
+        assertFalse(queued.isRunning)
+        assertFalse(queued.isFinished)
+    }
+
+    @Test
+    fun `tool queued state cleared once started`() {
+        val queuedAt = Clock.System.now()
+        val startedAt = queuedAt + 1.seconds
+        val started = UIMessagePart.Tool(
+            toolCallId = "tool_q2",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 1"}""",
+            queuedAt = queuedAt,
+            startedAt = startedAt,
+        )
+
+        // 一旦开始执行，即使保留 queuedAt 也不再视为等待中
+        assertTrue(started.hasQueued)
+        assertFalse(started.isQueued)
+        assertTrue(started.hasStarted)
+    }
+
+    @Test
+    fun `tool queued fields round trip and merge preserve`() {
+        val queuedAt = Clock.System.now()
+        val a = UIMessagePart.Tool(
+            toolCallId = "tool_q3",
+            toolName = "workspace_shell",
+            input = """{"command":"sleep 1"}""",
+            queuedAt = queuedAt,
+            queuedAtMs = 1234L,
+        )
+        val encoded = json.encodeToString(a)
+        val restored = json.decodeFromString<UIMessagePart>(encoded) as UIMessagePart.Tool
+
+        assertEquals(a, restored)
+        assertEquals(queuedAt, restored.queuedAt)
+        assertEquals(1234L, restored.queuedAtMs)
+
+        val merged = a.merge(UIMessagePart.Tool(toolCallId = "tool_q3", toolName = "", input = "{}"))
+        assertEquals(queuedAt, merged.queuedAt)
+        assertEquals(1234L, merged.queuedAtMs)
+    }
 }

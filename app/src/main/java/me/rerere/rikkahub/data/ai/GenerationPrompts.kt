@@ -42,39 +42,38 @@ object PromptMetrics {
     @Volatile
     var lastToolFamilies: Map<String, Int> = emptyMap()
 
+    /**
+     * system prompt + 工具 schema 的近似静态字符成本（不含历史消息），
+     * 供调试页对照 contextTokenLimit 判断是否超预算。
+     */
+    @Volatile
+    var lastStaticCostChars: Int = 0
+
+    /** 静态成本占 contextTokenLimit 的比例（4 字符 ≈ 1 token 的粗略估算）。 */
+    @Volatile
+    var lastStaticCostRatio: Float = 0f
+
+    /** 静态成本是否超过 [STATIC_COST_BUDGET_RATIO]，调试页置顶警示。 */
+    @Volatile
+    var lastStaticCostOverBudget: Boolean = false
+
     val revision: String get() = PROMPT_REVISION
 }
 
+/** 静态成本占上下文窗口的比例预算：超过即认为“能力注入过重”，调试页提示。 */
+internal const val STATIC_COST_BUDGET_RATIO: Float = 0.30f
+
 /**
- * 调试用工具族归类。与 AgentBehaviorPrompt 的工具分组保持一致的粗粒度口径，
- * 但只用于统计，不参与模型可见文本。
+ * 调试用工具族归类：直接委托给 [classifyToolFamily] 的统计口径（metricLabel）。
+ * 与 AgentBehaviorPrompt 的工具分组共享同一份判定来源，避免前缀映射漂移。
  */
-internal fun toolFamilyForMetrics(name: String): String = when {
-    name == "mcp_list" || name == "mcp_call" || name.startsWith("mcp__") -> "mcp"
-    name.startsWith("mcp_admin_") -> "mcp-admin"
-    name.startsWith("search_web") || name.startsWith("scrape_web") -> "search"
-    name.startsWith("workspace_") -> "workspace"
-    name.startsWith("trusted_folder_") -> "trusted_folder"
-    name.startsWith("kb_") -> "knowledge"
-    name.startsWith("study_") || name.startsWith("save_") ||
-        name.startsWith("quiz_") || name.startsWith("update_") ||
-        name.startsWith("delete_") -> "study"
-    name.startsWith("document_") -> "document"
-    name.startsWith("recent_") || name.startsWith("conversation_") -> "history"
-    name == "todo_write" -> "todo"
-    name == "ask_user" -> "ask_user"
-    name == "memory_tool" -> "memory"
-    name == "spawn_subagent" || name.startsWith("subagent") -> "subagent"
-    name.startsWith("use_skill") -> "skill"
-    name.startsWith("provider_") || name.startsWith("assistant_") ||
-        name.startsWith("settings_admin_") || name.startsWith("search_admin_") ||
-        name.startsWith("admin_") || name.startsWith("workspace_admin_") ||
-        name.startsWith("trusted_folder_admin_") || name.startsWith("knowledge_admin_") ||
-        name.startsWith("conversation_admin_") || name.startsWith("audit_") ||
-        name.startsWith("mode_") || name.startsWith("skill_admin_") ||
-        name == "env_inspect" || name == "app_logs" -> "management"
-    else -> "local"
-}
+internal fun toolFamilyForMetrics(name: String): String = classifyToolFamily(name).metricLabel
+
+/** 记忆 prompt 的防御性上限：即使调用侧传入超量记忆，也只渲染前 N 条，防止 system 膨胀。 */
+internal const val MAX_MEMORY_PROMPT_ENTRIES = 40
+
+/** 单条记忆注入 system 的内容截断长度（保留头部），避免一条超长记忆撑爆上下文。 */
+internal const val MAX_MEMORY_ENTRY_CHARS = 512
 
 internal fun buildMemoryPrompt(memories: List<AssistantMemory>) =
     buildString {
@@ -84,10 +83,10 @@ internal fun buildMemoryPrompt(memories: List<AssistantMemory>) =
         append("Memories from past conversations. Reference them when relevant.")
         appendLine()
         val json = buildJsonArray {
-            memories.forEach { memory ->
+            memories.take(MAX_MEMORY_PROMPT_ENTRIES).forEach { memory ->
                 add(buildJsonObject {
                     put("id", memory.id)
-                    put("content", memory.content)
+                    put("content", memory.content.take(MAX_MEMORY_ENTRY_CHARS))
                 })
             }
         }

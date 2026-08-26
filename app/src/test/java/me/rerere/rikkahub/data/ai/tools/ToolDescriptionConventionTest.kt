@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.AssistantMemory
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,7 +33,10 @@ class ToolDescriptionConventionTest {
         val tools = skillTools + memoryTools + searchTools.toList()
 
         assertTrue(tools.isNotEmpty())
+        val names = tools.map { it.name }
+        assertEquals(names.size, names.toSet().size)
         tools.forEach { tool ->
+            assertTrue("${tool.name} should have a non-blank description", tool.description.isNotBlank())
             assertTrue(
                 "${tool.name} should describe when to use or avoid",
                 tool.description.contains("Use when", ignoreCase = true) ||

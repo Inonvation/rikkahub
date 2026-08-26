@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -267,6 +268,15 @@ fun McpPicker(
                             text = server.commonOptions.name,
                             style = MaterialTheme.typography.titleLarge,
                         )
+                        if (server.commonOptions.description.isNotBlank()) {
+                            Text(
+                                text = server.commonOptions.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalContentColor.current.copy(alpha = 0.75f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         Text(
                             text = when (val s = status) {
                                 is McpStatus.Idle -> "Idle"

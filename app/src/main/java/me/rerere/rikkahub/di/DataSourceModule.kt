@@ -59,6 +59,7 @@ import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.dao.NoteDao
 import me.rerere.rikkahub.data.ai.tools.StudyDaoSet
 import me.rerere.rikkahub.data.ai.tools.StudyTools
+import me.rerere.rikkahub.data.ai.mcp.McpDescriptionGenerator
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.network.SettingsProxySelector
 import me.rerere.rikkahub.data.network.SettingsProxyAuthenticator
@@ -277,6 +278,8 @@ val dataSourceModule = module {
     }
 
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get(), appEventBus = get()) }
+
+    single { McpDescriptionGenerator(settingsStore = get(), providerManager = get()) }
 
     single {
         GenerationHandler(

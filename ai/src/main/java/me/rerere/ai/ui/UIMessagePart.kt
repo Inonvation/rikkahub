@@ -196,6 +196,9 @@ sealed class UIMessagePart {
         val finishedAt: Instant? = null,
         val startedAtMs: Long? = null,
         val finishedAtMs: Long? = null,
+        /** 排队等待开始执行（如排在 workspace 串行锁后面）的时刻，仅用于 UI 展示「等待中」 */
+        val queuedAt: Instant? = null,
+        val queuedAtMs: Long? = null,
         override var metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
@@ -203,6 +206,12 @@ sealed class UIMessagePart {
 
         /** Whether the tool has recorded a start time (wall clock or monotonic) */
         val hasStarted: Boolean get() = startedAt != null || startedAtMs != null
+
+        /** Whether the tool has been queued (waiting to start, e.g. behind a workspace serial lock) */
+        val hasQueued: Boolean get() = queuedAt != null || queuedAtMs != null
+
+        /** Whether the tool is currently queued and has not started yet */
+        val isQueued: Boolean get() = hasQueued && !hasStarted
 
         /** Whether the tool has recorded an end time (wall clock or monotonic) */
         val isFinished: Boolean get() = finishedAt != null || finishedAtMs != null
@@ -245,6 +254,8 @@ sealed class UIMessagePart {
                 finishedAt = finishedAt ?: other.finishedAt,
                 startedAtMs = startedAtMs ?: other.startedAtMs,
                 finishedAtMs = finishedAtMs ?: other.finishedAtMs,
+                queuedAt = queuedAt ?: other.queuedAt,
+                queuedAtMs = queuedAtMs ?: other.queuedAtMs,
                 metadata = if (other.metadata != null) other.metadata else metadata,
             )
         }

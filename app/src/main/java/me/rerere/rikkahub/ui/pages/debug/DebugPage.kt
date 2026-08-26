@@ -157,6 +157,12 @@ private fun MainPage(vm: DebugVM) {
                 "approx=${PromptMetrics.lastApproxTokens} tokens / ${PromptMetrics.lastToolCount} tools",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
         )
+        Text(
+            text = "static cost: ${PromptMetrics.lastStaticCostChars} chars / " +
+                "ratio=${"%.2f".format(PromptMetrics.lastStaticCostRatio)} " +
+                if (PromptMetrics.lastStaticCostOverBudget) "⚠️ OVER BUDGET" else "ok",
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+        )
         if (PromptMetrics.lastToolFamilies.isNotEmpty()) {
             Text(
                 text = "families: " + PromptMetrics.lastToolFamilies.entries

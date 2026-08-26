@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -354,6 +355,8 @@ private fun MessagePartsBlock(
     val scrollChatToBottom = LocalScrollChatToBottom.current
     // 用户是否正在控制列表（触碰中/滚动中/刚操作过）：自动折叠据此暂缓
     val isUserControlled = LocalIsChatListUserControlled.current
+    // 用户手动展开/收起过程区/思考步骤/工具气泡等时通知列表取消自动跟随
+    val onManualContentToggle = LocalOnManualContentToggle.current
     // 记录折叠瞬间是否在底部：动画落定后重新贴底，抵消 LazyColumn scrollBack 的上移
     var collapseAtBottom by remember { mutableStateOf(false) }
 
@@ -752,6 +755,8 @@ private fun MessagePartsBlock(
                 onClick = {
                     collapseAtBottom = !chainCollapsed && (isChatListAtBottom?.invoke() == true)
                     chainCollapsed = !chainCollapsed
+                    // 用户手动展开/收起过程区：通知列表取消自动跟随，避免高度骤增被拽到底部
+                    onManualContentToggle?.invoke()
                 },
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
@@ -789,10 +794,12 @@ private fun MessagePartsBlock(
 
         // 过程内容：自包含高度动画（expand/shrink）+ 淡入淡出。只作用于本块，
         // 不影响外层/流式正文的高度动画；普通布局下内容在卡片下方自然展开。
+        // 用短 tween 与内部 ChainOfThought / 工具步骤的动画同步，避免默认 spring 造成
+        // 多层高度动画不同步的回弹/抖动（"工具完成/展开时轻微抖一下"根因）。
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (!loading) Modifier.animateContentSize() else Modifier),
+                .then(if (!loading) Modifier.animateContentSize(animationSpec = tween(200)) else Modifier),
             horizontalAlignment = if (role == MessageRole.USER) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {

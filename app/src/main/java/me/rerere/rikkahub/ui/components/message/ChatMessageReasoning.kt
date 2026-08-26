@@ -267,6 +267,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val freezeState = LocalThinkingFreezeState.current
     val freezeEnabled = freezeState != null &&
         LocalSettings.current.displaySetting.thinkingFrozenBar
+    // 用户手动展开/收起思考（或其它消息内折叠内容）时通知列表取消自动跟随。
+    // 在组合期读取，供点击/协程回调捕获，避免在协程里访问 CompositionLocal.current。
+    val onManualContentToggle = LocalOnManualContentToggle.current
     val density = LocalDensity.current
     // 吸顶条与顶栏之间的参考间距（内容 2dp 留白）
     val frozenGapPx = remember(density) { with(density) { 2.dp.toPx() } }
@@ -305,8 +308,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     section.collapsed.value = state.expandState == ReasoningCardState.Collapsed
 
     // 吸顶条点击：
-    // - 生成中（loading）：状态机强制 Preview 无法真实折叠，退化为滚动折叠——
-    //   内容滚出条上方 / 头部滚回条下方，item 高度不变，不写展开状态记忆；
+    // - 生成中（loading）：与真实头部一致，同样在 Preview↔Expanded 之间切换内容状态
+    //   （生成完才能真正折叠到 Collapsed）。先滚到吸顶线让展开/收起时头部停在吸顶线，
+    //   避免"箭头显示收起、实际却只是滚动折叠"的不一致；
     // - 生成完成：真实折叠/展开。普通布局下思考头部天然锚定（顶部固定），
     //   只需先把头部滚到吸顶线，再切换状态即可，折叠/展开时头部停在吸顶线。
     section.onToggle = {
@@ -326,16 +330,18 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 }
             }
             if (loading) {
-                val wasFolded = section.folded.value
-                section.folded.value = !wasFolded
+                // 与真实头部一致：生成中冻结条同样切换 Preview↔Expanded 内容状态，
+                // 不再只做滚动折叠（否则箭头提示"收起"、实际却只是滚动折叠，行为不一致）。
+                section.folded.value = false
+                val nextExpanded = state.expandState != ReasoningCardState.Expanded
                 stepScope.launch {
                     programScroll {
-                        val target = if (wasFolded) {
-                            section.topY.value - (pin + frozenGapPx)
-                        } else {
-                            section.bottomY.value - (pin + frozenGapPx)
-                        }
-                        scrollHeaderToPin?.invoke(target)
+                        // 先把头部滚到吸顶线，让展开/收起时头部停在吸顶线
+                        scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
+                        state.onExpandedChange(nextExpanded, loading)
+                        if (stateKey != null) setSectionExpanded(stateKey, nextExpanded)
+                        // 通知列表：用户手动展开/收起（加载中会取消自动跟随，避免高度骤增被拽底）
+                        onManualContentToggle?.invoke()
                     }
                 }
             } else if (state.expandState != ReasoningCardState.Collapsed) {
@@ -437,6 +443,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             state.onExpandedChange(next, loading)
             // 用户手动操作才记录；生成中自动 preview/autoClose 不经过此回调，不影响记忆
             if (stateKey != null) setSectionExpanded(stateKey, next)
+            // 用户手动展开/折叠：通知列表取消自动跟随（加载中生效），
+            // 避免 reasoning item 高度骤增后自动跟随把列表硬拽到内容底部（"展开后突然跳到底部"根因）。
+            onManualContentToggle?.invoke()
             // 折叠若发生在底部：等高度动画落定后重新贴底，抵消 LazyColumn scrollBack 的上移
             if (wasAtBottom) {
                 stepScope.launch {

@@ -108,6 +108,8 @@ data class McpServerConfigDto(
     val id: String,
     /** 服务器显示名（非敏感，导出/导入闭环）。旧文件缺省为空串。 */
     val name: String = "",
+    /** 服务器的一句话描述（能力摘要），帮助 AI 与用户识别用途。 */
+    val description: String = "",
     /** 传输类型，对齐 MCP 配置规范 / Claude Desktop：sse / streamable_http */
     val type: String,
     val url: String? = null,

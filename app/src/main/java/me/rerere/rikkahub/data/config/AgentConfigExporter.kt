@@ -185,6 +185,7 @@ object AgentConfigExporter {
         return McpServerConfigDto(
             id = id.toString(),
             name = common.name,
+            description = common.description,
             type = type,
             url = url,
             enable = common.enable,

@@ -59,6 +59,32 @@ class McpDispatchToolsTest {
     }
 
     @Test
+    fun `formatMcpToolList shows server description when present`() {
+        val text = formatMcpToolList(
+            tools,
+            null,
+            serverDescriptions = mapOf(serverId to "GitHub repository search and issue management"),
+        )
+        assertTrue(text.contains("server=github — GitHub repository search and issue management"))
+    }
+
+    @Test
+    fun `formatMcpToolList shows description with id on name collision`() {
+        val s1 = Uuid.random()
+        val s2 = Uuid.random()
+        val ambiguous = listOf(
+            Triple(s1, "github", McpTool(name = "search_issues", description = null, needsApproval = false)),
+            Triple(s2, "github", McpTool(name = "get_issue", description = null, needsApproval = false)),
+        )
+        val text = formatMcpToolList(
+            ambiguous,
+            null,
+            serverDescriptions = mapOf(s2 to "Second github server"),
+        )
+        assertTrue(text.contains("server=github [id=$s2] — Second github server"))
+    }
+
+    @Test
     fun `formatMcpToolList disambiguates same-name servers by id`() {
         val s1 = Uuid.random()
         val s2 = Uuid.random()

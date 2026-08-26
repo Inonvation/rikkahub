@@ -48,6 +48,7 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.message.LocalOnManualContentToggle
 import me.rerere.rikkahub.ui.components.message.ReasoningFoldArrow
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
@@ -90,6 +91,8 @@ fun <T> ChainOfThought(
         mutableStateOf(stateKey?.let { getSectionExpanded(it) } ?: false)
     }
     val hapticController = rememberHaptic()
+    // 用户手动展开/收起步骤数时通知列表取消自动跟随（主聊天列表加载中生效）
+    val onManualContentToggle = LocalOnManualContentToggle.current
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
@@ -139,6 +142,8 @@ fun <T> ChainOfThought(
                                 expanded = !expanded
                                 // 用户手动操作才记录；key 为 null（无会话上下文）不记录
                                 if (stateKey != null) setSectionExpanded(stateKey, expanded)
+                                // 手动展开/收起步骤数：通知列表取消自动跟随，避免高度骤增被拽到底部
+                                onManualContentToggle?.invoke()
                             }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,

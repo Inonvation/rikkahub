@@ -11,7 +11,10 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.ai.mcp.McpDescriptionGenerator
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.mcp.McpTool
 import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
@@ -27,6 +30,7 @@ class SettingVM(
     private val settingsStore: SettingsStore,
     private val mcpManager: McpManager,
     private val conversationRepository: ConversationRepository,
+    private val mcpDescriptionGenerator: McpDescriptionGenerator,
 ) :
     ViewModel() {
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
@@ -98,4 +102,17 @@ class SettingVM(
     fun cancelDeleteCustomMode() {
         _pendingDelete.value = null
     }
+
+    /**
+     * 用默认快速模型为 MCP 服务器提炼一句话描述（基于已发现的工具）。
+     * 仅当 [tools] 非空（连接完成）时才可调用；失败抛出异常。
+     */
+    suspend fun generateMcpDescription(
+        server: McpServerConfig,
+        tools: List<McpTool> = server.commonOptions.tools,
+    ): String =
+        mcpDescriptionGenerator.generateDescription(
+            serverName = server.commonOptions.name,
+            tools = tools,
+        )
 }

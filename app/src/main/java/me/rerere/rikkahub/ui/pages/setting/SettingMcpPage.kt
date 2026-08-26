@@ -82,6 +82,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -98,6 +100,7 @@ import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.McpServer
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.MessageBlocked
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh
@@ -119,6 +122,7 @@ import me.rerere.rikkahub.ui.components.ui.SwitchSize
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.Tooltip
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -407,8 +411,8 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
         }
     }
 
-    McpServerConfigModal(creationState)
-    McpServerConfigModal(editState)
+    McpServerConfigModal(creationState, vm)
+    McpServerConfigModal(editState, vm)
 
     if (showImportDialog) {
         McpImportModal(
@@ -552,6 +556,15 @@ private fun McpServerCard(
                         Text("${enabledCount}/${item.commonOptions.tools.size}")
                     }
                 }
+                if (item.commonOptions.description.isNotBlank()) {
+                    Text(
+                        text = item.commonOptions.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (status is McpStatus.Error) {
                     val error = status as McpStatus.Error
                     Text(
@@ -673,6 +686,15 @@ private fun McpServerSelectableCard(
                         Text("${enabledCount}/${item.commonOptions.tools.size}")
                     }
                 }
+                if (item.commonOptions.description.isNotBlank()) {
+                    Text(
+                        text = item.commonOptions.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
             IconButton(onClick = { onEdit(item) }) {
@@ -683,7 +705,7 @@ private fun McpServerSelectableCard(
 }
 
 @Composable
-private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
+private fun McpServerConfigModal(state: EditState<McpServerConfig>, vm: SettingVM) {
     state.EditStateContent { config, updateValue ->
         val pagerState = rememberPagerState { 2 }
         val scope = rememberCoroutineScope()
@@ -764,7 +786,8 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                         0 -> {
                             McpCommonOptionsConfigure(
                                 config = config,
-                                update = updateValue
+                                update = updateValue,
+                                vm = vm,
                             )
                         }
 
@@ -798,7 +821,8 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
 @Composable
 private fun McpCommonOptionsConfigure(
     config: McpServerConfig,
-    update: (McpServerConfig) -> Unit
+    update: (McpServerConfig) -> Unit,
+    vm: SettingVM,
 ) {
     Column(
         modifier = Modifier
@@ -878,6 +902,110 @@ private fun McpCommonOptionsConfigure(
                     { Text(stringResource(R.string.setting_mcp_page_name_invalid)) }
                 } else null
             )
+        }
+
+        HorizontalDivider()
+
+        // 描述（可选）+ AI 提炼
+        FormItem(
+            label = {
+                Text(stringResource(R.string.setting_mcp_page_description))
+            },
+            description = {
+                Text(stringResource(R.string.setting_mcp_page_description_desc))
+            }
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = config.commonOptions.description,
+                    onValueChange = { description ->
+                        update(
+                            config.clone(
+                                commonOptions = config.commonOptions.copy(description = description)
+                            )
+                        )
+                    },
+                    label = { Text(stringResource(R.string.setting_mcp_page_description)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                    placeholder = { Text(stringResource(R.string.setting_mcp_page_description_placeholder)) }
+                )
+                // 实时工具列表：modal 的 config 是打开时的快照，连接完成/工具同步后
+                // 用最新设置兜底，保证「有工具才能 AI 提炼」的门禁始终基于最新状态。
+                val latestSettings by vm.settings.collectAsStateWithLifecycle()
+                val liveTools = latestSettings.mcpServers.firstOrNull { it.id == config.id }
+                    ?.commonOptions?.tools
+                    ?: config.commonOptions.tools
+                val hasTools = liveTools.isNotEmpty()
+                var generatingDescription by remember { mutableStateOf(false) }
+                val scope = rememberCoroutineScope()
+                val toaster = LocalToaster.current
+                val context = LocalContext.current
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!hasTools) {
+                        Text(
+                            text = stringResource(R.string.setting_mcp_page_ai_generate_description_hint_no_tools),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                generatingDescription = true
+                                try {
+                                    val description = vm.generateMcpDescription(config, liveTools)
+                                    update(
+                                        config.clone(
+                                            commonOptions = config.commonOptions.copy(description = description)
+                                        )
+                                    )
+                                    toaster.show(
+                                        context.getString(R.string.setting_mcp_page_ai_generate_description_success),
+                                        type = ToastType.Success,
+                                    )
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    toaster.show(
+                                        context.getString(
+                                            R.string.setting_mcp_page_ai_generate_description_error,
+                                            e.message ?: e.javaClass.simpleName,
+                                        ),
+                                        type = ToastType.Error,
+                                    )
+                                } finally {
+                                    generatingDescription = false
+                                }
+                            }
+                        },
+                        enabled = hasTools && !generatingDescription,
+                    ) {
+                        if (generatingDescription) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                HugeIcons.MagicWand01,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.setting_mcp_page_ai_generate_description))
+                    }
+                }
+            }
         }
 
         HorizontalDivider()
@@ -1294,7 +1422,8 @@ private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
         val headers = obj["headers"]?.jsonObject?.entries?.map { (k, v) ->
             k to (v.jsonPrimitive.contentOrNull ?: "")
         } ?: emptyList()
-        val commonOptions = McpCommonOptions(name = name, headers = headers)
+        val description = obj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+        val commonOptions = McpCommonOptions(name = name, description = description, headers = headers)
         when (type) {
             "sse" -> McpServerConfig.SseTransportServer(commonOptions = commonOptions, url = url)
             else -> McpServerConfig.StreamableHTTPServer(commonOptions = commonOptions, url = url)

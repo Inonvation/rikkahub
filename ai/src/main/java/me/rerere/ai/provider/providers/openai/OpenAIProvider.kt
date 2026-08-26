@@ -52,6 +52,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 
 private const val TAG = "OpenAIProvider"
 private const val CODEX_MODELS_CLIENT_VERSION = "0.148.0"
+private const val DEEPSEEK_API_HOST = "api.deepseek.com"
 
 class OpenAIProvider(
     private val client: OkHttpClient,
@@ -118,7 +119,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> = if (useResponsesApiFor(providerSetting, params.model)) {
+    ): Flow<StreamChunk> = if (useResponsesApiFor(providerSetting, params.model, stream = true)) {
         responseAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
@@ -136,7 +137,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = if (useResponsesApiFor(providerSetting, params.model)) {
+    ): TextGenerationResult = if (useResponsesApiFor(providerSetting, params.model, stream = false)) {
         responseAPI.generateText(
             providerSetting = providerSetting,
             messages = messages,
@@ -153,21 +154,32 @@ class OpenAIProvider(
     /**
      * 决定该模型是否走 Responses API。
      *
-     * DeepSeek 官方 Responses API 目前仅确认 deepseek-v4-flash 可用，其他模型
-     * （deepseek-chat / deepseek-reasoner / v3.x / v4-pro）在 /responses 端点会报错，
-     * 自动回退到 Chat Completions，避免提示词优化、标题生成、建议、压缩、翻译等
-     * 后台场景因 responseAPI 开关而全部失败。其余 provider 保持开关原语义。
+     * DeepSeek 模型（含第三方 OpenAI 兼容中继）统一按以下规则处理：
+     * - /responses 端点目前仅官方 api.deepseek.com 且仅 deepseek-v4-flash 确认可用；
+     * - 其他 DeepSeek 模型（deepseek-chat / deepseek-reasoner / v3.x / v4-pro 等）在
+     *   /responses 端点会报错，自动回退到 Chat Completions（该端点对所有 DeepSeek 模型可用）；
+     * - 第三方中继一般只实现 OpenAI Chat Completions，DeepSeek 模型一律回退，避免
+     *   提示词优化、标题生成、建议、压缩、翻译等后台场景因 responseAPI 开关而全部失败；
+     * - 非流式调用（后台场景均为非流式）走 Chat Completions，规避 DeepSeek /responses
+     *   非流式请求的兼容性风险。
+     * 其余 provider 保持开关原语义。
      */
-    private fun useResponsesApiFor(
+    internal fun useResponsesApiFor(
         providerSetting: ProviderSetting.OpenAI,
         model: Model,
+        stream: Boolean,
     ): Boolean {
         // ChatGPT 订阅（Codex 后端）只支持 Responses API，且必须流式。
         if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) return true
         if (!providerSetting.useResponseApi) return false
-        val host = providerSetting.baseUrl.toHttpUrlOrNull()?.host
-        if (host == "api.deepseek.com") {
-            return ModelRegistry.DEEPSEEK_RESPONSES.match(model.modelId)
+
+        // DeepSeek 模型：仅「官方端点 + 确认支持的模型 + 流式请求」才走 /responses，
+        // 其余情况（中继/镜像、无 scheme 的 baseUrl、非流式、不支持模型）回退 Chat Completions。
+        if (model.modelId.contains("deepseek", ignoreCase = true)) {
+            val host = providerSetting.effectiveBaseUrl().toHttpUrlOrNull()?.host
+            return stream &&
+                host == DEEPSEEK_API_HOST &&
+                ModelRegistry.DEEPSEEK_RESPONSES.match(model.modelId)
         }
         return true
     }

@@ -72,6 +72,7 @@ internal fun resolveMcpTool(
 internal fun formatMcpToolList(
     tools: List<Triple<Uuid, String, McpTool>>,
     serverFilter: String?,
+    serverDescriptions: Map<Uuid, String> = emptyMap(),
 ): String {
     val filtered = tools.filter {
         serverFilter.isNullOrBlank() || it.second.equals(serverFilter, ignoreCase = true)
@@ -92,7 +93,14 @@ internal fun formatMcpToolList(
         for ((id, serverTools) in byServer) {
             val displayServer = serverTools.first().second.ifBlank { "(unnamed)" }
             val collision = (nameToIds[displayServer]?.size ?: 1) > 1
-            appendLine("server=$displayServer" + if (collision) " [id=$id]" else "")
+            val description = serverDescriptions[id]?.let { " — $it" }.orEmpty()
+            appendLine(
+                buildString {
+                    append("server=$displayServer")
+                    if (collision) append(" [id=$id]")
+                    append(description)
+                }
+            )
             for ((_, _, tool) in serverTools) {
                 val summary = tool.description?.trim().orEmpty()
                 val params = (tool.inputSchema as? InputSchema.Obj)
@@ -127,7 +135,15 @@ fun createMcpListTool(assistant: Assistant, mcpManager: McpManager): Tool =
         },
         execute = { args ->
             val server = args.jsonObject["server"]?.jsonPrimitive?.contentOrNull
-            listOf(UIMessagePart.Text(formatMcpToolList(mcpManager.getAllAvailableTools(assistant), server)))
+            listOf(
+                UIMessagePart.Text(
+                    formatMcpToolList(
+                        mcpManager.getAllAvailableTools(assistant),
+                        server,
+                        mcpManager.getServerDescriptions(),
+                    )
+                )
+            )
         },
     )
 

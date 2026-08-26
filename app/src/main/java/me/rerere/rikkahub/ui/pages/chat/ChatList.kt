@@ -116,6 +116,7 @@ import me.rerere.rikkahub.ui.components.ai.CompressedHistoryCard
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.PresetMessagesIntro
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
+import me.rerere.rikkahub.ui.components.message.LocalOnManualContentToggle
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownNewCache
@@ -629,6 +630,16 @@ private fun ChatListNormal(
                 LocalWorkspaceImageResolver provides workspaceImgResolver,
                 LocalOpenWorkspaceImagePreview provides openWsPreview,
                 LocalOpenWorkspaceFile provides openWorkspaceFile,
+                // 用户手动展开/收起消息内可折叠内容（思考步骤/过程链/工具气泡等）时，
+                // 在流式加载中把用户视为主动离开底部，取消自动跟随。展开/收起会改变 item 高度，
+                // 若不暂停跟随，自动跟随会把列表硬拽到内容底部（"展开后突然跳到底部"根因）。
+                // 仅在加载中抑制；生成结束后自动跟随本就停止，避免无谓地置位 userScrolledUp。
+                LocalOnManualContentToggle provides {
+                    if (loadingState) {
+                        userScrolledUp = true
+                        lastUserScrollAt = SystemClock.elapsedRealtime()
+                    }
+                },
             ) {
             LazyColumn(
                 state = state,

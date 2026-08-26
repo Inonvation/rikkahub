@@ -918,10 +918,17 @@
   <string name="setting_files_page_title">File Management</string>
   <string name="setting_mcp_page_add_header">Add Header</string>
   <string name="setting_mcp_page_add_one_to_get_started">Add one to get started</string>
+  <string name="setting_mcp_page_ai_generate_description">AI Generate</string>
+  <string name="setting_mcp_page_ai_generate_description_error">Failed to generate description: %1$s</string>
+  <string name="setting_mcp_page_ai_generate_description_hint_no_tools">Connect the server first, then generate from its tools</string>
+  <string name="setting_mcp_page_ai_generate_description_success">Description generated</string>
   <string name="setting_mcp_page_basic_settings">Basic Settings</string>
   <string name="setting_mcp_page_custom_headers">Custom Headers</string>
   <string name="setting_mcp_page_custom_headers_desc">Add custom HTTP headers for MCP server requests</string>
   <string name="setting_mcp_page_delete_header">Delete Header</string>
+  <string name="setting_mcp_page_description">Description</string>
+  <string name="setting_mcp_page_description_desc">One-line summary of what this server does; helps the assistant discover and use it</string>
+  <string name="setting_mcp_page_description_placeholder">e.g.: GitHub repository search, issue and PR management</string>
   <string name="setting_mcp_page_enable">Enable</string>
   <string name="setting_mcp_page_enable_desc">Whether to enable this MCP server</string>
   <string name="setting_mcp_page_header_name">Header Name</string>

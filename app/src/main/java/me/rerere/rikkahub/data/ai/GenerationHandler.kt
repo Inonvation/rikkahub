@@ -156,14 +156,32 @@ private suspend fun executeToolSerialized(
     json: Json,
     execute: suspend (UIMessagePart.Tool, List<Tool>, suspend (UIMessagePart.Tool) -> Unit) -> UIMessagePart.Tool?,
     onToolStarted: suspend (UIMessagePart.Tool) -> Unit,
+    onToolQueued: suspend (UIMessagePart.Tool) -> Unit,
 ): UIMessagePart.Tool? {
     val inputJson = runCatching {
         json.parseToJsonElement(tool.input.ifBlank { "{}" }) as? JsonObject
     }.getOrNull()
     val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId) ?: return execute(tool, toolsInternal, onToolStarted)
     val mutex = workspaceToolLocks.getOrPut(key) { Mutex() }
-    return mutex.withLock {
+    // 非竞争：直接拿到锁，无需排队标识
+    if (mutex.tryLock()) {
+        return try {
+            execute(tool, toolsInternal, onToolStarted)
+        } finally {
+            mutex.unlock()
+        }
+    }
+    // 竞争：排在锁后面等待，先发「等待中」状态，再阻塞直到拿到锁
+    val queuedTool = tool.copy(
+        queuedAt = Clock.System.now(),
+        queuedAtMs = SystemClock.elapsedRealtime(),
+    )
+    onToolQueued(queuedTool)
+    mutex.lock()
+    return try {
         execute(tool, toolsInternal, onToolStarted)
+    } finally {
+        mutex.unlock()
     }
 }
 
@@ -454,12 +472,12 @@ class GenerationHandler(
             }
 
             val messageUpdateMutex = Mutex()
-            val onToolStarted: suspend (UIMessagePart.Tool) -> Unit = { started ->
+            val updateToolPart: suspend (UIMessagePart.Tool) -> Unit = { updated ->
                 messageUpdateMutex.withLock {
                     val lastMessage = messages.last()
                     val updatedParts = lastMessage.parts.map { part ->
-                        if (part is UIMessagePart.Tool && part.toolCallId == started.toolCallId) {
-                            started
+                        if (part is UIMessagePart.Tool && part.toolCallId == updated.toolCallId) {
+                            updated
                         } else {
                             part
                         }
@@ -468,6 +486,11 @@ class GenerationHandler(
                     emit(GenerationChunk.Messages(messages))
                 }
             }
+            val onToolStarted: suspend (UIMessagePart.Tool) -> Unit = { started -> updateToolPart(started) }
+            // 单个工具完成即回填 UI，避免并行时「已完成的工具仍显示执行中」
+            val onToolCompleted: suspend (UIMessagePart.Tool) -> Unit = { completed -> updateToolPart(completed) }
+            // 工具排在 workspace 串行锁后等待时，先发「等待中」状态
+            val onToolQueued: suspend (UIMessagePart.Tool) -> Unit = { queued -> updateToolPart(queued) }
             // Handle tools (execute approved tools, handle denied tools)
             // 并行执行：多个工具（含多子代理派发）并发跑，按原始顺序回填结果。
             // workspace 文件类工具经 executeToolSerialized 串行化（同一文件/同一 workspace 的
@@ -476,7 +499,18 @@ class GenerationHandler(
             val executedTools = coroutineScope {
                 toolsToProcess.map { tool ->
                     async {
-                        executeToolSerialized(tool, toolsInternal, workspaceIdForLock, json, ::executeTool, onToolStarted)
+                        val result = executeToolSerialized(
+                            tool,
+                            toolsInternal,
+                            workspaceIdForLock,
+                            json,
+                            ::executeTool,
+                            onToolStarted,
+                            onToolQueued,
+                        )
+                        // 完成一个立即刷新一个，让已完成工具不再停留在「执行中」
+                        if (result != null) onToolCompleted(result)
+                        result
                     }
                 }.awaitAll().filterNotNull()
             }
@@ -614,11 +648,21 @@ class GenerationHandler(
                     put(family, familyTools.size)
                 }
             }
+            // 静态成本 = system prompt + 工具 schema（近似；不含历史消息）。
+            // 占 contextTokenLimit 比例超阈值即标记，供调试页提示「能力注入过重」。
+            val staticCostChars = system.length + PromptMetrics.lastToolSchemaChars
+            PromptMetrics.lastStaticCostChars = staticCostChars
+            PromptMetrics.lastStaticCostRatio =
+                if (assistant.contextTokenLimit > 0) staticCostChars / 4f / assistant.contextTokenLimit else 0f
+            PromptMetrics.lastStaticCostOverBudget =
+                PromptMetrics.lastStaticCostRatio > STATIC_COST_BUDGET_RATIO
             Log.i(
                 TAG,
                 "system_prompt promptRevision=$PROMPT_REVISION chars=${system.length} " +
                     "approxTokens=${system.length / 4} tools=${tools.size} " +
-                    "toolSchemaChars=${PromptMetrics.lastToolSchemaChars} families=${PromptMetrics.lastToolFamilies}"
+                    "toolSchemaChars=${PromptMetrics.lastToolSchemaChars} families=${PromptMetrics.lastToolFamilies} " +
+                    "staticBudget=${"%.2f".format(PromptMetrics.lastStaticCostRatio)}" +
+                    "overBudget=${PromptMetrics.lastStaticCostOverBudget}"
             )
             if (system.isNotBlank()) add(UIMessage.system(prompt = system).copy(isSynthetic = true))
             addAll(messages.limitContext(assistant.contextMessageLimit))

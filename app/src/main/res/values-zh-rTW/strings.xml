@@ -736,10 +736,17 @@
   <string name="setting_files_page_title">檔案管理</string>
   <string name="setting_mcp_page_add_header">添加請求頭</string>
   <string name="setting_mcp_page_add_one_to_get_started">新增一個即可開始使用</string>
+  <string name="setting_mcp_page_ai_generate_description">AI 提煉</string>
+  <string name="setting_mcp_page_ai_generate_description_error">生成描述失敗：%1$s</string>
+  <string name="setting_mcp_page_ai_generate_description_hint_no_tools">連接成功後可基於工具列表自動生成</string>
+  <string name="setting_mcp_page_ai_generate_description_success">描述已生成</string>
   <string name="setting_mcp_page_basic_settings">基本設定</string>
   <string name="setting_mcp_page_custom_headers">自定義請求頭</string>
   <string name="setting_mcp_page_custom_headers_desc">為MCP伺服器請求添加自定義HTTP頭</string>
   <string name="setting_mcp_page_delete_header">刪除請求頭</string>
+  <string name="setting_mcp_page_description">描述</string>
+  <string name="setting_mcp_page_description_desc">一句話概括該伺服器的用途，幫助 AI 發現並使用它</string>
+  <string name="setting_mcp_page_description_placeholder">例如：GitHub 倉庫搜尋、Issue 與 PR 管理</string>
   <string name="setting_mcp_page_enable">啟用</string>
   <string name="setting_mcp_page_enable_desc">是否啟用此MCP伺服器</string>
   <string name="setting_mcp_page_header_name">請求頭名稱</string>

@@ -1,8 +1,7 @@
 package me.rerere.rikkahub.data.ai.prompts
 
 import me.rerere.ai.core.Tool
-import me.rerere.rikkahub.data.ai.tools.MCP_LIST_NAME
-import me.rerere.rikkahub.data.ai.tools.MCP_CALL_NAME
+import me.rerere.rikkahub.data.ai.classifyToolFamily
 import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 
 /**
@@ -127,48 +126,15 @@ private val SUB_AGENT_DELEGATION_SECTION = """
 """.trimIndent()
 
 /**
- * 工具分组清单：按命名前缀把工具聚成 <group> → 用途 的一行，帮模型建立"工具地图"。
+ * 工具分组清单：按 [classifyToolFamily] 把工具聚成 <group> → 用途 的一行，帮模型建立"工具地图"。
  * 只分组、不展开单工具——单工具细节在其自身 description 里，避免重复占 token。
+ * 判定与调试统计共用同一份 [classifyToolFamily]，新增工具族只需改这一处。
  */
 private fun groupToolsForPrompt(tools: List<Tool>): String {
     val groups = linkedMapOf<String, MutableList<String>>()
-    val known = setOf("spawn_subagent", "ask_user", "memory_tool", "todo_write")
     tools.forEach { tool ->
-        val prefix = when {
-            tool.name in known -> tool.name
-            tool.name.startsWith("mcp_admin_") -> "MCP management"
-            tool.name == MCP_LIST_NAME || tool.name == MCP_CALL_NAME -> "MCP servers"
-            tool.name.startsWith("mcp__") -> "MCP servers"
-            tool.name.startsWith("workspace_") -> "workspace"
-            tool.name.startsWith("search_web") -> "web search"
-            tool.name.startsWith("scrape_web") -> "web scrape"
-            tool.name.startsWith("kb_") -> "knowledge base"
-            tool.name.startsWith("study_") || tool.name.startsWith("save_") ||
-                tool.name.startsWith("quiz_") || tool.name.startsWith("update_") ||
-                tool.name.startsWith("delete_") -> "study tools"
-            tool.name.startsWith("document_") -> "document reading"
-            tool.name.startsWith("recent_") || tool.name.startsWith("conversation_") -> "conversation history"
-            tool.name.startsWith("eval_") || tool.name.startsWith("get_time") ||
-                tool.name.startsWith("clipboard") || tool.name.startsWith("text_to_speech") ||
-                tool.name.startsWith("get_screen") || tool.name.startsWith("calendar") -> "local device"
-            tool.name.startsWith("use_skill") -> "skills"
-            tool.name.startsWith("provider_") ||
-                tool.name.startsWith("assistant_") ||
-                tool.name.startsWith("settings_admin_") ||
-                tool.name.startsWith("search_admin_") ||
-                tool.name.startsWith("admin_") ||
-                tool.name.startsWith("workspace_admin_") ||
-                tool.name.startsWith("trusted_folder_admin_") ||
-                tool.name.startsWith("knowledge_admin_") ||
-                tool.name.startsWith("conversation_admin_") ||
-                tool.name.startsWith("audit_") ||
-                tool.name.startsWith("mode_") ||
-                tool.name.startsWith("skill_admin_") ||
-                tool.name == "env_inspect" ||
-                tool.name == "app_logs" -> "management"
-            else -> "other"
-        }
-        groups.getOrPut(prefix) { mutableListOf() }.add(tool.name)
+        val family = classifyToolFamily(tool.name)
+        groups.getOrPut(family.displayLabel) { mutableListOf() }.add(tool.name)
     }
 
     if (groups.isEmpty()) return ""

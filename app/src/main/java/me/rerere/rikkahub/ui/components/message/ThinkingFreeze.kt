@@ -112,6 +112,13 @@ val LocalIsChatListUserControlled = staticCompositionLocalOf<(() -> Boolean)?> {
 val LocalScrollChatToBottom = staticCompositionLocalOf<(suspend () -> Unit)?> { null }
 
 /**
+ * 由聊天页提供：用户手动展开/收起某条消息里的可折叠内容（思考步骤、过程链、工具气泡等）时回调。
+ * 聊天页据此在流式加载中取消自动跟随，避免 item 高度骤增被自动跟随硬拽到底部（"展开后突然跳到底部"根因）。
+ * 供 ChatMessage / ChainOfThought / 工具气泡等合成调用；未提供（如非主聊天列表页面）时不生效。
+ */
+val LocalOnManualContentToggle = staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/**
  * 悬浮吸顶条：位于聊天顶栏下方（列表内容区顶边），与顶栏无间距。
  * 背景为不透明卡片色到透明的由上至下渐变，仅内容行可点击（渐变区不拦截触摸）。
  */
