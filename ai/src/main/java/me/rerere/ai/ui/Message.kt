@@ -93,6 +93,81 @@ data class UIMessage(
 }
 
 /**
+ * 移除字符串首尾的空白行（空行或仅含空白字符的行），保留中间内容。
+ *
+ * 用于清理 AI 输出末尾多余的换行导致的空白展示（例如内容为 `"第一行\n\n\n"` 时，
+ * 第二、三行都是空白，渲染出来会多出空行）。
+ */
+fun String.trimBlankLines(): String {
+    val lines = lineSequence().toList()
+    var start = 0
+    var end = lines.size
+    while (start < end && lines[start].isBlank()) start++
+    while (end > start && lines[end - 1].isBlank()) end--
+    if (start >= end) return ""
+    return lines.subList(start, end).joinToString("\n")
+}
+
+/**
+ * 清理消息中的空白内容：
+ * - 移除 Text / Reasoning part 首尾的空白行；
+ * - 移除清理后变为全空白的 part。
+ *
+ * 未发生任何变化时返回原引用（保持身份，避免下游无谓重组）。
+ */
+fun UIMessage.cleanupBlankParts(): UIMessage {
+    var changed = false
+    val newParts = parts.mapNotNull { part ->
+        when (part) {
+            is UIMessagePart.Text -> {
+                val cleaned = part.text.trimBlankLines()
+                when {
+                    cleaned.isBlank() -> {
+                        changed = true
+                        null
+                    }
+                    cleaned != part.text -> {
+                        changed = true
+                        part.copy(text = cleaned)
+                    }
+                    else -> part
+                }
+            }
+
+            is UIMessagePart.Reasoning -> {
+                val cleaned = part.reasoning.trimBlankLines()
+                when {
+                    cleaned.isBlank() -> {
+                        changed = true
+                        null
+                    }
+                    cleaned != part.reasoning -> {
+                        changed = true
+                        part.copy(reasoning = cleaned)
+                    }
+                    else -> part
+                }
+            }
+
+            else -> part
+        }
+    }
+    return if (changed) copy(parts = newParts) else this
+}
+
+/**
+ * 对列表末尾的助手消息做空白行清理（流式 / 生成完成时调用）。
+ * 只在最后一条是助手消息且确实发生变化时重建列表。
+ */
+fun List<UIMessage>.cleanupLastAssistantBlankLines(): List<UIMessage> {
+    if (isEmpty()) return this
+    val last = last()
+    if (last.role != MessageRole.ASSISTANT) return this
+    val cleaned = last.cleanupBlankParts()
+    return if (cleaned === last) this else dropLast(1) + cleaned
+}
+
+/**
  * 判断这个消息是否有有任何用户**可输入内容**
  *
  * 例如: 文本，图片, 文档

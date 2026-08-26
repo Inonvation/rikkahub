@@ -56,6 +56,7 @@ class AgentConfigExporterTest {
                     id = modelId,
                     modelId = "gpt-4o",
                     displayName = "GPT-4o",
+                    contextLength = 256_000,
                     type = ModelType.CHAT,
                     inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
                     outputModalities = listOf(Modality.TEXT),
@@ -237,6 +238,7 @@ class AgentConfigExporterTest {
             // Model：基本设置 + 内置工具 + 嵌套 provider 覆盖（脱敏）
             val model = openai.models.single()
             assertEquals(listOf("image", "text"), model.inputModalities)
+            assertEquals(256_000, model.contextLength)
             assertEquals(listOf("reasoning", "tool"), model.abilities)
             assertEquals(listOf("search"), model.builtInTools)
             assertNotNull(model.customHeadersRef)

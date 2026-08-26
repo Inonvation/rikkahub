@@ -31,6 +31,9 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.WIRE_DESCRIPTION_LIMIT
+import me.rerere.ai.core.trimDescription
+import me.rerere.ai.core.trimmed
 import me.rerere.ai.core.merge
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
@@ -512,8 +515,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     params.tools.forEach { tool ->
                         add(buildJsonObject {
                             put("name", tool.name)
-                            put("description", tool.description)
-                            put("input_schema", json.encodeToJsonElement(tool.parameters()))
+                            put("description", tool.description.trimDescription(WIRE_DESCRIPTION_LIMIT))
+                            put("input_schema", json.encodeToJsonElement(tool.parameters().trimmed()))
                         })
                     }
                 }

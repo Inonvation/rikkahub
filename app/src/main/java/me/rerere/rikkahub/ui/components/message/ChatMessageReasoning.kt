@@ -326,21 +326,16 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 }
             }
             if (loading) {
-                if (section.folded.value) {
-                    // 滚动展开：下滚，头部回到吸顶线下方，解除吸顶（条淡出、真实头部淡入）
-                    stepScope.launch {
-                        programScroll {
-                            scrollHeaderToPin?.invoke(section.topY.value - (pin + frozenGapPx))
-                            section.folded.value = false
+                val wasFolded = section.folded.value
+                section.folded.value = !wasFolded
+                stepScope.launch {
+                    programScroll {
+                        val target = if (wasFolded) {
+                            section.topY.value - (pin + frozenGapPx)
+                        } else {
+                            section.bottomY.value - (pin + frozenGapPx)
                         }
-                    }
-                } else {
-                    // 滚动折叠：上滚，思考内容滚出条上方，输出顶部落到条正下方
-                    stepScope.launch {
-                        programScroll {
-                            scrollHeaderToPin?.invoke(section.bottomY.value - (pin + frozenGapPx))
-                            section.folded.value = true
-                        }
+                        scrollHeaderToPin?.invoke(target)
                     }
                 }
             } else if (state.expandState != ReasoningCardState.Collapsed) {

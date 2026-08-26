@@ -107,14 +107,30 @@ internal class McpSessionRegistry(
     fun getStatus(configId: Uuid): Flow<McpStatus> = statusStore.get(configId)
 
     fun reconcile(configs: List<McpServerConfig>) {
+        // 1) 结构性非法且已启用的服务器：标记 InvalidConfig（不建会话、不重连、不暴露工具）
+        val configErrorById = configs.associate { it.id to it.configError() }
+        configs.forEach { c ->
+            if (c.commonOptions.enable && configErrorById.getValue(c.id) != null) {
+                statusStore.update(c.id, McpStatus.InvalidConfig)
+            }
+        }
+
         val activeConfigs = configs
-            .filter { it.commonOptions.enable && it.commonOptions.name.isNotBlank() }
+            .filter {
+                it.commonOptions.enable &&
+                    it.commonOptions.name.isNotBlank() &&
+                    configErrorById.getValue(it.id) == null
+            }
             .associateBy { it.id }
 
         (sessions.keys - activeConfigs.keys).forEach { configId ->
             val detached = sessions.remove(configId) ?: return@forEach
             oauthCoordinator.forget(configId)
-            statusStore.remove(configId)
+            val cfg = configs.find { it.id == configId }
+            // 仅当服务器被禁用、或配置本身合法时才清状态；非法配置保留 InvalidConfig 供用户修复
+            if (cfg == null || !cfg.commonOptions.enable || configErrorById.getValue(cfg.id) == null) {
+                statusStore.remove(configId)
+            }
             appScope.launch { closeSession(detached) }
         }
 
@@ -177,6 +193,13 @@ internal class McpSessionRegistry(
             removeClient(desiredConfig)
             return
         }
+        // 配置结构性非法：不连接、不重连、不暴露工具；保留原始配置并标记 InvalidConfig 供用户修复
+        desiredConfig.configError()?.let { reason ->
+            Log.w(TAG, "addClient rejected invalid config ${desiredConfig.id}: $reason")
+            removeClient(desiredConfig)
+            statusStore.update(desiredConfig.id, McpStatus.InvalidConfig)
+            return
+        }
 
         val session = sessions.computeIfAbsent(desiredConfig.id) { McpSession(desiredConfig) }
         session.config = desiredConfig
@@ -209,6 +232,13 @@ internal class McpSessionRegistry(
             if (sessions[requestedConfig.id] !== session) return@withLock ConnectResult.Stale
             if (!hasSameConnectionParameters(session.config, requestedConfig)) {
                 return@withLock ConnectResult.Stale
+            }
+
+            // 再审一次配置合法性：连接/重连/sync 都走这里，杜绝非法配置进入连接过程
+            requestedConfig.configError()?.let { reason ->
+                Log.w(TAG, "connectSession rejected invalid config ${requestedConfig.id}: $reason")
+                statusStore.update(requestedConfig.id, McpStatus.InvalidConfig)
+                return@withLock ConnectResult.Failed
             }
 
             if (cancelPendingReconnect) {
@@ -354,6 +384,8 @@ internal class McpSessionRegistry(
             session.lifecycleMutex.withLock {
                 if (sessions[configId] !== session) return@withLock
                 if (sourceClient != null && session.client !== sourceClient) return@withLock
+                // 配置错误（InvalidConfig）不允许进入任何重连：只能等用户修复后由 reconcile 重建会话
+                if (statusStore.status.value[configId] is McpStatus.InvalidConfig) return@withLock
                 if (!retryAfterFailure && statusStore.status.value[configId] != McpStatus.Connected) {
                     return@withLock
                 }

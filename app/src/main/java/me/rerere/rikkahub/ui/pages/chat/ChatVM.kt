@@ -308,6 +308,10 @@ class ChatVM(
         chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
     }
 
+    fun approveAllRelatedApprovals(toolCallId: String) {
+        chatService.approveAllRelatedToolApprovals(_conversationId, toolCallId)
+    }
+
     fun stopGeneration() {
         viewModelScope.launch {
             chatService.stopGeneration(_conversationId)

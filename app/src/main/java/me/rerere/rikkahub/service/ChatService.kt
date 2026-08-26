@@ -93,6 +93,8 @@ import me.rerere.rikkahub.data.ai.tools.createKnowledgeAdminTools
 import me.rerere.rikkahub.data.ai.tools.createConversationAdminTools
 import me.rerere.rikkahub.data.ai.tools.createRollbackTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
+import me.rerere.rikkahub.data.ai.tools.createMcpListTool
+import me.rerere.rikkahub.data.ai.tools.createMcpCallTool
 import me.rerere.rikkahub.data.ai.tools.createAgentConfigTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -1522,6 +1524,80 @@ class ChatService(
         session.setJob(job)
     }
 
+    /**
+     * 审批「同意相关所有审批」：批准同一生成批次（该工具调用所在消息节点）内所有待审批工具调用。
+     * 由 UI 上某个 pending 工具触发；后端根据 [toolCallId] 定位其所属消息节点，
+     * 将同节点内其余 pending 工具一并置为 Approved，再按常规流程继续生成。
+     */
+    fun approveAllRelatedToolApprovals(
+        conversationId: Uuid,
+        toolCallId: String,
+    ) {
+        val session = getOrCreateSession(conversationId)
+        session.getJob()?.cancel()
+
+        val job = appScope.launch {
+            try {
+                val conversation = session.state.value
+                // 找到包含该 toolCallId 的消息节点（同一轮生成批次），收集其全部 pending 工具调用
+                val relatedToolCallIds = conversation.messageNodes
+                    .firstOrNull { node ->
+                        node.currentMessage.parts.any {
+                            it is UIMessagePart.Tool && it.toolCallId == toolCallId
+                        }
+                    }
+                    ?.currentMessage
+                    ?.parts
+                    ?.filterIsInstance<UIMessagePart.Tool>()
+                    ?.filter { it.approvalState is ToolApprovalState.Pending }
+                    ?.map { it.toolCallId }
+                    .orEmpty()
+
+                if (relatedToolCallIds.isEmpty()) {
+                    // 没有可批的待审批调用（可能已被处理），直接返回
+                    _generationDoneFlow.emit(conversationId)
+                    return@launch
+                }
+
+                val updatedNodes = conversation.messageNodes.map { node ->
+                    node.copy(
+                        messages = node.messages.map { msg ->
+                            msg.copy(
+                                parts = msg.parts.map { part ->
+                                    if (part is UIMessagePart.Tool && part.toolCallId in relatedToolCallIds) {
+                                        part.copy(approvalState = ToolApprovalState.Approved)
+                                    } else {
+                                        part
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+                val updatedConversation = conversation.copy(
+                    messageNodes = updatedNodes,
+                    compressedHistory = null,
+                )
+                saveConversation(conversationId, updatedConversation)
+
+                // 仍存在 pending（跨节点）则继续等待，否则继续生成
+                val hasPendingTools = updatedNodes.any { node ->
+                    node.currentMessage.parts.any { part ->
+                        part is UIMessagePart.Tool && part.isPending
+                    }
+                }
+                if (!hasPendingTools) {
+                    handleMessageComplete(conversationId)
+                }
+                _generationDoneFlow.emit(conversationId)
+            } catch (e: Exception) {
+                addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
+            }
+        }
+
+        session.setJob(job)
+    }
+
     // ---- 处理消息补全 ----
 
     private suspend fun handleMessageComplete(
@@ -1687,38 +1763,13 @@ class ChatService(
                         )
                     )
                     }
-                    if (modePolicy.allowMcpUse) {
-                        mcpManager.getAllAvailableTools(assistant).also { allTools ->
-                        val invalidNames = allTools
-                            .map { it.second }
-                            .distinct()
-                            .filter { name -> name.isEmpty() || !name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } }
-                        if (invalidNames.isNotEmpty()) {
-                            addError(
-                                error = IllegalStateException(
-                                    context.getString(
-                                        R.string.error_mcp_invalid_server_name,
-                                        invalidNames.joinToString(", ")
-                                    )
-                                ),
-                                conversationId = conversationId,
-                            )
-                            return
-                        }
-                    }.forEach { (serverId, serverName, tool) ->
-                        add(
-                            Tool(
-                                name = "mcp__${serverName}__${tool.name}",
-                                description = tool.description?.takeIf { it.isNotBlank() }
-                                    ?: "Tool from MCP server \"$serverName\".",
-                                parameters = { tool.inputSchema },
-                                needsApproval = { tool.needsApproval },
-                                execute = {
-                                    mcpManager.callTool(serverId, tool.name, it.jsonObject)
-                                },
-                            )
-                        )
-                    }
+                    if (modePolicy.allowMcpUse && assistant.mcpServers.isNotEmpty()) {
+                        // 高收益：用 mcp_list / mcp_call 两个通用工具替代全量 MCP 工具 schema 注入，
+                        // 避免外部 server 的工具数量/描述把系统提示词撑到几十 K。
+                        // 仅当 assistant 已绑定 MCP 服务器时才注入；未绑定时无任何工具可发现，
+                        // 且 restrictedCapabilities 已把 MCP_USE 标记为不可用——避免空工具占 token。
+                        add(createMcpListTool(assistant, mcpManager))
+                        add(createMcpCallTool(assistant, mcpManager))
                     }
                     // 管理模式专属工具：环境/日志只读感知 + 提供商/新模式写入（需审批）
                     if (modePolicy.allowCreativeTools) {

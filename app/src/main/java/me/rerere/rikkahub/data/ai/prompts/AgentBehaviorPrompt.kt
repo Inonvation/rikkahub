@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.prompts
 
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.ai.tools.MCP_LIST_NAME
+import me.rerere.rikkahub.data.ai.tools.MCP_CALL_NAME
 import me.rerere.rikkahub.data.model.AgentBehaviorProfile
 
 /**
@@ -135,6 +137,7 @@ private fun groupToolsForPrompt(tools: List<Tool>): String {
         val prefix = when {
             tool.name in known -> tool.name
             tool.name.startsWith("mcp_admin_") -> "MCP management"
+            tool.name == MCP_LIST_NAME || tool.name == MCP_CALL_NAME -> "MCP servers"
             tool.name.startsWith("mcp__") -> "MCP servers"
             tool.name.startsWith("workspace_") -> "workspace"
             tool.name.startsWith("search_web") -> "web search"

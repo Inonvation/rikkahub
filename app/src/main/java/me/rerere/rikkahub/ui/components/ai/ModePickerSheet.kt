@@ -76,7 +76,7 @@ fun Capability.note(): String = when (this) {
     Capability.TRUSTED_FOLDER -> "信任文件夹工具族 + 环境说明注入"
     Capability.SKILL_USE -> "use_skill（已启用 skill 的使用）"
     Capability.SKILL_ADMIN -> "skill_admin_*（感知与配置 skill）"
-    Capability.MCP_USE -> "外部 MCP 工具 mcp__*"
+    Capability.MCP_USE -> "外部 MCP 工具（mcp_list / mcp_call 动态调用）"
     Capability.MCP_ADMIN -> "mcp_admin_*（感知与配置 MCP）"
     Capability.MEMORY -> "记忆工具与记忆提示词"
     Capability.TODO -> "todo 工具"

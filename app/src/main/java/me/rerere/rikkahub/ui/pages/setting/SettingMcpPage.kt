@@ -514,6 +514,7 @@ private fun McpServerCard(
                 is McpStatus.Error -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
                 McpStatus.NeedsAuthorization -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
                 McpStatus.Authorizing -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                McpStatus.InvalidConfig -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
             }
 
             Column(
@@ -634,6 +635,7 @@ private fun McpServerSelectableCard(
                 is McpStatus.Error -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
                 McpStatus.NeedsAuthorization -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
                 McpStatus.Authorizing -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                McpStatus.InvalidConfig -> Icon(HugeIcons.AlertCircle, null, modifier = Modifier.size(20.dp))
             }
 
             Column(

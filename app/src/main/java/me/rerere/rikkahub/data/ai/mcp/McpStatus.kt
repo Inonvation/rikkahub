@@ -28,4 +28,12 @@ sealed class McpStatus {
 
     /** 正在进行 OAuth 授权流程（等待浏览器回调 / 交换令牌）。 */
     data object Authorizing : McpStatus()
+
+    /**
+     * 配置结构性非法（URL 为空/协议错、名称为空等）。
+     *
+     * 这类错误属于「配置错误」而非「网络/服务错误」：不允许自动重连、不允许调用工具，
+     * 仅提示用户修复；与 [Error]（网络/服务层失败、可有限重试）严格区分。
+     */
+    data object InvalidConfig : McpStatus()
 }

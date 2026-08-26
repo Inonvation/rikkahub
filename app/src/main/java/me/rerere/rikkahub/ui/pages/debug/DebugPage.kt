@@ -152,10 +152,18 @@ private fun MainPage(vm: DebugVM) {
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
         )
         Text(
-            text = "Last generation: ${PromptMetrics.lastSystemPromptChars} chars / " +
-                "${PromptMetrics.lastApproxTokens} tokens / ${PromptMetrics.lastToolCount} tools",
+            text = "Last generation: system=${PromptMetrics.lastSystemPromptChars} chars / " +
+                "tools=${PromptMetrics.lastToolSchemaChars} chars / " +
+                "approx=${PromptMetrics.lastApproxTokens} tokens / ${PromptMetrics.lastToolCount} tools",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
         )
+        if (PromptMetrics.lastToolFamilies.isNotEmpty()) {
+            Text(
+                text = "families: " + PromptMetrics.lastToolFamilies.entries
+                    .joinToString(", ") { (k, v) -> "$k=$v" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+            )
+        }
         var avatar: Avatar by remember { mutableStateOf(Avatar.Emoji("😎")) }
         UIAvatar(
             value = avatar,

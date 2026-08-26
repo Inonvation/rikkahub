@@ -237,6 +237,7 @@
   <string name="chat_message_add_favorite">즐겨찌기 추가</string>
   <string name="chat_message_remove_favorite">즐겨찾기 제거</string>
   <string name="chat_message_tool_approve">승인</string>
+  <string name="chat_message_tool_approve_all">관련 모든 승인</string>
   <string name="chat_message_tool_ask_questions">%d개의 질문</string>
   <string name="chat_message_tool_call_generic">도구 호출 %1$s</string>
   <string name="chat_message_tool_call_label">도구 %1$s 호출함</string>
@@ -248,8 +249,10 @@
   <string name="chat_message_tool_delete_memory">기억 삭제됨</string>
   <string name="chat_message_tool_denied">거부됨</string>
   <string name="chat_message_tool_deny">거부</string>
+  <string name="chat_message_tool_deny_and_output_reason">거부 및 사유 출력</string>
   <string name="chat_message_tool_deny_dialog_hint">거절 사유(선택 사항)</string>
   <string name="chat_message_tool_deny_dialog_title">도구 실행 거부</string>
+  <string name="chat_message_tool_more_actions">추가 작업</string>
   <string name="chat_message_tool_edit_memory">기억 업데이트됨</string>
   <string name="chat_message_tool_get_time">시간 정보 가져오기</string>
   <string name="chat_message_tool_scrape_prefix">웹사이트 긁어오기: %1$s</string>

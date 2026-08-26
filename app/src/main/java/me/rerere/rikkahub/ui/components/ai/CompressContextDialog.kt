@@ -28,19 +28,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
+import me.rerere.ai.provider.DEFAULT_MODEL_CONTEXT_LENGTH
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
-
-private const val DEFAULT_CONTEXT_TOKEN_LIMIT = 128_000
 
 internal fun resolveContextTokenLimit(
     modelContextTokenLimit: Int?,
     assistantContextTokenLimit: Int,
 ): Int = modelContextTokenLimit?.takeIf { it > 0 }
     ?: assistantContextTokenLimit.takeIf { it > 0 }
-    ?: DEFAULT_CONTEXT_TOKEN_LIMIT
+    ?: DEFAULT_MODEL_CONTEXT_LENGTH
 
 internal fun autoCompressShouldTrigger(
     totalTokens: Int,
@@ -202,7 +201,7 @@ fun CompressContextDialog(
                 TextButton(onClick = {
                     hapticController.lightTap()
                     // 兜底：删除或非法时恢复默认 128k
-                    val effectiveLimit = contextLimit.takeIf { it > 0 } ?: DEFAULT_CONTEXT_TOKEN_LIMIT
+                    val effectiveLimit = contextLimit.takeIf { it > 0 } ?: DEFAULT_MODEL_CONTEXT_LENGTH
                     onSaveContextTokenLimit(effectiveLimit)
                     // 只有目标 Token 和保留消息数都大于 0 时才执行压缩
                     if (selectedTokens > 0 && keepRecentMessages > 0) {

@@ -118,8 +118,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.registry.contextLengthOrDefault
 import me.rerere.ai.provider.Model
-import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
@@ -631,30 +631,39 @@ private fun ChatPageContent(
                 parts = inputState.getContents(),
                 messageId = inputState.editingMessage!!,
             )
-        } else if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
-            if (appendOnly) {
-                // 生成中长按发送：只追加消息不回复，不打断当前任务，先排队。
-                vm.sendMessageQueued(inputState.getContents(), answer = false)
-            } else {
-                val contents = inputState.getContents()
-                val hasAttachment = contents.any { it !is UIMessagePart.Text }
-                if (hasAttachment) {
-                    // 生成中发带附件消息：同样排队（不打断当前流式），回合正常结束后自动发送。
-                    vm.sendMessageQueued(contents)
+        } else {
+            todolist
+                ?.takeIf { it.items.isNotEmpty() && it.items.all { item ->
+                    item.status == TodoStatus.completed || item.status == TodoStatus.cancelled
+                } }
+                ?.let { completedTodo ->
+                    todoStorage.saveDismissedFingerprint(
+                        conversation.id.toString(),
+                        completedTodo.fingerprint(),
+                    )
+                }
+            if (loadingJob?.isActive == true || subAgentActiveCount > 0) {
+                if (appendOnly) {
+                    vm.sendMessageQueued(inputState.getContents(), answer = false)
                 } else {
-                    val guidanceText = inputState.textContent.text.toString()
-                    if (pendingGuidance.isNotEmpty()) {
-                        vm.sendGuidanceInterrupt(guidanceText)
+                    val contents = inputState.getContents()
+                    val hasAttachment = contents.any { it !is UIMessagePart.Text }
+                    if (hasAttachment) {
+                        vm.sendMessageQueued(contents)
                     } else {
-                        vm.sendGuidance(guidanceText)
+                        val guidanceText = inputState.textContent.text.toString()
+                        if (pendingGuidance.isNotEmpty()) {
+                            vm.sendGuidanceInterrupt(guidanceText)
+                        } else {
+                            vm.sendGuidance(guidanceText)
+                        }
                     }
                 }
+                scrollAfterSend()
+            } else {
+                vm.sendMessageQueued(inputState.getContents(), answer = !appendOnly)
+                scrollAfterSend()
             }
-            scrollAfterSend()
-        } else {
-            // 普通发送（appendOnly=false）要触发 AI 生成（answer=true）；长按仅追加（appendOnly=true）不生成（answer=false）
-            vm.sendMessageQueued(inputState.getContents(), answer = !appendOnly)
-            scrollAfterSend()
         }
         inputState.clearInput()
         vm.clearDraft()
@@ -765,10 +774,14 @@ private fun ChatPageContent(
                     // （"生成完后下滑查看上方消息回弹抽搐"根因）。
                     // 手势判定排除程序滚动：跟随滚动/折叠动画已置 scrollingByProgram，
                     // 否则生成末帧的最后一次跟随会把自动折叠误判为"用户在看历史"而跳过。
+                    // 持久闩锁（userScrolledLatch）：离开底部后、回到底部前一律视为用户在
+                    // 控制列表——350ms 时间窗在慢速浏览历史时会过期，生成结束的自动折叠
+                    // 可能误触发（折叠高度骤减 → LazyColumn 锚点修正 → 拽回）。
                     val now = android.os.SystemClock.elapsedRealtime()
                     listInteracting.value ||
                         (chatListState.isScrollInProgress && !thinkingFreezeState.scrollingByProgram) ||
-                        (now - lastUserScrollAt < 350L)
+                        (now - lastUserScrollAt < 350L) ||
+                        userScrolledLatch
                 },
                 LocalScrollChatToBottom provides {
                     // 消费闩锁（无论是否贴底都复位，让下一次折叠重新武装）；
@@ -882,6 +895,9 @@ private fun ChatPageContent(
                             },
                             onToolAnswer = { toolCallId, answer ->
                                 vm.handleToolAnswer(toolCallId, answer)
+                            },
+                            onApproveAllRelated = { toolCallId ->
+                                vm.approveAllRelatedApprovals(toolCallId)
                             },
                             onToggleFavorite = { node ->
                                 vm.toggleMessageFavorite(node)
@@ -1081,9 +1097,7 @@ private fun ChatPageContent(
 
         if (showCompressDialog) {
             val assistant = setting.getCurrentAssistant()
-            val modelContextTokenLimit = setting.getCurrentChatModel()?.modelId?.let {
-                ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
-            }
+            val modelContextTokenLimit = setting.getCurrentChatModel()?.contextLengthOrDefault()
             CompressContextDialog(
                 contextTokenLimit = assistant.contextTokenLimit,
                 modelContextTokenLimit = modelContextTokenLimit,
@@ -1400,7 +1414,11 @@ private fun TopBar(
                     )
                     if (model != null && provider != null) {
                         Text(
-                            text = "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
+                            text = stringResource(
+                                R.string.chat_page_model_context,
+                                "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
+                                formatContextLength(model.contextLengthOrDefault()),
+                            ),
                             overflow = TextOverflow.Ellipsis,
                             maxLines = 1,
                             color = LocalContentColor.current.copy(0.65f),
@@ -1660,7 +1678,7 @@ private fun TodolistBanner(
                                     // 全部完成后关闭 = 彻底隐藏这个任务集：持久化指纹，
                                     // 切换界面 / 重启进程都不再显示；AI 换新任务后自动重新出现。
                                     // 任务未完成时关闭仍只是本次折叠（下轮提醒/更新后重新显示）。
-                                    if (allDone) onDismiss()
+                                    onDismiss()
                                 },
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1793,6 +1811,13 @@ private suspend fun scrollListByDelta(
  * 汇总一条会话当前的 token 用量与上下文上限，供顶部用量圆圈与自动压缩共用，
  * 避免两处重复计算导致数值口径不一致。
  */
+private fun formatContextLength(tokens: Int): String = when {
+    tokens >= 1_000_000 && tokens % 1_000_000 == 0 -> "${tokens / 1_000_000}M"
+    tokens >= 1_000 && tokens % 1_000 == 0 -> "${tokens / 1_000}k"
+    tokens >= 1_000 -> "%.1fk".format(tokens / 1_000f)
+    else -> tokens.toString()
+}
+
 private data class TokenStats(
     val totalTokens: Int,
     val contextTokenLimit: Int,
@@ -1804,9 +1829,7 @@ private fun computeTokenStats(
     settings: Settings,
 ): TokenStats {
     val assistant = settings.getCurrentAssistant()
-    val modelContextTokenLimit = settings.getCurrentChatModel()?.modelId?.let {
-        ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it)
-    }
+    val modelContextTokenLimit = settings.getCurrentChatModel()?.contextLengthOrDefault()
     val contextTokenLimit = resolveContextTokenLimit(
         modelContextTokenLimit = modelContextTokenLimit,
         assistantContextTokenLimit = assistant.contextTokenLimit,

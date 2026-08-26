@@ -4,10 +4,14 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.uuid.Uuid
 
+const val DEFAULT_MODEL_CONTEXT_LENGTH = 128_000
+
 @Serializable
 data class Model(
     val modelId: String = "",
     val displayName: String = "",
+    /** Registered model context window in tokens. Null keeps compatibility with older settings. */
+    val contextLength: Int? = null,
     val id: Uuid = Uuid.random(),
     val type: ModelType = ModelType.CHAT,
     val customHeaders: List<CustomHeader> = emptyList(),

@@ -70,7 +70,7 @@ object SubAgentCatalog {
             ## Workflow
             1. Use the `search_web__*` tools first (one per enabled provider; call several to cross-check).
             2. If search snippets are insufficient, use `scrape_web__*` to read key pages.
-            3. When internal data is needed, call `mcp__*` tools.
+            3. When internal data is needed, call `mcp_list` to see available MCP tools, then `mcp_call` to invoke one.
             4. Cross-verify key facts across sources; when sources conflict, say so explicitly — never fabricate.
 
             ## Output Format

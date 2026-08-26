@@ -9,7 +9,6 @@ import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.DragDropHorizontal
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -102,6 +101,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.registry.contextLengthOrDefault
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ai.ModelAbilityTag
@@ -111,6 +111,7 @@ import me.rerere.rikkahub.ui.components.ai.ModelTypeTag
 import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.SettingsLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.ShareSheet
 import me.rerere.rikkahub.ui.components.ui.SiliconFlowPowerByIcon
@@ -451,27 +452,14 @@ private fun ModelList(
                                 onUpdateProvider(providerSetting.editModel(editedModel))
                             },
                             parentProvider = providerSetting,
-                            // 拖动把手独立成图标（与供应商列表页一致）：整卡长按与
-                            // SwipeToDismissBox 横向滑动手势互抢，易误触；图标把手
-                            // 让"长按拖动"与"横滑删除"各占各的手势区域。
-                            dragHandle = {
-                                IconButton(
-                                    onClick = {},
-                                    modifier = Modifier.longPressDraggableHandle(
-                                        onDragStarted = {
-                                            hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                        },
-                                        onDragStopped = {
-                                            hapticController.perform(HapticFeedbackType.GestureEnd)
-                                        },
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = HugeIcons.DragDropHorizontal,
-                                        contentDescription = null,
-                                    )
-                                }
-                            },
+                            dragModifier = Modifier.longPressDraggableHandle(
+                                onDragStarted = {
+                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                },
+                                onDragStopped = {
+                                    hapticController.perform(HapticFeedbackType.GestureEnd)
+                                },
+                            ),
                             modifier = Modifier
                                 // 兄弟项随拖放平滑移动，避免列表位置硬跳（闪烁来源之一）
                                 .animateItem()
@@ -532,6 +520,7 @@ private fun ModelSettingsForm(
             model.copy(
                 modelId = id,
                 displayName = id,
+                contextLength = ModelRegistry.contextLengthOrDefault(id),
                 inputModalities = inputModality,
                 outputModalities = outputModality,
                 abilities = abilities
@@ -619,6 +608,17 @@ private fun ModelSettingsForm(
                                     Text(stringResource(R.string.setting_provider_page_model_display_name_placeholder))
                                 }
                             }
+                        )
+
+                        OutlinedNumberInput(
+                            value = model.contextLengthOrDefault(),
+                            onValueChange = { contextLength ->
+                                if (contextLength > 0) {
+                                    onModelChange(model.copy(contextLength = contextLength))
+                                }
+                            },
+                            label = stringResource(R.string.setting_provider_page_model_context_length),
+                            modifier = Modifier.fillMaxWidth(),
                         )
 
                         ModelTypeSelector(
@@ -727,6 +727,7 @@ private fun AddModelButton(
                 val abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
                 onAddModel(
                     model.copy(
+                        contextLength = model.contextLengthOrDefault(),
                         inputModalities = inputModalities,
                         outputModalities = outputModalities,
                         abilities = abilities
@@ -743,6 +744,7 @@ private fun AddModelButton(
                             parentProvider.models.none { existing -> existing.modelId == model.modelId }
                         }.map { model ->
                             model.copy(
+                                contextLength = model.contextLengthOrDefault(),
                                 inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId),
                                 outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId),
                                 abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
@@ -987,6 +989,7 @@ private fun ModelPicker(
                                     ) {
                                         val modelMeta = remember(it) {
                                             it.copy(
+                                                contextLength = it.contextLengthOrDefault(),
                                                 inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
                                                 outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
                                                 abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
@@ -1217,7 +1220,7 @@ private fun ModelCard(
     onDelete: () -> Unit,
     onEdit: (Model) -> Unit,
     parentProvider: ProviderSetting,
-    dragHandle: @Composable () -> Unit = {},
+    dragModifier: Modifier = Modifier,
 ) {
     val dialogState = useEditState<Model> {
         onEdit(it)
@@ -1349,7 +1352,7 @@ private fun ModelCard(
         gesturesEnabled = true,
         modifier = modifier
     ) {
-        OutlinedCard {
+        OutlinedCard(modifier = dragModifier) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1404,7 +1407,6 @@ private fun ModelCard(
                     Icon(HugeIcons.Tools, "Edit")
                 }
 
-                dragHandle()
             }
         }
     }

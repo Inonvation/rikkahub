@@ -257,6 +257,7 @@ fun McpPicker(
                         McpStatus.Authorizing -> CircularProgressIndicator(
                             modifier = Modifier.size(24.dp)
                         )
+                        McpStatus.InvalidConfig -> Icon(HugeIcons.Alert01, null)
                     }
                     Column(
                         modifier = Modifier.weight(1f),
@@ -275,6 +276,7 @@ fun McpPicker(
                                 is McpStatus.Error -> "Error: ${s.message}"
                                 is McpStatus.NeedsAuthorization -> "Needs authorization"
                                 is McpStatus.Authorizing -> "Authorizing"
+                                is McpStatus.InvalidConfig -> "Invalid config"
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = LocalContentColor.current.copy(alpha = 0.8f),

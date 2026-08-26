@@ -99,3 +99,24 @@ val McpServerConfig.serverUrl: String
         is McpServerConfig.SseTransportServer -> url
         is McpServerConfig.StreamableHTTPServer -> url
     }
+
+/**
+ * 结构性配置校验：返回 null 表示可用于连接，否则返回错误原因。
+ *
+ * 这类错误属于「配置错误」（对应 [McpStatus.InvalidConfig]），不允许自动重连/工具调用，
+ * 与网络/服务层错误（[McpStatus.Error]）严格区分。仅做静态结构校验，不发起任何网络请求。
+ */
+fun McpServerConfig.configError(): String? {
+    if (commonOptions.name.isBlank()) return "服务器名称不能为空"
+    val url = serverUrl
+    if (url.isBlank()) return "URL 不能为空"
+    val scheme = url.substringBefore(":", missingDelimiterValue = "").lowercase()
+    if (scheme != "http" && scheme != "https") return "URL 协议必须是 http/https"
+    // 注意：不带 missingDelimiterValue 调 substringBefore，分隔符不存在时返回整段字符串；
+    // 不然 https://host（无路径/无查询）会被误判成缺主机名。
+    val host = url.substringAfter("://", missingDelimiterValue = "")
+        .substringBefore('/')
+        .substringBefore('?')
+    if (host.isBlank()) return "URL 缺少主机名"
+    return null
+}

@@ -82,6 +82,8 @@ data class ModelConfigDto(
     val modelId: String,
     val displayName: String,
     val type: String, // chat / image / embedding / reranking
+    /** Registered context window in tokens. */
+    val contextLength: Int? = null,
     // ---- 模型基本设置 ----
     val inputModalities: List<String> = emptyList(),   // text / image
     val outputModalities: List<String> = emptyList(),  // text / image

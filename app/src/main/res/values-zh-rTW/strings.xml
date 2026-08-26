@@ -237,6 +237,7 @@
   <string name="chat_message_add_favorite">加入最愛</string>
   <string name="chat_message_remove_favorite">移除最愛</string>
   <string name="chat_message_tool_approve">核准</string>
+  <string name="chat_message_tool_approve_all">同意相關所有核准</string>
   <string name="chat_message_tool_ask_questions">詢問 %d 個問題</string>
   <string name="chat_message_tool_call_generic">調用工具 %1$s</string>
   <string name="chat_message_tool_call_label">調用工具 %1$s</string>
@@ -248,8 +249,10 @@
   <string name="chat_message_tool_delete_memory">刪除了記憶</string>
   <string name="chat_message_tool_denied">已拒絕</string>
   <string name="chat_message_tool_deny">拒絕</string>
+  <string name="chat_message_tool_deny_and_output_reason">拒絕並輸出原因</string>
   <string name="chat_message_tool_deny_dialog_hint">原因（選填）</string>
   <string name="chat_message_tool_deny_dialog_title">拒絕工具執行</string>
+  <string name="chat_message_tool_more_actions">更多操作</string>
   <string name="chat_message_tool_edit_memory">更新了記憶</string>
   <string name="chat_message_tool_get_time">取得時間資訊</string>
   <string name="chat_message_tool_scrape_prefix">爬取網站：%1$s</string>

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.config
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.registry.contextLengthOrDefault
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
@@ -155,6 +156,7 @@ object AgentConfigExporter {
         modelId = modelId,
         displayName = displayName,
         type = type.name.lowercase(),
+        contextLength = contextLengthOrDefault(),
         inputModalities = inputModalities.map { it.name.lowercase() }.sorted(),
         outputModalities = outputModalities.map { it.name.lowercase() }.sorted(),
         abilities = abilities.map { it.name.lowercase() }.sorted(),

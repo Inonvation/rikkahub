@@ -138,6 +138,7 @@ private object DefaultToolUIRenderer : ToolUIRenderer {
 object ToolUIRegistry {
     private val renderers: Map<String, ToolUIRenderer> = listOf(
         MemoryToolUI,
+        McpCallToolUI,
         SearchWebToolUI,
         ScrapeWebToolUI,
         JavascriptToolUI,
@@ -618,6 +619,11 @@ internal fun toolApprovalPurpose(
             val modelId = argObj?.get("modelId")?.jsonPrimitiveOrNull?.contentOrNull
             if (modelId.isNullOrBlank()) base else "$base：$modelId"
         }
+        "mcp_call" -> {
+            val server = argObj?.get("server")?.jsonPrimitiveOrNull?.contentOrNull
+            val tool = argObj?.get("tool")?.jsonPrimitiveOrNull?.contentOrNull
+            if (server.isNullOrBlank() || tool.isNullOrBlank()) base else "$base：$server / $tool"
+        }
         else -> base
     }
     return detail
@@ -643,6 +649,7 @@ private val PURPOSE_MAP = mapOf(
     "workspace_edit" to "编辑工作区文件",
     "workspace_shell" to "在工作区执行命令",
     "subagent_spawn" to "派发子代理任务",
+    "mcp_call" to "调用 MCP 工具",
 )
 
 /**

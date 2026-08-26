@@ -43,7 +43,11 @@ data class Assistant(
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),
-    val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo),
+    val localTools: List<LocalToolOption> = listOf(
+        LocalToolOption.TimeInfo,
+        LocalToolOption.JavascriptEngine,
+        LocalToolOption.AskUser,
+    ),
     val enableWebSearch: Boolean = false, // 网络搜索开关(每个助手独立)
     val workspaceId: Uuid? = null,
     /** 新建对话时默认的工作目录（Rootfs 内绝对路径）；用户切换 cwd 时同步保存 */

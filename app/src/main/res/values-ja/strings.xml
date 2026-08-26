@@ -237,6 +237,7 @@
   <string name="chat_message_add_favorite">お気に入りに追加</string>
   <string name="chat_message_remove_favorite">お気に入りから削除</string>
   <string name="chat_message_tool_approve">承認</string>
+  <string name="chat_message_tool_approve_all">関連するすべての承認</string>
   <string name="chat_message_tool_ask_questions">%d 件の質問</string>
   <string name="chat_message_tool_call_generic">ツール %1$s を呼び出しました</string>
   <string name="chat_message_tool_call_label">ツール %1$s を呼び出しました</string>
@@ -248,8 +249,10 @@
   <string name="chat_message_tool_delete_memory">記憶を削除しました</string>
   <string name="chat_message_tool_denied">拒否されました</string>
   <string name="chat_message_tool_deny">拒否</string>
+  <string name="chat_message_tool_deny_and_output_reason">拒否して理由を出力</string>
   <string name="chat_message_tool_deny_dialog_hint">理由（任意）</string>
   <string name="chat_message_tool_deny_dialog_title">ツール実行を拒否</string>
+  <string name="chat_message_tool_more_actions">その他の操作</string>
   <string name="chat_message_tool_edit_memory">記憶を更新しました</string>
   <string name="chat_message_tool_get_time">時刻情報を取得</string>
   <string name="chat_message_tool_scrape_prefix">ウェブサイトをスクレイピング: %1$s</string>

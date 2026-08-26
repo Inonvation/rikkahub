@@ -100,7 +100,15 @@ class StreamChunkHandler(private val model: Model? = null) {
                 }
             }
 
-            is StreamChunk.TextEnd -> this.also { textPartIndexes.remove(chunk.id) }
+            is StreamChunk.TextEnd -> {
+                // 文本段结束：清理该段首尾的空白行，避免模型输出末尾多余的换行被渲染成空行
+                val index = textPartIndexes.remove(chunk.id)
+                if (index == null || parts.getOrNull(index) !is UIMessagePart.Text) this
+                else copy(parts = parts.toMutableList().apply {
+                    val text = get(index) as UIMessagePart.Text
+                    set(index, text.copy(text = text.text.trimBlankLines()))
+                })
+            }
             is StreamChunk.ReasoningStart -> {
                 if (chunk.id in reasoningPartIndexes) this
                 else copy(parts = parts + UIMessagePart.Reasoning(
@@ -304,13 +312,6 @@ class StreamChunkHandler(private val model: Model? = null) {
     })
 }
 
-private fun UIMessage.cleanupBlankParts(): UIMessage = copy(
-    parts = parts.filterNot { part ->
-        (part is UIMessagePart.Text && part.text.isBlank()) ||
-            (part is UIMessagePart.Reasoning && part.reasoning.isBlank())
-    }
-)
-
 private fun parseServerToolJson(value: String) = runCatching {
     json.parseToJsonElement(value)
 }.getOrElse { JsonPrimitive(value) }
@@ -338,7 +339,7 @@ fun List<UIMessage>.handleTextGenerationResult(
             modelId = model?.id ?: last().modelId,
             usage = last().usage.merge(result.usage ?: TokenUsage()),
             finishedAt = incoming.finishedAt,
-        ).finishReasoning()
+        ).finishReasoning().cleanupBlankParts()
     }
 }
 

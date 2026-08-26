@@ -240,6 +240,36 @@ private fun AssistantLocalToolContent(
                     )
                 }
             )
+            item(
+                headlineContent = { Text("设备诊断") },
+                supportingContent = { Text("检查设备健康状态与系统信息") },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.DeviceDoctor),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.DeviceDoctor, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = { Text("存储清理") },
+                supportingContent = { Text("分析并清理冗余存储空间") },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.StorageCleaner),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.StorageCleaner, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = { Text("冻结应用") },
+                supportingContent = { Text("临时冻结不常用应用以节省资源") },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.FreezeApps),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.FreezeApps, it) }
+                    )
+                }
+            )
         }
     }
 }

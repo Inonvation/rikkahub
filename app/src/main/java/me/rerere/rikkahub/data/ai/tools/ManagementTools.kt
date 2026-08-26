@@ -27,6 +27,7 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
@@ -316,11 +317,25 @@ internal fun updateProviderModels(
     remove: List<String>?,
 ): List<Model> {
     val base = if (full != null) {
-        full.map { Model(modelId = it.trim(), displayName = it.trim()) }
+        full.map {
+            val modelId = it.trim()
+            Model(
+                modelId = modelId,
+                displayName = modelId,
+                contextLength = ModelRegistry.contextLengthOrDefault(modelId),
+            )
+        }
     } else {
         current
     }
-    val additions = add.orEmpty().map { Model(modelId = it.trim(), displayName = it.trim()) }
+    val additions = add.orEmpty().map {
+        val modelId = it.trim()
+        Model(
+            modelId = modelId,
+            displayName = modelId,
+            contextLength = ModelRegistry.contextLengthOrDefault(modelId),
+        )
+    }
     val removed = remove.orEmpty().toSet()
     return (base + additions).filterNot { it.modelId in removed }.distinctBy { it.modelId }
 }
@@ -501,7 +516,13 @@ fun createProviderAdminTools(
                 val models = input.strArray("models")
                     ?.map { it.trim() }
                     ?.filter { it.isNotEmpty() }
-                    ?.map { Model(modelId = it, displayName = it) }
+                    ?.map { modelId ->
+                        Model(
+                            modelId = modelId,
+                            displayName = modelId,
+                            contextLength = ModelRegistry.contextLengthOrDefault(modelId),
+                        )
+                    }
                     ?: emptyList()
                 val baseUrl = input.str("baseUrl")?.trim()?.ifEmpty { null }
                 val enabled = input.bool("enabled") ?: true
@@ -756,7 +777,7 @@ fun createProviderAdminTools(
         ),
         Tool(
             name = "model_add",
-            description = "Add a model with full basic settings to a provider: type (chat/image/embedding/reranking), abilities (tool/reasoning), input/output modalities (text/image), built-in tools (search/url_context/image_generation) and optional custom headers. When type/abilities/modalities are omitted they are inferred from the modelId (e.g. *-vision → image input, o1/thinking → reasoning). Requires user approval.",
+            description = "Add a model with full basic settings to a provider: type (chat/image/embedding/reranking), contextLength (tokens), abilities (tool/reasoning), input/output modalities (text/image), built-in tools (search/url_context/image_generation) and optional custom headers. When type/abilities/modalities are omitted they are inferred from the modelId (e.g. *-vision → image input, o1/thinking → reasoning). Requires user approval.",
             needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
@@ -770,6 +791,10 @@ fun createProviderAdminTools(
                             put("description", "Model identifier, e.g. gpt-4o")
                         })
                         put("displayName", buildJsonObject { put("type", "string") })
+                        put("contextLength", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Context length in tokens; defaults to the registered model capability or 128000")
+                        })
                         put("type", buildJsonObject {
                             put("type", "string")
                             put("description", "chat / image / embedding / reranking (default chat)")
@@ -812,6 +837,8 @@ fun createProviderAdminTools(
                 val model = Model(
                     modelId = modelId,
                     displayName = input.str("displayName")?.trim()?.ifEmpty { null } ?: modelId,
+                    contextLength = input.int("contextLength")?.takeIf { it > 0 }
+                        ?: ModelRegistry.contextLengthOrDefault(modelId),
                     type = input.str("type")?.let { parseModelType(it) } ?: inferred.type,
                     abilities = parseAbilities(input.strArray("abilities")) ?: inferred.abilities,
                     inputModalities = parseModalities(input.strArray("inputModalities")) ?: inferred.inputModalities,
@@ -835,7 +862,7 @@ fun createProviderAdminTools(
         ),
         Tool(
             name = "model_update",
-            description = "Update basic settings of an existing model: displayName, type, abilities, input/output modalities, built-in tools and custom headers. Omitted fields keep their current value. Requires user approval.",
+            description = "Update basic settings of an existing model: displayName, contextLength (tokens), type, abilities, input/output modalities, built-in tools and custom headers. Omitted fields keep their current value. Requires user approval.",
             needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
@@ -846,6 +873,10 @@ fun createProviderAdminTools(
                             put("description", "Model id from provider_get or config_read")
                         })
                         put("displayName", buildJsonObject { put("type", "string") })
+                        put("contextLength", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Context length in tokens")
+                        })
                         put("type", buildJsonObject {
                             put("type", "string")
                             put("description", "chat / image / embedding / reranking")
@@ -884,6 +915,7 @@ fun createProviderAdminTools(
                     ?: return@Tool errorText("model '$id' not found")
                 val updatedModel = model.copy(
                     displayName = input.str("displayName")?.trim()?.ifEmpty { null } ?: model.displayName,
+                    contextLength = input.int("contextLength")?.takeIf { it > 0 } ?: model.contextLength,
                     type = input.str("type")?.let { parseModelType(it) } ?: model.type,
                     abilities = parseAbilities(input.strArray("abilities")) ?: model.abilities,
                     inputModalities = parseModalities(input.strArray("inputModalities")) ?: model.inputModalities,

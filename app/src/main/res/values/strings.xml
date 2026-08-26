@@ -245,6 +245,7 @@
   <string name="chat_message_add_favorite">Add Favorite</string>
   <string name="chat_message_remove_favorite">Remove Favorite</string>
   <string name="chat_message_tool_approve">Approve</string>
+  <string name="chat_message_tool_approve_all">Approve all related</string>
   <string name="chat_message_tool_ask_questions">Ask %d questions</string>
   <string name="chat_message_tool_call_generic">Called tool %1$s</string>
   <string name="chat_message_tool_call_label">Called tool %1$s</string>
@@ -257,8 +258,10 @@
   <string name="chat_message_tool_denied">Denied</string>
   <string name="chat_message_tool_view_full_detail">View full detail</string>
   <string name="chat_message_tool_deny">Deny</string>
+  <string name="chat_message_tool_deny_and_output_reason">Deny and output reason</string>
   <string name="chat_message_tool_deny_dialog_hint">Reason (optional)</string>
   <string name="chat_message_tool_deny_dialog_title">Deny Tool Execution</string>
+  <string name="chat_message_tool_more_actions">More actions</string>
   <string name="chat_message_tool_edit_memory">Updated memory</string>
   <string name="chat_message_tool_get_time">Get time info</string>
   <string name="chat_message_tool_scrape_prefix">Scrape website: %1$s</string>
@@ -316,6 +319,7 @@
   <string name="chat_page_clear_all_errors">Clear all</string>
   <string name="chat_page_compress_additional_prompt">附加说明（可选）</string>
   <string name="chat_page_compress_additional_prompt_hint">指定要保留或关注的内容</string>
+  <string name="chat_page_model_context">%1$s / Context %2$s</string>
   <string name="chat_page_compress_context">压缩历史</string>
   <string name="chat_page_compress_context_desc">将对话压缩为摘要以节省令牌</string>
   <string name="chat_page_compress_context_title">压缩对话历史</string>
@@ -1334,6 +1338,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_model_display_name_placeholder">e.g.: GPT-3.5, for UI display</string>
   <string name="setting_provider_page_model_id">Model ID</string>
   <string name="setting_provider_page_model_id_placeholder">e.g.: gpt-3.5-turbo</string>
+  <string name="setting_provider_page_model_context_length">Context length (tokens)</string>
   <string name="setting_provider_page_model_name">Model Name</string>
   <string name="setting_provider_page_model_type">Model Type</string>
   <string name="setting_provider_page_models">Models</string>

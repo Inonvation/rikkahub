@@ -273,7 +273,12 @@ class MessageToolMigrationTest {
                     UIMessage(
                         role = MessageRole.ASSISTANT,
                         parts = listOf(
-                            UIMessagePart.Tool("call1", "tool", "{}", listOf(UIMessagePart.Text("result")))
+                            UIMessagePart.Tool(
+                                toolCallId = "call1",
+                                toolName = "tool",
+                                input = "{}",
+                                output = listOf(UIMessagePart.Text("result")),
+                            )
                         )
                     )
                 )
@@ -421,7 +426,12 @@ class MessageToolMigrationTest {
             UIMessage(
                 role = MessageRole.ASSISTANT,
                 parts = listOf(
-                    UIMessagePart.Tool("call1", "tool", "{}", listOf(UIMessagePart.Text("result"))),
+                    UIMessagePart.Tool(
+                        toolCallId = "call1",
+                        toolName = "tool",
+                        input = "{}",
+                        output = listOf(UIMessagePart.Text("result")),
+                    ),
                     UIMessagePart.Text("Response"),
                     UIMessagePart.Reasoning(reasoning = "Thinking")
                 )

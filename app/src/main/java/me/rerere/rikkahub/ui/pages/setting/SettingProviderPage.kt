@@ -4,7 +4,6 @@ import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
@@ -191,25 +190,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 .animateItem()
                                 .fillMaxWidth(),
                             provider = provider,
-                            dragHandle = {
-                                IconButton(
-                                    onClick = {},
-                                    modifier = Modifier
-                                        .longPressDraggableHandle(
-                                            onDragStarted = {
-                                                hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                            },
-                                            onDragStopped = {
-                                                hapticController.perform(HapticFeedbackType.GestureEnd)
-                                            }
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = HugeIcons.DragDropHorizontal,
-                                        contentDescription = null
-                                    )
+                            dragModifier = Modifier.longPressDraggableHandle(
+                                onDragStarted = {
+                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                },
+                                onDragStopped = {
+                                    hapticController.perform(HapticFeedbackType.GestureEnd)
                                 }
-                            },
+                            ),
                             onCopy = {
                                 hapticController.tap()
                                 vm.updateSettings(
@@ -630,13 +618,13 @@ private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
 private fun ProviderItem(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
-    dragHandle: @Composable () -> Unit,
+    dragModifier: Modifier = Modifier,
     onCopy: () -> Unit,
     onClick: () -> Unit
 ) {
     val hapticController = rememberHaptic()
     Card(
-        modifier = modifier,
+        modifier = modifier.then(dragModifier),
         colors = CardDefaults.cardColors(
             containerColor = if (provider.enabled) {
                 CustomColors.listItemColors.containerColor
@@ -704,7 +692,6 @@ private fun ProviderItem(
                     contentDescription = stringResource(R.string.assistant_page_clone)
                 )
             }
-            dragHandle()
         }
     }
 }

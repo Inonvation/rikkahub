@@ -646,13 +646,14 @@ private fun SendButton(
     modifier: Modifier = Modifier,
 ) {
     val hapticController = rememberHaptic()
+    val stopping = loading && empty
     val containerColor = when {
-        loading -> MaterialTheme.colorScheme.errorContainer
+        stopping -> MaterialTheme.colorScheme.errorContainer
         empty -> MaterialTheme.colorScheme.surfaceContainerHigh
         else -> MaterialTheme.colorScheme.primary
     }
     val contentColor = when {
-        loading -> MaterialTheme.colorScheme.onErrorContainer
+        stopping -> MaterialTheme.colorScheme.onErrorContainer
         empty -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         else -> MaterialTheme.colorScheme.onPrimary
     }
@@ -663,7 +664,7 @@ private fun SendButton(
             .testTag("chat_send_button")
             .clip(CircleShape)
             .combinedClickable(
-                enabled = loading || !empty,
+                enabled = stopping || !empty,
                 onClick = { hapticController.tap(); onClick() },
                 onLongClick = { hapticController.tap(); onLongClick() },
             )
@@ -676,6 +677,8 @@ private fun SendButton(
         )
         if (loading) {
             KeepScreenOn()
+        }
+        if (stopping) {
             Icon(
                 imageVector = HugeIcons.Cancel01,
                 contentDescription = stringResource(R.string.stop),

@@ -14,6 +14,9 @@ class SkillManager(
 ) {
     companion object {
         private const val TAG = "SkillManager"
+
+        /** SKILL.md 体积上限（字符），超限拒绝写入并保留旧文件。 */
+        private const val MAX_SKILL_SIZE = 1_000_000
     }
 
     fun getSkillsDir(): File {
@@ -83,13 +86,42 @@ class SkillManager(
     }
 
     fun saveSkill(name: String, content: String): SkillMetadata? {
+        // 先校验再提交：格式非法时**不写盘**（保留旧文件），避免坏 SKILL.md 落盘后再解析失败的
+        // “先写后错”路径。校验要求与 SkillsVM / SkillDetailVM 的前置校验保持一致（name/description），
+        // 并额外强制 frontmatter 存在、name 与目录名一致、大小上限。
+        validateSkillContent(name, content)?.let { reason ->
+            Log.w(TAG, "saveSkill rejected: $name ($reason)")
+            return null
+        }
         // 通过原子写入(staging + rename)落盘，避免直接 mkdirs 失败时
         // writeText 抛出 FileNotFoundException 导致崩溃
-        if (!saveSkillFileBytesAtomically(name, mapOf("SKILL.md" to content.toByteArray()))) {
+        if (!saveSkillFileBytesAtomically(name, mapOf("SKILL.md" to content.toByteArray(Charsets.UTF_8)))) {
             return null
         }
         val skillDir = resolveSkillDir(name) ?: return null
         return parseSkillFile(skillDir.resolve("SKILL.md"), skillDir)
+    }
+
+    /**
+     * 校验 SKILL.md 内容；返回 null 表示合法，否则返回错误原因。
+     *
+     * 只做“能否安全落盘、能否被系统解析”的硬校验，不校验业务内容；与现有
+     * [parseSkillFile] 的准入条件一致（frontmatter 存在、name/description 非空），
+     * 额外强制 name 与技能目录名一致并限制体积。
+     */
+    private fun validateSkillContent(name: String, content: String): String? {
+        if (content.isBlank()) return "SKILL.md 内容为空"
+        if (content.length > MAX_SKILL_SIZE) return "SKILL.md 超出大小限制"
+        val frontmatter = SkillFrontmatterParser.parse(content)
+        if (frontmatter === SkillFrontmatter.Empty) return "SKILL.md 缺少有效的 frontmatter"
+        val normalizedName = name.trim()
+        val fmName = frontmatter["name"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: return "SKILL.md 缺少 name 字段"
+        if (fmName != normalizedName) return "SKILL.md 的 name 与技能目录名不一致"
+        if (frontmatter["description"]?.trim()?.isNotBlank() != true) {
+            return "SKILL.md 缺少 description 字段"
+        }
+        return null
     }
 
     suspend fun deleteSkill(name: String): Boolean = withContext(Dispatchers.IO) {
@@ -141,9 +173,31 @@ class SkillManager(
     fun saveSkillFile(skillName: String, relativePath: String, content: String): Boolean {
         val skillDir = resolveSkillDir(skillName) ?: return false
         val target = SkillPaths.resolveSkillFile(skillDir, relativePath) ?: return false
+
+        // 对 SKILL.md 强制校验后再落盘：避免详情页单文件保存直接 writeText 把坏文件写进去
+        if (relativePath.equals("SKILL.md", ignoreCase = true)) {
+            validateSkillContent(skillName, content)?.let { reason ->
+                Log.w(TAG, "saveSkillFile rejected: $skillName/$relativePath ($reason)")
+                return false
+            }
+        }
+
         target.parentFile?.mkdirs()
-        target.writeText(content)
-        return true
+        // 单文件原子替换：临时文件 + rename；避免直接 writeText 非受控覆盖崩溃/写坏
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        return runCatching {
+            tmp.writeText(content, Charsets.UTF_8)
+            if (!tmp.renameTo(target)) {
+                // rename 失败（目标已存在/平台差异）时回退直接覆盖，保证不 crash
+                tmp.delete()
+                target.writeText(content, Charsets.UTF_8)
+            }
+            true
+        }.getOrElse { e ->
+            Log.w(TAG, "saveSkillFile failed: $skillName/$relativePath", e)
+            tmp.delete()
+            false
+        }
     }
 
     fun saveSkillFilesAtomically(skillName: String, files: Map<String, String>): Boolean {
@@ -227,8 +281,16 @@ class SkillManager(
         return runCatching {
             val content = skillFile.readText()
             val frontmatter = SkillFrontmatterParser.parse(content)
-            val name = frontmatter["name"]?.takeIf { it.isNotBlank() } ?: return null
-            val description = frontmatter["description"]?.takeIf { it.isNotBlank() } ?: return null
+            val name = frontmatter["name"]?.takeIf { it.isNotBlank() }
+            if (name == null) {
+                Log.w(TAG, "parseSkillFile: missing name in ${skillFile.absolutePath}")
+                return null
+            }
+            val description = frontmatter["description"]?.takeIf { it.isNotBlank() }
+            if (description == null) {
+                Log.w(TAG, "parseSkillFile: missing description in ${skillFile.absolutePath}")
+                return null
+            }
             SkillMetadata(
                 name = name,
                 description = description,

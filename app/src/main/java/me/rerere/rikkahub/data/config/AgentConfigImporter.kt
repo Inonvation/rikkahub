@@ -10,6 +10,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
@@ -147,6 +148,7 @@ object AgentConfigImporter {
                 existing.copy(
                     modelId = dtoModel.modelId.ifBlank { existing.modelId },
                     displayName = dtoModel.displayName.ifBlank { existing.displayName },
+                    contextLength = dtoModel.contextLength?.takeIf { it > 0 } ?: existing.contextLength,
                     type = parseModelType(dtoModel.type) ?: existing.type,
                     abilities = parseAbilities(dtoModel.abilities) ?: existing.abilities,
                     inputModalities = parseModalities(dtoModel.inputModalities) ?: existing.inputModalities,
@@ -159,6 +161,8 @@ object AgentConfigImporter {
                     id = Uuid.random(),
                     modelId = dtoModel.modelId,
                     displayName = dtoModel.displayName,
+                    contextLength = dtoModel.contextLength?.takeIf { it > 0 }
+                        ?: ModelRegistry.contextLengthOrDefault(dtoModel.modelId),
                     type = parseModelType(dtoModel.type) ?: ModelType.CHAT,
                     abilities = parseAbilities(dtoModel.abilities) ?: emptyList(),
                     inputModalities = parseModalities(dtoModel.inputModalities)

@@ -13,7 +13,6 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.currentDateLabel
 import me.rerere.rikkahub.data.model.AssistantMemory
 
 fun buildMemoryTools(
@@ -35,7 +34,6 @@ fun buildMemoryTools(
             You may store: preferred name, preferences, plans, work-related notes, chat style preferences, first chat time, etc.
             Avoid storing transient facts that change often or can be looked up again.
             Do not show memory content directly in the conversation unless the user explicitly asks.
-            Today is ${currentDateLabel()}.
             Similar memories should be merged; prefer updating existing records.
 
             Examples:

@@ -1,6 +1,8 @@
 package me.rerere.ai.registry
 
+import me.rerere.ai.provider.DEFAULT_MODEL_CONTEXT_LENGTH
 import me.rerere.ai.provider.Modality
+import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 
 fun interface ModelData<T> {
@@ -717,6 +719,10 @@ object ModelRegistry {
         resolveModels(modelId).firstNotNullOfOrNull { it.contextLength }
     }
 
+    fun contextLengthOrDefault(modelId: String): Int =
+        MODEL_CONTEXT_LENGTH.getData(modelId)?.takeIf { it > 0 }
+            ?: DEFAULT_MODEL_CONTEXT_LENGTH
+
     private fun resolveModels(modelId: String): List<ModelDefinition> {
         var bestScore: Int? = null
         val matches = mutableListOf<ModelDefinition>()
@@ -772,3 +778,6 @@ object ModelRegistry {
     private val Int.k: Int get() = this * 1_000
     private val Int.m: Int get() = this * 1_000_000
 }
+
+fun Model.contextLengthOrDefault(): Int = contextLength?.takeIf { it > 0 }
+    ?: ModelRegistry.contextLengthOrDefault(modelId)

@@ -15,13 +15,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -111,6 +114,7 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.ai.CompressedHistoryCard
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.PresetMessagesIntro
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
 import me.rerere.rikkahub.ui.components.richtext.warmMarkdownCache
@@ -175,6 +179,7 @@ fun ChatList(
     onClearTranslation: (UIMessage) -> Unit = {},
     onJumpToMessage: (Int) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onApproveAllRelated: ((toolCallId: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
@@ -219,6 +224,7 @@ fun ChatList(
                 onClearTranslation = onClearTranslation,
                 animatedVisibilityScope = this@AnimatedContent,
                 onToolApproval = onToolApproval,
+                onApproveAllRelated = onApproveAllRelated,
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
@@ -252,6 +258,7 @@ private fun ChatListNormal(
     onClearTranslation: (UIMessage) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onApproveAllRelated: ((toolCallId: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
@@ -263,6 +270,8 @@ private fun ChatListNormal(
     // 用户是否主动上滑离开底部：上滑置 true 取消跟随，滚回真正底部置 false 恢复跟随。
     // 持久 remember（而非局部变量），避免 LaunchedEffect 因 loadingState 变化重启时丢状态。
     var userScrolledUp by remember { mutableStateOf(false) }
+    // Keep the preset intro dismissed after the first real chat item is added.
+    var presetIntroDismissed by rememberSaveable(conversation.id) { mutableStateOf(false) }
     // 用户最近一次触碰/滚动列表的时刻（elapsedRealtime）：跟随冷却与松手窗口共用。
     // 持久 remember：effect 因 loadingState 变化重启时不丢，避免冷却窗口被重启冲掉。
     var lastUserScrollAt by remember { mutableLongStateOf(0L) }
@@ -325,6 +334,25 @@ private fun ChatListNormal(
     val assistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
+    // 新对话的预设消息只作为开场展示，不进入普通聊天消息列表；
+    // 通过消息 id 对齐，避免内容相同但已被用户编辑的消息被误判为预设。
+    // 不依赖 @Transient 的 newConversation 字段：该字段不入库，会话从 Room 重建后
+    // 会丢失（恢复为 false），导致已开始的会话把预设消息误当成普通消息再次展示。
+    val presetMessages = assistant?.presetMessages.orEmpty()
+    val presetMessageCount = remember(conversation.messageNodes, presetMessages) {
+        presetMessages.indices.takeWhile { index ->
+            conversation.messageNodes.getOrNull(index)?.let { node ->
+                node.messages.size == 1 && node.messages.firstOrNull()?.id == presetMessages[index].id
+            } == true
+        }.size
+    }
+    val hasPresetIntroItem = presetMessageCount > 0 && assistant != null
+    val hasStartedConversation = conversation.messageNodes.size > presetMessageCount
+    LaunchedEffect(conversation.id, hasStartedConversation) {
+        if (hasStartedConversation) {
+            presetIntroDismissed = true
+        }
+    }
     // 工作区图片解析器：AI 正文用 ![描述](/workspace/路径) 引用工作区图片时，
     // 结合当前会话绑定的 workspace 解析成沙箱内实际文件 Uri（createWorkspace 时 root = id）
     val workspaceManager = koinInject<WorkspaceManager>()
@@ -347,6 +375,7 @@ private fun ChatListNormal(
     val currentOnTranslate = rememberUpdatedState(onTranslate)
     val currentOnClearTranslation = rememberUpdatedState(onClearTranslation)
     val currentOnToolApproval = rememberUpdatedState(onToolApproval)
+    val currentOnApproveAllRelated = rememberUpdatedState(onApproveAllRelated)
     val currentOnToolAnswer = rememberUpdatedState(onToolAnswer)
     val currentOnToggleFavorite = rememberUpdatedState(onToggleFavorite)
     val currentOnAssistantNameClick = rememberUpdatedState(onAssistantNameClick)
@@ -392,9 +421,6 @@ private fun ChatListNormal(
         // 且会在列表内部作用域排一个手势结束后的补正协程（"闪到底又弹回"根因）。
         LaunchedEffect(state, loadingState, settings.displaySetting.enableAutoScroll, thinkingFreezeState) {
             if (settings.displaySetting.enableAutoScroll) {
-                // 从当前真实位置起步，避免 effect 因 loadingState 变化重启后把"已经上滑"误判成"原地未动"
-                var lastIdx = state.firstVisibleItemIndex
-                var lastOff = state.firstVisibleItemScrollOffset
                 snapshotFlow {
                     Pair(
                         state.layoutInfo,
@@ -409,18 +435,27 @@ private fun ChatListNormal(
                         viewportEnd = info.viewportEndOffset,
                         afterContentPadding = info.afterContentPadding,
                     )
-                    val idx = state.firstVisibleItemIndex
-                    val off = state.firstVisibleItemScrollOffset
-                    val movedUp = idx < lastIdx || (idx == lastIdx && off < lastOff)
-                    // 1) 只在用户真实手势（inProgress）中检测"上滑"取消跟随；
-                    //    程序滚动/锚点重排造成的位置变化不算——否则发送贴底的重锚瞬时会误判成
-                    //    用户上滑，导致整个生成期间跟随被禁（第二条消息不跟随的根因）。
-                    if (inProgress && movedUp) {
+                    // 1) 解除跟随：用户手指按在列表上且列表正因手势滚动 → 立即解除。
+                    //    - 不做方向判断（movedUp）：快速 fling / 与程序滚动重叠时 collectLatest
+                    //      会丢中间帧，方向判定会漏闩 → 跟随重新武装 → 生成结束瞬间把正在看
+                    //      历史的用户拽回底部（"回拉抽搐"根因）。任何用户手势滚动都算接管，
+                    //      回到底部由下方"稳定回底"重新武装。
+                    //    - 不判 scrollingByProgram：该标志只用于抑制"发起跟随"（下方 requestNow
+                    //      的 folding），不能否定"用户此刻正在拖拽"的事实；用户拖拽时在途的
+                    //      程序滚动会被 collectLatest 取消。
+                    val userTouching = isUserInteracting?.value == true
+                    if (inProgress && userTouching) {
                         userScrolledUp = true
+                        lastUserScrollAt = SystemClock.elapsedRealtime()
                     }
-                    // 2) 滚动稳定且回到真正底部 → 恢复跟随
+                    // 2) 滚动稳定且回到真正底部 → 恢复跟随。
+                    //    冷却窗口内不复位：工具完成/内容突变可能让布局"恰好贴底"
+                    //    （用户仍在上拉后的位置），立即复位会让跟随重新武装、下一帧
+                    //    把列表拽回（"工具调用后下拉回弹"根因之一）。
                     val liveScrolling = state.isScrollInProgress
-                    if (!inProgress && !liveScrolling && pinned) {
+                    val settledAfterInteraction =
+                        SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
+                    if (!inProgress && !liveScrolling && pinned && settledAfterInteraction) {
                         userScrolledUp = false
                     }
                     // 思考折叠/展开的程序滚动与高度动画期间不跟随，避免抢滚
@@ -436,8 +471,6 @@ private fun ChatListNormal(
                         SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
                     val requestNow = !inProgress && !liveScrolling && !folding && shouldFollow &&
                         followCooledDown && (isUserInteracting?.value != true)
-                    lastIdx = idx
-                    lastOff = off
                     // 3) 跟随：仅当"生成中、用户未上滑、列表已离开底部"时发请求。
                     //    已钉底/正在滚动/思考折叠动画/用户触碰中都不发。发请求前用实时
                     //    isScrollInProgress 二次校验，挡住 snapshotFlow 的陈旧快照。
@@ -469,15 +502,18 @@ private fun ChatListNormal(
             snapshotFlow { state.firstVisibleItemIndex / PREFETCH_WINDOW }
                 .distinctUntilChanged()
                 .collect {
-                    val firstVisible = state.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: return@collect
-                    val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
+                    val visibleIndexes = state.layoutInfo.visibleItemsInfo.map { it.index }
                     val size = conversationUpdated.messageNodes.size
-                    if (size <= 0) return@collect
-                    // 普通布局下消息 item index 即消息下标（底部固定项在列表末尾）
+                    if (size <= 0 || visibleIndexes.isEmpty()) return@collect
+                    // 预设开场占用一个 LazyColumn item，后续消息下标需要扣除该偏移；
+                    // 末尾的摘要、系统提示和底部占位项不对应消息，直接跳过。
+                    val listItemOffset = if (hasPresetIntroItem) 1 else 0
                     fun origIndex(itemIdx: Int): Int? =
-                        if (itemIdx in 0 until size) itemIdx else null
-                    val oFirst = origIndex(firstVisible) ?: return@collect
-                    val oLast = origIndex(lastVisible) ?: return@collect
+                        (itemIdx - listItemOffset).takeIf { it in 0 until size }
+                    val messageIndexes = visibleIndexes.mapNotNull(::origIndex)
+                    if (messageIndexes.isEmpty()) return@collect
+                    val oFirst = messageIndexes.minOrNull() ?: return@collect
+                    val oLast = messageIndexes.maxOrNull() ?: return@collect
                     val lo = (minOf(oFirst, oLast) - PREFETCH_BEHIND).coerceAtLeast(0)
                     val hi = (maxOf(oFirst, oLast) + PREFETCH_AHEAD).coerceAtMost(size)
                     if (lo >= hi) return@collect
@@ -572,9 +608,31 @@ private fun ChatListNormal(
                     .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
+            val showPresetMessages = !presetIntroDismissed &&
+                presetMessageCount > 0 &&
+                conversation.messageNodes.size == presetMessageCount
+            val visibleMessageNodes = conversation.messageNodes.drop(presetMessageCount)
+
+            if (hasPresetIntroItem) {
+                item(key = "PresetMessagesIntro") {
+                    // 开场时占满可视高度，让「头像 + 预设消息」在聊天界面正中显示；
+                    // 开始对话（showPresetMessages=false）后整个 item 移除，不留下空白占位。
+                    if (showPresetMessages) {
+                        PresetMessagesIntro(
+                            messages = conversation.messageNodes
+                                .take(presetMessageCount)
+                                .mapNotNull { it.messages.firstOrNull() },
+                            assistant = assistant,
+                            onAvatarClick = currentOnAssistantNameClick.value,
+                            modifier = Modifier.fillParentMaxHeight(),
+                        )
+                    }
+                }
+            }
+
             itemsIndexed(
-                items = conversation.messageNodes,
-                key = { index, item -> item.id },
+                items = visibleMessageNodes,
+                key = { _, item -> item.id },
                 // 按消息形态分类，让 LazyColumn 槽位按形态复用组合/布局缓存
                 // （含工具消息重子树：工具气泡 + 文件变更卡片，与纯文本消息形态差异大）
                 contentType = { _, node ->
@@ -585,7 +643,8 @@ private fun ChatListNormal(
                         else -> "text"
                     }
                 },
-            ) { index, node ->
+            ) { visibleIndex, node ->
+                val index = visibleIndex + presetMessageCount
                 ListSelectableItem(
                         key = node.id,
                         onSelectChange = {
@@ -623,6 +682,9 @@ private fun ChatListNormal(
                         val toolApprovalCb: (String, Boolean, String) -> Unit = remember(node) {
                             { id: String, approved: Boolean, reason: String -> currentOnToolApproval.value?.invoke(id, approved, reason) }
                         }
+                        val approveAllCb: (String) -> Unit = remember(node) {
+                            { id: String -> currentOnApproveAllRelated.value?.invoke(id) }
+                        }
                         val toolAnswerCb: (String, String) -> Unit = remember(node) {
                             { id: String, answer: String -> currentOnToolAnswer.value?.invoke(id, answer) }
                         }
@@ -645,6 +707,7 @@ private fun ChatListNormal(
                             onTranslate = translateCb,
                             onClearTranslation = remember(node) { { msg: UIMessage -> currentOnClearTranslation.value(msg) } },
                             onToolApproval = toolApprovalCb,
+                            onApproveAllRelated = approveAllCb,
                             onToolAnswer = toolAnswerCb,
                             lastMessage = index == conversation.messageNodes.lastIndex,
                             onAssistantNameClick = assistantNameCb,

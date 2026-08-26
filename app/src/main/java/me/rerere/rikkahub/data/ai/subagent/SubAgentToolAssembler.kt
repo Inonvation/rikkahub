@@ -1,14 +1,14 @@
 package me.rerere.rikkahub.data.ai.subagent
 
-import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.retrieval.Reranker
 import me.rerere.knowledge.tool.EmbeddingConfig
 import me.rerere.knowledge.tool.KnowledgeSearchTool
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createDocumentReadTool
+import me.rerere.rikkahub.data.ai.tools.createMcpCallTool
+import me.rerere.rikkahub.data.ai.tools.createMcpListTool
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.datastore.Settings
@@ -32,7 +32,7 @@ import me.rerere.workspace.WorkspaceShellStatus
  *
  * 能力 → 工具映射：
  * - SEARCH/SCRAPE → createSearchTools 的每源独立工具（母代理子代理共用）
- * - MCP → mcp__{server}__{tool}
+ * - MCP → mcp_list / mcp_call（动态调度）
  * - KNOWLEDGE_BASE → KnowledgeSearchTool 的 kb_search / kb_list
  * - DOCUMENT → document_read（本地文档解析）
  * - WORKSPACE → createWorkspaceTools（沙盒 shell/文件，装配时强制免审批——子代理是可信委派执行器）
@@ -61,27 +61,13 @@ class SubAgentToolAssembler(
                 addAll(createSearchTools(settings, concise = true))
             }
 
-            // MCP 工具：复用 ChatService 的封装模式（mcp__{server}__{tool}）
+            // MCP 工具：动态调度（mcp_list + mcp_call），复用母代理的 MCP 可见性，避免全量 schema 注入
             if (SubAgentCapability.MCP in def.capabilities) {
                 val mcpAssistant = parentAssistant ?: settings.getCurrentAssistant()
-                mcpManager.getAllAvailableTools(mcpAssistant).forEach { (serverId, serverName, tool) ->
-                    // 校验服务器名，非法名跳过（与 ChatService 一致），避免 mcp____tool 畸形工具名
-                    if (serverName.isEmpty() || !serverName.all {
-                            it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9'
-                        }
-                    ) return@forEach
-                    add(
-                        Tool(
-                            name = "mcp__${serverName}__${tool.name}",
-                            description = tool.description?.takeIf { it.isNotBlank() }
-                                ?: "Tool from MCP server \"$serverName\".",
-                            parameters = { tool.inputSchema },
-                            needsApproval = { tool.needsApproval },
-                            execute = {
-                                mcpManager.callTool(serverId, tool.name, it.jsonObject)
-                            },
-                        )
-                    )
+                // 母代理未绑定任何 MCP 服务器时无工具可发现，不注入避免空工具占 token。
+                if (mcpAssistant.mcpServers.isNotEmpty()) {
+                    add(createMcpListTool(mcpAssistant, mcpManager))
+                    add(createMcpCallTool(mcpAssistant, mcpManager))
                 }
             }
 

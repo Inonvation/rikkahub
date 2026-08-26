@@ -67,6 +67,9 @@ import me.rerere.rikkahub.data.sync.SyncConfig
 import me.rerere.rikkahub.ui.theme.CustomTheme
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.decodeListOrDefault
+import me.rerere.rikkahub.utils.decodeOrDefault
+import me.rerere.rikkahub.utils.parseUuidOrNull
 import me.rerere.rikkahub.utils.toMutableStateFlow
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchServiceOptions
@@ -186,6 +189,15 @@ class SettingsStore(
         // 技能排序
         val SKILL_ORDER = stringPreferencesKey("skill_order")
 
+        // lastKnownGood 回退快照：每次成功写入时同步保存，供下次启动「当前配置解码失败」时回退到
+        // 上一份有效配置（而非直接清空到默认）。与对应主 key 一起写入，保证原子。
+        val PROVIDERS_LKG = stringPreferencesKey("providers_lkg")
+        val ASSISTANTS_LKG = stringPreferencesKey("assistants_lkg")
+        val MCP_SERVERS_LKG = stringPreferencesKey("mcp_servers_lkg")
+        val TTS_PROVIDERS_LKG = stringPreferencesKey("tts_providers_lkg")
+        val ASR_PROVIDERS_LKG = stringPreferencesKey("asr_providers_lkg")
+        val SKILL_ORDER_LKG = stringPreferencesKey("skill_order_lkg")
+
         // 备份提醒
         val BACKUP_REMINDER_CONFIG = stringPreferencesKey("backup_reminder_config")
 
@@ -246,107 +258,82 @@ class SettingsStore(
             }
         }.map { preferences ->
             Settings(
-                favoriteModels = preferences[FAVORITE_MODELS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                chatModelId = preferences[SELECT_MODEL]?.let { Uuid.parse(it) }
-                    ?: DEFAULT_AUTO_MODEL_ID,
-                fastModelId = preferences[FAST_MODEL]?.let { Uuid.parse(it) }
-                    ?: DEFAULT_AUTO_MODEL_ID,
-                titleModelId = preferences[TITLE_MODEL]?.let { Uuid.parse(it) },
-                translateModeId = preferences[TRANSLATE_MODEL]?.let { Uuid.parse(it) }
-                    ?: DEFAULT_AUTO_MODEL_ID,
+                favoriteModels = decodeListOrDefault<Uuid>(preferences[FAVORITE_MODELS], emptyList()),
+                chatModelId = parseUuidOrNull(preferences[SELECT_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
+                fastModelId = parseUuidOrNull(preferences[FAST_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
+                titleModelId = parseUuidOrNull(preferences[TITLE_MODEL]),
+                translateModeId = parseUuidOrNull(preferences[TRANSLATE_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
                 enableSuggestion = preferences[ENABLE_SUGGESTION] != false,
-                suggestionModelId = preferences[SUGGESTION_MODEL]?.let { Uuid.parse(it) },
-                imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: UNSET_MODEL_ID,
+                suggestionModelId = parseUuidOrNull(preferences[SUGGESTION_MODEL]),
+                imageGenerationModelId = parseUuidOrNull(preferences[IMAGE_GENERATION_MODEL]) ?: UNSET_MODEL_ID,
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                 translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
-                ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: UNSET_MODEL_ID,
+                ocrModelId = parseUuidOrNull(preferences[OCR_MODEL]) ?: UNSET_MODEL_ID,
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
-                compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
+                compressModelId = parseUuidOrNull(preferences[COMPRESS_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] != false,
                 autoCompressThreshold = (preferences[AUTO_COMPRESS_THRESHOLD] ?: 80).coerceIn(1, 100),
-                embeddingModelId = preferences[EMBEDDING_MODEL]?.let { Uuid.parse(it) },
-                rerankModelId = preferences[RERANK_MODEL]?.let { Uuid.parse(it) },
-                promptOptimizeModelId = preferences[PROMPT_OPTIMIZE_MODEL]?.let { Uuid.parse(it) },
+                embeddingModelId = parseUuidOrNull(preferences[EMBEDDING_MODEL]),
+                rerankModelId = parseUuidOrNull(preferences[RERANK_MODEL]),
+                promptOptimizeModelId = parseUuidOrNull(preferences[PROMPT_OPTIMIZE_MODEL]),
                 promptOptimizePrompt = preferences[PROMPT_OPTIMIZE_PROMPT],
-                promptOptimizePromptsByScene = preferences[PROMPT_OPTIMIZE_PROMPTS_BY_SCENE]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyMap(),
+                promptOptimizePromptsByScene = decodeOrDefault<Map<String, String>>(preferences[PROMPT_OPTIMIZE_PROMPTS_BY_SCENE], emptyMap()),
                 promptOptimizeThinkingBudget = preferences[PROMPT_OPTIMIZE_THINKING_BUDGET] ?: 0,
-                promptOptimizeThinkingBudgetByScene = preferences[PROMPT_OPTIMIZE_THINKING_BUDGET_BY_SCENE]?.let {
-                    JsonInstant.decodeFromString<Map<String, Int>>(it)
-                } ?: emptyMap(),
-                promptOptimizeDepthByScene = preferences[PROMPT_OPTIMIZE_DEPTH_BY_SCENE]?.let {
-                    JsonInstant.decodeFromString<Map<String, String>>(it)
-                } ?: emptyMap(),
-                assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
-                    ?: DEFAULT_ASSISTANT_ID,
-                assistantTags = preferences[ASSISTANT_TAGS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                providers = JsonInstant.decodeFromString(preferences[PROVIDERS] ?: "[]"),
-                assistants = JsonInstant.decodeFromString(preferences[ASSISTANTS] ?: "[]"),
+                promptOptimizeThinkingBudgetByScene = decodeOrDefault<Map<String, Int>>(preferences[PROMPT_OPTIMIZE_THINKING_BUDGET_BY_SCENE], emptyMap()),
+                promptOptimizeDepthByScene = decodeOrDefault<Map<String, String>>(preferences[PROMPT_OPTIMIZE_DEPTH_BY_SCENE], emptyMap()),
+                assistantId = parseUuidOrNull(preferences[SELECT_ASSISTANT]) ?: DEFAULT_ASSISTANT_ID,
+                assistantTags = decodeListOrDefault<Tag>(preferences[ASSISTANT_TAGS], emptyList()),
+                providers = decodeListOrDefault<ProviderSetting>(
+                    preferences[PROVIDERS],
+                    decodeListOrDefault<ProviderSetting>(preferences[PROVIDERS_LKG], emptyList())
+                ),
+                assistants = decodeListOrDefault<Assistant>(
+                    preferences[ASSISTANTS],
+                    decodeListOrDefault<Assistant>(preferences[ASSISTANTS_LKG], emptyList())
+                ),
                 dynamicColor = preferences[DYNAMIC_COLOR] != false,
                 themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
-                customThemes = preferences[CUSTOM_THEMES]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
+                customThemes = decodeListOrDefault<CustomTheme>(preferences[CUSTOM_THEMES], emptyList()),
                 developerMode = preferences[DEVELOPER_MODE] == true,
-                displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
-                networkSetting = JsonInstant.decodeFromString(preferences[NETWORK_SETTING] ?: "{}"),
-                searchServices = preferences[SEARCH_SERVICES]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: listOf(SearchServiceOptions.DEFAULT),
-                searchCommonOptions = preferences[SEARCH_COMMON]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: SearchCommonOptions(),
+                displaySetting = decodeOrDefault<DisplaySetting>(preferences[DISPLAY_SETTING], DisplaySetting()),
+                networkSetting = decodeOrDefault<NetworkSetting>(preferences[NETWORK_SETTING], NetworkSetting()),
+                searchServices = decodeListOrDefault<SearchServiceOptions>(preferences[SEARCH_SERVICES], listOf(SearchServiceOptions.DEFAULT)),
+                searchCommonOptions = decodeOrDefault<SearchCommonOptions>(preferences[SEARCH_COMMON], SearchCommonOptions()),
                 searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
-                enabledSearchServiceIds = preferences[SEARCH_ENABLED_SERVICES]?.let {
-                    JsonInstant.decodeFromString<List<kotlin.uuid.Uuid>>(it)
-                } ?: emptyList(),
-                mcpServers = preferences[MCP_SERVERS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                webDavConfig = preferences[WEBDAV_CONFIG]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: WebDavConfig(),
-                s3Config = preferences[S3_CONFIG]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: S3Config(),
-                ttsProviders = preferences[TTS_PROVIDERS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                selectedTTSProviderId = preferences[SELECTED_TTS_PROVIDER]?.let { Uuid.parse(it) }
-                    ?: DEFAULT_SYSTEM_TTS_ID,
+                enabledSearchServiceIds = decodeListOrDefault<Uuid>(preferences[SEARCH_ENABLED_SERVICES], emptyList()),
+                mcpServers = decodeListOrDefault<McpServerConfig>(
+                    preferences[MCP_SERVERS],
+                    decodeListOrDefault<McpServerConfig>(preferences[MCP_SERVERS_LKG], emptyList())
+                ),
+                webDavConfig = decodeOrDefault<WebDavConfig>(preferences[WEBDAV_CONFIG], WebDavConfig()),
+                s3Config = decodeOrDefault<S3Config>(preferences[S3_CONFIG], S3Config()),
+                ttsProviders = decodeListOrDefault<TTSProviderSetting>(
+                    preferences[TTS_PROVIDERS],
+                    decodeListOrDefault<TTSProviderSetting>(preferences[TTS_PROVIDERS_LKG], emptyList())
+                ),
+                selectedTTSProviderId = parseUuidOrNull(preferences[SELECTED_TTS_PROVIDER]) ?: DEFAULT_SYSTEM_TTS_ID,
                 defaultTTSPlaybackSpeed = preferences[DEFAULT_TTS_PLAYBACK_SPEED]?.coerceIn(0.5f, 2.0f) ?: 1.0f,
-                asrProviders = preferences[ASR_PROVIDERS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                selectedASRProviderId = preferences[SELECTED_ASR_PROVIDER]?.let { Uuid.parse(it) },
-                modeInjections = preferences[MODE_INJECTIONS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                lorebooks = preferences[LOREBOOKS]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                quickMessages = preferences[QUICK_MESSAGES]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
-                skillOrder = preferences[SKILL_ORDER]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyList(),
+                asrProviders = decodeListOrDefault<ASRProviderSetting>(
+                    preferences[ASR_PROVIDERS],
+                    decodeListOrDefault<ASRProviderSetting>(preferences[ASR_PROVIDERS_LKG], emptyList())
+                ),
+                selectedASRProviderId = parseUuidOrNull(preferences[SELECTED_ASR_PROVIDER]),
+                modeInjections = decodeListOrDefault<PromptInjection.ModeInjection>(preferences[MODE_INJECTIONS], emptyList()),
+                lorebooks = decodeListOrDefault<Lorebook>(preferences[LOREBOOKS], emptyList()),
+                quickMessages = decodeListOrDefault<QuickMessage>(preferences[QUICK_MESSAGES], emptyList()),
+                skillOrder = decodeListOrDefault<String>(
+                    preferences[SKILL_ORDER],
+                    decodeListOrDefault<String>(preferences[SKILL_ORDER_LKG], emptyList())
+                ),
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] != false,
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
-                backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: BackupReminderConfig(),
+                backupReminderConfig = decodeOrDefault<BackupReminderConfig>(preferences[BACKUP_REMINDER_CONFIG], BackupReminderConfig()),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
                 pdfOcrEnabled = preferences[PDF_OCR_ENABLED] == true,
@@ -354,11 +341,9 @@ class SettingsStore(
                 studyDeleteEnabled = preferences[STUDY_DELETE_ENABLED] == true,
                 studyDeleteApprovalEnabled = preferences[STUDY_DELETE_APPROVAL_ENABLED] != false,
                 studyStatsEnabled = preferences[STUDY_STATS_ENABLED] != false,
-                studyToolApprovalOverrides = preferences[STUDY_TOOL_APPROVAL_OVERRIDES]?.let {
-                    JsonInstant.decodeFromString(it)
-                } ?: emptyMap(),
+                studyToolApprovalOverrides = decodeOrDefault<Map<String, Boolean>>(preferences[STUDY_TOOL_APPROVAL_OVERRIDES], emptyMap()),
                 enableSubAgent = preferences[SUB_AGENT_ENABLED] == true,
-                subAgentModelId = preferences[SUB_AGENT_MODEL]?.let { Uuid.parse(it) },
+                subAgentModelId = parseUuidOrNull(preferences[SUB_AGENT_MODEL]),
                 subAgentTimeoutSeconds = preferences[SUB_AGENT_TIMEOUT_SECONDS]?.takeIf { it > 0 },
                 subAgentMaxConcurrent = (preferences[SUB_AGENT_MAX_CONCURRENT] ?: 5).coerceIn(1, 64),
                 subAgentAllowGuidance = preferences[SUB_AGENT_ALLOW_GUIDANCE] == true,
@@ -540,8 +525,10 @@ class SettingsStore(
             preferences[PROMPT_OPTIMIZE_DEPTH_BY_SCENE] = JsonInstant.encodeToString(settings.promptOptimizeDepthByScene)
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
+            preferences[PROVIDERS_LKG] = JsonInstant.encodeToString(settings.providers)
 
             preferences[ASSISTANTS] = JsonInstant.encodeToString(settings.assistants)
+            preferences[ASSISTANTS_LKG] = JsonInstant.encodeToString(settings.assistants)
             preferences[SELECT_ASSISTANT] = settings.assistantId.toString()
             preferences[ASSISTANT_TAGS] = JsonInstant.encodeToString(settings.assistantTags)
 
@@ -558,14 +545,17 @@ class SettingsStore(
             )
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
+            preferences[MCP_SERVERS_LKG] = JsonInstant.encodeToString(settings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
             preferences[S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
             preferences[TTS_PROVIDERS] = JsonInstant.encodeToString(settings.ttsProviders)
+            preferences[TTS_PROVIDERS_LKG] = JsonInstant.encodeToString(settings.ttsProviders)
             settings.selectedTTSProviderId?.let {
                 preferences[SELECTED_TTS_PROVIDER] = it.toString()
             } ?: preferences.remove(SELECTED_TTS_PROVIDER)
             preferences[DEFAULT_TTS_PLAYBACK_SPEED] = settings.defaultTTSPlaybackSpeed.coerceIn(0.5f, 2.0f)
             preferences[ASR_PROVIDERS] = JsonInstant.encodeToString(settings.asrProviders)
+            preferences[ASR_PROVIDERS_LKG] = JsonInstant.encodeToString(settings.asrProviders)
             settings.selectedASRProviderId?.let {
                 preferences[SELECTED_ASR_PROVIDER] = it.toString()
             } ?: preferences.remove(SELECTED_ASR_PROVIDER)
@@ -573,6 +563,7 @@ class SettingsStore(
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
             preferences[SKILL_ORDER] = JsonInstant.encodeToString(settings.skillOrder)
+            preferences[SKILL_ORDER_LKG] = JsonInstant.encodeToString(settings.skillOrder)
             preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
@@ -627,6 +618,7 @@ class SettingsStore(
         settingsFlow.value = settingsFlow.value.copy(providers = providers)
         dataStore.edit { preferences ->
             preferences[PROVIDERS] = JsonInstant.encodeToString(providers)
+            preferences[PROVIDERS_LKG] = JsonInstant.encodeToString(providers)
         }
     }
 

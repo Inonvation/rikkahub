@@ -237,6 +237,7 @@
   <string name="chat_message_add_favorite">Добавить в избранное</string>
   <string name="chat_message_remove_favorite">Удалить из избранного</string>
   <string name="chat_message_tool_approve">Одобрить</string>
+  <string name="chat_message_tool_approve_all">Одобрить всё связанное</string>
   <string name="chat_message_tool_ask_questions">Задать %d вопросов</string>
   <string name="chat_message_tool_call_generic">Вызван инструмент %1$s</string>
   <string name="chat_message_tool_call_label">Вызван инструмент %1$s</string>
@@ -248,8 +249,10 @@
   <string name="chat_message_tool_delete_memory">Удалённая память</string>
   <string name="chat_message_tool_denied">Отклонено</string>
   <string name="chat_message_tool_deny">Отклонить</string>
+  <string name="chat_message_tool_deny_and_output_reason">Отклонить и вывести причину</string>
   <string name="chat_message_tool_deny_dialog_hint">Причина (необязательно)</string>
   <string name="chat_message_tool_deny_dialog_title">Отклонить выполнение инструмента</string>
+  <string name="chat_message_tool_more_actions">Дополнительные действия</string>
   <string name="chat_message_tool_edit_memory">Обновлена память</string>
   <string name="chat_message_tool_get_time">Получить информацию о времени</string>
   <string name="chat_message_tool_scrape_prefix">Собрать данные с сайта: %1$s</string>

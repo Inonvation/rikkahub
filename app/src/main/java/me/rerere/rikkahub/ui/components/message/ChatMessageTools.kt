@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.os.SystemClock
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
@@ -59,6 +62,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.MoreHorizontal
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
@@ -212,6 +216,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean = false,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onApproveAllRelated: ((toolCallId: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     // ask_user 是交互式问答流程, 不走注册式渲染框架
@@ -220,11 +225,19 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         return
     }
 
-    // AI 思考完成后自动折叠所有步骤：工具执行完成（流式中 false→true）时按开关折叠气泡
+    // AI 思考完成后自动折叠所有步骤：工具执行完成（流式中 false→true）时按开关折叠气泡。
+    // 守卫与 ChatMessage 兜底一致：折叠会瞬间收掉工具摘要（该步内容直接条件渲染、无动画，
+    // 流式中外层 animateContentSize 又不生效 → 高度骤减），用户在翻历史/拖拽中触发会引发
+    // LazyColumn 锚点修正把列表吸回底部（"生成中调用工具后下拉回弹"根因）。
+    // 仅列表贴底且用户未控制列表时才折叠；否则保持展开，回底后由生成结束兜底折叠。
+    val isChatListAtBottom = LocalIsChatListAtBottom.current
+    val isUserControlled = LocalIsChatListUserControlled.current
     val settings = LocalSettings.current
     var wasExecuted by remember(tool.toolCallId) { mutableStateOf(tool.isExecuted) }
     LaunchedEffect(tool.isExecuted) {
-        if (tool.isExecuted && !wasExecuted && settings.displaySetting.autoCollapseAllSteps) {
+        if (tool.isExecuted && !wasExecuted && settings.displaySetting.autoCollapseAllSteps &&
+            (isChatListAtBottom?.invoke() != false) && (isUserControlled?.invoke() != true)
+        ) {
             toolBubbleExpanded[tool.toolCallId] = false
         }
         wasExecuted = tool.isExecuted
@@ -257,6 +270,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     var showResult by remember(tool.toolCallId) { mutableStateOf(false) }
     var showDenyDialog by remember(tool.toolCallId) { mutableStateOf(false) }
+    var approvalMenuExpanded by remember(tool.toolCallId) { mutableStateOf(false) }
     val onExpandedChange: (Boolean) -> Unit = { value ->
         // 始终写入显式值：初始默认按工具类型推导，用户一旦操作就记录真实意图。
         // 不能 remove 后回落默认——折叠类工具默认 false，remove 会让"展开"操作丢失。
@@ -288,6 +302,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     ControlledChainOfThoughtStep(
         expanded = expanded,
         onExpandedChange = onExpandedChange,
+        // 工具完成瞬间气泡会骤变（摘要/图片/时长行出现、loading 翻转），高度突变会让
+        // LazyColumn 锚点修正、与用户拖拽/自动跟随打架（"工具调用后列表跳动"根因）。
+        // 步骤自身高度动画平滑：流式中外层过程内容无动画（避免追 chunk），工具步骤
+        // 变化频率低（执行中仅时长文本、完成后内容一次性出现），动画成本可忽略。
+        modifier = Modifier.animateContentSize(),
         icon = {
             if (rendererLoading) {
                 DotLoading(
@@ -360,6 +379,51 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 contentDescription = stringResource(R.string.chat_message_tool_approve),
                                 modifier = Modifier.size(14.dp)
                             )
+                        }
+                        // 更多审批选项：同意相关所有审批 / 拒绝并输出原因
+                        Box {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    hapticController.lightTap()
+                                    approvalMenuExpanded = true
+                                },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.MoreHorizontal,
+                                    contentDescription = stringResource(R.string.chat_message_tool_more_actions),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = approvalMenuExpanded,
+                                onDismissRequest = { approvalMenuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.chat_message_tool_approve_all),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    },
+                                    onClick = {
+                                        approvalMenuExpanded = false
+                                        onApproveAllRelated?.invoke(tool.toolCallId)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.chat_message_tool_deny_and_output_reason),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    },
+                                    onClick = {
+                                        approvalMenuExpanded = false
+                                        showDenyDialog = true
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -538,6 +602,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     ControlledChainOfThoughtStep(
         expanded = expanded,
         onExpandedChange = { expanded = it },
+        modifier = Modifier.animateContentSize(),
         icon = {
             if (loading) {
                 DotLoading(size = 10.dp)

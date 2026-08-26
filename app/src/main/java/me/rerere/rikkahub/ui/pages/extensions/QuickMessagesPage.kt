@@ -42,8 +42,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,7 +54,6 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Zap
@@ -209,27 +208,14 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                                             scaleY = 1.05f
                                         }
                                     },
-                                dragHandle = {
-                                    IconButton(
-                                        onClick = {},
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .longPressDraggableHandle(
-                                                onDragStarted = {
-                                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                                },
-                                                onDragStopped = {
-                                                    hapticController.perform(HapticFeedbackType.GestureEnd)
-                                                }
-                                            )
-                                    ) {
-                                        Icon(
-                                            imageVector = HugeIcons.DragDropHorizontal,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                    }
-                                },
+                                dragModifier = Modifier.longPressDraggableHandle(
+                                    onDragStarted = {
+                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                    },
+                                    onDragStopped = {
+                                        hapticController.perform(HapticFeedbackType.GestureEnd)
+                                    },
+                                ),
                             )
                         }
                     }
@@ -365,12 +351,12 @@ private fun QuickMessageCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
-    dragHandle: @Composable (() -> Unit)? = null,
+    dragModifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().then(dragModifier),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
@@ -379,8 +365,6 @@ private fun QuickMessageCard(
                 .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            dragHandle?.invoke()
-
             Icon(
                 imageVector = HugeIcons.Zap,
                 contentDescription = null,

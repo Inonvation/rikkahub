@@ -26,6 +26,9 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.WIRE_DESCRIPTION_LIMIT
+import me.rerere.ai.core.trimDescription
+import me.rerere.ai.core.trimmed
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -287,11 +290,11 @@ class ResponseAPI(
                             add(buildJsonObject {
                                 put("type", "function")
                                 put("name", tool.name)
-                                put("description", tool.description)
+                                put("description", tool.description.trimDescription(WIRE_DESCRIPTION_LIMIT))
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(
-                                        tool.parameters()
+                                        tool.parameters().trimmed()
                                     )
                                 )
                             })

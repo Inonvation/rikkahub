@@ -89,6 +89,7 @@ fun createMcpManagerTools(
             is McpStatus.Error -> "error: ${status.message}"
             is McpStatus.NeedsAuthorization -> "needs OAuth authorization"
             is McpStatus.Authorizing -> "authorizing"
+            is McpStatus.InvalidConfig -> "invalid config"
         }
     }
 
@@ -125,12 +126,8 @@ fun createMcpManagerTools(
     val systemPrompt: (me.rerere.ai.provider.Model, List<me.rerere.ai.ui.UIMessage>) -> String = { _, _ ->
         buildString {
             appendLine("**MCP Server Management**")
-            appendLine("You can manage MCP (Model Context Protocol) server configurations using the `mcp_admin_*` tools. Use these tools to list, inspect, add, update, delete, and test MCP servers. Use `mcp_admin_assistant_set_enabled` to control which configured MCP servers are enabled for the current assistant.")
-            appendLine("<configured_mcp_servers>")
-            allServers().forEach { server ->
-                appendLine("  <server id=\"${server.id}\">${server.commonOptions.name} (${mcpTransportOf(server)}, status: ${statusText(server)})</server>")
-            }
-            appendLine("</configured_mcp_servers>")
+            appendLine("You can manage MCP (Model Context Protocol) server configurations using the `mcp_admin_*` tools. Call `mcp_admin_list` first to see all configured MCP servers with their id, name, transport, url, status, and whether each is enabled for the current assistant; then operate by server id with `mcp_admin_get`, `mcp_admin_update`, `mcp_admin_delete`, or `mcp_admin_assistant_set_enabled`, and use `mcp_admin_add` / `mcp_admin_test` to add or test a server.")
+            appendLine("Only servers enabled for the current assistant are usable via `mcp_list` / `mcp_call`. Call `mcp_admin_list` to discover and configure the rest.")
         }
     }
 
@@ -433,6 +430,9 @@ fun createMcpManagerTools(
                         "MCP server '${server.commonOptions.name}' (id=${server.id}) is authorizing..."
                     is McpStatus.Idle ->
                         "MCP server '${server.commonOptions.name}' (id=${server.id}) is idle."
+                    is McpStatus.InvalidConfig ->
+                        "MCP server '${server.commonOptions.name}' (id=${server.id}) has an invalid " +
+                            "configuration (empty/invalid URL or name). Fix it in the MCP settings page."
                 }
                 listOf(UIMessagePart.Text(text))
             },

@@ -99,6 +99,58 @@ class StreamChunkHandlerTest {
     }
 
     @Test
+    fun `trailing blank lines should be trimmed at text end`() {
+        var messages = listOf(UIMessage.user("hello"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.TextStart("text-1"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("text-1", "hi\n\n\n"))
+        messages = handler.handle(messages, StreamChunk.TextEnd("text-1"))
+
+        assertEquals("hi", messages.last().toText())
+    }
+
+    @Test
+    fun `blank lines should be trimmed on finish when no text end arrives`() {
+        var messages = listOf(UIMessage.user("hello"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.TextStart("text-1"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("text-1", "\n\nhi\n\n\n"))
+        messages = handler.handle(messages, StreamChunk.Finish(finishReason = "stop"))
+
+        assertEquals("hi", messages.last().toText())
+    }
+
+    @Test
+    fun `non streaming result should trim leading and trailing blank lines`() {
+        val messages = listOf(UIMessage.user("hello"))
+        val result = TextGenerationResult(
+            id = "resp-1",
+            model = model.modelId,
+            message = UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Text("\n\nanswer\n\n\n")),
+            ),
+        )
+
+        val assistant = messages.handleTextGenerationResult(result, model).last()
+        assertEquals("answer", assistant.toText())
+    }
+
+    @Test
+    fun `interior blank lines should be preserved`() {
+        var messages = listOf(UIMessage.user("hello"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.TextStart("text-1"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("text-1", "a\n\nb\n\n\n"))
+        messages = handler.handle(messages, StreamChunk.TextEnd("text-1"))
+
+        assertEquals("a\n\nb", messages.last().toText())
+    }
+
+    @Test
     fun `blank reasoning should be removed on end`() {
         var messages = listOf(UIMessage.user("hello"))
         val handler = StreamChunkHandler(model)

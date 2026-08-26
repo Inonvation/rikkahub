@@ -10,7 +10,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.currentDateLabel
 import me.rerere.rikkahub.data.ai.tools.local.convertHtmlToMarkdown
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstantPretty
@@ -120,7 +119,6 @@ private fun searchToolDescription(providerName: String, concise: Boolean): Strin
         Use this when the user asks for the latest news, current facts, or needs verification.
         Avoid using it for general knowledge you already know unless the user asks for verification.
         Generate focused keywords and run multiple searches if needed.
-        Today is ${currentDateLabel()}.
 
         Multi-source: when the user wants thorough cross-verified info, call MULTIPLE search_web__* tools
         (one per enabled search provider) and compare the independent results.

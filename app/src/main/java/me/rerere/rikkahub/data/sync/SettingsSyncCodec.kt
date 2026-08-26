@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.sync
 
+import android.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +20,8 @@ import me.rerere.rikkahub.utils.JsonInstant
  * 默认策略：白名单之外一律不同步（explicit allowlist，比黑名单更安全）。
  */
 object SettingsSyncCodec {
+
+    private const val TAG = "SettingsSyncCodec"
 
     /** 允许同步的 Settings 顶层字段名（其余一律剔除）。 */
     val ALLOWLIST: Set<String> = setOf(
@@ -135,12 +138,16 @@ object SettingsSyncCodec {
         return JsonInstant.encodeToString(sanitize(JsonObject(filtered)))
     }
 
-    /** 远端 JSON 合并回 [local]：白名单 key 生效，白名单外与密钥字段保留 [local] 现值。 */
-    fun fromSyncableJson(json: String, local: Settings): Settings {
+    /** 远端 JSON 合并回 [local]：白名单 key 生效，白名单外与密钥字段保留 [local] 现值。
+     *  远端 JSON 损坏/无法解析时保留本地 [local] 并记录告警，避免同步源坏数据覆盖本地配置。 */
+    fun fromSyncableJson(json: String, local: Settings): Settings = runCatching {
         val remote = JsonObject(JsonInstant.parseToJsonElement(json).jsonObject.filterKeys { it in ALLOWLIST })
         val localRoot = JsonInstant.parseToJsonElement(JsonInstant.encodeToString(local)).jsonObject
         val merged = mergeElement(remote, localRoot) as JsonObject
-        return JsonInstant.decodeFromString(JsonInstant.encodeToString(merged))
+        JsonInstant.decodeFromString<Settings>(JsonInstant.encodeToString(merged))
+    }.getOrElse { e ->
+        runCatching { Log.w(TAG, "fromSyncableJson failed, keep local settings: ${e.message}", e) }
+        local
     }
 
     /** 递归剔除 SECRET_KEYS 中的字段。 */

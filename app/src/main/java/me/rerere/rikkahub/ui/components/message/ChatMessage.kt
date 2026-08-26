@@ -3,10 +3,8 @@ package me.rerere.rikkahub.ui.components.message
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -47,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -109,6 +108,7 @@ import kotlinx.coroutines.delay
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun ChatMessage(
@@ -129,6 +129,7 @@ fun ChatMessage(
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onApproveAllRelated: ((toolCallId: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
     onAvatarClick: (() -> Unit)? = null,
@@ -195,6 +196,7 @@ fun ChatMessage(
                 messageCreatedAt = message.createdAt,
                 messageFinishedAt = message.finishedAt,
                 onToolApproval = onToolApproval,
+                onApproveAllRelated = onApproveAllRelated,
                 onToolAnswer = onToolAnswer,
                 onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
             )
@@ -260,8 +262,24 @@ fun ChatMessage(
             StudyItemsList(parts = message.parts)
         }
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+        // 统计行：生成期间隐藏（alpha=0）但用虚拟 finishedAt 渲染出与完成态一致的
+        // 完整行（tokens/tok/s/耗时），生成结束零高度差，LazyColumn 锚点不受影响。
+        if (!loading || (lastMessage && settings.showTokenUsage)) {
+            Box(
+                modifier = Modifier.graphicsLayer { alpha = if (loading) 0f else 1f },
+            ) {
+                ProvideTextStyle(textStyle) {
+                    ChatMessageNerdLine(
+                        message = if (loading) {
+                            message.copy(
+                                finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+                            )
+                        } else {
+                            message
+                        },
+                    )
+                }
+            }
         }
 
     }
@@ -322,6 +340,7 @@ private fun MessagePartsBlock(
     messageCreatedAt: LocalDateTime,
     messageFinishedAt: LocalDateTime?,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onApproveAllRelated: ((toolCallId: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
 ) {
@@ -477,6 +496,7 @@ private fun MessagePartsBlock(
                                         tool = step.tool,
                                         loading = loading && !step.tool.isExecuted,
                                         onToolApproval = onToolApproval,
+                                        onApproveAllRelated = onApproveAllRelated,
                                         onToolAnswer = onToolAnswer,
                                     )
                                 }
@@ -769,16 +789,14 @@ private fun MessagePartsBlock(
 
         // 过程内容：自包含高度动画（expand/shrink）+ 淡入淡出。只作用于本块，
         // 不影响外层/流式正文的高度动画；普通布局下内容在卡片下方自然展开。
-        AnimatedVisibility(
-            visible = !chainCollapsed,
-            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (!loading) Modifier.animateContentSize() else Modifier),
+            horizontalAlignment = if (role == MessageRole.USER) Alignment.End else Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = if (role == MessageRole.USER) Alignment.End else Alignment.Start,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            if (!chainCollapsed) {
                 processBlocks.fastForEach { block -> renderBlock(block) }
             }
         }

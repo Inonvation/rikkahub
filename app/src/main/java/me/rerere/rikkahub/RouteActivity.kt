@@ -77,11 +77,13 @@ import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
-import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantIdentityPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantModelPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantExtensionsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantLocalToolPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantToolsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMemoryPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
@@ -439,8 +441,12 @@ class RouteActivity : ComponentActivity() {
                                 GroupDiscussionPage(id = key.id)
                             }
 
-                            entry<Screen.AssistantBasic> { key ->
-                                AssistantBasicPage(key.id)
+                            entry<Screen.AssistantIdentity> { key ->
+                                AssistantIdentityPage(key.id)
+                            }
+
+                            entry<Screen.AssistantModel> { key ->
+                                AssistantModelPage(key.id)
                             }
 
                             entry<Screen.AssistantPrompt> { key ->
@@ -457,6 +463,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.AssistantMcp> { key ->
                                 AssistantMcpPage(key.id)
+                            }
+
+                            entry<Screen.AssistantTools> { key ->
+                                AssistantToolsPage(key.id)
                             }
 
                             entry<Screen.AssistantLocalTool> { key ->
@@ -821,8 +831,12 @@ sealed interface Screen : NavKey {
     /** 群组讨论页。id = conversationId（群组内单场会话）；群组配置经 conversation.groupId 读取 */
     @Serializable
     data class GroupDiscussion(val id: String) : Screen
+
     @Serializable
-    data class AssistantBasic(val id: String) : Screen
+    data class AssistantIdentity(val id: String) : Screen
+
+    @Serializable
+    data class AssistantModel(val id: String) : Screen
 
     @Serializable
     data class AssistantPrompt(val id: String) : Screen
@@ -836,7 +850,10 @@ sealed interface Screen : NavKey {
     @Serializable
     data class AssistantMcp(val id: String) : Screen
 
+    
     @Serializable
+    data class AssistantTools(val id: String) : Screen
+@Serializable
     data class AssistantLocalTool(val id: String) : Screen
 
     @Serializable

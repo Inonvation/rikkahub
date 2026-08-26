@@ -44,6 +44,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.StreamChunkHandler
+import me.rerere.ai.ui.cleanupLastAssistantBlankLines
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.ai.ui.limitContext
@@ -348,7 +349,7 @@ class GenerationHandler(
                             model = model,
                             assistant = assistant,
                             settings = settings
-                        )
+                        ).cleanupLastAssistantBlankLines()
                         // 流式 chunk 的 Finish 会写入 finishedAt，但工具循环还没结束，
                         // 这里统一清掉，避免 UI 在回合中途提前显示“完成”。
                         emit(GenerationChunk.Messages(visualMessages.markLastAssistantFinished(false)))
@@ -382,7 +383,7 @@ class GenerationHandler(
                     model = model,
                     assistant = assistant,
                     settings = settings
-                )
+                ).cleanupLastAssistantBlankLines()
 
                 val tools = messages.last().getTools().filter { !it.isExecuted }
                 if (tools.isEmpty()) {
@@ -583,9 +584,10 @@ class GenerationHandler(
                 }
                 // 工具prompt
                 if (policy?.includeToolSystemPrompt ?: true) {
-                    tools.forEach { tool ->
+                    // 去重：同一份 systemPrompt（如 SkillTools 挂在多个技能工具上）只注入一次。
+                    buildToolSystemPrompts(tools, model, messages).forEach { prompt ->
                         appendLine()
-                        append(tool.systemPrompt(model, messages))
+                        append(prompt)
                     }
                 }
                 // 行为层：决策/工具/子代理/提问准则（默认开，可关）。放末尾，不覆盖用户自定义提示词
@@ -602,10 +604,21 @@ class GenerationHandler(
             PromptMetrics.lastSystemPromptChars = system.length
             PromptMetrics.lastApproxTokens = system.length / 4
             PromptMetrics.lastToolCount = tools.size
+            PromptMetrics.lastToolSchemaChars = runCatching {
+                tools.sumOf { tool ->
+                    tool.name.length + tool.description.length + (tool.parameters()?.toString()?.length ?: 0)
+                }
+            }.getOrDefault(0)
+            PromptMetrics.lastToolFamilies = buildMap {
+                tools.groupBy { toolFamilyForMetrics(it.name) }.forEach { (family, familyTools) ->
+                    put(family, familyTools.size)
+                }
+            }
             Log.i(
                 TAG,
                 "system_prompt promptRevision=$PROMPT_REVISION chars=${system.length} " +
-                    "approxTokens=${system.length / 4} tools=${tools.size}"
+                    "approxTokens=${system.length / 4} tools=${tools.size} " +
+                    "toolSchemaChars=${PromptMetrics.lastToolSchemaChars} families=${PromptMetrics.lastToolFamilies}"
             )
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(messages.limitContext(assistant.contextMessageLimit))

@@ -239,6 +239,7 @@
   <string name="chat_message_add_favorite">添加收藏</string>
   <string name="chat_message_remove_favorite">取消收藏</string>
   <string name="chat_message_tool_approve">批准</string>
+  <string name="chat_message_tool_approve_all">同意相关所有审批</string>
   <string name="chat_message_tool_ask_questions">询问 %d 个问题</string>
   <string name="chat_message_tool_call_generic">调用工具 %1$s</string>
   <string name="chat_message_tool_call_label">调用工具 %1$s</string>
@@ -251,8 +252,10 @@
   <string name="chat_message_tool_denied">已拒绝</string>
   <string name="chat_message_tool_view_full_detail">查看完整详情</string>
   <string name="chat_message_tool_deny">拒绝</string>
+  <string name="chat_message_tool_deny_and_output_reason">拒绝并输出原因</string>
   <string name="chat_message_tool_deny_dialog_hint">原因（可选）</string>
   <string name="chat_message_tool_deny_dialog_title">拒绝工具执行</string>
+  <string name="chat_message_tool_more_actions">更多操作</string>
   <string name="chat_message_tool_edit_memory">更新了记忆</string>
   <string name="chat_message_tool_get_time">获取时间信息</string>
   <string name="chat_message_tool_scrape_prefix">抓取网站：%1$s</string>
@@ -303,6 +306,7 @@
   <string name="chat_page_clear_all_errors">清除全部</string>
   <string name="chat_page_compress_additional_prompt">附加说明（可选）</string>
   <string name="chat_page_compress_additional_prompt_hint">指定要保留或关注的内容</string>
+  <string name="chat_page_model_context">%1$s / 上下文 %2$s</string>
   <string name="chat_page_compress_context">压缩历史</string>
   <string name="chat_page_compress_context_desc">将对话压缩为摘要以节省令牌</string>
   <string name="chat_page_compress_context_title">压缩对话历史</string>
@@ -1131,6 +1135,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_model_display_name_placeholder">例如：GPT-3.5, 用于UI显示</string>
   <string name="setting_provider_page_model_id">模型ID</string>
   <string name="setting_provider_page_model_id_placeholder">例如：gpt-3.5-turbo</string>
+  <string name="setting_provider_page_model_context_length">上下文长度（Token）</string>
   <string name="setting_provider_page_model_name">模型名称</string>
   <string name="setting_provider_page_model_type">模型类型</string>
   <string name="setting_provider_page_models">模型</string>

@@ -1,6 +1,7 @@
 package me.rerere.ai.registry
 
 import me.rerere.ai.provider.Modality
+import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -141,6 +142,17 @@ class ModelRegistryTest {
         assertEquals(1_000_000, ModelRegistry.MODEL_CONTEXT_LENGTH.getData("deepseek-v4-pro"))
         assertEquals(1_000_000, ModelRegistry.MODEL_CONTEXT_LENGTH.getData("deepseek-v4-flash-vision-exp"))
         assertEquals(null, ModelRegistry.MODEL_CONTEXT_LENGTH.getData("deepseek-v3"))
+    }
+
+    @Test
+    fun testContextLengthOrDefault() {
+        assertEquals(1_000_000, ModelRegistry.contextLengthOrDefault("deepseek-v4-flash"))
+        assertEquals(128_000, ModelRegistry.contextLengthOrDefault("unknown-model-xyz"))
+        assertEquals(
+            256_000,
+            Model(modelId = "deepseek-v4-flash", contextLength = 256_000).contextLengthOrDefault(),
+        )
+        assertEquals(128_000, Model(modelId = "unknown-model-xyz", contextLength = 0).contextLengthOrDefault())
     }
 
     @Test
