@@ -109,10 +109,6 @@ class ChatNotificationManager(
         }
     }
 
-    private fun getLiveUpdateNotificationId(conversationId: Uuid): Int {
-        return conversationId.hashCode() + 10000
-    }
-
     private fun sendLiveUpdateNotification(
         conversationId: Uuid,
         lastMessage: UIMessage,
@@ -123,7 +119,7 @@ class ChatNotificationManager(
 
         context.sendNotification(
             channelId = CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID,
-            notificationId = getLiveUpdateNotificationId(conversationId)
+            notificationId = ChatGenerationForegroundService.NOTIFICATION_ID
         ) {
             title = senderName
             content = contentText
@@ -183,7 +179,7 @@ class ChatNotificationManager(
 
     private fun cancelLiveUpdateNotification(conversationId: Uuid) {
         liveUpdateLastSentAt.remove(conversationId)
-        context.cancelNotification(getLiveUpdateNotificationId(conversationId))
+        context.cancelNotification(ChatGenerationForegroundService.NOTIFICATION_ID)
     }
 
     private fun getPendingIntent(context: Context, conversationId: Uuid): PendingIntent {

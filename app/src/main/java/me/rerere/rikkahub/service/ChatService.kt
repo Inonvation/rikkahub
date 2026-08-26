@@ -895,6 +895,30 @@ class ChatService(
         return getOrCreateSession(conversationId).processingStatus
     }
 
+    private fun launchGenerationJob(
+        conversationId: Uuid,
+        keepAliveInBackground: Boolean = true,
+        block: suspend () -> Unit,
+    ): Job {
+        if (!keepAliveInBackground) return appScope.launch { block() }
+
+        val generationId = Uuid.random()
+        val foregroundStarted = ChatGenerationForegroundService.acquire(
+            context = context,
+            generationId = generationId,
+            conversationId = conversationId,
+        )
+        return appScope.launch {
+            try {
+                block()
+            } finally {
+                if (foregroundStarted) {
+                    ChatGenerationForegroundService.release(context, generationId)
+                }
+            }
+        }
+    }
+
     fun getConversationJobs(): Flow<Map<Uuid, Job?>> {
         return _sessionsVersion.flatMapLatest {
             val currentSessions = sessions.values.toList()
@@ -1033,7 +1057,10 @@ class ChatService(
         val previousJob = session.getJob()
         previousJob?.cancel()
 
-        val job = appScope.launch {
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = answer,
+        ) {
             try {
                 runCatching { previousJob?.join() }
                 finishInterruptedPendingTools(conversationId)
@@ -1069,7 +1096,7 @@ class ChatService(
                         runCatching { discussionOrchestrator.runDiscussion(conversationId) }
                     }
                     _generationDoneFlow.emit(conversationId)
-                    return@launch
+                    return@launchGenerationJob
                 }
 
                 val processedContent = preprocessUserInputParts(content, assistant)
@@ -1099,7 +1126,7 @@ class ChatService(
                                 conversationId,
                                 title = context.getString(R.string.error_title_workspace),
                             )
-                            return@launch
+                            return@launchGenerationJob
                         }
                         runCatching { workspaceRepository.ensureAgentsFile(workspaceId) }
                         runCatching { workspaceRepository.ensureMemoryIndex(workspaceId) }
@@ -1405,7 +1432,10 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
 
-        val job = appScope.launch {
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = message.role == MessageRole.USER || regenerateAssistantMsg,
+        ) {
             try {
                 val conversation = session.state.value
 
@@ -1421,9 +1451,9 @@ class ChatService(
                     handleMessageComplete(conversationId)
                 } else {
                     if (regenerateAssistantMsg) {
-                        val node = conversation.getMessageNodeByMessage(message) ?: return@launch
+                        val node = conversation.getMessageNodeByMessage(message) ?: return@launchGenerationJob
                         val nodeIndex = conversation.messageNodes.indexOf(node)
-                        if (nodeIndex < 0) return@launch
+                        if (nodeIndex < 0) return@launchGenerationJob
                         if (nodeIndex == 0) {
                             // 首条即 assistant：生成上下文为空，重生成无意义，报可读错误而非崩溃（#16）
                             addError(
@@ -1433,7 +1463,7 @@ class ChatService(
                                 conversationId,
                                 title = context.getString(R.string.error_title_regenerate_message),
                             )
-                            return@launch
+                            return@launchGenerationJob
                         }
                         // 重生成 assistant 消息：截断到目标消息之前，生成上下文之后不留悬空旧尾部（#15）。
                         // 与 USER 分支的 subList 截断保持一致，避免「A1' 不知道 U2 → U2→A2 悬空」的语义错乱。
@@ -1535,7 +1565,16 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
 
-        val job = appScope.launch {
+        val hasOtherPendingTools = session.state.value.messageNodes.any { node ->
+            node.currentMessage.parts.any { part ->
+                part is UIMessagePart.Tool && part.isPending && part.toolCallId != toolCallId
+            }
+        }
+
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = !hasOtherPendingTools,
+        ) {
             try {
                 val conversation = session.state.value
                 // 找到包含该 toolCallId 的消息节点（同一轮生成批次），收集其全部 pending 工具调用
@@ -1555,7 +1594,7 @@ class ChatService(
                 if (relatedToolCallIds.isEmpty()) {
                     // 没有可批的待审批调用（可能已被处理），直接返回
                     _generationDoneFlow.emit(conversationId)
-                    return@launch
+                    return@launchGenerationJob
                 }
 
                 val updatedNodes = conversation.messageNodes.map { node ->
