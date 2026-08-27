@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.CustomModeConfig
 import me.rerere.rikkahub.data.model.ModeRefs
+import me.rerere.rikkahub.data.model.UserProfileSetting
 import me.rerere.rikkahub.data.repository.ConversationRepository
 
 data class CustomModeDeleteRequest(
@@ -38,6 +39,23 @@ class SettingVM(
     fun updateSettings(settings: Settings) {
         viewModelScope.launch {
             settingsStore.update(settings)
+        }
+    }
+
+    /**
+     * 个人资料页统一提交入口：整份写入 userProfile，并把昵称同步到 DisplaySetting.userNickname。
+     *
+     * 基于最新 Settings 做变换而不是页面持有的快照——配合资料页的防抖草稿，
+     * 避免逐键全量写盘以及快照过期覆盖其他入口（如聊天抽屉改昵称）的并发修改。
+     */
+    fun updateUserProfile(profile: UserProfileSetting, nickname: String) {
+        viewModelScope.launch {
+            settingsStore.update { s ->
+                s.copy(
+                    userProfile = profile,
+                    displaySetting = s.displaySetting.copy(userNickname = nickname),
+                )
+            }
         }
     }
 
