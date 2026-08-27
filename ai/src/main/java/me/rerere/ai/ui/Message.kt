@@ -24,6 +24,9 @@ data class UIMessage(
         .toLocalDateTime(TimeZone.currentSystemDefault()),
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
+    // 生成该消息时的模型展示名快照（displayName 为空回退 API modelId）。
+    // 模型从配置删除/更换后统计页仍可显示真实名称；旧数据缺省为 null 向后兼容。
+    val modelName: String? = null,
     val usage: TokenUsage? = null,
     val translation: String? = null,
     // 请求期间生成的内部消息（系统提示/注入/提醒等）；仅内存中使用，不参与持久化

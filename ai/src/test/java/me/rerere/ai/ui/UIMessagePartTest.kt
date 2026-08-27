@@ -155,7 +155,7 @@ class UIMessagePartTest {
             queuedAt = queuedAt,
             queuedAtMs = 1234L,
         )
-        val encoded = json.encodeToString(a)
+        val encoded = json.encodeToString<UIMessagePart>(a)
         val restored = json.decodeFromString<UIMessagePart>(encoded) as UIMessagePart.Tool
 
         assertEquals(a, restored)

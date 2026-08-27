@@ -1365,5 +1365,13 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="workspace_terminal_close_confirm_title">ターミナル %1$d を閉じますか？</string>
   <string name="workspace_terminal_close_confirm_message">このタブを閉じると、実行中のプロセスは終了します。</string>
   <string name="workspace_terminal_close">閉じる</string>
+  <string name="chat_page_context_usage_title">コンテキスト使用量</string>
+  <string name="setting_page_console_footer_usage">会話の使用量</string>
+  <string name="setting_page_console_footer_usage_desc">全セッションの累計メッセージ数とトークン数を表示</string>
+  <string name="setting_page_console_footer">コンテキストポップオーバー表示</string>
+  <string name="setting_page_console_footer_desc">コンテキスト円をタップしたときにポップオーバーに表示する情報を選択</string>
+  <string name="setting_page_console_audit_desc">管理操作の記録と権限ブロックの記録</string>
+  <string name="setting_page_console_config_files_summary">プロバイダー %1$d 件 · アシスタント %2$d 件 · MCP %3$d 件</string>
+  <string name="chat_page_context_popover_indicators_hint">指標が有効になっていません。管理コンソールで有効にできます</string>
 </resources>
 

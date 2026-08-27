@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聊天输入框优化方案对比 · rikkahub</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --border: #2a2f3a;
+    --text: #e6e8ee; --sub: #9aa3b2; --accent: #7c8cf8; --accent-soft: #2a3050;
+    --danger: #f07178; --ok: #7dd87d; --warn: #e5c07b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -100px, #1c2130 0%, var(--bg) 60%);
+    color: var(--text); font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    min-height: 100vh; padding: 32px 20px 80px;
+  }
+  header { max-width: 1200px; margin: 0 auto 24px; }
+  h1 { font-size: 22px; font-weight: 700; }
+  header p { color: var(--sub); margin-top: 8px; font-size: 14px; line-height: 1.7; }
+
+  /* 方案 Tab */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; max-width: 1200px; margin: 0 auto 20px; }
+  .tab {
+    border: 1px solid var(--border); background: var(--panel); color: var(--sub);
+    padding: 9px 16px; border-radius: 999px; cursor: pointer; font-size: 13px; user-select: none;
+    transition: all .15s ease;
+  }
+  .tab:hover { border-color: #3a4150; color: var(--text); }
+  .tab.active { background: var(--accent-soft); border-color: var(--accent); color: #cdd4ff; }
+  .tab .tag { font-size: 11px; margin-left: 6px; opacity: .8; }
+
+  .layout {
+    display: flex; gap: 24px; align-items: flex-start; justify-content: center;
+    max-width: 1200px; margin: 0 auto; flex-wrap: wrap;
+  }
+
+  /* 手机模拟器 */
+  .phone-wrap { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .phone {
+    width: 392px; height: 760px; background: #101318; border-radius: 44px;
+    border: 1px solid #333a46; box-shadow: 0 20px 60px rgba(0,0,0,.5), inset 0 0 0 2px #0a0c10;
+    overflow: hidden; position: relative; display: flex; flex-direction: column;
+  }
+  .statusbar {
+    height: 40px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; font-size: 12px; color: var(--sub);
+  }
+  .statusbar .notch { width: 90px; height: 22px; background: #0a0c10; border-radius: 12px; position: absolute; left: 50%; transform: translateX(-50%); top: 8px; }
+  .chat-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: #14171e;
+  }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg,#7c8cf8,#b06ab3); display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .chat-head .titles { flex: 1; min-width: 0; }
+  .chat-head .titles b { font-size: 13px; display: block; }
+  .chat-head .titles span { font-size: 11px; color: var(--sub); }
+  .pill {
+    font-size: 11px; color: var(--sub); border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px 10px; white-space: nowrap;
+  }
+  .chat-area { flex: 1 1 auto; overflow-y: auto; padding: 14px 14px 6px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 76%; font-size: 13px; line-height: 1.55; padding: 9px 12px; border-radius: 16px; }
+  .msg.user { align-self: flex-end; background: var(--accent-soft); border: 1px solid #39406a; color: #dbe0ff; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: #1e232d; border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--text); }
+  .msg .time { display: block; font-size: 10px; color: var(--sub); margin-top: 4px; }
+  .kbd-tip {
+    align-self: center; margin: 10px 0 2px; font-size: 11px; color: var(--warn);
+    border: 1px dashed #4a4030; background: #221d12; border-radius: 999px; padding: 5px 12px; cursor: pointer; user-select: none;
+  }
+  .kbd-tip:hover { border-color: var(--warn); }
+
+  /* —— 输入区（各方案共用结构）—— */
+  .input-wrap { flex: 0 0 auto; padding: 8px 10px 10px; background: #101318; }
+  .pending { align-self: flex-end; background: #27304e; border: 1px solid #3c4a80; border-radius: 14px; padding: 6px 12px; font-size: 12px; color: #c8d0ff; margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
+  .pending .mini { width: 18px; height: 18px; border-radius: 50%; background: #0f1115; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; }
+  .input-shell {
+    background: #1a1e27; border: 1px solid #2e3440; border-radius: 26px; padding: 6px 8px;
+    display: flex; flex-direction: column; gap: 4px; transition: border-color .15s;
+  }
+  .input-shell:focus-within { border-color: #4a5170; }
+  .attach-row { display: flex; gap: 6px; padding: 2px 6px; }
+  .chip { display: flex; align-items: center; gap: 6px; background: #262c38; border-radius: 999px; padding: 4px 10px; font-size: 11px; color: var(--sub); }
+  .chip b { color: var(--text); font-weight: 500; }
+  .chip .x { color: var(--sub); cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .chip .x:hover { color: var(--danger); }
+  .inrow { display: flex; align-items: flex-end; gap: 2px; }
+  .inrow .field { flex: 1; padding: 8px 6px 8px 12px; }
+  .inrow .field .ph { color: #5c6676; font-size: 14px; padding: 6px 0; cursor: text; white-space: nowrap; overflow: hidden; }
+  .inrow .field .ph.small { font-size: 12px; color: #7a8494; }
+  .icb {
+    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; cursor: pointer; user-select: none; color: #cfd6e4; flex: 0 0 auto;
+    transition: background .12s, transform .06s;
+  }
+  .icb:hover { background: #262c3a; }
+  .icb:active { transform: scale(.9); background: #2e3546; }
+  .icb.on { background: var(--accent-soft); color: #cdd4ff; }
+  .send {
+    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: #fff; cursor: pointer; user-select: none; flex: 0 0 auto;
+    background: linear-gradient(135deg, var(--accent), #9a6fd0); box-shadow: 0 2px 8px rgba(124,140,248,.35);
+    transition: transform .06s, opacity .12s; font-weight: 700;
+  }
+  .send:active { transform: scale(.85); }
+  .send.off { opacity: .32; box-shadow: none; }
+  .send.stop { background: #e5484d; }
+  .iconbtn { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #cfd6e4; padding: 4px 6px; border-radius: 8px; cursor: pointer; user-select: none; white-space: nowrap; }
+  .iconbtn:hover { background: #262c3a; }
+  .iconbtn:active { background: #2e3546; }
+  .iconbtn .g { font-size: 14px; }
+
+  /* 底栏 */
+  .toolbar { display: flex; align-items: center; gap: 0; padding: 2px 4px 0; }
+  .toolbar .scroll { display: flex; gap: 2px; overflow-x: auto; flex: 1; scrollbar-width: none; }
+  .toolbar .scroll::-webkit-scrollbar { display: none; }
+  .center-gap { flex: 0 0 8px; width: 8px; }
+
+  /* 键盘 */
+  .keyboard {
+    height: 240px; flex: 0 0 auto; background: #161a22; border-top: 1px solid #262c38;
+    display: none; grid-template-rows: repeat(4, 1fr); grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 10px;
+  }
+  .phone.kbd .keyboard { display: grid; }
+  .key { background: #232936; border-radius: 8px; font-size: 13px; display: flex; align-items: center; justify-content: center; color: #c9d1df; }
+  .key.space { grid-column: span 5; }
+  .key.enter { background: var(--accent-soft); color: #cdd4ff; }
+
+  /* ============ 各方案改造点（CSS 状态切换） ============ */
+  /* 现状：键盘收起 → 底栏显示；键盘弹出 → 底栏消失、发送跳入输入框 trailing */
+  .scheme-current .toolbar { display: flex; }
+  .phone.kbd .scheme-current .toolbar { display: none; }
+  .scheme-current .trailing-send { display: none; }
+  .phone.kbd .scheme-current .trailing-send { display: flex; }
+
+  /* A 发送固定右上：trailing 常驻发送；＋ 常驻输入框 leading；⚡ 快捷消息与＋ 对调进工具行 */
+  .scheme-a .trailing-send { display: flex; }
+  .scheme-a .toolbar { display: flex; }
+  .scheme-a .right-side { margin-left: auto; }
+  /* A「＋」更多选项面板（新排序：MCP / 网络搜索 / 扩展管理 / 工作区 / 信任文件夹 / 知识库，统一宽卡片） */
+  .scheme-a { position: relative; }
+  .a-sheet { position: absolute; left: 6px; right: 6px; bottom: 6px; background: #1d212b; border: 1px solid var(--border); border-radius: 22px; padding: 14px 12px; display: none; z-index: 6; box-shadow: 0 12px 40px rgba(0,0,0,.55); flex-direction: column; gap: 8px; max-height: 440px; overflow-y: auto; }
+  .a-sheet.open { display: flex; }
+  .a-sheet h4 { font-size: 13px; color: var(--text); margin: 0 0 2px 4px; }
+  .a-sheet .att { display: flex; gap: 8px; padding: 2px 4px 8px; }
+  .a-sheet .att span { flex: 1; background: #232936; border-radius: 12px; padding: 10px 0; text-align: center; font-size: 11px; color: var(--sub); cursor: pointer; }
+  .a-sheet .att span:hover { background: #2a3140; }
+  .a-sheet .att .g { display: block; font-size: 16px; margin-bottom: 3px; }
+  .a-divider { height: 1px; background: var(--border); margin: 0 4px; }
+  .a-card { display: flex; align-items: center; gap: 10px; background: #232936; border: 1px solid #2a2f3a; border-radius: 14px; padding: 10px 12px; cursor: pointer; }
+  .a-card:hover { background: #2a3140; }
+  .a-card .ic { width: 34px; height: 34px; border-radius: 10px; background: #2c3342; display: flex; align-items: center; justify-content: center; font-size: 16px; flex: 0 0 auto; }
+  .a-card .tx { flex: 1; min-width: 0; }
+  .a-card .tx b { display: block; font-size: 13px; font-weight: 600; }
+  .a-card .tx span { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .a-card .tr { font-size: 11px; color: var(--accent); flex: 0 0 auto; }
+
+  /* B 全入输入框：底栏移除；leading「+」菜单 */
+  .scheme-b .toolbar { display: none; }
+  .scheme-b .trailing-send { display: flex; }
+  .scheme-b .b-lead { display: flex; }
+  .scheme-b .b-menu { position: absolute; bottom: 78px; left: 10px; right: 10px; background: #1d212b; border: 1px solid var(--border); border-radius: 18px; padding: 10px; display: none; grid-template-columns: repeat(4, 1fr); gap: 8px; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .scheme-b .b-menu.open { display: grid; }
+  .scheme-b .b-menu .mitem { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px; border-radius: 12px; cursor: pointer; font-size: 11px; color: var(--sub); }
+  .scheme-b .b-menu .mitem:hover { background: #262c3a; color: var(--text); }
+  .scheme-b .b-menu .mitem .g { font-size: 18px; }
+
+  /* C 底栏三键：🛠 抽屉 / 🎙 / ↑ */
+  .scheme-c .toolbar { display: flex; gap: 2px; }
+  .scheme-c .drawer { position: absolute; bottom: 96px; left: 10px; background: #1d212b; border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; display: none; gap: 2px; z-index: 5; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .scheme-c .drawer.open { display: flex; }
+  .scheme-c .drawer .g { font-size: 15px; }
+  .scheme-c .trailing-send { display: none; }
+
+  /* D 底栏常驻不隐藏（键盘弹出时仍保留底栏） */
+  .scheme-d .toolbar { display: flex; }
+  .scheme-d .trailing-send { display: none; }
+  .scheme-d .toolbar .send { display: flex; }
+
+  .phone .input-shell { position: relative; }
+
+  /* 距离标尺背景 */
+  .ruler { position: absolute; text-align: center; font-size: 10px; color: var(--warn); top: -4px; right: 40px; border-left: 1.5px dashed var(--warn); border-right: 1.5px dashed var(--warn); height: 12px; padding-top: 14px; white-space: nowrap; }
+  .ruler.g { color: var(--ok); border-color: var(--ok); }
+
+  /* 说明面板 */
+  .notes { flex: 1 1 380px; max-width: 560px; min-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; }
+  .card h3 { font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card h3 .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .badge.rec { background: #1d3a2a; color: var(--ok); }
+  .badge.min { background: #22304a; color: #8fb3ff; }
+  .card p, .card li { font-size: 13px; line-height: 1.75; color: var(--sub); }
+  .card p b, .card li b { color: var(--text); font-weight: 600; }
+  .card ul { padding-left: 18px; margin-top: 6px; }
+  .card .d { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--panel2); border-radius: 8px; padding: 8px 10px; margin-top: 8px; color: #a8b3c8; white-space: pre-wrap; }
+  .card .pros { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .card .pros span { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: #1d2a24; color: #8fd0a0; border: 1px solid #24402f; }
+  .card .cons span { background: #2c1f24; color: #e09aa2; border-color: #4a2630; }
+  .vspace { height: 6px; }
+  .warn-tip { font-size: 12px; color: var(--warn); background: #221d12; border: 1px solid #4a4030; border-radius: 10px; padding: 8px 12px; line-height: 1.6; }
+  .ok-tip { font-size: 12px; color: var(--ok); background: #12241b; border: 1px solid #24402f; border-radius: 10px; padding: 8px 12px; line-height: 1.6; }
+
+  @media (max-width: 900px) {
+    .phone { width: 356px; height: 700px; }
+    .keyboard { height: 200px; }
+    .notes { min-width: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>聊天输入框优化方案对比</h1>
+  <p>基于 <code>app/.../ui/components/ai/ChatInput.kt</code> 现状还原。切换方案标签查看对应布局；点击手机上「模拟键盘弹出」可观察 IME 状态切换时按钮是否“跳动”。每个方案的右侧面板列出改动点、优点与代价。</p>
+</header>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-scheme="current">1 · 现状<span class="tag">问题所在</span></div>
+  <div class="tab" data-scheme="a">2 · 方案 A<span class="tag">已落地</span></div>
+  <div class="tab" data-scheme="b">3 · 方案 B</div>
+  <div class="tab" data-scheme="c">4 · 方案 C</div>
+  <div class="tab" data-scheme="d">5 · 方案 D</div>
+</div>
+
+<div class="layout">
+  <!-- ================= 手机模拟器 ================= -->
+  <div class="phone-wrap">
+    <div class="phone" id="phone">
+      <div class="statusbar">
+        <span>9:41</span>
+        <div class="notch"></div>
+        <span>▲ 66%</span>
+      </div>
+      <div class="chat-head">
+        <div class="avatar">🤖</div>
+        <div class="titles"><b>通用助手</b><span>gemini-2.5-flash</span></div>
+        <span class="pill">⚡ 快捷消息</span>
+      </div>
+
+      <div class="chat-area">
+        <div class="msg ai">你好，我是 rikkahub 助手。有什么可以帮你？<span class="time">14:02</span></div>
+        <div class="msg user">帮我把这段 Kotlin 代码的思路讲一下……<span class="time">14:03</span></div>
+        <div class="msg ai">好的。这段代码核心是……<span class="time">14:03</span></div>
+
+        <!-- ===== 以下输入区：五个方案叠放，切换 display ===== -->
+
+        <!-- ═══ 现状 ═══ -->
+        <div class="input-wrap scheme-current" data-pane="current">
+          <div class="pending" style="display:none">⚠ 排队引导（生成中发消息时出现）</div>
+          <div class="input-shell">
+            <div class="attach-row" style="display:none">
+              <span class="chip">🖼 图片_01.png <span class="x">✕</span></span>
+            </div>
+            <div class="inrow">
+              <div class="icb">⚡</div>
+              <div class="field">
+                <div class="ph">给助手发送消息…</div>
+              </div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="icb trailing-send">→</div>
+            </div>
+            <div class="toolbar">
+              <div class="scroll">
+                <span class="iconbtn"><span class="g">★</span>模型</span>
+                <span class="iconbtn"><span class="g">🔍</span>搜索</span>
+                <span class="iconbtn"><span class="g">🧠</span>推理</span>
+              </div>
+              <span class="iconbtn" title="优化提示词">✨</span>
+              <div class="center-gap"></div>
+              <span class="icb" title="更多选项（打开文件）" style="width:30px"><b>＋</b></span>
+              <span class="icb" title="语音输入">🎙</span>
+              <span class="send" title="发送（长按=仅追加）" style="width:30px;height:30px;margin:2px 2px 2px 0">↑</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 A：发送固定右上（已落地）═══ -->
+        <div class="input-wrap scheme-a" data-pane="a" style="display:none">
+          <div class="input-shell">
+            <div class="a-sheet" id="aSheet">
+              <h4>更多选项</h4>
+              <div class="att">
+                <span><span class="g">📷</span>拍照</span>
+                <span><span class="g">🖼</span>图片</span>
+                <span><span class="g">🎬</span>视频</span>
+                <span><span class="g">🎵</span>音频</span>
+                <span><span class="g">📎</span>文件</span>
+              </div>
+              <div class="a-divider"></div>
+              <div class="a-card"><div class="ic">🖧</div><div class="tx"><b>MCP 服务</b><span>已启用 2 个服务</span></div></div>
+              <div class="a-card"><div class="ic">🔍</div><div class="tx"><b>网络搜索服务</b><span>已开启 · Exa</span></div><span class="tr">1</span></div>
+              <div class="a-card"><div class="ic">📦</div><div class="tx"><b>扩展管理</b><span>技能 2 · 快捷消息 1 · 模式注入 1 · 世界书 2</span></div></div>
+              <div class="a-card"><div class="ic">📦</div><div class="tx"><b>工作区</b><span>/workspace</span></div><span class="tr">⚙</span></div>
+              <div class="a-card"><div class="ic">🔒</div><div class="tx"><b>信任文件夹</b><span>未激活</span></div></div>
+              <div class="a-card"><div class="ic">📚</div><div class="tx"><b>知识库</b><span>已选择 1 个知识库</span></div></div>
+            </div>
+            <div class="inrow">
+              <div class="icb" title="更多选项（打开文件）" id="aPlus"><b>＋</b></div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="send trailing-send" title="发送（位置恒定，永不跳变）" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="toolbar">
+              <div class="scroll">
+                <span class="iconbtn"><span class="g">★</span>模型</span>
+                <span class="iconbtn"><span class="g">🔍</span>搜索</span>
+                <span class="iconbtn"><span class="g">🧠</span>推理</span>
+              </div>
+              <span class="iconbtn" title="优化提示词">✨</span>
+              <div class="center-gap"></div>
+              <div class="icb" title="快捷消息（原输入框左侧位置）">⚡</div>
+              <div class="right-side"></div>
+              <span class="icb" title="语音输入" style="width:30px">🎙</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 B：全入输入框 ═══ -->
+        <div class="input-wrap scheme-b" data-pane="b" style="display:none">
+          <div class="input-shell">
+            <div class="b-menu" id="bMenu">
+              <div class="mitem"><span class="g">📎</span>文件</div>
+              <div class="mitem"><span class="g">🖼</span>图片</div>
+              <div class="mitem"><span class="g">★</span>模型</div>
+              <div class="mitem"><span class="g">🔍</span>搜索</div>
+              <div class="mitem"><span class="g">🧠</span>推理</div>
+              <div class="mitem"><span class="g">✨</span>优化</div>
+              <div class="mitem"><span class="g">🎙</span>语音</div>
+              <div class="mitem"><span class="g">⚡</span>快捷</div>
+            </div>
+            <div class="inrow">
+              <div class="icb b-lead" title="更多操作" id="bLead">＋</div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="icb trailing-send" title="发送" style="display:none"></div>
+              <div class="send trailing-send" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="toolbar" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 C：三键底栏 ═══ -->
+        <div class="input-wrap scheme-c" data-pane="c" style="display:none">
+          <div class="drawer" id="cDrawer">
+            <span class="icb" style="width:34px;height:34px">📎</span>
+            <span class="icb" style="width:34px;height:34px">★</span>
+            <span class="icb" style="width:34px;height:34px">🔍</span>
+            <span class="icb" style="width:34px;height:34px">🧠</span>
+            <span class="icb" style="width:34px;height:34px">✨</span>
+            <span class="icb" style="width:34px;height:34px">⛶</span>
+          </div>
+          <div class="input-shell">
+            <div class="inrow">
+              <div class="icb">⚡</div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="icb" style="width:36px"></div>
+              <div class="icb trailing-send" style="display:none"></div>
+              <div class="send trailing-send" style="width:30px;height:30px;margin:2px;display:none">↑</div>
+            </div>
+            <div class="toolbar" style="padding:4px 4px 0">
+              <span class="icb" title="工具抽屉" id="cTool" style="width:34px;height:34px;background:#232936">🛠</span>
+              <div class="center-gap" style="width:12px"></div>
+              <span class="icb" title="语音输入" style="width:34px;height:34px">🎙</span>
+              <div class="center-gap" style="width:12px"></div>
+              <span class="icb" style="width:34px;height:34px"></span>
+              <span class="send" title="发送" style="width:34px;height:34px;margin:2px 4px 2px 2px">↑</span>
+              <div class="ruler g" title="三键等距 12dp 以上">12dp</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 D：底栏常驻 ═══ -->
+        <div class="input-wrap scheme-d" data-pane="d" style="display:none">
+          <div class="input-shell">
+            <div class="inrow">
+              <div class="icb">⚡</div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="icb" title="插入文件" style="width:36px">📎</div>
+            </div>
+            <div class="toolbar">
+              <div class="scroll">
+                <span class="iconbtn"><span class="g">★</span>模型</span>
+                <span class="iconbtn"><span class="g">🔍</span>搜索</span>
+                <span class="iconbtn"><span class="g">🧠</span>推理</span>
+                <span class="iconbtn"><span class="g">✨</span>优化</span>
+              </div>
+              <div class="center-gap"></div>
+              <span class="icb" title="更多选项" style="width:30px"><b>＋</b></span>
+              <span class="icb" title="语音输入" style="width:30px">🎙</span>
+              <div class="ruler" title="＋ 与 ↑ 间距 16dp">16dp</div>
+              <span class="icb" style="width:12px"></span>
+              <span class="send" title="发送（键盘弹出时仍在原位）" style="width:30px;height:30px;margin:2px">↑</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="keyboard" id="keyboard">
+        <div class="key">q</div><div class="key">w</div><div class="key">e</div><div class="key">r</div><div class="key">t</div><div class="key">y</div><div class="key">u</div><div class="key">i</div><div class="key">o</div><div class="key">p</div>
+        <div class="key">a</div><div class="key">s</div><div class="key">d</div><div class="key">f</div><div class="key">g</div><div class="key">h</div><div class="key">j</div><div class="key">k</div><div class="key">l</div><div class="key">⌫</div>
+        <div class="key">⇧</div><div class="key">z</div><div class="key">x</div><div class="key">c</div><div class="key">v</div><div class="key">b</div><div class="key">n</div><div class="key">m</div><div class="key">，</div><div class="key">.</div>
+        <div class="key">🌐</div><div class="key space"></div><div class="key">↵</div>
+      </div>
+    </div>
+    <div class="kbd-tip" id="kbdTip">⌨ 模拟键盘弹出 / 收起（观察按钮位置是否跳变）</div>
+  </div>
+
+  <!-- ================= 说明面板 ================= -->
+  <div class="notes">
+
+    <div class="notes-pane" data-pane="current">
+      <div class="card">
+        <h3>1 · 现状 <span class="badge rec" style="background:#3a2427;color:#e09aa2">问题定位</span></h3>
+        <p>输入区由 <b>输入框（含 leading 快捷消息 / trailing 全屏+发送）</b> 和 <b>底部工具行</b> 两部分组成，工具行随键盘状态显示/隐藏。</p>
+        <p class="warn-tip" style="margin-top:8px"><b>四个具体问题：</b><br>
+        ① <b>「＋」与发送按钮相邻仅 8dp</b>（30dp 圆形按钮，Material 规范建议相邻触控目标 ≥ 8dp 间隙或 ≥ 16dp），两者视觉相近、同一样式，极易误触；<br>
+        ② <b>发送按钮存在两个位置</b>：键盘弹出时出现在输入框 trailing，键盘收起时出现在底栏最右——位置随 IME 状态“跳跃”，肌肉记忆失效；<br>
+        ③ 一行塞了 <b>7 个控件</b>（模型/搜索/推理/优化/＋/麦克风/发送），层级不分，视觉杂乱；<br>
+        ④ 键盘弹出时 <b>「＋」入口整个消失</b>——打字中途想加附件需要先收键盘再点＋，流程断裂。</p>
+      </div>
+      <div class="card">
+        <h3>交互观察</h3>
+        <p>点击下方「模拟键盘弹出」：<b>底栏整行消失</b>，发送按钮从右下角“跳”到输入框内右上角。这就是问题 ② 的实际体感。</p>
+      </div>
+    </div>
+
+    <div class="notes-pane" data-pane="a" style="display:none">
+      <div class="card">
+        <h3>2 · 方案 A：发送固定右上 + 「＋ / ⚡」对调 <span class="badge rec">已落地</span></h3>
+        <p><b>最终形态：发送按钮唯一、常驻输入框右上角；「＋」常驻输入框左侧 leading；快捷消息 ⚡ 移到工具行，与「＋」对调位置。</b></p>
+        <ul>
+          <li>发送按钮<b>固定输入框右上</b>（键盘弹出/收起位置不变），工具行不再放发送</li>
+          <li><b>「＋」移到输入框左侧</b>（原快捷消息的位置）：常驻可见，键盘弹出时也能直接加附件，无需额外入口</li>
+          <li><b>⚡ 快捷消息移到工具行</b>（原「＋」的位置），与模型/搜索/推理同区</li>
+          <li>「＋」与发送分处输入框两端，物理上不可能误触；子代理运行中在「＋」左侧附加子代理图标</li>
+          <li><b>「＋」面板改版</b>：新增<b>网络搜索服务</b>卡片；排序为 MCP 服务 → 网络搜索 → 扩展管理 → 工作区 → 信任文件夹 → 知识库；全部统一为主标题+次标题宽卡片，扩展管理副标题展示 技能/快捷消息/模式注入/世界书 已开数量（点左侧 ＋ 可实际展开预览）</li>
+        </ul>
+        <div class="d">// ChatInput.kt 已落地改动
+leadingIcon = { ＋ MoreButton }        // 原 ⚡ 快捷消息位置，常驻
+trailingIcon = SendButton()            // 常驻，去掉 imeTargetVisible 条件
+// 工具行：⚡ QuickMessageButton 取代原 ＋；
+// 删除工具行内的 SendButton（发送唯一在输入框右上）</div>
+        <div class="pros"><span>✅ 已实现</span><span>发送位置恒定</span><span>＋/发送彻底分离</span><span>键盘态附件入口补齐</span></div>
+      </div>
+      <div class="card"><h3>误触分析</h3><p>＋ 移入输入框最左端，发送固定在输入框右上角，两者之间隔着一整条文本框；工具行内的 ⚡ 与发送也不再同侧。发送按钮在全部 IME 状态下只有一个、一个位置。</p></div>
+    </div>
+
+    <div class="notes-pane" data-pane="b" style="display:none">
+      <div class="card">
+        <h3>3 · 方案 B：全入输入框（主流 IM 风）</h3>
+        <p><b>核心思路：干掉整个底栏，所有辅助功能收进输入框 leading 的「＋」展开面板，输入区只剩一行。</b></p>
+        <ul>
+          <li>输入框结构：<b>leading「＋」</b>（点开功能面板：文件/图片/模型/搜索/推理/优化/语音/快捷消息）→ <b>文字区</b> → <b>trailing 发送</b>（常驻）</li>
+          <li>键盘弹出/收起输入区 <b>零变化</b>，布局最稳定</li>
+          <li>＋ 在左端、发送在右端，间距为整个输入框宽度</li>
+          <li>与微信 / Telegram / DeepSeek 一致的心智模型，用户零学习成本</li>
+        </ul>
+        <div class="d">// 底栏整个删除
+// TextInputRow:
+leadingIcon  = MoreButton { showPanel() }  // 原快捷消息入口并入面板
+trailingIcon = { SendButton() }            // 常驻，无 IME 条件</div>
+        <div class="pros"><span>最简洁（一行）</span><span>位置零跳变</span><span>符合主流习惯</span><span>键盘态功能完整</span></div>
+        <div class="pros cons"><span>高频功能多一步展开</span><span>模型/搜索切换变繁琐</span><span>改动量中等</span></div>
+      </div>
+      <div class="card"><h3>试试看</h3><p>点击输入框左侧的 <b>＋</b> 展开功能面板；点击面板外关闭。发送按钮始终固定在输入框右上。</p></div>
+    </div>
+
+    <div class="notes-pane" data-pane="c" style="display:none">
+      <div class="card">
+        <h3>4 · 方案 C：三键底栏 + 工具抽屉</h3>
+        <p><b>核心思路：底栏只保留三个主键——🛠 工具抽屉 / 🎙 语音 / ↑ 发送，所有低频功能收进抽屉；三键等距 ≥ 12dp。</b></p>
+        <ul>
+          <li>底栏：<b>🛠</b>（点击弹出横向抽屉：📎 附件 / ★ 模型 / 🔍 搜索 / 🧠 推理 / ✨ 优化 / ⛶ 全屏）— 12dp — 🎙 语音 — 12dp — ↑ 发送</li>
+          <li>发送仍在底栏最右（现状位置），但只出现一次、且与 🎙 距离 12dp</li>
+          <li>常用项（语音、发送）保持一级入口，低频项（模型、搜索）收进抽屉，回车即收</li>
+        </ul>
+        <div class="d">// 底栏重构：
+Row {
+  ToolDrawerButton(...)     // 抽屉浮层
+  Spacer(12.dp)
+  AsrButton(...)
+  Spacer(12.dp)
+  SendButton(...)           // 唯一发送
+}
+// 删除输入框 trailing 的 SendButton 分支</div>
+        <div class="pros"><span>底栏视觉最干净</span><span>只保留一个发送</span><span>触控间距达标</span></div>
+        <div class="pros cons"><span>模型切换多一步</span><span>抽屉是新增 UI 需打磨</span><span>改动量中等</span></div>
+      </div>
+      <div class="card"><h3>试试看</h3><p>点击底栏左侧 <b>🛠</b> 展开工具抽屉；🎙 和 ↑ 始终原地不动。</p></div>
+    </div>
+
+    <div class="notes-pane" data-pane="d" style="display:none">
+      <div class="card">
+        <h3>5 · 方案 D：底栏常驻（不随键盘隐藏）</h3>
+        <p><b>核心思路：底栏永远显示（键盘弹出时顶到键盘上方），所有按钮位置在任何状态下都不变；「＋」与发送间距拉到 16dp。</b></p>
+        <ul>
+          <li>删除 <code>AnimatedVisibility(!imeTargetVisible)</code> 的隐藏逻辑，底栏常驻</li>
+          <li>输入框 trailing 不再放发送，发送<b>唯一</b>在底栏最右</li>
+          <li>「＋」与发送之间改 <b>16dp 间距</b>，达到 Material 相邻触控目标推荐值</li>
+          <li>键盘弹出时底部可用高度减少约一行，但换来位置绝对稳定</li>
+        </ul>
+        <div class="d">// 底栏：
+AnimatedVisibility(visible = !imeTargetVisible)  →  Row { ... }  // 去掉动画隐藏，直接常驻
+// 间距：8.dp → 16.dp
+Spacer(Modifier.width(16.dp))</div>
+        <div class="pros"><span>位置零跳变</span><span>改动最小</span><span>无新增 UI 概念</span></div>
+        <div class="pros cons"><span>打字时底部占用多一行</span><span>＋ 与 ↑ 仍同侧（间距 16dp）</span></div>
+      </div>
+      <div class="card"><h3>误触分析</h3><p>16dp 缝隙 + 发送改为实底圆形/＋保持描边，视觉层级拉开；但仍同处右侧，误触概率下降而非消除。若想根治误触，选方案 A。</p></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panes = document.querySelectorAll('.input-wrap[data-pane], .notes-pane[data-pane]');
+  const phone = document.getElementById('phone');
+  const kbdTip = document.getElementById('kbdTip');
+
+  function show(scheme) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.scheme === scheme));
+    panes.forEach(p => { p.style.display = p.dataset.pane === scheme ? '' : 'none'; });
+    // 关闭遗留浮层
+    document.getElementById('bMenu')?.classList.remove('open');
+    document.getElementById('cDrawer')?.classList.remove('open');
+    document.getElementById('aSheet')?.classList.remove('open');
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.scheme)));
+
+  kbdTip.addEventListener('click', () => {
+    phone.classList.toggle('kbd');
+    kbdTip.textContent = phone.classList.contains('kbd')
+      ? '⌨ 已弹出键盘（再点收起）' : '⌨ 模拟键盘弹出 / 收起（观察按钮位置是否跳变）';
+    document.getElementById('bMenu')?.classList.remove('open');
+    document.getElementById('cDrawer')?.classList.remove('open');
+  });
+
+  // 方案 B：＋ 展开面板
+  document.getElementById('bLead').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('bMenu').classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    const m = document.getElementById('bMenu');
+    if (m.classList.contains('open') && !m.contains(e.target) && e.target.id !== 'bLead') m.classList.remove('open');
+    const d = document.getElementById('cDrawer');
+    if (d.classList.contains('open') && !d.contains(e.target) && e.target.id !== 'cTool') d.classList.remove('open');
+    const s = document.getElementById('aSheet');
+    if (s && s.classList.contains('open') && !s.contains(e.target) && e.target.id !== 'aPlus' && !e.target.closest('#aPlus')) s.classList.remove('open');
+  });
+
+  // 方案 A：＋ 展开更多选项面板
+  document.getElementById('aPlus')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('aSheet').classList.toggle('open');
+  });
+
+  // 方案 C：🛠 抽屉
+  document.getElementById('cTool').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('cDrawer').classList.toggle('open');
+  });
+
+  // 发送按钮点击反馈
+  document.querySelectorAll('.send').forEach(s => s.addEventListener('click', () => {
+    if (s.classList.contains('off')) return;
+    s.textContent = '✓'; s.style.background = '#3d8a4f';
+    setTimeout(() => { s.textContent = '↑'; s.style.background = ''; }, 600);
+  }));
+
+  // 模拟输入框聚焦颜色 + 输入占位
+  document.querySelectorAll('.field').forEach(f => f.addEventListener('click', () => {
+    const ph = f.querySelector('.ph');
+    if (ph && ph.textContent.includes('…')) { ph.textContent = '帮我总结一下这段对话'; ph.classList.add('small'); }
+  }));
+</script>
+</body>
+</html>

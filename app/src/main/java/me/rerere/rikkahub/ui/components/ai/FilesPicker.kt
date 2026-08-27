@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.BuiltInTools
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Camera01
@@ -63,7 +64,9 @@ import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderLocked
+import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
@@ -102,6 +105,12 @@ internal fun FilesPicker(
     onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
+    /** 网络搜索状态/服务更新：与输入栏搜索按钮共用同一组回调 */
+    enableSearch: Boolean,
+    onUpdateSearchMode: (SearchMode) -> Unit,
+    onUpdateSearchService: (Int) -> Unit,
+    /** 优化提示词（面板卡片）：由调用方负责空输入校验与弹层 */
+    onOptimizePromptClick: () -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
     showCompressDialog: Boolean,
@@ -114,7 +123,8 @@ internal fun FilesPicker(
     onPickFile: () -> Unit,
 ) {
     val settings = LocalSettings.current
-    val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
+    val chatModel = settings.getCurrentChatModel()
+    val provider = chatModel?.findProvider(providers = settings.providers)
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
@@ -147,17 +157,107 @@ internal fun FilesPicker(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Extensions (Quick Messages + Prompt Injections + Skills)
-        val modeAndLorebookCount =
-            if (assistant.allowConversationPromptInjection) {
-                conversation.modeInjectionIds.size + conversation.lorebookIds.size
-            } else {
-                assistant.modeInjectionIds.size + assistant.lorebookIds.size
-            }
-        val activeCount =
-            assistant.quickMessageIds.size +
-                modeAndLorebookCount +
-                assistant.enabledSkills.size
+        // ===== 能力入口：统一为「主标题 + 次标题」宽卡片
+        // 排序：MCP 服务 / 网络搜索服务 / 扩展管理 / 工作区 / 信任文件夹 / 知识库 =====
+
+        // 共享依赖：信任文件夹状态 + 会话能力策略（MCP / 知识库卡片用）
+        val trustedFolderRepository: TrustedFolderRepository = koinInject()
+        val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
+        val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+        val modePolicy = resolveConversationPolicy(
+            conversation = conversation,
+            assistant = assistant,
+            settings = settings,
+            trustedFolderActive = activeTrustedProject != null,
+        )
+
+        // 1. MCP 服务
+        val mcpManager: McpManager = koinInject()
+        val mcpStatus by mcpManager.syncingStatus.collectAsStateWithLifecycle()
+        val mcpLoading = mcpStatus.values.any { it == McpStatus.Connecting }
+        val enabledMcpCount = settings.mcpServers.count {
+            it.commonOptions.enable && it.id in assistant.mcpServers
+        }
+        var showMcpSheet by remember { mutableStateOf(false) }
+        var showKbSheet by remember { mutableStateOf(false) }
+        ListItem(
+            leadingContent = { Icon(HugeIcons.McpServer, contentDescription = null) },
+            headlineContent = { Text("MCP 服务") },
+            supportingContent = {
+                Text(
+                    text = when {
+                        settings.mcpServers.isEmpty() -> "未配置 MCP 服务"
+                        enabledMcpCount > 0 -> "已启用 $enabledMcpCount 个服务"
+                        else -> "未启用服务"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingContent = {
+                if (mcpLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable(enabled = settings.mcpServers.isNotEmpty() && modePolicy.allowMcpUse) {
+                    hapticController.lightTap()
+                    showMcpSheet = true
+                },
+        )
+
+        // 2. 网络搜索服务（新增卡片，与输入栏搜索按钮同源）
+        var showSearchSheet by remember { mutableStateOf(false) }
+        val currentSearchService = settings.searchServices.getOrNull(settings.searchServiceSelected)
+        val builtInSearchEnabled = chatModel?.tools?.contains(BuiltInTools.Search) == true
+        ListItem(
+            leadingContent = { Icon(HugeIcons.GlobalSearch, contentDescription = null) },
+            headlineContent = { Text("网络搜索服务") },
+            supportingContent = {
+                Text(
+                    text = when {
+                        builtInSearchEnabled -> "使用模型内置搜索"
+                        enableSearch && currentSearchService != null -> "已开启 · ${currentSearchService.displayName}"
+                        enableSearch -> "已开启"
+                        else -> "未开启"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingContent = {
+                if (enableSearch && settings.enabledSearchServiceIds.isNotEmpty()) {
+                    Text(
+                        text = settings.enabledSearchServiceIds.size.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable {
+                    hapticController.lightTap()
+                    showSearchSheet = true
+                },
+        )
+
+        // 3. 扩展管理：次标题展示各类已开数量（技能 / 快捷消息 / 模式注入 / 世界书）
+        val skillCount = assistant.enabledSkills.size
+        val quickMessageCount = assistant.quickMessageIds.size
+        val modeInjectionCount =
+            if (assistant.allowConversationPromptInjection) conversation.modeInjectionIds.size
+            else assistant.modeInjectionIds.size
+        val lorebookCount =
+            if (assistant.allowConversationPromptInjection) conversation.lorebookIds.size
+            else assistant.lorebookIds.size
         ListItem(
             leadingContent = {
                 Icon(
@@ -168,43 +268,9 @@ internal fun FilesPicker(
             headlineContent = {
                 Text(stringResource(R.string.assistant_page_tab_extensions))
             },
-            trailingContent = {
-                if (activeCount > 0) {
-                    Text(
-                        text = activeCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            },
-            colors = ListItemDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.large)
-                .clickable {
-                    hapticController.lightTap()
-                    onShowInjectionSheetChange(true)
-                },
-        )
-
-        // Trusted Folder
-        val trustedFolderRepository: TrustedFolderRepository = koinInject()
-        val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
-        val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
-        ListItem(
-            leadingContent = {
-                Icon(
-                    imageVector = HugeIcons.FolderLocked,
-                    contentDescription = "信任文件夹",
-                )
-            },
-            headlineContent = {
-                Text("信任文件夹")
-            },
-            trailingContent = {
+            supportingContent = {
                 Text(
-                    text = activeTrustedProject?.name ?: "未激活",
+                    text = "技能 $skillCount · 快捷消息 $quickMessageCount · 模式注入 $modeInjectionCount · 世界书 $lorebookCount",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -218,12 +284,11 @@ internal fun FilesPicker(
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
                     hapticController.lightTap()
-                    onDismiss()
-                    navController.navigate(Screen.TrustedFolders)
+                    onShowInjectionSheetChange(true)
                 },
         )
 
-        // Workspace：点击进入对应工作区文件目录页；长按切换工作目录（未绑定时点击/长按均引导绑定）
+        // 4. 工作区：点击进入对应工作区文件目录页；长按切换工作目录（未绑定时点击/长按均引导绑定）
         var showWorkspaceSheet by remember { mutableStateOf(false) }
         var showCwdSheet by remember { mutableStateOf(false) }
         val boundWorkspace = remember(workspaces, assistant.workspaceId) {
@@ -291,53 +356,39 @@ internal fun FilesPicker(
                 ),
         )
 
-        // 外部能力：MCP / 知识库（从输入栏收起到「更多」里，减少常驻触控）
-        val modePolicy = resolveConversationPolicy(
-            conversation = conversation,
-            assistant = assistant,
-            settings = settings,
-            trustedFolderActive = activeTrustedProject != null,
-        )
-        val mcpManager: McpManager = koinInject()
-        val mcpStatus by mcpManager.syncingStatus.collectAsStateWithLifecycle()
-        val mcpLoading = mcpStatus.values.any { it == McpStatus.Connecting }
-        val enabledMcpCount = settings.mcpServers.count {
-            it.commonOptions.enable && it.id in assistant.mcpServers
-        }
-        var showMcpSheet by remember { mutableStateOf(false) }
-        var showKbSheet by remember { mutableStateOf(false) }
-
-        // 与「扩展管理 / 信任文件夹 / 工作区」一致的 ListItem 入口
+        // 5. 信任文件夹：激活项目名入主标题下的次标题
         ListItem(
-            leadingContent = { Icon(HugeIcons.McpServer, contentDescription = null) },
-            headlineContent = { Text("MCP 服务") },
+            leadingContent = {
+                Icon(
+                    imageVector = HugeIcons.FolderLocked,
+                    contentDescription = "信任文件夹",
+                )
+            },
+            headlineContent = {
+                Text("信任文件夹")
+            },
             supportingContent = {
                 Text(
-                    text = when {
-                        settings.mcpServers.isEmpty() -> "未配置 MCP 服务"
-                        enabledMcpCount > 0 -> "已启用 $enabledMcpCount 个服务"
-                        else -> "未启用服务"
-                    },
+                    text = activeTrustedProject?.name ?: "未激活",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
-            trailingContent = {
-                if (mcpLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            colors = ListItemDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            ),
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
-                .clickable(enabled = settings.mcpServers.isNotEmpty() && modePolicy.allowMcpUse) {
+                .clickable {
                     hapticController.lightTap()
-                    showMcpSheet = true
+                    onDismiss()
+                    navController.navigate(Screen.TrustedFolders)
                 },
         )
 
+        // 6. 知识库
         ListItem(
             leadingContent = { Icon(HugeIcons.Bookshelf01, contentDescription = null) },
             headlineContent = { Text("知识库") },
@@ -357,6 +408,28 @@ internal fun FilesPicker(
                 .clickable(enabled = modePolicy.allowKnowledge) {
                     hapticController.lightTap()
                     showKbSheet = true
+                },
+        )
+
+        // 7. 优化提示词（从输入栏工具行收起，低频功能归位到「＋」面板）
+        ListItem(
+            leadingContent = { Icon(HugeIcons.MagicWand01, contentDescription = null) },
+            headlineContent = { Text("优化提示词") },
+            supportingContent = {
+                Text(
+                    text = "用 AI 改写当前输入内容",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable {
+                    hapticController.lightTap()
+                    onOptimizePromptClick()
                 },
         )
 
@@ -404,6 +477,39 @@ internal fun FilesPicker(
                     },
                     onDismiss = { showKbSheet = false },
                 )
+            }
+        }
+
+        // 网络搜索服务弹层：复用输入栏搜索按钮的同一套配置面板
+        if (showSearchSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showSearchSheet = false },
+                sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.7f)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_picker_title),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    )
+                    SearchPicker(
+                        enableSearch = enableSearch,
+                        settings = settings,
+                        model = chatModel,
+                        onUpdateSearchMode = onUpdateSearchMode,
+                        onUpdateSearchService = onUpdateSearchService,
+                        onDismiss = { showSearchSheet = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                }
             }
         }
 

@@ -971,7 +971,7 @@ enum class ChatFontFamily {
     CUSTOM,
 }
 
-/** 聊天输入框下方指标条可展示的信息项（顺序即默认展示顺序）。 */
+/** 上下文浮窗可展示的信息项（顺序即默认展示顺序）。 */
 @Serializable
 enum class FooterIndicator {
     @SerialName("model") CURRENT_MODEL,
@@ -980,6 +980,7 @@ enum class FooterIndicator {
     @SerialName("cost") COST,
     @SerialName("tokens") TOKENS,
     @SerialName("messages") MESSAGES,
+    @SerialName("global_usage") GLOBAL_USAGE,
 }
 
 @Serializable

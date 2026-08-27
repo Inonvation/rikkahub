@@ -55,6 +55,9 @@ interface MessageNodeDAO {
 
     @RawQuery
     suspend fun getAssistantUsageRaw(query: SupportSQLiteQuery): List<AssistantUsageEntry>
+
+    @RawQuery
+    suspend fun getModelNameSnapshotsRaw(query: SupportSQLiteQuery): List<ModelNameSnapshot>
 }
 
 data class MessageTokenStats(
@@ -120,37 +123,63 @@ private val TREND_BY_MODEL_SQL = SimpleSQLiteQuery(
 suspend fun MessageNodeDAO.getTrendByModel(startDate: String): List<DayModelUsage> =
     getTrendByModelRaw(SimpleSQLiteQuery(TREND_BY_MODEL_SQL.sql, arrayOf(startDate)))
 
-// 模型使用率：按消息 modelId 分组统计消息数与 token 消耗，由高到低
-private val MODEL_USAGE_SQL = SimpleSQLiteQuery(
-    "SELECT json_extract(j.value, '$.modelId') AS modelId, " +
-        "COUNT(*) AS count, " +
-        "COALESCE(SUM(" +
-        "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
-        "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
-        "), 0) AS tokens " +
-        "FROM message_node mn, json_each(mn.messages) j " +
-        "WHERE json_extract(j.value, '$.modelId') IS NOT NULL " +
-        "AND json_extract(j.value, '$.modelId') != '' " +
-        "GROUP BY modelId ORDER BY count DESC",
-)
-
-suspend fun MessageNodeDAO.getModelUsage(): List<ModelUsageEntry> =
-    getModelUsageRaw(MODEL_USAGE_SQL)
+// 模型使用率：按消息 modelId 分组统计消息数与 token 消耗，由高到低。
+// 与趋势一致只取最近一年，避免全表 json_each 展开拖慢统计页首屏。
+suspend fun MessageNodeDAO.getModelUsage(startDate: String): List<ModelUsageEntry> =
+    getModelUsageRaw(
+        SimpleSQLiteQuery(
+            "SELECT json_extract(j.value, '$.modelId') AS modelId, " +
+                "COUNT(*) AS count, " +
+                "COALESCE(SUM(" +
+                "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
+                "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
+                "), 0) AS tokens " +
+                "FROM message_node mn, json_each(mn.messages) j " +
+                "WHERE json_extract(j.value, '$.modelId') IS NOT NULL " +
+                "AND json_extract(j.value, '$.modelId') != '' " +
+                "AND json_extract(j.value, '$.createdAt') >= ? " +
+                "GROUP BY modelId ORDER BY count DESC",
+            arrayOf(startDate)
+        )
+    )
 
 // 助手使用率：消息 JOIN 会话取 assistant_id 分组统计，由高到低
-private val ASSISTANT_USAGE_SQL = SimpleSQLiteQuery(
-    "SELECT c.assistant_id AS assistantId, " +
-        "COUNT(*) AS count, " +
-        "COALESCE(SUM(" +
-        "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
-        "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
-        "), 0) AS tokens " +
-        "FROM message_node mn " +
-        "JOIN conversationentity c ON mn.conversation_id = c.id " +
-        "CROSS JOIN json_each(mn.messages) j " +
-        "GROUP BY c.assistant_id ORDER BY count DESC",
-)
+suspend fun MessageNodeDAO.getAssistantUsage(startDate: String): List<AssistantUsageEntry> =
+    getAssistantUsageRaw(
+        SimpleSQLiteQuery(
+            "SELECT c.assistant_id AS assistantId, " +
+                "COUNT(*) AS count, " +
+                "COALESCE(SUM(" +
+                "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
+                "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
+                "), 0) AS tokens " +
+                "FROM message_node mn " +
+                "JOIN conversationentity c ON mn.conversation_id = c.id " +
+                "CROSS JOIN json_each(mn.messages) j " +
+                "WHERE json_extract(j.value, '$.createdAt') >= ? " +
+                "GROUP BY c.assistant_id ORDER BY count DESC",
+            arrayOf(startDate)
+        )
+    )
 
-suspend fun MessageNodeDAO.getAssistantUsage(): List<AssistantUsageEntry> =
-    getAssistantUsageRaw(ASSISTANT_USAGE_SQL)
+/** 消息落库时的模型展示名快照（modelId -> 名字） */
+data class ModelNameSnapshot(val modelId: String = "", val modelName: String = "")
+
+// 模型名快照：消息生成时快照了模型展示名，模型从配置删除/更换后统计页仍可据此显示真实名称。
+// 与用量查询同窗口（1 年），同一 modelId 取任意一条快照即可（同一模型名一般稳定）。
+suspend fun MessageNodeDAO.getModelNameSnapshots(startDate: String): List<ModelNameSnapshot> =
+    getModelNameSnapshotsRaw(
+        SimpleSQLiteQuery(
+            "SELECT json_extract(j.value, '$.modelId') AS modelId, " +
+                "MAX(json_extract(j.value, '$.modelName')) AS modelName " +
+                "FROM message_node mn, json_each(mn.messages) j " +
+                "WHERE json_extract(j.value, '$.modelId') IS NOT NULL " +
+                "AND json_extract(j.value, '$.modelId') != '' " +
+                "AND json_extract(j.value, '$.modelName') IS NOT NULL " +
+                "AND json_extract(j.value, '$.modelName') != '' " +
+                "AND json_extract(j.value, '$.createdAt') >= ? " +
+                "GROUP BY modelId",
+            arrayOf(startDate)
+        )
+    )
 

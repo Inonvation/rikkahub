@@ -30,6 +30,8 @@ class StreamChunkHandlerTest {
         assertEquals(MessageRole.ASSISTANT, messages.last().role)
         assertEquals("hello", messages.last().toText())
         assertEquals(model.id, messages.last().modelId)
+        // 模型名快照：displayName 为空时回退 API modelId
+        assertEquals(model.modelId, messages.last().modelName)
         assertNotNull(messages.last().finishedAt)
     }
 

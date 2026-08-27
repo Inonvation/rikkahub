@@ -141,6 +141,8 @@ import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDevicePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDeviceWhitelistPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDevicePermissionPage
+import me.rerere.rikkahub.ui.pages.setting.ConfigFilesPage
+import me.rerere.rikkahub.ui.pages.setting.ManagementAuditPage
 import me.rerere.rikkahub.ui.pages.setting.SettingDeviceAuditPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
@@ -606,6 +608,14 @@ class RouteActivity : ComponentActivity() {
                                 SettingDeviceAuditPage()
                             }
 
+                            entry<Screen.SettingConfigFiles> {
+                                ConfigFilesPage()
+                            }
+
+                            entry<Screen.SettingManagementAudit> {
+                                ManagementAuditPage()
+                            }
+
                             entry<Screen.SettingDevicePermission> {
                                 SettingDevicePermissionPage()
                             }
@@ -975,6 +985,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingDeviceAudit : Screen
+
+    @Serializable
+    data object SettingConfigFiles : Screen
+
+    @Serializable
+    data object SettingManagementAudit : Screen
 
     @Serializable
     data object Debug : Screen

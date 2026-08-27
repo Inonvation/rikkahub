@@ -8,8 +8,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -31,6 +29,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ime
@@ -39,7 +38,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -103,21 +101,22 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
-import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Fullscreen
-import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
@@ -146,7 +145,6 @@ import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.utils.SoundEffectPlayer
 import org.koin.compose.koinInject
-import kotlin.time.Duration.Companion.seconds
 
 @Composable
 fun ChatInput(
@@ -154,18 +152,13 @@ fun ChatInput(
     loading: Boolean,
     settings: Settings,
     hazeState: HazeState,
-    enableSearch: Boolean,
-    onUpdateSearchMode: (SearchMode) -> Unit,
     modifier: Modifier = Modifier,
     conversation: Conversation,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
     onUpdateChatModel: (Model) -> Unit,
     onOpenProviderSettings: () -> Unit = {},
     onUpdateAssistant: (Assistant) -> Unit,
-    onUpdateSearchService: (Int) -> Unit,
-    onUpdateConversation: (Conversation) -> Unit,
     onMoreClick: () -> Unit,
-    onOptimizePromptClick: () -> Unit,
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
@@ -189,6 +182,10 @@ fun ChatInput(
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
+    // 快捷消息（⚡）在底部工具行展示：与「＋」对调后不再占用输入框 leading
+    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
+        settings.getQuickMessagesOfAssistant(assistant)
+    }
     val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
     val inputHazeStyle = HazeBlurStyle.Material3 {
         blurRadius(12.dp)
@@ -337,8 +334,10 @@ fun ChatInput(
                         subAgentActive = subAgentActive,
                         subAgentActiveCount = subAgentActiveCount,
                         onOpenSubAgentPanel = onOpenSubAgentPanel,
+                        onMoreClick = onMoreClick,
                         trailingContent = {
-                            if (imeTargetVisible && !asrState.isRecording) {
+                            // 发送按钮固定右上：不随 IME 状态切换位置（键盘弹出/收起都在输入框内）
+                            if (!asrState.isRecording) {
                                 SendButton(
                                     loading = loading,
                                     empty = state.isEmpty(),
@@ -354,9 +353,12 @@ fun ChatInput(
                         enter = EnterTransition.None,
                         exit = shrinkVertically() + fadeOut(),
                     ) {
+                        // 底条（Codex 风格）：左侧文本 pill（模型/思考强度），右侧快捷消息 + 录音。
+                        // 固定 36dp 高度，pill 与图标垂直居中，避免行高随内容抖动。
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .height(36.dp)
                                 .padding(horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -367,74 +369,32 @@ fun ChatInput(
                                     modifier = Modifier
                                         .weight(1f)
                                         .horizontalScroll(rememberScrollState()),
+                                    verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    // Model Picker
-                                    ModelSelectorButton(
+                                    // Model Picker：文本 pill，名称超长截断，展示「供应商名/模型名」
+                                    ModelPillButton(
                                         state = modelListState,
-                                        onlyIcon = true,
+                                        providers = settings.providers,
                                         onLongClick = onOpenProviderSettings,
-                                        modifier = Modifier,
                                     )
 
-                                    // Search
-                                    val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                                    val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                                    val chatModel = settings.getCurrentChatModel()
-                                    SearchPickerButton(
-                                        enableSearch = enableSearch,
-                                        settings = settings,
-                                        onUpdateSearchMode = { mode ->
-                                            onUpdateSearchMode(mode)
-                                            val enabled = mode != SearchMode.OFF
-                                            toaster.show(
-                                                message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                                duration = 1.seconds,
-                                                type = if (enabled) {
-                                                    ToastType.Success
-                                                } else {
-                                                    ToastType.Normal
-                                                }
-                                            )
-                                        },
-                                        onUpdateSearchService = onUpdateSearchService,
-                                        model = chatModel,
-                                        compact = true,
-                                    )
-
-                                    // Reasoning
+                                    // Reasoning：文本 pill（仅推理模型显示）
                                     val model = settings.getCurrentChatModel()
                                     if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                        ReasoningButton(
+                                        ReasoningPillButton(
                                             reasoningLevel = assistant.reasoningLevel,
                                             onUpdateReasoningLevel = {
                                                 onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                             },
-                                            onlyIcon = true,
-                                            compact = true,
                                         )
                                     }
                                 }
                             }
 
-                            ActionIconButton(
-                                onClick = onOptimizePromptClick
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.MagicWand01,
-                                    contentDescription = stringResource(R.string.prompt_optimize),
-                                )
-                            }
-
-                            Spacer(Modifier.width(8.dp))
-
-                            ActionIconButton(
-                                onClick = onMoreClick
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Add01,
-                                    contentDescription = stringResource(R.string.more_options)
-                                )
+                            // 快捷消息保留在底条（高频）
+                            if (quickMessages.isNotEmpty()) {
+                                QuickMessageButton(quickMessages = quickMessages, state = state)
                             }
 
                             if (asrState.isAvailable || asrState.isRecording) {
@@ -461,35 +421,8 @@ fun ChatInput(
                                     }
                                 )
                             }
-
-                            if (!imeTargetVisible) {
-                                AnimatedVisibility(
-                                    visible = !asrState.isRecording,
-                                    enter = fadeIn() + scaleIn(),
-                                    exit = fadeOut() + scaleOut(),
-                                ) {
-                                    SendButton(
-                                        loading = loading,
-                                        empty = state.isEmpty(),
-                                        onClick = { sendMessage() },
-                                        onLongClick = { sendMessageWithoutAnswer() },
-                                    )
-                                }
-                            }
                         }
                     }
-                    WorkspaceFooterBar(
-                        assistant = assistant,
-                        conversation = conversation,
-                        settings = settings,
-                        // 会话无消息且未生成中时可切换模式；首条消息发送后锁定，仅展示
-                        // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
-                        modeSwitchEnabled = !loading && conversation.currentMessages.none { it.role == MessageRole.USER },
-                        onSwitchMode = { ref ->
-                            onUpdateConversation(conversation.copy(mode = ref))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
                 }
             }
         }
@@ -720,6 +653,98 @@ private fun ActionIconButton(
     }
 }
 
+/**
+ * Codex 风格低调文本 pill：模型选择。点击弹模型列表，长按进服务商设置。
+ * 无背景、灰阶文字；「供应商名/模型名」超过 150dp 自动省略号截断，避免撑宽底条。
+ */
+@Composable
+private fun ModelPillButton(
+    state: ModelListState,
+    providers: List<ProviderSetting>,
+    onLongClick: () -> Unit,
+) {
+    val hapticController = rememberHaptic()
+    // 供应商名前缀：模型归属的提供商（未归属到任何提供商时省略前缀）
+    val providerName = state.currentModel?.let { activeModel ->
+        providers.firstOrNull { p -> p.models.any { it.id == activeModel.id } }?.name
+    }
+    Row(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(CircleShape)
+            .combinedClickable(
+                onClick = { hapticController.lightTap(); state.open() },
+                onLongClick = { hapticController.lightTap(); onLongClick() },
+            )
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = buildString {
+                providerName?.takeIf { it.isNotBlank() }?.let {
+                    append(it).append('/')
+                }
+                append(state.currentModel?.displayName ?: stringResource(R.string.model_list_select_model))
+            },
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 150.dp),
+        )
+        Icon(
+            imageVector = HugeIcons.ArrowDown01,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(13.dp),
+        )
+    }
+}
+
+/**
+ * Codex 风格低调文本 pill：思考强度（仅推理模型显示），点开级别滑杆。
+ */
+@Composable
+private fun ReasoningPillButton(
+    reasoningLevel: ReasoningLevel,
+    onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
+) {
+    val hapticController = rememberHaptic()
+    var showPicker by remember { mutableStateOf(false) }
+    if (showPicker) {
+        ReasoningPicker(
+            reasoningLevel = reasoningLevel,
+            onDismissRequest = { showPicker = false },
+            onUpdateReasoningLevel = onUpdateReasoningLevel,
+        )
+    }
+    Row(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(CircleShape)
+            .clickable { hapticController.lightTap(); showPicker = true }
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "思考·${reasoningLevel.label()}",
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 100.dp),
+        )
+        Icon(
+            imageVector = HugeIcons.ArrowDown01,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(13.dp),
+        )
+    }
+}
+
 @Composable
 private fun TextInputRow(
     state: ChatInputState,
@@ -728,15 +753,13 @@ private fun TextInputRow(
     subAgentActive: Boolean = false,
     subAgentActiveCount: Int = 0,
     onOpenSubAgentPanel: (() -> Unit)? = null,
+    /** 「＋」更多选项：常驻输入框 leading（与快捷消息对调），键盘弹出时也可加附件 */
+    onMoreClick: () -> Unit,
     trailingContent: @Composable () -> Unit = {},
 ) {
     val settings = LocalSettings.current
     val hapticController = rememberHaptic()
     val filesManager: FilesManager = koinInject()
-    val assistant = settings.getCurrentAssistant()
-    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
-        settings.getQuickMessagesOfAssistant(assistant)
-    }
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     // 点击用户消息进入编辑态时，自动聚焦输入框并弹出键盘，避免"已进入编辑却还要再点一下输入框"。
@@ -945,25 +968,30 @@ private fun TextInputRow(
                     trailingContent()
                 }
             },
-            leadingIcon = when {
-                // 子代理任务运行时：输入框左侧显示子代理图标（替代快捷消息按钮），点击进面板
-                subAgentActive && onOpenSubAgentPanel != null -> {
-                    {
-                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+            leadingIcon = {
+                // 「＋」常驻输入框左侧；子代理运行中在其左侧补充子代理图标
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        if (subAgentActive && onOpenSubAgentPanel != null) {
                             SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount)
                         }
-                    }
-                }
-
-                quickMessages.isNotEmpty() -> {
-                    {
-                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                            QuickMessageButton(quickMessages = quickMessages, state = state)
+                        ActionIconButton(
+                            onClick = {
+                                hapticController.lightTap()
+                                onMoreClick()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Add01,
+                                contentDescription = stringResource(R.string.more_options),
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
                     }
                 }
-
-                else -> null
             },
         )
         if (isFullScreen) {

@@ -10,9 +10,21 @@
 - 自定义包名 `com.inonvation.rikkahub`，自定义签名 `keystore.jks`
 - `origin` → `https://github.com/Inonvation/rikkahub.git`（日常推送）
 - `upstream` → `https://github.com/rikkahub/rikkahub.git`（原项目）
-- **永不向 upstream 推送或提 PR**；拉上游用 `git fetch upstream && git merge upstream/master`（上游默认分支为 `master`）
+- **永不向 upstream 推送或提 PR**；上游默认分支为 `master`
 
 更多定制细节见 `CLAUDE.md`。
+
+## 上游同步流程（禁止直接 merge）
+
+本 fork 已大规模重构（本地领先上游 200+ 提交），`git merge upstream/master` 必冲突，**所有上游同步一律走「三分类清单 → 逐条落地」流程**：
+
+1. `git fetch upstream` 后用 `git log --oneline HEAD..upstream/master` 与 `git log HEAD..upstream/master --stat` 列出全部待同步提交。
+2. 逐提交检查改动文件与本地树的分歧（`git diff HEAD upstream/master --stat -- <path>`），归入三类：
+   - **无需合并**：纯版本号 bump（本地版本独立演进，直接跳过）、上游自身文档（CONTRIBUTING 等）、以及本地已实现的等价功能。判断等价功能时先 `grep` 本地是否已存在（历史实例：`ChatGenerationForegroundService`、`RetryPolicy`/`docs/ai-request-retry-plan.md`、`UIMessage.isSynthetic`、`videogen/` 目录），存在则核对覆盖范围后跳过。
+   - **可放心合并**：改动文件与上游**完全一致**或差异极小——纯新增资源（svg/png）、追加型模型注册（ModelRegistry 新条目）、字符串 key 追加、`workspace`/`ai` 未重构模块的小修复。此类可直接 `git cherry-pick` 或照抄。
+   - **需本地化手动同步**：改动文件被本地重构过（历史实例：`ChatInput`/`ChatPage`、`GenerationHandler`/`ChatService`、`SettingPage`、TTS 配置、备份导入器、路径迁移过的 `WorkspaceTerminalPage` 等）。先读上游提交内容，再按本地结构移植功能，**禁止直接 merge**。
+3. 输出按风险排序的分类清单供拍板，之后逐条执行；每落地一条即验证构建（改动涉及 app 层时 `./gradlew :app:compileDebugKotlin`）。
+4. 每次同步的结论（分类清单 + 落地记录）记入 `docs/upstream-sync-log.md`。
 
 ## Build, Test, and Development Commands
 

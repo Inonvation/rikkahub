@@ -70,7 +70,12 @@ class StreamChunkHandler(private val model: Model? = null) {
         require(messages.isNotEmpty()) { "messages must not be empty" }
 
         val targetMessages = if (messages.last().role != MessageRole.ASSISTANT) {
-            messages + UIMessage(modelId = model?.id, role = MessageRole.ASSISTANT, parts = emptyList())
+            messages + UIMessage(
+                modelId = model?.id,
+                modelName = model?.modelNameSnapshot(),
+                role = MessageRole.ASSISTANT,
+                parts = emptyList(),
+            )
         } else {
             messages
         }
@@ -329,6 +334,7 @@ fun List<UIMessage>.handleTextGenerationResult(
     require(isNotEmpty()) { "messages must not be empty" }
     val incoming = result.message.copy(
         modelId = model?.id,
+        modelName = model?.modelNameSnapshot(),
         usage = result.usage,
         finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
     ).finishReasoning().cleanupBlankParts()
@@ -337,6 +343,7 @@ fun List<UIMessage>.handleTextGenerationResult(
     } else {
         dropLast(1) + last().appendMessage(incoming).copy(
             modelId = model?.id ?: last().modelId,
+            modelName = model?.modelNameSnapshot() ?: last().modelName,
             usage = last().usage.merge(result.usage ?: TokenUsage()),
             finishedAt = incoming.finishedAt,
         ).finishReasoning().cleanupBlankParts()
@@ -452,3 +459,6 @@ private fun UIMessage.appendMessage(delta: UIMessage): UIMessage {
         annotations = delta.annotations.ifEmpty { annotations },
     )
 }
+
+/** 模型展示名快照：自定义显示名为空时回退到 API modelId */
+private fun Model.modelNameSnapshot(): String = displayName.ifBlank { modelId }

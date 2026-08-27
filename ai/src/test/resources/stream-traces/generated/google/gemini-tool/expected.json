@@ -3,7 +3,7 @@
     "parts": [
         {
             "type": "reasoning",
-            "text": "**Defining the Technologies**\n\nOkay, I'm starting by establishing a firm grasp of the goal: researching Kotlin, Ktor, and Compose Multiplatform separately. I need to gather details on their latest stable releases, including release dates and official source URLs.\n\n\n"
+            "text": "**Defining the Technologies**\n\nOkay, I'm starting by establishing a firm grasp of the goal: researching Kotlin, Ktor, and Compose Multiplatform separately. I need to gather details on their latest stable releases, including release dates and official source URLs."
         },
         {
             "type": "tool",

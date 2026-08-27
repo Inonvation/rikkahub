@@ -514,16 +514,22 @@
   <string name="favorite_page_removed">收藏已移除</string>
   <string name="favorite_page_title">收藏</string>
   <string name="favorite_page_untitled_conversation">未命名对话</string>
+  <string name="history_page_batch_select">批量选择</string>
   <string name="history_page_cancel">取消</string>
   <string name="history_page_conversation_deleted">对话已删除</string>
+  <string name="history_page_conversations_deleted">已删除 %1$d 个对话</string>
   <string name="history_page_delete">删除</string>
   <string name="history_page_delete_all">删除全部</string>
   <string name="history_page_delete_all_confirmation">确定要删除所有对话吗？此操作无法撤销。</string>
   <string name="history_page_delete_all_conversations">删除全部对话</string>
+  <string name="history_page_delete_selected_confirmation">确定要删除选中的 %1$d 个对话吗？此操作无法撤销。</string>
+  <string name="history_page_delete_selected_conversations">删除所选对话</string>
+  <string name="history_page_deselect_all">取消全选</string>
   <string name="history_page_new_conversation">新对话</string>
   <string name="history_page_pin">置顶</string>
   <string name="history_page_search">搜索</string>
   <string name="history_page_search_messages">搜索消息</string>
+  <string name="history_page_select_all">全选</string>
   <string name="history_page_title">聊天历史</string>
   <string name="history_page_undo">撤销</string>
   <string name="history_page_unpin">取消置顶</string>
@@ -981,10 +987,6 @@
   <string name="setting_page_default_model_desc">设置各个功能的默认模型</string>
   <string name="setting_page_management_console">管理控制台</string>
   <string name="setting_page_console_status">运行状态</string>
-  <string name="setting_page_console_permissions">当前模式权限</string>
-  <string name="setting_page_console_management_capabilities">管理能力</string>
-  <string name="setting_page_console_no_permission">无管理权限</string>
-  <string name="setting_page_console_restricted">未生效</string>
   <string name="setting_page_console_audit">管理审计</string>
   <string name="setting_page_console_no_audit">暂无管理操作</string>
   <string name="setting_page_console_bottom_hint">状态、审计与权限</string>
@@ -1566,5 +1568,13 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_terminal_close_confirm_title">关闭终端 %1$d？</string>
   <string name="workspace_terminal_close_confirm_message">关闭此标签页将终止其中仍在运行的任何进程。</string>
   <string name="workspace_terminal_close">关闭</string>
+  <string name="chat_page_context_usage_title">上下文占用</string>
+  <string name="setting_page_console_footer_usage">会话用量</string>
+  <string name="setting_page_console_footer_usage_desc">显示所有会话累计的消息数与 tokens</string>
+  <string name="setting_page_console_footer">上下文浮窗显示</string>
+  <string name="setting_page_console_footer_desc">选择点击上下文圆圈后浮窗中展示的信息</string>
+  <string name="setting_page_console_audit_desc">管理操作记录与权限拦截记录</string>
+  <string name="setting_page_console_config_files_summary">%1$d 个提供商 · %2$d 个助手 · %3$d 个 MCP</string>
+  <string name="chat_page_context_popover_indicators_hint">未开启任何指标，可在管理控制台中开启</string>
 </resources>
 

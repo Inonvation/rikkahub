@@ -317,9 +317,12 @@ internal fun updateProviderModels(
     remove: List<String>?,
 ): List<Model> {
     val base = if (full != null) {
-        full.map {
-            val modelId = it.trim()
-            Model(
+        // 按 API modelId 对齐现有模型：命中的原样保留（id 与自定义配置不丢），
+        // 仅对探测到的新模型建立新条目，避免刷新导致历史消息的模型 Uuid 全部失联
+        val currentByModelId = current.associateBy { it.modelId }
+        full.map { raw ->
+            val modelId = raw.trim()
+            currentByModelId[modelId] ?: Model(
                 modelId = modelId,
                 displayName = modelId,
                 contextLength = ModelRegistry.contextLengthOrDefault(modelId),

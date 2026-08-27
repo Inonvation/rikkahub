@@ -21,15 +21,16 @@ interface SubAgentUsageDAO {
     )
     suspend fun getTokenStats(): SubAgentTokenStats
 
-    /** 子代理用量按模型聚合（次数 + prompt+completion token），由高到低。model_id 为空（继承主模型）保留空串，由 UI 归入「其他」。 */
+    /** 子代理用量按模型聚合（次数 + prompt+completion token），由高到低。model_id 为空（继承主模型）保留空串，由 UI 归入「其他」。按天去重口径与趋势一致，只取最近一年。 */
     @Query(
         "SELECT COALESCE(model_id, '') AS modelId, " +
             "COUNT(*) AS count, " +
             "COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens " +
             "FROM subagent_task_usage " +
+            "WHERE created_at >= :startMillis " +
             "GROUP BY modelId ORDER BY count DESC"
     )
-    suspend fun getModelUsage(): List<ModelUsageEntry>
+    suspend fun getModelUsage(startMillis: Long): List<ModelUsageEntry>
 
     /** 子代理用量按日 + 模型聚合，供趋势图合并；created_at 为 epoch 毫秒，转本地日期与主聊天对齐。 */
     @Query(

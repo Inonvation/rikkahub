@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,7 +40,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -71,6 +72,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,6 +88,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -117,6 +121,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.registry.contextLengthOrDefault
 import me.rerere.ai.provider.Model
@@ -128,11 +133,11 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.hugeicons.stroke.SlidersVertical
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -154,8 +159,11 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.ContextStatusPopover
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.resolveContextTokenLimit
@@ -163,6 +171,8 @@ import me.rerere.rikkahub.ui.components.ai.autoCompressResetThreshold
 import me.rerere.rikkahub.ui.components.ai.autoCompressShouldTrigger
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
+import me.rerere.rikkahub.ui.components.ai.ModePickerSheet
+import me.rerere.rikkahub.ui.components.ai.modeRefDisplayName
 import me.rerere.rikkahub.ui.components.ai.completion.CommandCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
@@ -460,8 +470,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             errors = errors,
             onDismissError = { vm.dismissError(it) },
             onClearAllErrors = { vm.clearAllErrors() },
-            rightDrawerOpen = rightDrawerOpen,
-            onRightDrawerOpenChange = { rightDrawerOpen = it },
         )
     }
 }
@@ -484,8 +492,6 @@ private fun ChatPageContent(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
-    rightDrawerOpen: Boolean,
-    onRightDrawerOpenChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -746,6 +752,14 @@ private fun ChatPageContent(
                 settings = setting,
                 conversation = conversation,
                 previewMode = previewMode,
+                // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。
+                // 不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
+                modeSwitchEnabled = !(loadingJob?.isActive == true) &&
+                    conversation.currentMessages.none { it.role == MessageRole.USER },
+                onSwitchMode = { ref ->
+                    vm.updateConversation(conversation.copy(mode = ref))
+                    vm.saveConversationAsync()
+                },
                 onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
                 onNewChat = {
                     navigateToChatPage(navController)
@@ -756,9 +770,7 @@ private fun ChatPageContent(
                 onUpdateTitle = {
                     vm.updateTitle(it)
                 },
-                onOpenRightDrawer = {
-                    onRightDrawerOpenChange(true)
-                },
+                navController = navController,
                 onCompressClick = {
                     showCompressDialog = true
                 },
@@ -961,6 +973,45 @@ private fun ChatPageContent(
             }
         }
 
+        // 网络搜索状态/服务更新：ChatInput 与「＋」更多选项（FilesPicker）共用
+        val updateSearchMode: (SearchMode) -> Unit = { mode ->
+            val current = setting.getCurrentAssistant()
+            val model = setting.getCurrentChatModel()
+            vm.updateSettings(
+                setting.copy(
+                    assistants = setting.assistants.map { assistant ->
+                        if (assistant.id == current.id) {
+                            assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
+                        } else {
+                            assistant
+                        }
+                    },
+                    providers = if (model == null) {
+                        setting.providers
+                    } else {
+                        setting.providers.map { provider ->
+                            provider.editModel(
+                                model.copy(
+                                    tools = if (mode == SearchMode.BUILT_IN) {
+                                        model.tools + BuiltInTools.Search
+                                    } else {
+                                        model.tools - BuiltInTools.Search
+                                    }
+                                )
+                            )
+                        }
+                    },
+                )
+            )
+        }
+        val updateSearchService: (Int) -> Unit = { index ->
+            vm.updateSettings(
+                setting.copy(
+                    searchServiceSelected = index
+                )
+            )
+        }
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1014,37 +1065,6 @@ private fun ChatPageContent(
                 onCancelClick = {
                     vm.stopGeneration()
                 },
-                enableSearch = enableWebSearch,
-                onUpdateSearchMode = { mode ->
-                    val current = setting.getCurrentAssistant()
-                    val model = setting.getCurrentChatModel()
-                    vm.updateSettings(
-                        setting.copy(
-                            assistants = setting.assistants.map { assistant ->
-                                if (assistant.id == current.id) {
-                                    assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
-                                } else {
-                                    assistant
-                                }
-                            },
-                            providers = if (model == null) {
-                                setting.providers
-                            } else {
-                                setting.providers.map { provider ->
-                                    provider.editModel(
-                                        model.copy(
-                                            tools = if (mode == SearchMode.BUILT_IN) {
-                                                model.tools + BuiltInTools.Search
-                                            } else {
-                                                model.tools - BuiltInTools.Search
-                                            }
-                                        )
-                                    )
-                                }
-                            },
-                        )
-                    )
-                },
                 onSendClick = {
                     performSend(appendOnly = false)
                 },
@@ -1070,29 +1090,8 @@ private fun ChatPageContent(
                         )
                     )
                 },
-                onUpdateSearchService = { index ->
-                    vm.updateSettings(
-                        setting.copy(
-                            searchServiceSelected = index
-                        )
-                    )
-                },
-                onUpdateConversation = { newConversation ->
-                    vm.updateConversation(newConversation)
-                    vm.saveConversationAsync()
-                },
                 onMoreClick = {
                     showFilesSheet = true
-                },
-                onOptimizePromptClick = {
-                    if (inputState.isEmpty()) {
-                        toaster.show(
-                            context.getString(R.string.prompt_optimize_empty_input),
-                            type = ToastType.Error,
-                        )
-                    } else {
-                        showPromptOptimizeSheet = true
-                    }
                 },
                 subAgentActive = subAgentActiveCount > 0,
                 subAgentActiveCount = subAgentActiveCount,
@@ -1156,6 +1155,10 @@ private fun ChatPageContent(
                 conversation = conversation,
                 assistant = assistant,
                 vm = vm,
+                enableSearch = enableWebSearch,
+                onUpdateSearchMode = updateSearchMode,
+                onUpdateSearchService = updateSearchService,
+                onShowPromptOptimize = { showPromptOptimizeSheet = true },
                 onDismiss = { showFilesSheet = false },
             )
         }
@@ -1182,6 +1185,12 @@ private fun ChatFilesPickerSheet(
     conversation: Conversation,
     assistant: Assistant,
     vm: ChatVM,
+    /** 网络搜索状态与服务更新：与输入栏搜索按钮共用同一组逻辑（ChatPage 顶层提取的 updateSearchMode/updateSearchService） */
+    enableSearch: Boolean,
+    onUpdateSearchMode: (SearchMode) -> Unit,
+    onUpdateSearchService: (Int) -> Unit,
+    /** 打开提示词优化弹层（原输入栏 ✨ 按钮入口，已收入「＋」面板） */
+    onShowPromptOptimize: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1348,6 +1357,21 @@ private fun ChatFilesPickerSheet(
             onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
                 vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
             },
+            enableSearch = enableSearch,
+            onUpdateSearchMode = onUpdateSearchMode,
+            onUpdateSearchService = onUpdateSearchService,
+            onOptimizePromptClick = {
+                // 与之前输入栏 ✨ 按钮一致的空输入校验；为空时保留面板仅提示
+                if (inputState.isEmpty()) {
+                    toaster.show(
+                        context.getString(R.string.prompt_optimize_empty_input),
+                        type = ToastType.Error,
+                    )
+                } else {
+                    dismissAll()
+                    onShowPromptOptimize()
+                }
+            },
             onUpdateAssistant = {
                 vm.updateSettings(
                     setting.copy(
@@ -1384,11 +1408,13 @@ private fun TopBar(
     settings: Settings,
     conversation: Conversation,
     previewMode: Boolean,
+    modeSwitchEnabled: Boolean,
+    onSwitchMode: (String?) -> Unit,
     onOpenLeftDrawer: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onUpdateTitle: (String) -> Unit,
-    onOpenRightDrawer: () -> Unit,
+    navController: Navigator,
     onCompressClick: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -1397,6 +1423,16 @@ private fun TopBar(
         onUpdateTitle(it)
     }
     val hapticController = rememberHaptic()
+    var showContextPopover by remember { mutableStateOf(false) }
+
+    // 上下文用量：顶栏圆圈与浮窗共用同一份统计，避免两处口径不一致
+    val tokenStats = computeTokenStats(conversation, settings)
+    val totalTokens = tokenStats.totalTokens
+    val usagePercent = tokenStats.usagePercent
+    val tokenText = when {
+        totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
+        else -> totalTokens.toString()
+    }
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -1423,78 +1459,77 @@ private fun TopBar(
                 },
                 color = Color.Transparent,
             ) {
-                Column {
-                    val assistant = settings.getCurrentAssistant()
-                    val model = settings.getCurrentChatModel()
-                    val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyMedium,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                    if (model != null && provider != null) {
-                        Text(
-                            text = stringResource(
-                                R.string.chat_page_model_context,
-                                "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
-                                formatContextLength(model.contextLengthOrDefault()),
-                            ),
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 1,
-                            color = LocalContentColor.current.copy(0.65f),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 8.sp,
-                            )
-                        )
-                    }
+                    // 模式切换与显示：自输入框下方栏迁移至会话标题旁（锁定态仅展示）
+                    TopBarModeChip(
+                        conversation = conversation,
+                        settings = settings,
+                        modeSwitchEnabled = modeSwitchEnabled,
+                        onSwitchMode = onSwitchMode,
+                    )
                 }
             }
         },
         actions = {
-            // 上下文用量圆圈
-            val tokenStats = computeTokenStats(conversation, settings)
-            val totalTokens = tokenStats.totalTokens
-            val usagePercent = tokenStats.usagePercent
-            val tokenText = when {
-                totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
-                else -> totalTokens.toString()
-            }
-            IconButton(
-                onClick = {
-                    hapticController.lightTap()
+            // 上下文用量圆圈：点击从图标位置展开状态浮窗（上下文占用/指标/全会话用量/管理控制台）
+            ContextStatusPopover(
+                expanded = showContextPopover,
+                // 点击锚点圆圈时 Popup 的 dismiss 会与 IconButton 的 onClick 竞争：
+                // dismiss 先设 expanded=false，onClick 再 toggle 会误判成 true（浮窗关不掉）。
+                // 用协程延迟 dismiss，让 onClick 先基于原始状态完成切换（同 StudyDetailActions 的处理）。
+                onDismiss = { scope.launch { showContextPopover = false } },
+                settings = settings,
+                conversation = conversation,
+                contextTotalTokens = totalTokens,
+                contextUsagePercent = usagePercent,
+                contextLimitLabel = formatContextLength(tokenStats.contextTokenLimit),
+                onCompressClick = {
+                    showContextPopover = false
                     onCompressClick()
                 },
-                modifier = Modifier.size(44.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
-                    CircularProgressIndicator(
-                        progress = { usagePercent },
-                        modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 3.dp,
-                        color = when {
-                            usagePercent > 0.9f -> MaterialTheme.colorScheme.error
-                            usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.primary
+                onOpenConsole = {
+                    showContextPopover = false
+                    navController.navigate(Screen.ManagementDashboard)
+                },
+                anchor = {
+                    IconButton(
+                        onClick = {
+                            hapticController.lightTap()
+                            showContextPopover = !showContextPopover
                         },
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                    Text(
-                        text = tokenText,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = {
-                    hapticController.lightTap()
-                    onOpenRightDrawer()
-                }
-            ) {
-                Icon(HugeIcons.BookOpen01, "Study Panel")
-            }
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
+                            CircularProgressIndicator(
+                                progress = { usagePercent },
+                                modifier = Modifier.fillMaxSize(),
+                                strokeWidth = 3.dp,
+                                color = when {
+                                    usagePercent > 0.9f -> MaterialTheme.colorScheme.error
+                                    usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.primary
+                                },
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                            // 空会话不显示数字，只留圆环（0 无信息量）
+                            if (totalTokens > 0) {
+                                Text(
+                                    text = tokenText,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                },
+            )
 
             IconButton(
                 onClick = {
@@ -1552,6 +1587,120 @@ private fun TopBar(
                 }
             }
         )
+    }
+}
+
+/**
+ * 顶栏会话标题旁的模式 chip：短按弹出模式选择（可切换时），长按进模式设置页；
+ * 首条用户消息发送后锁定，仅展示 + 提示。
+ */
+@Composable
+private fun TopBarModeChip(
+    conversation: Conversation,
+    settings: Settings,
+    modeSwitchEnabled: Boolean,
+    onSwitchMode: (String?) -> Unit,
+) {
+    val navController = LocalNavController.current
+    val toaster = LocalToaster.current
+    val hapticController = rememberHaptic()
+    val lockedModeDesc = stringResource(R.string.chat_mode_locked_desc)
+    var showModePicker by remember { mutableStateOf(false) }
+    val modeLabel = modeRefDisplayName(conversation.mode, settings.customModes, settings.builtinModeOverrides)
+    val followAssistantSummary = rememberFollowAssistantSummary(settings)
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(start = 8.dp)
+            .clip(MaterialTheme.shapes.small)
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    if (modeSwitchEnabled) {
+                        hapticController.lightTap()
+                        showModePicker = true
+                    } else {
+                        // 有消息/生成中：模式锁定，给出提示而不是无响应
+                        toaster.show(
+                            message = lockedModeDesc,
+                            type = ToastType.Normal,
+                        )
+                    }
+                },
+                onLongClick = {
+                    hapticController.lightTap()
+                    navController.navigate(Screen.SettingModes)
+                }
+            )
+            .padding(vertical = 2.dp, horizontal = 6.dp)
+            .alpha(if (modeSwitchEnabled) 1f else 0.6f),
+    ) {
+        Icon(
+            imageVector = HugeIcons.SlidersVertical,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = modeLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            // 自定义模式名可很长：限制宽度，极端长名截断而非把会话标题挤没
+            modifier = Modifier.widthIn(max = 120.dp),
+        )
+    }
+
+    if (showModePicker) {
+        ModePickerSheet(
+            selectedRef = conversation.mode,
+            customModes = settings.customModes,
+            builtinModeOverrides = settings.builtinModeOverrides,
+            showFollowGlobal = true,
+            followAssistantSummary = followAssistantSummary,
+            onSelect = { ref ->
+                showModePicker = false
+                onSwitchMode(ref)
+            },
+            onDismiss = { showModePicker = false },
+        )
+    }
+}
+
+/**
+ * 「跟随助手配置」的实时摘要：按当前助手/全局设置列出会生效的能力族。
+ */
+@Composable
+private fun rememberFollowAssistantSummary(settings: Settings): String {
+    val trustedFolderRepository: TrustedFolderRepository = koinInject()
+    val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
+    val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+    val assistant = settings.getCurrentAssistant()
+    return remember(assistant, settings, activeTrustedProject) {
+        val enabled = buildList {
+            val mcpCount = settings.mcpServers.count { it.id in assistant.mcpServers && it.commonOptions.enable }
+            if (mcpCount > 0) add("MCP $mcpCount")
+            if (assistant.enableWebSearch) add("联网搜索")
+            if (assistant.enableMemory) add("记忆")
+            if (assistant.enabledSkills.isNotEmpty()) add("技能 ${assistant.enabledSkills.size}")
+            if (assistant.knowledgeBaseIds.isNotEmpty()) add("知识库")
+            if (assistant.workspaceId != null) add("工作区")
+            if (activeTrustedProject != null) add("信任文件夹")
+            if (assistant.enableRecentChatsReference) add("历史引用")
+            if (assistant.enabledStudyTools.isNotEmpty()) add("学习工具")
+            if (assistant.enableTimeReminder) add("时间提醒")
+            if (settings.enableTodoList) add("Todo")
+            if (settings.enableSubAgent) add("子代理")
+        }
+        if (enabled.isEmpty()) {
+            "当前仅启用本地工具、附件解析等基础能力"
+        } else {
+            "当前已启用：${enabled.joinToString("、")}"
+        }
     }
 }
 

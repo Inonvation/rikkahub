@@ -1,12 +1,15 @@
 package me.rerere.rikkahub.ui.pages.stats
 
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Message01
 import me.rerere.hugeicons.stroke.Rocket01
 import me.rerere.hugeicons.stroke.Zap
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -131,6 +134,7 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
                     TrendCard(
                         trendByModel = stats.trendByModel,
                         modelDisplayNames = stats.modelDisplayNames,
+                        modelNameSnapshots = stats.modelNameSnapshots,
                         unknownName = stringResource(R.string.stats_page_unknown_model),
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
@@ -143,6 +147,7 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
                             items = stats.modelUsage.map {
                                 it.toRankItem(
                                     names = stats.modelDisplayNames,
+                                    snapshotNames = stats.modelNameSnapshots,
                                     unknown = stringResource(R.string.stats_page_unknown_model),
                                 )
                             },
@@ -496,37 +501,46 @@ private data class TrendBucket(
     val segments: List<TrendSegment>,
 )
 
-/** 时间桶内的单个模型分段（堆叠柱的一段） */
+/** 时间桶内的单个模型分段（堆叠柱的一段）；「其他」段的 children 存放被合并的真实成员（可下钻） */
 private data class TrendSegment(
     val modelId: String,
     val label: String,
     val tokens: Long,
+    val children: List<TrendSegment> = emptyList(),
 )
 
-/** 使用率排行榜单行（已带显示名） */
+/** 使用率排行榜单行（已带显示名）；「其他」行的 children 存放被合并的真实成员（可下钻） */
 private data class UsageRankItem(
     val id: String,
     val name: String,
     val count: Int,
     val tokens: Long,
+    val children: List<UsageRankItem> = emptyList(),
 )
 
-/** 解析模型显示名；未匹配到当前配置时回退到「未知模型 + id 短前缀」，便于区分历史遗留的模型 */
-private fun resolveModelName(modelId: String, names: Map<String, String>, unknown: String): String =
-    names[modelId] ?: if (modelId.isBlank()) unknown else "$unknown · ${modelId.take(8)}"
+/** 解析模型显示名：当前配置名 > 消息落库快照名 > 「未知模型」 */
+private fun resolveModelName(
+    modelId: String,
+    names: Map<String, String>,
+    snapshotNames: Map<String, String>,
+    unknown: String,
+): String = names[modelId] ?: snapshotNames[modelId] ?: unknown
 
-private fun ModelUsageEntry.toRankItem(names: Map<String, String>, unknown: String) =
-    UsageRankItem(
-        id = modelId,
-        name = resolveModelName(modelId, names, unknown),
-        count = count,
-        tokens = tokens,
-    )
+private fun ModelUsageEntry.toRankItem(
+    names: Map<String, String>,
+    snapshotNames: Map<String, String>,
+    unknown: String,
+) = UsageRankItem(
+    id = modelId,
+    name = resolveModelName(modelId, names, snapshotNames, unknown),
+    count = count,
+    tokens = tokens,
+)
 
 private fun AssistantUsageEntry.toRankItem(names: Map<String, String>, unknown: String) =
     UsageRankItem(id = assistantId, name = names[assistantId] ?: unknown, count = count, tokens = tokens)
 
-/** 把未匹配到当前配置的模型/助手合并为「其他」，避免历史遗留的未知项刷屏 */
+/** 把未匹配到当前配置的模型/助手合并为「其他」，成员放入 children 供下钻查看，避免历史遗留的未知项刷屏 */
 private fun mergeUnknownModels(
     items: List<UsageRankItem>,
     knownIds: Set<String>,
@@ -540,6 +554,7 @@ private fun mergeUnknownModels(
         name = othersLabel,
         count = unknown.sumOf { it.count },
         tokens = unknown.sumOf { it.tokens },
+        children = unknown,
     )
 }
 
@@ -553,6 +568,7 @@ private fun buildTrendBuckets(
     modelOrder: List<String>,
     topKnownIds: Set<String>,
     names: Map<String, String>,
+    snapshotNames: Map<String, String>,
     unknown: String,
     othersLabel: String,
     granularity: TrendGranularity,
@@ -582,19 +598,22 @@ private fun buildTrendBuckets(
             val tokens = modelTokens[modelId] ?: return@mapNotNull null
             if (tokens <= 0L) null else TrendSegment(
                 modelId = modelId,
-                label = resolveModelName(modelId, names, unknown),
+                label = resolveModelName(modelId, names, snapshotNames, unknown),
                 tokens = tokens,
             )
         }
         // 仅保留「全局已知用量前 MAX_VISIBLE_MODELS」的模型为独立段，
-        // 其余（未知模型、已知但用量靠后）一律合并为「其他」，保证柱子与图例严格一致
-        val othersTokens = segments.filterNot { it.modelId in topKnownIds }.sumOf { it.tokens }
+        // 其余（未知模型、已知但用量靠后）一律合并为「其他」，保证柱子与图例严格一致；
+        // 被合并的真实成员放入 children，用户可下钻查看每个模型的用量
+        val othersSegments = segments.filterNot { it.modelId in topKnownIds }
+        val othersTokens = othersSegments.sumOf { it.tokens }
         segments = segments.filter { it.modelId in topKnownIds }
         if (othersTokens > 0L) {
             segments = segments + TrendSegment(
                 modelId = "",
                 label = othersLabel,
                 tokens = othersTokens,
+                children = othersSegments,
             )
         }
         return count to segments
@@ -665,6 +684,7 @@ private fun LocalDate.shortRange(): String = "${monthValue}/${dayOfMonth}"
 private fun TrendCard(
     trendByModel: List<DayModelUsage>,
     modelDisplayNames: Map<String, String>,
+    modelNameSnapshots: Map<String, String>,
     unknownName: String,
     modifier: Modifier = Modifier,
 ) {
@@ -687,17 +707,27 @@ private fun TrendCard(
     val topKnownIds = remember(modelOrder, modelDisplayNames) {
         modelOrder.filter { it in modelDisplayNames }.take(MAX_VISIBLE_MODELS).toSet()
     }
-    val buckets = remember(trendByModel, modelOrder, topKnownIds, granularity) {
-        buildTrendBuckets(trendByModel, modelOrder, topKnownIds, modelDisplayNames, unknownName, othersLabel, granularity)
+    val buckets = remember(trendByModel, modelOrder, topKnownIds, granularity, modelNameSnapshots) {
+        buildTrendBuckets(
+            trendByModel,
+            modelOrder,
+            topKnownIds,
+            modelDisplayNames,
+            modelNameSnapshots,
+            unknownName,
+            othersLabel,
+            granularity,
+        )
     }
     // 图例与柱子一致：只显示全局已知前 3 模型 + 其他，避免各桶并集导致模型过多
-    val legendSegments = remember(topKnownIds, buckets, othersLabel, unknownName, modelDisplayNames) {
+    val legendSegments = remember(topKnownIds, buckets, othersLabel, unknownName, modelDisplayNames, modelNameSnapshots) {
         val seenIds = buckets.flatMap { it.segments }.map { it.modelId }.toSet()
-        val hasOthers = seenIds.any { it.isNotEmpty() && it !in topKnownIds }
+        // 「其他」段（modelId 为空串）只要任一桶存在，图例就展示对应的灰色块
+        val hasOthers = buckets.any { bucket -> bucket.segments.any { it.modelId.isEmpty() } }
         buildList {
             topKnownIds.forEach { id ->
                 if (id in seenIds) {
-                    add(TrendSegment(id, resolveModelName(id, modelDisplayNames, unknownName), 0L))
+                    add(TrendSegment(id, resolveModelName(id, modelDisplayNames, modelNameSnapshots, unknownName), 0L))
                 }
             }
             if (hasOthers) {
@@ -912,40 +942,88 @@ private fun TrendChart(
     }
 }
 
-/** 选中时间桶的模型用量明细（颜色点 + 名称 + token） */
+/** 选中时间桶的模型用量明细（颜色点 + 名称 + token）；「其他」段可点击展开真实成员 */
 @Composable
 private fun TrendBreakdown(segments: List<TrendSegment>, colorByModel: Map<String, Color>) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         segments.forEach { segment ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            colorByModel[segment.modelId]
-                                ?: MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                )
-                Text(
-                    text = segment.label,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = formatTokens(segment.tokens),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            if (segment.children.isEmpty()) {
+                TrendSegmentRow(segment = segment, colorByModel = colorByModel)
+            } else {
+                var expanded by remember { mutableStateOf(false) }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TrendSegmentRow(
+                        segment = segment,
+                        colorByModel = colorByModel,
+                        onClick = { expanded = !expanded },
+                        trailing = {
+                            Icon(
+                                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                    AnimatedVisibility(visible = expanded) {
+                        Column(
+                            modifier = Modifier.padding(start = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            segment.children.forEach { child ->
+                                TrendSegmentRow(segment = child, colorByModel = colorByModel)
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun TrendSegmentRow(
+    segment: TrendSegment,
+    colorByModel: Map<String, Color>,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable(onClick = onClick)
+                } else Modifier
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(
+                    colorByModel[segment.modelId]
+                        ?: MaterialTheme.colorScheme.surfaceVariant
+                ),
+        )
+        Text(
+            text = segment.label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = formatTokens(segment.tokens),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        trailing?.invoke()
     }
 }
 
@@ -1039,8 +1117,88 @@ private fun UsageRankCard(
 
 @Composable
 private fun UsageRankRow(item: UsageRankItem, fraction: Float, metric: UsageMetric) {
+    if (item.children.isEmpty()) {
+        UsageRankRowMain(item = item, fraction = fraction, metric = metric)
+    } else {
+        var expanded by remember { mutableStateOf(false) }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            UsageRankRowMain(
+                item = item,
+                fraction = fraction,
+                metric = metric,
+                onClick = { expanded = !expanded },
+                trailing = {
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            )
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    item.children.forEach { child ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            )
+                            Text(
+                                text = child.name,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = when (metric) {
+                                    UsageMetric.MESSAGE ->
+                                        stringResource(R.string.stats_page_usage_count, child.count)
+                                    UsageMetric.TOKEN ->
+                                        stringResource(R.string.stats_page_usage_tokens, formatTokens(child.tokens))
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageRankRowMain(
+    item: UsageRankItem,
+    fraction: Float,
+    metric: UsageMetric,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable(onClick = onClick)
+                } else Modifier
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(
@@ -1068,6 +1226,10 @@ private fun UsageRankRow(item: UsageRankItem, fraction: Float, metric: UsageMetr
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (trailing != null) {
+                    Spacer(Modifier.width(4.dp))
+                    trailing()
+                }
             }
             LinearProgressIndicator(
                 progress = { fraction },

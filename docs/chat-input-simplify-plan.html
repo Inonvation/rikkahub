@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聊天输入框精简排版规划（参考 Codex 桌面端）· rikkahub</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --border: #2a2f3a;
+    --text: #e6e8ee; --sub: #9aa3b2; --accent: #7c8cf8; --accent-soft: #2a3050;
+    --danger: #f07178; --ok: #7dd87d; --warn: #e5c07b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -100px, #1c2130 0%, var(--bg) 60%);
+    color: var(--text); font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    min-height: 100vh; padding: 32px 20px 80px;
+  }
+  header { max-width: 1200px; margin: 0 auto 24px; }
+  h1 { font-size: 22px; font-weight: 700; }
+  header p { color: var(--sub); margin-top: 8px; font-size: 14px; line-height: 1.7; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; max-width: 1200px; margin: 0 auto 20px; }
+  .tab {
+    border: 1px solid var(--border); background: var(--panel); color: var(--sub);
+    padding: 9px 16px; border-radius: 999px; cursor: pointer; font-size: 13px; user-select: none;
+    transition: all .15s ease;
+  }
+  .tab:hover { border-color: #3a4150; color: var(--text); }
+  .tab.active { background: var(--accent-soft); border-color: var(--accent); color: #cdd4ff; }
+  .tab .tag { font-size: 11px; margin-left: 6px; opacity: .8; }
+
+  .layout { display: flex; gap: 24px; align-items: flex-start; justify-content: center; max-width: 1200px; margin: 0 auto; flex-wrap: wrap; }
+
+  /* 手机模拟器 */
+  .phone-wrap { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .phone {
+    width: 392px; height: 700px; background: #101318; border-radius: 44px;
+    border: 1px solid #333a46; box-shadow: 0 20px 60px rgba(0,0,0,.5), inset 0 0 0 2px #0a0c10;
+    overflow: hidden; position: relative; display: flex; flex-direction: column;
+  }
+  .statusbar { height: 40px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; font-size: 12px; color: var(--sub); }
+  .statusbar .notch { width: 90px; height: 22px; background: #0a0c10; border-radius: 12px; position: absolute; left: 50%; transform: translateX(-50%); top: 8px; }
+  .chat-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #14171e; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg,#7c8cf8,#b06ab3); display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .chat-head .titles { flex: 1; min-width: 0; }
+  .chat-head .titles b { font-size: 13px; display: block; }
+  .chat-head .titles span { font-size: 11px; color: var(--sub); }
+  .pill-head { font-size: 11px; color: var(--sub); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  .chat-area { flex: 1 1 auto; overflow-y: auto; padding: 14px 14px 6px; display: flex; flex-direction: column; gap: 10px; position: relative; }
+  .msg { max-width: 76%; font-size: 13px; line-height: 1.55; padding: 9px 12px; border-radius: 16px; }
+  .msg.user { align-self: flex-end; background: var(--accent-soft); border: 1px solid #39406a; color: #dbe0ff; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: #1e232d; border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--text); }
+  .msg .time { display: block; font-size: 10px; color: var(--sub); margin-top: 4px; }
+  .kbd-tip { align-self: center; margin: 10px 0 2px; font-size: 11px; color: var(--warn); border: 1px dashed #4a4030; background: #221d12; border-radius: 999px; padding: 5px 12px; cursor: pointer; user-select: none; }
+  .kbd-tip:hover { border-color: var(--warn); }
+
+  /* 输入区 */
+  .input-wrap { flex: 0 0 auto; padding: 8px 10px 10px; background: #101318; }
+  .input-shell {
+    background: #1a1e27; border: 1px solid #2e3440; border-radius: 26px; padding: 6px 8px;
+    display: flex; flex-direction: column; gap: 4px; transition: border-color .15s; position: relative;
+  }
+  .input-shell:focus-within { border-color: #4a5170; }
+  .inrow { display: flex; align-items: flex-end; gap: 2px; }
+  .inrow .field { flex: 1; padding: 8px 6px 8px 10px; }
+  .inrow .field .ph { color: #5c6676; font-size: 14px; padding: 6px 0; cursor: text; white-space: nowrap; overflow: hidden; }
+  .icb {
+    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; cursor: pointer; user-select: none; color: #cfd6e4; flex: 0 0 auto;
+    transition: background .12s, transform .06s;
+  }
+  .icb:hover { background: #262c3a; }
+  .icb:active { transform: scale(.9); background: #2e3546; }
+  .send {
+    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: #fff; cursor: pointer; user-select: none; flex: 0 0 auto;
+    background: linear-gradient(135deg, var(--accent), #9a6fd0); box-shadow: 0 2px 8px rgba(124,140,248,.35);
+    transition: transform .06s, opacity .12s; font-weight: 700;
+  }
+  .send:active { transform: scale(.85); }
+
+  /* 现状风格工具行：图标按钮带背景块 */
+  .toolbar { display: flex; align-items: center; gap: 0; padding: 2px 4px 0; }
+  .toolbar .scroll { display: flex; gap: 2px; overflow-x: auto; flex: 1; scrollbar-width: none; }
+  .toolbar .scroll::-webkit-scrollbar { display: none; }
+  .center-gap { flex: 0 0 8px; width: 8px; }
+  .iconbtn { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #cfd6e4; padding: 4px 8px; border-radius: 8px; cursor: pointer; user-select: none; white-space: nowrap; background: #232936; border: 1px solid #2a2f3a; }
+  .iconbtn:hover { background: #2a3140; }
+  .iconbtn .g { font-size: 14px; }
+
+  /* Codex 风格底条：单色文本 pill + 低调图标 */
+  .strip { display: flex; align-items: center; padding: 0 6px 2px; height: 36px; gap: 2px; }
+  .strip .grow { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px;
+    font-size: 13px; color: var(--sub); cursor: pointer; user-select: none; white-space: nowrap;
+    transition: background .12s, color .12s;
+  }
+  .pill:hover { background: #232936; color: #d7dce6; }
+  .pill .caret { font-size: 9px; opacity: .7; }
+  .strip-ic {
+    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--sub); cursor: pointer; user-select: none; flex: 0 0 auto; transition: background .12s;
+  }
+  .strip-ic:hover { background: #232936; color: #d7dce6; }
+
+  /* 键盘 */
+  .keyboard {
+    height: 220px; flex: 0 0 auto; background: #161a22; border-top: 1px solid #262c38;
+    display: none; grid-template-rows: repeat(4, 1fr); grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 10px;
+  }
+  .phone.kbd .keyboard { display: grid; }
+  .key { background: #232936; border-radius: 8px; font-size: 13px; display: flex; align-items: center; justify-content: center; color: #c9d1df; }
+  .key.space { grid-column: span 5; }
+
+  /* 键盘弹出时底条/工具行隐藏（沿用现状行为，发送固定右上不动） */
+  .phone.kbd .toolbar, .phone.kbd .strip { display: none; }
+
+  /* 「＋」更多选项面板 */
+  .plus-sheet { position: absolute; left: 6px; right: 6px; bottom: 6px; background: #1d212b; border: 1px solid var(--border); border-radius: 22px; padding: 14px 12px; display: none; z-index: 6; box-shadow: 0 12px 40px rgba(0,0,0,.55); flex-direction: column; gap: 8px; max-height: 470px; overflow-y: auto; }
+  .plus-sheet.open { display: flex; }
+  .plus-sheet h4 { font-size: 13px; color: var(--text); margin: 0 0 2px 4px; }
+  .plus-sheet .att { display: flex; gap: 8px; padding: 2px 4px 8px; }
+  .plus-sheet .att span { flex: 1; background: #232936; border-radius: 12px; padding: 10px 0; text-align: center; font-size: 11px; color: var(--sub); cursor: pointer; }
+  .plus-sheet .att span:hover { background: #2a3140; }
+  .plus-sheet .att .g { display: block; font-size: 16px; margin-bottom: 3px; }
+  .p-divider { height: 1px; background: var(--border); margin: 0 4px; }
+  .p-card { display: flex; align-items: center; gap: 10px; background: #232936; border: 1px solid #2a2f3a; border-radius: 14px; padding: 9px 12px; cursor: pointer; }
+  .p-card:hover { background: #2a3140; }
+  .p-card .ic { width: 32px; height: 32px; border-radius: 10px; background: #2c3342; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: 0 0 auto; }
+  .p-card .tx { flex: 1; min-width: 0; }
+  .p-card .tx b { display: block; font-size: 13px; font-weight: 600; }
+  .p-card .tx span { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-card .tr { font-size: 11px; color: var(--accent); flex: 0 0 auto; }
+  .p-card.new { border-style: dashed; }
+  .p-card.new .ic { background: #2a3050; }
+
+  /* 模型 pill 下拉（示意） */
+  .model-menu { position: absolute; left: 14px; bottom: 118px; background: #1d212b; border: 1px solid var(--border); border-radius: 14px; padding: 6px; display: none; flex-direction: column; gap: 2px; z-index: 6; box-shadow: 0 12px 40px rgba(0,0,0,.55); min-width: 220px; }
+  .model-menu.open { display: flex; }
+  .model-menu .mi { padding: 9px 12px; border-radius: 10px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; color: var(--text); }
+  .model-menu .mi:hover { background: #262c3a; }
+  .model-menu .mi.cur { color: #cdd4ff; }
+  .model-menu .mi span { color: var(--sub); font-size: 11px; }
+
+  /* 说明面板 */
+  .notes { flex: 1 1 400px; max-width: 580px; min-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; }
+  .card h3 { font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card h3 .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .badge.rec { background: #1d3a2a; color: var(--ok); }
+  .badge.min { background: #22304a; color: #8fb3ff; }
+  .badge.warn { background: #3a2427; color: #e09aa2; }
+  .card p, .card li { font-size: 13px; line-height: 1.75; color: var(--sub); }
+  .card p b, .card li b { color: var(--text); font-weight: 600; }
+  .card ul { padding-left: 18px; margin-top: 6px; }
+  .card .d { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--panel2); border-radius: 8px; padding: 8px 10px; margin-top: 8px; color: #a8b3c8; white-space: pre-wrap; }
+  table.where { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  table.where th, table.where td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--sub); }
+  table.where th { color: var(--text); font-weight: 600; }
+  table.where td b { color: var(--text); }
+  .go { font-size: 11px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+  .go.keep { background: #1d2a24; color: #8fd0a0; }
+  .go.move { background: #22304a; color: #8fb3ff; }
+  .go.del { background: #3a2427; color: #e09aa2; }
+  .go.style { background: #2c2a1d; color: #e5c07b; }
+  .pros { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .pros span { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: #1d2a24; color: #8fd0a0; border: 1px solid #24402f; }
+  .cons span { background: #2c1f24; color: #e09aa2; border-color: #4a2630; }
+
+  @media (max-width: 900px) {
+    .phone { width: 356px; height: 660px; }
+    .keyboard { height: 190px; }
+    .notes { min-width: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>聊天输入框精简排版规划 <span style="font-size:13px;color:var(--sub);font-weight:400">参考 Codex 桌面端：单容器 · 文本化选择器 · 单色低对比</span></h1>
+  <p>在已落地版本（发送固定右上、＋ 常驻左侧、⚡ 与 ＋ 对调）的基础上继续精简：<b>去掉冗余搜索图标</b>（「＋」面板已有"网络搜索服务"卡片），把图标按钮换成 Codex 风的<b>文本 pill</b>，低频功能收进「＋」面板。发送按钮保持上一轮约定——固定输入框右上、不随键盘跳动。</p>
+</header>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-scheme="now">0 · 现状<span class="tag">已落地版</span></div>
+  <div class="tab" data-scheme="a">1 · 方案 A<span class="tag">Codex 极简 · 推荐</span></div>
+  <div class="tab" data-scheme="b">2 · 方案 B<span class="tag">保守精简</span></div>
+  <div class="tab" data-scheme="c">3 · 方案 C<span class="tag">折中 · 已落地</span></div>
+</div>
+
+<div class="layout">
+  <div class="phone-wrap">
+    <div class="phone" id="phone">
+      <div class="statusbar"><span>9:41</span><div class="notch"></div><span>▲ 66%</span></div>
+      <div class="chat-head">
+        <div class="avatar">🤖</div>
+        <div class="titles"><b>通用助手</b><span>gemini-2.5-flash</span></div>
+        <span class="pill-head">⚡ 快捷消息</span>
+      </div>
+
+      <div class="chat-area">
+        <div class="msg ai">你好，我是 rikkahub 助手。有什么可以帮你？<span class="time">14:02</span></div>
+        <div class="msg user">帮我把这段 Kotlin 代码的思路讲一下……<span class="time">14:03</span></div>
+        <div class="msg ai">好的。这段代码核心是……<span class="time">14:03</span></div>
+
+        <!-- ═══ 现状（已落地版）═══ -->
+        <div class="input-wrap" data-pane="now">
+          <div class="input-shell">
+            <div class="inrow">
+              <div class="icb" title="更多选项"><b>＋</b></div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="send" title="发送" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="toolbar">
+              <div class="scroll">
+                <span class="iconbtn"><span class="g">★</span>模型</span>
+                <span class="iconbtn" title="冗余：＋ 面板已有网络搜索服务卡片"><span class="g">🔍</span>搜索</span>
+                <span class="iconbtn"><span class="g">🧠</span>推理</span>
+              </div>
+              <span class="iconbtn" title="优化提示词">✨</span>
+              <div class="center-gap"></div>
+              <div class="icb" title="快捷消息">⚡</div>
+              <span class="icb" title="语音输入" style="width:30px">🎙</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 A：Codex 极简 ═══ -->
+        <div class="input-wrap" data-pane="a" style="display:none">
+          <div class="input-shell">
+            <div class="model-menu" id="aModelMenu">
+              <div class="mi cur">gemini-2.5-flash <span>Google</span></div>
+              <div class="mi">gemini-2.5-pro <span>Google</span></div>
+              <div class="mi">claude-sonnet-4-5 <span>Anthropic</span></div>
+            </div>
+            <div class="plus-sheet" id="aPlus">
+              <h4>更多选项</h4>
+              <div class="att">
+                <span><span class="g">📷</span>拍照</span>
+                <span><span class="g">🖼</span>图片</span>
+                <span><span class="g">🎬</span>视频</span>
+                <span><span class="g">🎵</span>音频</span>
+                <span><span class="g">📎</span>文件</span>
+              </div>
+              <div class="p-divider"></div>
+              <div class="p-card"><div class="ic">🖧</div><div class="tx"><b>MCP 服务</b><span>已启用 2 个服务</span></div></div>
+              <div class="p-card"><div class="ic">🔍</div><div class="tx"><b>网络搜索服务</b><span>已开启 · Exa</span></div><span class="tr">1</span></div>
+              <div class="p-card"><div class="ic">📦</div><div class="tx"><b>扩展管理</b><span>技能 2 · 快捷消息 1 · 模式注入 1 · 世界书 2</span></div></div>
+              <div class="p-card"><div class="ic">🗂</div><div class="tx"><b>工作区</b><span>/workspace</span></div><span class="tr">⚙</span></div>
+              <div class="p-card"><div class="ic">🔒</div><div class="tx"><b>信任文件夹</b><span>未激活</span></div></div>
+              <div class="p-card"><div class="ic">📚</div><div class="tx"><b>知识库</b><span>已选择 1 个知识库</span></div></div>
+              <div class="p-card new"><div class="ic">⚡</div><div class="tx"><b>快捷消息</b><span>3 条可用 · 点击选择插入</span></div></div>
+              <div class="p-card new"><div class="ic">✨</div><div class="tx"><b>优化提示词</b><span>用 AI 改写当前输入内容</span></div></div>
+            </div>
+            <div class="inrow">
+              <div class="icb" title="更多选项" id="aPlusBtn"><b>＋</b></div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="send" title="发送（固定右上）" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="strip">
+              <span class="pill" id="aModelPill" title="切换模型（长按进服务商设置）">gemini-2.5-flash <span class="caret">▾</span></span>
+              <span class="pill" id="aThinkPill" title="思考强度">思考·中 <span class="caret">▾</span></span>
+              <span class="grow"></span>
+              <span class="strip-ic" title="语音输入">🎙</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 B：保守精简 ═══ -->
+        <div class="input-wrap" data-pane="b" style="display:none">
+          <div class="input-shell">
+            <div class="inrow">
+              <div class="icb" title="更多选项"><b>＋</b></div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="send" title="发送（固定右上）" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="toolbar" style="gap:2px">
+              <div class="scroll">
+                <span class="pill">★ 模型 <span class="caret">▾</span></span>
+                <span class="pill">🧠 推理 <span class="caret">▾</span></span>
+              </div>
+              <span class="strip-ic" title="优化提示词">✨</span>
+              <span class="strip-ic" title="快捷消息">⚡</span>
+              <span class="strip-ic" title="语音输入">🎙</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 方案 C：折中（已落地）═══ -->
+        <div class="input-wrap" data-pane="c" style="display:none">
+          <div class="input-shell">
+            <div class="plus-sheet" id="cPlus">
+              <h4>更多选项</h4>
+              <div class="att">
+                <span><span class="g">📷</span>拍照</span>
+                <span><span class="g">🖼</span>图片</span>
+                <span><span class="g">🎬</span>视频</span>
+                <span><span class="g">🎵</span>音频</span>
+                <span><span class="g">📎</span>文件</span>
+              </div>
+              <div class="p-divider"></div>
+              <div class="p-card"><div class="ic">🖧</div><div class="tx"><b>MCP 服务</b><span>已启用 2 个服务</span></div></div>
+              <div class="p-card"><div class="ic">🔍</div><div class="tx"><b>网络搜索服务</b><span>已开启 · Exa</span></div><span class="tr">1</span></div>
+              <div class="p-card"><div class="ic">📦</div><div class="tx"><b>扩展管理</b><span>技能 2 · 快捷消息 1 · 模式注入 1 · 世界书 2</span></div></div>
+              <div class="p-card"><div class="ic">🗂</div><div class="tx"><b>工作区</b><span>/workspace</span></div><span class="tr">⚙</span></div>
+              <div class="p-card"><div class="ic">🔒</div><div class="tx"><b>信任文件夹</b><span>未激活</span></div></div>
+              <div class="p-card"><div class="ic">📚</div><div class="tx"><b>知识库</b><span>已选择 1 个知识库</span></div></div>
+              <div class="p-card new"><div class="ic">✨</div><div class="tx"><b>优化提示词</b><span>用 AI 改写当前输入内容</span></div></div>
+            </div>
+            <div class="inrow">
+              <div class="icb" title="更多选项" id="cPlusBtn"><b>＋</b></div>
+              <div class="field"><div class="ph">给助手发送消息…</div></div>
+              <div class="icb" title="全屏编辑">⛶</div>
+              <div class="send" title="发送（固定右上）" style="width:30px;height:30px;margin:2px">↑</div>
+            </div>
+            <div class="strip">
+              <span class="pill" title="模型名超长自动省略号截断（宽限 140dp）">gemini-2.5-flash <span class="caret">▾</span></span>
+              <span class="pill" title="仅推理模型显示">思考·中 <span class="caret">▾</span></span>
+              <span class="grow"></span>
+              <span class="strip-ic" title="快捷消息（高频保留）">⚡</span>
+              <span class="strip-ic" title="语音输入">🎙</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="keyboard">
+        <div class="key">q</div><div class="key">w</div><div class="key">e</div><div class="key">r</div><div class="key">t</div><div class="key">y</div><div class="key">u</div><div class="key">i</div><div class="key">o</div><div class="key">p</div>
+        <div class="key">a</div><div class="key">s</div><div class="key">d</div><div class="key">f</div><div class="key">g</div><div class="key">h</div><div class="key">j</div><div class="key">k</div><div class="key">l</div><div class="key">⌫</div>
+        <div class="key">⇧</div><div class="key">z</div><div class="key">x</div><div class="key">c</div><div class="key">v</div><div class="key">b</div><div class="key">n</div><div class="key">m</div><div class="key">，</div><div class="key">.</div>
+        <div class="key">🌐</div><div class="key space"></div><div class="key">↵</div>
+      </div>
+    </div>
+    <div class="kbd-tip" id="kbdTip">⌨ 模拟键盘弹出 / 收起（底条隐藏，发送位置不变）</div>
+  </div>
+
+  <!-- ═══ 说明面板 ═══ -->
+  <div class="notes">
+
+    <div class="notes-pane" data-pane="now">
+      <div class="card">
+        <h3>0 · 现状（已落地版）<span class="badge warn">待精简</span></h3>
+        <p>上一轮已落地：发送固定右上、＋ 常驻左侧、⚡ 移到工具行。剩余问题：</p>
+        <ul>
+          <li><b>搜索图标冗余</b>：「＋」面板已有"网络搜索服务"卡片（含开关与服务选择），工具行再放一个搜索入口是重复功能</li>
+          <li><b>视觉偏重</b>：工具行图标按钮带背景块（surfaceContainer + 边框），6 个元素全是"按钮感"，与 Codex 单色低对比风格差距大</li>
+          <li><b>低频功能占位</b>：✨ 优化提示词、⚡ 快捷消息不是每句都用，却常驻一级界面</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Codex 桌面端参考要点</h3>
+        <ul>
+          <li><b>单容器</b>：所有控件收在一个圆角容器内，无独立工具栏分割感</li>
+          <li><b>文本化选择器</b>：模型是「gemini-2.5-flash ▾」式文本 pill，不是彩色图标按钮</li>
+          <li><b>单色</b>：除发送按钮外全部灰阶，无彩色图标</li>
+          <li><b>克制</b>：底条只有 2-3 个元素，大量留白</li>
+        </ul>
+        <p style="margin-top:8px">注：Codex 桌面端发送在底条右下，但我们<b>保留上一轮的"发送固定右上"</b>约定，只借鉴其视觉语言。</p>
+      </div>
+    </div>
+
+    <div class="notes-pane" data-pane="a" style="display:none">
+      <div class="card">
+        <h3>1 · 方案 A：Codex 极简 <span class="badge rec">推荐</span></h3>
+        <p><b>底条只剩两个文本 pill（模型 / 思考强度）+ 一个录音图标，其余全部收进「＋」面板。</b></p>
+        <table class="where">
+          <tr><th>元素</th><th>去向</th><th>说明</th></tr>
+          <tr><td><b>🔍 搜索图标</b></td><td><span class="go del">删除</span></td><td>「＋」面板"网络搜索服务"卡片已覆盖开关+服务选择</td></tr>
+          <tr><td><b>★ 模型</b></td><td><span class="go style">改样式</span></td><td>图标按钮 → 文本 pill「gemini-2.5-flash ▾」，复用 ModelSelectorButton 的文本模式</td></tr>
+          <tr><td><b>🧠 推理</b></td><td><span class="go style">改样式</span></td><td>→ 文本 pill「思考·中 ▾」，仅推理模型显示；点开级别滑杆（现有 ReasoningPicker）</td></tr>
+          <tr><td><b>⚡ 快捷消息</b></td><td><span class="go move">移入 ＋ 面板</span></td><td>面板尾部新增卡片，副标题"N 条可用"，点开选择插入</td></tr>
+          <tr><td><b>✨ 优化提示词</b></td><td><span class="go move">移入 ＋ 面板</span></td><td>面板尾部新增卡片，点开 PromptOptimizeSheet</td></tr>
+          <tr><td><b>🎙 录音</b></td><td><span class="go keep">保留</span></td><td>改单色低调样式，录音时高亮</td></tr>
+          <tr><td><b>＋ / ↑ / ⛶</b></td><td><span class="go keep">不动</span></td><td>上一轮已定</td></tr>
+        </table>
+        <div class="d">// ChatInput.kt 工具行重构
+Row {                          // 原 horizontalScroll 图标行删除
+  ModelSelectorButton(onlyIcon = false)  // 文本 pill
+  if (reasoningModel) ReasoningButton(onlyIcon = false)  // 文本 pill
+  Spacer(weight(1f))
+  AsrButton(...)               // 单色
+}
+// FilesPicker.kt 尾部新增两张卡片：快捷消息 / 优化提示词</div>
+        <div class="pros"><span>最贴近 Codex 风格</span><span>底条仅 3 元素</span><span>低频功能归位</span><span>发送位置不变</span></div>
+        <div class="pros cons"><span>快捷消息多一步</span><span>改动量中等</span></div>
+      </div>
+      <div class="card"><h3>试试看</h3><p>点击底条 <b>gemini-2.5-flash ▾</b> 弹模型菜单；点 <b>思考·中 ▾</b> 循环切换强度；点 <b>＋</b> 查看新增的两张卡片（虚线框）。</p></div>
+    </div>
+
+    <div class="notes-pane" data-pane="b" style="display:none">
+      <div class="card">
+        <h3>2 · 方案 B：保守精简 <span class="badge min">改动最小</span></h3>
+        <p><b>只做三件事：删搜索图标；所有工具行元素去彩色背景块、统一为 20dp 灰色；行高从 40dp 收到 36dp。</b></p>
+        <ul>
+          <li>⚡ / ✨ 原地保留（高频用户无迁移成本）</li>
+          <li>模型/推理保留图标按钮形态，仅去彩色</li>
+          <li>逻辑零改动，纯样式调整</li>
+        </ul>
+        <div class="d">// 改动量
+ChatInput.kt 工具行：删除 SearchPickerButton 调用
+所有按钮：ToggleSurface/背景 → 透明，图标 22dp → 20dp</div>
+        <div class="pros"><span>风险最低</span><span>纯样式改动</span><span>高频功能零迁移</span></div>
+        <div class="pros cons"><span>仍是"一排平级图标"</span><span>精简不彻底</span></div>
+      </div>
+    </div>
+
+    <div class="notes-pane" data-pane="c" style="display:none">
+      <div class="card">
+        <h3>3 · 方案 C：折中 <span class="badge rec">已落地</span></h3>
+        <p><b>与 A 相同的 pill 化 + 删搜索图标，但底条保留 ⚡ 快捷消息（灰色小图标），只有 ✨ 优化提示词移入「＋」面板。</b></p>
+        <ul>
+          <li>快捷消息是"输入内容相关"的高频动作，留在底条一键可达</li>
+          <li>优化提示词低频，收进面板尾部（原 6 张能力卡片之后）</li>
+          <li>底条固定 36dp 高度；pill 高 32dp、无背景、灰阶文字</li>
+          <li><b>模型名超长按 140dp 上限自动省略号截断</b>，思考 pill 限 100dp，均不撑宽底条</li>
+          <li>搜索图标已删除（＋ 面板"网络搜索服务"卡片覆盖）</li>
+        </ul>
+        <div class="d">// 已落地改动
+ChatInput.kt：工具行 → 36dp 固定高 pill 底条
+  ModelPillButton / ReasoningPillButton（widthIn 上限 + Ellipsis）
+  删除 SearchPickerButton / ✨ / 相关回调参数
+FilesPicker.kt：尾部新增「优化提示词」卡片
+ReasoningPicker.kt：label() → internal 复用</div>
+        <div class="pros"><span>✅ 已实现并编译通过</span><span>快捷消息一键可达</span><span>长模型名不撑破</span></div>
+      </div>
+      <div class="card"><h3>试试看</h3><p>点击左侧 <b>＋</b> 查看面板尾部新增的「优化提示词」卡片（虚线框）；键盘弹出时底条整行隐藏，发送按钮位置不变。</p></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panes = document.querySelectorAll('.input-wrap[data-pane], .notes-pane[data-pane]');
+  const phone = document.getElementById('phone');
+  const kbdTip = document.getElementById('kbdTip');
+  const overlays = ['aPlus', 'aModelMenu', 'cPlus'];
+
+  function closeOverlays() {
+    overlays.forEach(id => document.getElementById(id)?.classList.remove('open'));
+  }
+  function show(scheme) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.scheme === scheme));
+    panes.forEach(p => { p.style.display = p.dataset.pane === scheme ? '' : 'none'; });
+    closeOverlays();
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.scheme)));
+
+  kbdTip.addEventListener('click', () => {
+    phone.classList.toggle('kbd');
+    kbdTip.textContent = phone.classList.contains('kbd')
+      ? '⌨ 已弹出键盘（再点收起）' : '⌨ 模拟键盘弹出 / 收起（底条隐藏，发送位置不变）';
+    closeOverlays();
+  });
+
+  // 方案 A：＋ 面板 / 模型 pill 菜单 / 思考强度循环
+  document.getElementById('aPlusBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = document.getElementById('aPlus');
+    const wasOpen = s.classList.contains('open');
+    closeOverlays();
+    if (!wasOpen) s.classList.add('open');
+  });
+  document.getElementById('aModelPill').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const m = document.getElementById('aModelMenu');
+    const wasOpen = m.classList.contains('open');
+    closeOverlays();
+    if (!wasOpen) m.classList.add('open');
+  });
+  // 方案 C：＋ 面板
+  document.getElementById('cPlusBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = document.getElementById('cPlus');
+    const wasOpen = s.classList.contains('open');
+    closeOverlays();
+    if (!wasOpen) s.classList.add('open');
+  });
+  const thinkLevels = ['思考·关', '思考·低', '思考·中', '思考·高'];
+  let thinkIdx = 2;
+  document.getElementById('aThinkPill').addEventListener('click', (e) => {
+    e.stopPropagation();
+    thinkIdx = (thinkIdx + 1) % thinkLevels.length;
+    e.currentTarget.firstChild.textContent = thinkLevels[thinkIdx] + ' ';
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#aPlusBtn') || e.target.closest('#aModelPill') || e.target.closest('#aThinkPill') || e.target.closest('#cPlusBtn')) return;
+    const s = document.getElementById('aPlus');
+    const m = document.getElementById('aModelMenu');
+    const c = document.getElementById('cPlus');
+    if (s.classList.contains('open') && !s.contains(e.target)) s.classList.remove('open');
+    if (m.classList.contains('open') && !m.contains(e.target)) m.classList.remove('open');
+    if (c && c.classList.contains('open') && !c.contains(e.target)) c.classList.remove('open');
+  });
+
+  // 发送按钮点击反馈
+  document.querySelectorAll('.send').forEach(s => s.addEventListener('click', () => {
+    s.textContent = '✓'; s.style.background = '#3d8a4f';
+    setTimeout(() => { s.textContent = '↑'; s.style.background = ''; }, 600);
+  }));
+  document.querySelectorAll('.field').forEach(f => f.addEventListener('click', () => {
+    const ph = f.querySelector('.ph');
+    if (ph && ph.textContent.includes('…')) { ph.textContent = '帮我总结一下这段对话'; ph.style.color = '#aab3c2'; }
+  }));
+</script>
+</body>
+</html>
