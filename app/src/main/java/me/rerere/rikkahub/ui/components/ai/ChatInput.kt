@@ -110,7 +110,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Cancel01
@@ -694,7 +694,7 @@ private fun ModelPillButton(
             modifier = Modifier.widthIn(max = 150.dp),
         )
         Icon(
-            imageVector = HugeIcons.ArrowDown01,
+            imageVector = HugeIcons.ArrowRight01,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(13.dp),
@@ -737,7 +737,7 @@ private fun ReasoningPillButton(
             modifier = Modifier.widthIn(max = 100.dp),
         )
         Icon(
-            imageVector = HugeIcons.ArrowDown01,
+            imageVector = HugeIcons.ArrowRight01,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(13.dp),
