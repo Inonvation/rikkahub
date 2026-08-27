@@ -79,6 +79,7 @@
 - **material3**: Material color utility extensions used by the app UI
 - **search**: Search functionality SDK for multiple providers (Exa, Tavily, Zhipu, Bing, Brave, SearXNG, and others)
 - **speech**: Speech module for TTS and ASR implementations
+- **videogen**: 异步视频生成供应商抽象层（阿里万相 / 火山 Seedance / MiniMax H3）。只做协议适配（create/query + 可取消轮询 Flow），不负责持久化任务、下载视频或 UI；供应商专属字段走 `extraParameters`，见 `videogen/README.md`
 - **web**: Embedded web server module that provides Ktor server startup function and hosts static frontend build files (
   built from web-ui/ React project)
 - **workspace**: Sandboxed per-workspace file system and shell execution environment exposed to the AI as tools.
@@ -88,6 +89,8 @@
 
 - **trace-cli**（bun）：录制真实 Provider 的 SSE 响应生成 `ai` 模块可回放的 `events.jsonl`
 - **locale-tui**（uv）：Android `strings.xml` 翻译管理 TUI，`cd locale-tui && uv run python src/main.py`，改动字符串资源时用 `locale-tui-localization` skill
+
+设计与实现计划文档集中在 `docs/`（如 `remote-sync-plan.md`、`settings-refactor-plan.md`、`knowledge-retrieval-optimization-plan.md` 等），改动对应领域前先查阅相关 plan。
 
 ## Concepts
 
