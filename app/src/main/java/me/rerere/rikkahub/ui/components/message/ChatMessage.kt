@@ -447,7 +447,9 @@ private fun MessagePartsBlock(
     // 前缀 process: 不与思考链的 chain: 冲突；无会话上下文（导出预览等）为 null → 退化为纯推导。
     val chainStateKey = LocalConversationId.current?.let { "process:$it:$nodeId" }
     // 整体折叠：开启开关且消息完成后，过程内容折叠成“已处理 n分m秒”卡片，只保留最终输出。
-    // 初始形态优先读用户手动记录（true=展开）；无记录时按开关推导——自动折叠不落库，仅用户点击写入。
+    // 初始形态优先读进程级记忆（true=展开）；无记忆时按开关推导。
+    // 写入时机：手动点击（下方 Card onClick）与"生成完成时刻的最终形态"（下方 effect），
+    // 两者都只记录用户/系统此时真正采取的形态，不记录中间过程。
     var chainCollapsed by remember(nodeId, autoCollapseAll) {
         mutableStateOf(
             chainStateKey?.let { getSectionExpanded(it) }
@@ -457,6 +459,7 @@ private fun MessagePartsBlock(
     // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态。
     // 完成后折叠仅在列表贴底时执行：折叠会把本消息的过程内容收掉（高度骤减，含视口上方的历史消息），
     // 用户在看历史/拖拽中触发会引发 LazyColumn 位置修正（"下拉被拽回"根因）；贴底时由底部锚定吸收。
+    var prevChainLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, autoCollapseAll) {
         if (autoCollapseAll) {
             if (!loading) {
@@ -467,10 +470,21 @@ private fun MessagePartsBlock(
                 ) {
                     chainCollapsed = true
                 }
+                // 生成完成时刻把"实际最终形态"固化落库：守卫放行→折叠、暂缓→保持展开，
+                // 两者都是此刻呈现在用户面前的真实形态。否则消息滚出视口销毁重建后
+                // 按开关推导无条件回到折叠态——生成中翻历史时最新消息（生成中强制展开）
+                // 在被拉回视口的瞬间塌缩（"AI 生成完后下拉回拉抽搐"根因）。
+                // 仅"本组合内 loading 由 true 翻转为 false"（即刚生成完）才落库：
+                // 历史消息下拉重建不算生成完成，不得写入——否则每条被看过的历史
+                // 都会被记成展开，破坏自动折叠的产品语义。
+                if (prevChainLoading) {
+                    chainStateKey?.let { setSectionExpanded(it, !chainCollapsed) }
+                }
             } else {
                 chainCollapsed = false
             }
         }
+        prevChainLoading = loading
     }
 
     // 渲染单个块（思考链或内容块），过程区与最终输出区复用

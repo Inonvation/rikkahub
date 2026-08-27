@@ -16,7 +16,9 @@ val LocalConversationId = staticCompositionLocalOf<String?> { null }
  * - 切换窗口/页面后仍保持用户手动展开/折叠的状态（Navigation 3 对非栈顶 entry 组合重建，
  *   remember/rememberSaveable 恢复不可靠，故存进程级单例，与 toolBubbleExpanded 同款方案）；
  * - 各 key 彼此独立、互不联动（不会出现"点开一条其他全展开"）；
- * - 仅记录用户手动操作，生成中自动预览/完成自动折叠不写入。
+ * - 主要记录用户手动操作；`process:` 前缀（过程区整体折叠）额外固化"生成完成时刻的
+ *   最终形态"（守卫放行=折叠、暂缓=展开），保证消息回收重建后与用户所见一致
+ *   （见 ChatMessage 完成折叠 effect 的落库说明）。
  * App 进程存活期间有效。
  */
 internal val sectionExpanded = mutableStateMapOf<String, Boolean>()
