@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.discussion
 
+import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
@@ -9,8 +10,6 @@ import me.rerere.knowledge.retrieval.Reranker
 import me.rerere.knowledge.tool.EmbeddingConfig
 import me.rerere.knowledge.tool.KnowledgeSearchTool
 import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.tools.createMcpCallTool
-import me.rerere.rikkahub.data.ai.tools.createMcpListTool
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -49,11 +48,24 @@ class DiscussionToolAssembler(
             addAll(createSearchTools(settings, concise = true))
         }
 
-        // MCP 工具（动态调度：mcp_list + mcp_call，避免全量 schema 注入；讨论组可信执行器免审批）
-        // 仅当成员已绑定 MCP 服务器时才暴露；空绑定无工具可发现，不注入避免空工具占 token。
-        if (assistant.mcpServers.isNotEmpty()) {
-            add(createMcpListTool(assistant, mcpManager))
-            add(createMcpCallTool(assistant, mcpManager, forceNoApproval = true))
+        // MCP 工具（与母代理一致：每个工具独立 schema 直接注入；讨论组可信执行器免审批）
+        mcpManager.getAllAvailableTools(assistant).forEach { (serverId, serverName, tool) ->
+            if (serverName.isEmpty() || !serverName.all {
+                    it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9'
+                }
+            ) return@forEach
+            add(
+                Tool(
+                    name = "mcp__${serverName}__${tool.name}",
+                    description = tool.description?.takeIf { it.isNotBlank() }
+                        ?: "Tool from MCP server \"$serverName\".",
+                    parameters = { tool.inputSchema },
+                    needsApproval = { false },
+                    execute = {
+                        mcpManager.callTool(serverId, tool.name, it.jsonObject)
+                    },
+                )
+            )
         }
 
         // 知识库检索

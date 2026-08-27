@@ -7,6 +7,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantMemory
 import kotlin.uuid.Uuid
 
 class TransformerContext(
@@ -19,6 +20,8 @@ class TransformerContext(
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     val workspaceCwd: String? = null,
     val conversationId: String? = null,
+    /** 本轮检索出的情景记忆，由 MemoryContextTransformer 追加到最后一条 USER 消息 */
+    val retrievedMemories: List<AssistantMemory> = emptyList(),
 )
 
 interface MessageTransformer {
@@ -74,6 +77,7 @@ suspend fun List<UIMessage>.transforms(
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     workspaceCwd: String? = null,
     conversationId: String? = null,
+    retrievedMemories: List<AssistantMemory> = emptyList(),
 ): List<UIMessage> {
     val ctx = TransformerContext(
         context = context,
@@ -85,6 +89,7 @@ suspend fun List<UIMessage>.transforms(
         processingStatus = processingStatus,
         workspaceCwd = workspaceCwd,
         conversationId = conversationId,
+        retrievedMemories = retrievedMemories,
     )
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)

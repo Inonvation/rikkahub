@@ -4,6 +4,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -45,9 +47,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryCategory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -113,6 +117,7 @@ private fun AssistantMemoryContent(
         }
     }
     var pendingDeleteMemory by remember { mutableStateOf<AssistantMemory?>(null) }
+    var filterCategory by remember { mutableStateOf<MemoryCategory?>(null) }
 
     // 记忆对话框
     memoryDialogState.EditStateContent { memory, update ->
@@ -124,17 +129,27 @@ private fun AssistantMemoryContent(
                 Text(stringResource(R.string.assistant_page_manage_memory_title))
             },
             text = {
-                TextField(
-                    value = memory.content,
-                    onValueChange = {
-                        update(memory.copy(content = it))
-                    },
-                    label = {
-                        Text(stringResource(R.string.assistant_page_manage_memory_title))
-                    },
-                    minLines = 2,
-                    maxLines = 8
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextField(
+                        value = memory.content,
+                        onValueChange = {
+                            update(memory.copy(content = it))
+                        },
+                        label = {
+                            Text(stringResource(R.string.assistant_page_manage_memory_title))
+                        },
+                        minLines = 2,
+                        maxLines = 8
+                    )
+                    Select(
+                        options = MemoryCategory.entries.toList(),
+                        selectedOption = memory.category ?: MemoryCategory.OTHER,
+                        onOptionSelected = { category ->
+                            update(memory.copy(category = category))
+                        },
+                        optionToString = { memoryCategoryLabel(it) }
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
@@ -201,6 +216,22 @@ private fun AssistantMemoryContent(
                 }
             )
             item(
+                headlineContent = { Text(stringResource(R.string.assistant_page_use_profile)) },
+                supportingContent = { Text(stringResource(R.string.assistant_page_use_profile_desc)) },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.useUserProfile,
+                        onCheckedChange = {
+                            onUpdateAssistant(
+                                assistant.copy(
+                                    useUserProfile = it
+                                )
+                            )
+                        }
+                    )
+                }
+            )
+            item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_recent_chats)) },
                 supportingContent = { Text(stringResource(R.string.assistant_page_recent_chats_desc)) },
                 trailingContent = {
@@ -249,7 +280,7 @@ private fun AssistantMemoryContent(
 
             IconButton(
                 onClick = {
-                    memoryDialogState.open(AssistantMemory(0, ""))
+                    memoryDialogState.open(AssistantMemory(0, "", category = MemoryCategory.PREFERENCE))
                 },
                 modifier = Modifier.align(Alignment.CenterEnd)
             ) {
@@ -260,17 +291,50 @@ private fun AssistantMemoryContent(
             }
         }
 
-        memories.fastForEach { memory ->
-            key(memory.id) {
-                MemoryItem(
-                    memory = memory,
-                    onEditMemory = {
-                        memoryDialogState.open(it)
-                    },
-                    onDeleteMemory = {
-                        pendingDeleteMemory = it
-                    }
+        // 分类筛选
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = filterCategory == null,
+                onClick = { filterCategory = null },
+                label = { Text(stringResource(R.string.memory_category_all)) }
+            )
+            MemoryCategory.entries.fastForEach { category ->
+                FilterChip(
+                    selected = filterCategory == category,
+                    onClick = { filterCategory = category },
+                    label = { Text(memoryCategoryLabel(category)) }
                 )
+            }
+        }
+
+        // 按固定顺序分组展示（历史数据无分类归入「其他」）
+        val filtered = if (filterCategory == null) memories
+        else memories.filter { (it.category ?: MemoryCategory.OTHER) == filterCategory }
+        MemoryCategory.entries.fastForEach { category ->
+            val items = filtered.filter { (it.category ?: MemoryCategory.OTHER) == category }
+            if (items.isEmpty()) return@fastForEach
+            Text(
+                text = memoryCategoryLabel(category),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            items.fastForEach { memory ->
+                key(memory.id) {
+                    MemoryItem(
+                        memory = memory,
+                        onEditMemory = {
+                            memoryDialogState.open(it)
+                        },
+                        onDeleteMemory = {
+                            pendingDeleteMemory = it
+                        }
+                    )
+                }
             }
         }
     }
@@ -317,7 +381,7 @@ private fun MemoryItem(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "#${memory.id}",
+                    text = "#${memory.id} · ${memoryCategoryLabel(memory.category ?: MemoryCategory.OTHER)}",
                     style = MaterialTheme.typography.titleMediumEmphasized,
                 )
                 Text(
@@ -349,6 +413,18 @@ private fun MemoryItem(
         }
     }
 }
+
+/** 记忆分类显示名（默认中文即可，遵循仓库约定不强制本地化）。 */
+@Composable
+private fun memoryCategoryLabel(category: MemoryCategory): String = stringResource(
+    when (category) {
+        MemoryCategory.PREFERENCE -> R.string.memory_category_preference
+        MemoryCategory.BASIC -> R.string.memory_category_basic
+        MemoryCategory.GOAL -> R.string.memory_category_goal
+        MemoryCategory.WORK -> R.string.memory_category_work
+        MemoryCategory.OTHER -> R.string.memory_category_other
+    }
+)
 
 /** 记忆时间标签：创建/更新时间，旧数据（0）显示「时间未知」。 */
 private fun memoryTimeLabel(memory: AssistantMemory): String {

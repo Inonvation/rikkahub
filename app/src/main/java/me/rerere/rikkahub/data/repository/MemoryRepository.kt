@@ -8,6 +8,7 @@ import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryCategory
 
 class MemoryRepository(
     private val memoryDAO: MemoryDAO,
@@ -27,11 +28,16 @@ class MemoryRepository(
 
         /** 记忆检索词最长字符数，控制 jieba 分词成本 */
         const val MEMORY_QUERY_MAX_CHARS = 200
+
+        /** 去重用的内容归一化：trim、折叠连续空白、忽略大小写 */
+        private fun normalizeContent(content: String): String =
+            content.trim().replace(Regex("\\s+"), " ").lowercase()
     }
 
     private fun MemoryEntity.toAssistantMemory() = AssistantMemory(
         id = id,
         content = content,
+        category = MemoryCategory.fromNameOrNull(category),
         createdAt = createdAt.takeIf { it > 0 },
         updatedAt = updatedAt.takeIf { it > 0 },
     )
@@ -63,12 +69,24 @@ class MemoryRepository(
         ftsManager.invalidate(assistantId)
     }
 
-    suspend fun updateContent(id: Int, content: String): AssistantMemory {
+    /**
+     * 更新记忆（校验归属：目标必须属于 [assistantId] 对应的记忆池，
+     * 防止工具调用跨池误改其他助手的记忆）。
+     */
+    suspend fun updateContent(
+        assistantId: String,
+        id: Int,
+        content: String,
+        category: MemoryCategory? = null,
+    ): AssistantMemory {
         val old = memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
-        val now = System.currentTimeMillis()
+        if (old.assistantId != assistantId) {
+            error("Memory record #$id not found in current memory space")
+        }
         val newMemory = old.copy(
             content = content,
-            updatedAt = now,
+            category = (category?.name ?: old.category),
+            updatedAt = System.currentTimeMillis(),
         )
         memoryDAO.updateMemory(newMemory)
         // 内容变了但 count 没变，对账发现不了，必须显式失效
@@ -76,17 +94,37 @@ class MemoryRepository(
         return newMemory.toAssistantMemory()
     }
 
-    suspend fun addMemory(assistantId: String, content: String): AssistantMemory {
+    suspend fun addMemory(
+        assistantId: String,
+        content: String,
+        category: MemoryCategory? = null,
+    ): AssistantMemory {
+        // 去重守卫：模型自觉性不可靠，写入侧兜底拦截归一化后完全相同的重复条目
+        val normalized = normalizeContent(content)
+        getMemoriesOfAssistant(assistantId)
+            .firstOrNull { normalizeContent(it.content) == normalized }
+            ?.let { return it }
         val now = System.currentTimeMillis()
         val newMemory = MemoryEntity(
             assistantId = assistantId,
-            content = content,
+            content = content.trim(),
+            category = category?.name,
             createdAt = now,
             updatedAt = now,
         )
         val id = memoryDAO.insertMemory(newMemory).toInt()
         ftsManager.invalidate(assistantId)
         return newMemory.copy(id = id).toAssistantMemory()
+    }
+
+    /** 删除记忆（校验归属，防止跨池误删）。 */
+    suspend fun deleteMemoryInScope(assistantId: String, id: Int) {
+        val memory = memoryDAO.getMemoryById(id) ?: return
+        if (memory.assistantId != assistantId) {
+            error("Memory record #$id not found in current memory space")
+        }
+        memoryDAO.deleteMemory(id)
+        ftsManager.invalidate(assistantId)
     }
 
     suspend fun deleteMemory(id: Int) {

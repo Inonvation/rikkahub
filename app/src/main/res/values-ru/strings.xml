@@ -736,17 +736,10 @@
   <string name="setting_files_page_title">Управление файлами</string>
   <string name="setting_mcp_page_add_header">Добавить заголовок</string>
   <string name="setting_mcp_page_add_one_to_get_started">Добавьте один, чтобы начать</string>
-  <string name="setting_mcp_page_ai_generate_description">Создать описание (ИИ)</string>
-  <string name="setting_mcp_page_ai_generate_description_error">Не удалось создать описание: %1$s</string>
-  <string name="setting_mcp_page_ai_generate_description_hint_no_tools">После подключения описание можно сгенерировать на основе инструментов</string>
-  <string name="setting_mcp_page_ai_generate_description_success">Описание создано</string>
   <string name="setting_mcp_page_basic_settings">Основные настройки</string>
   <string name="setting_mcp_page_custom_headers">Пользовательские заголовки</string>
   <string name="setting_mcp_page_custom_headers_desc">Добавьте пользовательские заголовки HTTP для запросов к серверу MCP</string>
   <string name="setting_mcp_page_delete_header">Удалить заголовок</string>
-  <string name="setting_mcp_page_description">Описание</string>
-  <string name="setting_mcp_page_description_desc">Краткое описание возможностей сервера, помогающее ИИ находить и использовать его</string>
-  <string name="setting_mcp_page_description_placeholder">например: поиск репозиториев GitHub, управление Issue и PR</string>
   <string name="setting_mcp_page_enable">Включить</string>
   <string name="setting_mcp_page_enable_desc">Включить ли этот MCP-сервер</string>
   <string name="setting_mcp_page_header_name">Имя заголовка</string>

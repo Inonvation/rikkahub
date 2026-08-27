@@ -325,14 +325,14 @@ class GenerationHandler(
                     }
                     buildMemoryTools(
                         json = json,
-                        onCreation = { content ->
-                            memoryRepo.addMemory(memoryAssistantId, content)
+                        onCreation = { content, category ->
+                            memoryRepo.addMemory(memoryAssistantId, content, category)
                         },
-                        onUpdate = { id, content ->
-                            memoryRepo.updateContent(id, content)
+                        onUpdate = { id, content, category ->
+                            memoryRepo.updateContent(memoryAssistantId, id, content, category)
                         },
                         onDelete = { id ->
-                            memoryRepo.deleteMemory(id)
+                            memoryRepo.deleteMemoryInScope(memoryAssistantId, id)
                         }
                     ).let(this::addAll)
                 }
@@ -611,11 +611,21 @@ class GenerationHandler(
                     append(effectiveSystemPrompt)
                 }
 
-                // 记忆
-                if ((policy?.allowMemory ?: true) && assistant.enableMemory) {
-                    appendLine()
-                    append(buildMemoryPrompt(memories = memories))
+                // 用户基本资料（全局稳定注入）：紧跟助手提示词，只在设置变更时变化，
+                // 是 system 缓存前缀的一部分；空配置跳过。
+                if (assistant.useUserProfile) {
+                    buildUserProfilePrompt(
+                        profile = settings.userProfile,
+                        nickname = settings.displaySetting.userNickname,
+                    )?.let {
+                        appendLine()
+                        append(it)
+                    }
                 }
+
+                // 记忆不进 system：检索结果逐轮变化会打穿后续全部缓存前缀。
+                // 改由 MemoryContextTransformer 追加到最后一条 USER 消息（见 transforms 调用）。
+
                 // 工具prompt
                 if (policy?.includeToolSystemPrompt ?: true) {
                     // 去重：同一份 systemPrompt（如 SkillTools 挂在多个技能工具上）只注入一次。
@@ -677,6 +687,7 @@ class GenerationHandler(
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
             conversationId = conversationId?.toString(),
+            retrievedMemories = if ((policy?.allowMemory ?: true) && assistant.enableMemory) memories else emptyList(),
         )
 
         // 续答唤醒指令：作为 provider 看到的最后一条 USER 消息追加（transforms 之后，避免被

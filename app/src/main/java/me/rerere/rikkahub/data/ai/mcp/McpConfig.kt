@@ -9,14 +9,6 @@ import kotlin.uuid.Uuid
 data class McpCommonOptions(
     val enable: Boolean = true,
     val name: String = "",
-    /**
-     * 服务器的一句话描述（能力摘要）。
-     *
-     * 用途：展示在设置列表/绑定选择器里，也会随 `mcp_list` / `mcp_admin_list`
-     * 提供给 AI，帮助其判断何时使用该服务器。可由用户手写，或点击「AI 提炼」
-     * 用默认快速模型根据已发现的工具自动生成。
-     */
-    val description: String = "",
     val headers: List<Pair<String, String>> = emptyList(),
     val tools: List<McpTool> = emptyList(),
     val oauth: McpOAuthState? = null,

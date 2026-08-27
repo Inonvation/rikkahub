@@ -39,6 +39,7 @@ import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.ImageUpload
+import me.rerere.hugeicons.stroke.UserGroup
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.McpServer
@@ -102,6 +103,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     onClick = { navController.navigate(Screen.SettingPreferencesGeneral) },
                     leadingContent = { Icon(HugeIcons.Settings03, null) },
                     headlineContent = { Text(stringResource(R.string.setting_page_behavior_notifications)) },
+                    trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                )
+                item(
+                    onClick = { navController.navigate(Screen.SettingUserProfile) },
+                    leadingContent = { Icon(HugeIcons.UserGroup, null) },
+                    headlineContent = { Text(stringResource(R.string.setting_user_profile_title)) },
                     trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }

@@ -25,8 +25,8 @@ class ToolDescriptionConventionTest {
         )
         val memoryTools = buildMemoryTools(
             json = Json,
-            onCreation = { content -> AssistantMemory(id = 0, content = content) },
-            onUpdate = { id, content -> AssistantMemory(id = id, content = content) },
+            onCreation = { content, _ -> AssistantMemory(id = 0, content = content) },
+            onUpdate = { id, content, _ -> AssistantMemory(id = id, content = content) },
             onDelete = {},
         )
         val searchTools = createSearchTools(Settings(init = true))

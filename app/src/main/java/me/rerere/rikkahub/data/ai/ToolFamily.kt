@@ -1,8 +1,5 @@
 package me.rerere.rikkahub.data.ai
 
-import me.rerere.rikkahub.data.ai.tools.MCP_CALL_NAME
-import me.rerere.rikkahub.data.ai.tools.MCP_LIST_NAME
-
 /**
  * 工具族单一分类来源。
  *
@@ -43,7 +40,7 @@ enum class ToolFamily(val metricLabel: String, val displayLabel: String) {
  * 避免 admin 工具被误合并进 MCP 使用族。
  */
 internal fun classifyToolFamily(name: String): ToolFamily = when {
-    name == MCP_LIST_NAME || name == MCP_CALL_NAME || name.startsWith("mcp__") -> ToolFamily.MCP
+    name.startsWith("mcp__") -> ToolFamily.MCP
     name.startsWith("mcp_admin_") -> ToolFamily.MCP_ADMIN
     name.startsWith("search_web") || name.startsWith("scrape_web") -> ToolFamily.SEARCH
     name.startsWith("workspace_") -> ToolFamily.WORKSPACE

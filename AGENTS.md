@@ -41,6 +41,14 @@
 - Room schema 由 KSP 导出到 `app/schemas`，`androidTest` 用它做 migration 测试
 - 签名配置在 `local.properties`（已 gitignore）；CI（`.github/workflows/daily-build.yml`）通过 secrets 解码 keystore 并写入
 
+## Windows 受限环境构建失败排查
+
+在受限权限环境（如 DSH 沙箱）下，Gradle wrapper 首次运行需要在用户目录创建发行版缓存，可能直接失败：
+
+- **现象**：`gradlew.bat` 启动即退出，报 `java.io.FileNotFoundException: C:\Users\<user>\.gradle\wrapper\dists\gradle-9.6.0-bin\<hash>\gradle-9.6.0-bin.zip.lck (拒绝访问)`，构建尚未开始。
+- **原因**：wrapper 要写入 `%USERPROFILE%\.gradle` 下载并解压 Gradle 发行版，受限环境对该目录无写权限（工作区外的沙箱拦截）。
+- **解决**：以完整访问权限运行构建（沙箱一次性权限提升后重试同一命令）；或先以完整权限预热 wrapper（如执行一次 `gradlew --version`），之后普通权限构建可复用已下载的发行版缓存。
+
 ## Coding Style & Naming Conventions
 
 本仓库使用 `.editorconfig` 统一格式：

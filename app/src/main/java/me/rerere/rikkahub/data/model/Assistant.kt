@@ -31,6 +31,10 @@ data class Assistant(
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
+    /** 注入全局用户基本资料（Settings.userProfile）；角色扮演类助手可关闭以隔离真实身份 */
+    val useUserProfile: Boolean = true,
+    /** 回合结束后自动提取记忆（预留，尚未启用） */
+    val enableAutoMemory: Boolean = false,
     val enableRecentChatsReference: Boolean = false,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
@@ -78,11 +82,40 @@ data class QuickMessage(
 data class AssistantMemory(
     val id: Int,
     val content: String = "",
+    /** 记忆分类（结构化沉淀），null 为历史遗留数据 */
+    val category: MemoryCategory? = null,
     /** 创建时间戳（epoch ms），旧数据为 null */
     val createdAt: Long? = null,
     /** 最后更新时间戳（epoch ms），旧数据为 null */
     val updatedAt: Long? = null,
 )
+
+/**
+ * 记忆的固定分类。固定枚举而非自由标签：约束模型的写入质量，
+ * 让注入按类分组、UI 按类筛选成为可能。
+ */
+@Serializable
+enum class MemoryCategory {
+    @SerialName("preference")
+    PREFERENCE,
+
+    @SerialName("basic")
+    BASIC,
+
+    @SerialName("goal")
+    GOAL,
+
+    @SerialName("work")
+    WORK,
+
+    @SerialName("other")
+    OTHER;
+
+    companion object {
+        fun fromNameOrNull(name: String?): MemoryCategory? =
+            entries.firstOrNull { it.name == name }
+    }
+}
 
 @Serializable
 enum class AssistantAffectScope {

@@ -268,15 +268,6 @@ fun McpPicker(
                             text = server.commonOptions.name,
                             style = MaterialTheme.typography.titleLarge,
                         )
-                        if (server.commonOptions.description.isNotBlank()) {
-                            Text(
-                                text = server.commonOptions.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LocalContentColor.current.copy(alpha = 0.75f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                         Text(
                             text = when (val s = status) {
                                 is McpStatus.Idle -> "Idle"

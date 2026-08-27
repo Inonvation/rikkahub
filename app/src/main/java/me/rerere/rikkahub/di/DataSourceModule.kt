@@ -53,13 +53,13 @@ import me.rerere.rikkahub.data.db.migrations.Migration_41_42
 import me.rerere.rikkahub.data.db.migrations.Migration_42_43
 import me.rerere.rikkahub.data.db.migrations.Migration_43_44
 import me.rerere.rikkahub.data.db.migrations.Migration_44_45
+import me.rerere.rikkahub.data.db.migrations.Migration_45_46
 import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.dao.WrongQuestionDao
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.dao.NoteDao
 import me.rerere.rikkahub.data.ai.tools.StudyDaoSet
 import me.rerere.rikkahub.data.ai.tools.StudyTools
-import me.rerere.rikkahub.data.ai.mcp.McpDescriptionGenerator
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.network.SettingsProxySelector
 import me.rerere.rikkahub.data.network.SettingsProxyAuthenticator
@@ -109,7 +109,7 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40, Migration_40_41, Migration_41_42, Migration_42_43, Migration_43_44, Migration_44_45)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40, Migration_40_41, Migration_41_42, Migration_42_43, Migration_43_44, Migration_44_45, Migration_45_46)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     // 消息 FTS 初始化任一步失败都不能让 DB open 崩溃（否则应用启动即崩）。
@@ -279,7 +279,6 @@ val dataSourceModule = module {
 
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get(), appEventBus = get()) }
 
-    single { McpDescriptionGenerator(settingsStore = get(), providerManager = get()) }
 
     single {
         GenerationHandler(

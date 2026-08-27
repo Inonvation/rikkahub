@@ -13,8 +13,6 @@ class ToolFamilyClassificationTest {
 
     @Test
     fun knownToolNamesMapToExpectedFamilies() {
-        assertEquals(ToolFamily.MCP, classifyToolFamily("mcp_list"))
-        assertEquals(ToolFamily.MCP, classifyToolFamily("mcp_call"))
         assertEquals(ToolFamily.MCP, classifyToolFamily("mcp__search"))
         assertEquals(ToolFamily.MCP_ADMIN, classifyToolFamily("mcp_admin_list"))
         assertEquals(ToolFamily.SEARCH, classifyToolFamily("search_web"))
@@ -45,7 +43,7 @@ class ToolFamilyClassificationTest {
     fun adminMcpIsNotMergedIntoClients() {
         // 顺序敏感：mcp_admin_* 必须命中 MCP_ADMIN，不能被 mcp__* 分支抢先并入 MCP
         assertEquals(ToolFamily.MCP_ADMIN, classifyToolFamily("mcp_admin_add"))
-        assertEquals(ToolFamily.MCP, classifyToolFamily("mcp_call"))
+        assertEquals(ToolFamily.MCP, classifyToolFamily("mcp__github__search_issues"))
     }
 
     @Test

@@ -93,8 +93,6 @@ import me.rerere.rikkahub.data.ai.tools.createKnowledgeAdminTools
 import me.rerere.rikkahub.data.ai.tools.createConversationAdminTools
 import me.rerere.rikkahub.data.ai.tools.createRollbackTools
 import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
-import me.rerere.rikkahub.data.ai.tools.createMcpListTool
-import me.rerere.rikkahub.data.ai.tools.createMcpCallTool
 import me.rerere.rikkahub.data.ai.tools.createAgentConfigTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -113,6 +111,7 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.KnowledgeBaseReminderTransformer
+import me.rerere.rikkahub.data.ai.transformers.MemoryContextTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
@@ -1760,6 +1759,8 @@ class ChatService(
                     if (modePolicy.allowWorkspace) add(workspaceReminderTransformer)
                     if (modePolicy.allowTrustedFolder) add(trustedFolderReminderTransformer)
                     if (modePolicy.allowKnowledge) add(knowledgeBaseReminderTransformer)
+                    // 必须在最后：记忆块追加到模板渲染后的最后一条 USER 消息，保持 system 前缀稳定
+                    add(MemoryContextTransformer)
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
@@ -1820,13 +1821,39 @@ class ChatService(
                         )
                     )
                     }
-                    if (modePolicy.allowMcpUse && assistant.mcpServers.isNotEmpty()) {
-                        // 高收益：用 mcp_list / mcp_call 两个通用工具替代全量 MCP 工具 schema 注入，
-                        // 避免外部 server 的工具数量/描述把系统提示词撑到几十 K。
-                        // 仅当 assistant 已绑定 MCP 服务器时才注入；未绑定时无任何工具可发现，
-                        // 且 restrictedCapabilities 已把 MCP_USE 标记为不可用——避免空工具占 token。
-                        add(createMcpListTool(assistant, mcpManager))
-                        add(createMcpCallTool(assistant, mcpManager))
+                    if (modePolicy.allowMcpUse) {
+                        // 与上游一致：每个 MCP 工具注册独立 function schema（mcp__{server}__{tool}）
+                        mcpManager.getAllAvailableTools(assistant).also { allTools ->
+                            val invalidNames = allTools
+                                .map { it.second }
+                                .distinct()
+                                .filter { name -> name.isEmpty() || !name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } }
+                            if (invalidNames.isNotEmpty()) {
+                                addError(
+                                    error = IllegalStateException(
+                                        context.getString(
+                                            R.string.error_mcp_invalid_server_name,
+                                            invalidNames.joinToString(", ")
+                                        )
+                                    ),
+                                    conversationId = conversationId,
+                                )
+                                return
+                            }
+                        }.forEach { (serverId, serverName, tool) ->
+                            add(
+                                Tool(
+                                    name = "mcp__${serverName}__${tool.name}",
+                                    description = tool.description?.takeIf { it.isNotBlank() }
+                                        ?: "Tool from MCP server \"$serverName\".",
+                                    parameters = { tool.inputSchema },
+                                    needsApproval = { tool.needsApproval },
+                                    execute = {
+                                        mcpManager.callTool(serverId, tool.name, it.jsonObject)
+                                    },
+                                )
+                            )
+                        }
                     }
                     // 管理模式专属工具：环境/日志只读感知 + 提供商/新模式写入（需审批）
                     if (modePolicy.allowCreativeTools) {
@@ -2057,6 +2084,11 @@ class ChatService(
                     generateSuggestion(conversationId, finalConversation)
                 }
             }
+
+            // TODO(自动提取记忆挂载点)：计划在此仿照上方 generateTitle 串行追加一次后台辅助
+            //  模型调用（assistant.enableAutoMemory 开关控制，默认关闭）：取最近一轮对话让
+            //  辅助模型提炼候选原子事实，diff 现有记忆后执行 ADD/UPDATE/DELETE（Mem0 式两阶段
+            //  管线）。当前仅预留位置，未实现调用逻辑。
 
             // 母代理回合正常结束：补唤醒该会话已完成但未消费的子代理
             scheduleRoundEndResume(conversationId)

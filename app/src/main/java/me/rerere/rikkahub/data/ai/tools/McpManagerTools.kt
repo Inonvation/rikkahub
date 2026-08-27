@@ -97,9 +97,6 @@ fun createMcpManagerTools(
         val enabledForAssistant = config.id in assistant.mcpServers
         appendLine("- id: ${config.id}")
         appendLine("  name: ${config.commonOptions.name}")
-        if (config.commonOptions.description.isNotBlank()) {
-            appendLine("  description: ${config.commonOptions.description}")
-        }
         appendLine("  type: ${mcpTransportOf(config)}")
         appendLine("  url: ${config.serverUrl}")
         appendLine("  enable: ${config.commonOptions.enable}")
@@ -130,8 +127,7 @@ fun createMcpManagerTools(
         buildString {
             appendLine("**MCP Server Management**")
             appendLine("You can manage MCP (Model Context Protocol) server configurations using the `mcp_admin_*` tools. Call `mcp_admin_list` first to see all configured MCP servers with their id, name, transport, url, status, and whether each is enabled for the current assistant; then operate by server id with `mcp_admin_get`, `mcp_admin_update`, `mcp_admin_delete`, or `mcp_admin_assistant_set_enabled`, and use `mcp_admin_add` / `mcp_admin_test` to add or test a server.")
-            appendLine("When adding or updating a server, provide a concise `description` (1-2 sentences) summarizing what the server's tools can do, based on the tool list from `mcp_admin_get`. The description helps the assistant discover and use the server.")
-            appendLine("Only servers enabled for the current assistant are usable via `mcp_list` / `mcp_call`. Call `mcp_admin_list` to discover and configure the rest.")
+            appendLine("Only servers enabled for the current assistant expose their tools directly to the model (as `mcp__*` function tools). Call `mcp_admin_list` to discover and configure the rest.")
         }
     }
 
@@ -199,10 +195,6 @@ fun createMcpManagerTools(
                             put("type", "object")
                             put("description", "Optional custom headers as a JSON object of key-value pairs, e.g. {\"Authorization\":\"Bearer token\"}")
                         })
-                        put("description", buildJsonObject {
-                            put("type", "string")
-                            put("description", "Optional one-line description of what this server does, based on its tools (helps the assistant discover and use it)")
-                        })
                         put("enable", buildJsonObject {
                             put("type", "boolean")
                             put("description", "Whether the server is enabled. Defaults to true")
@@ -224,7 +216,6 @@ fun createMcpManagerTools(
                     error("name must be non-empty and contain only letters and digits")
                 }
                 val headers = mcpParseHeaders(json["headers"]?.jsonObject)
-                val description = json["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
 
                 val config: McpServerConfig = when (transport) {
                     TRANSPORT_SSE -> McpServerConfig.SseTransportServer(
@@ -232,7 +223,6 @@ fun createMcpManagerTools(
                         commonOptions = McpCommonOptions(
                             enable = enable,
                             name = name,
-                            description = description,
                             headers = headers,
                         ),
                         url = url,
@@ -242,7 +232,6 @@ fun createMcpManagerTools(
                         commonOptions = McpCommonOptions(
                             enable = enable,
                             name = name,
-                            description = description,
                             headers = headers,
                         ),
                         url = url,
@@ -281,10 +270,6 @@ fun createMcpManagerTools(
                             put("type", "object")
                             put("description", "Replace custom headers entirely with this JSON object of key-value pairs")
                         })
-                        put("description", buildJsonObject {
-                            put("type", "string")
-                            put("description", "New one-line description of what this server does, based on its tools (helps the assistant discover and use it)")
-                        })
                         put("enable", buildJsonObject {
                             put("type", "boolean")
                             put("description", "Enable or disable the server")
@@ -312,7 +297,6 @@ fun createMcpManagerTools(
                     error("name must be non-empty and contain only letters and digits")
                 }
                 val url = json["url"]?.jsonPrimitive?.contentOrNull
-                val description = json["description"]?.jsonPrimitive?.contentOrNull
                 val enable = json["enable"]?.jsonPrimitive?.booleanOrNull
                 val headersProvided = json["headers"] != null
                 val newHeaders = if (headersProvided) mcpParseHeaders(json["headers"]?.jsonObject) else null
@@ -323,7 +307,6 @@ fun createMcpManagerTools(
                 val newCommon = common.copy(
                     name = name ?: common.name,
                     enable = enable ?: common.enable,
-                    description = description ?: common.description,
                     headers = newHeaders ?: common.headers,
                     tools = if (enableTools != null || disableTools != null) {
                         common.tools.map { tool ->

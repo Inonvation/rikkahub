@@ -7,12 +7,15 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.ResponseTonePreset
+import me.rerere.rikkahub.data.model.UserProfileSetting
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.toLocalString
 import java.security.MessageDigest
 import java.time.LocalDate
 
-internal const val PROMPT_REVISION = "2026-08-21-v1"
+/** 提示词布局版本：记忆改为尾部 <memories> 注入 + 新增用户资料稳定段（2026-08-27）。 */
+internal const val PROMPT_REVISION = "2026-08-27-v1"
 
 internal fun currentDateLabel(): String = LocalDate.now().toLocalString(true)
 
@@ -69,30 +72,96 @@ internal const val STATIC_COST_BUDGET_RATIO: Float = 0.30f
  */
 internal fun toolFamilyForMetrics(name: String): String = classifyToolFamily(name).metricLabel
 
-/** 记忆 prompt 的防御性上限：即使调用侧传入超量记忆，也只渲染前 N 条，防止 system 膨胀。 */
-internal const val MAX_MEMORY_PROMPT_ENTRIES = 40
+/** 记忆上下文的防御性上限：即使调用侧传入超量记忆，也只注入前 N 条，防止尾部膨胀。 */
+internal const val MAX_MEMORY_PROMPT_ENTRIES = 24
 
-/** 单条记忆注入 system 的内容截断长度（保留头部），避免一条超长记忆撑爆上下文。 */
+/** 单条记忆的内容截断长度（保留头部），避免一条超长记忆撑爆上下文。 */
 internal const val MAX_MEMORY_ENTRY_CHARS = 512
 
-internal fun buildMemoryPrompt(memories: List<AssistantMemory>) =
-    buildString {
+/** 整个 <memories> 块的字符预算；超预算按最新优先裁剪（含失败回退的全量路径）。 */
+internal const val MEMORY_SECTION_CHAR_BUDGET = 2000
+
+/** 用户资料「补充信息」单字段截断长度。 */
+internal const val MAX_PROFILE_INFO_CHARS = 1000
+
+/**
+ * 构建追加到最后一条 USER 消息的记忆上下文块。
+ *
+ * 不放 system：检索结果逐轮变化，而 system 逐字节稳定是跨轮前缀缓存的前提；
+ * 放在本来就全新的末尾用户消息里，缓存代价被限制在该消息自身。
+ * 条数与总字符双重封顶：FTS 失败回退的「全量注入」同样经过此处，天然受预算保护。
+ */
+internal fun buildMemoryContextBlock(memories: List<AssistantMemory>): String {
+    if (memories.isEmpty()) return ""
+    // 新→旧排序后做预算裁剪，保证被丢弃的是最旧的低价值条目
+    val ordered = memories.sortedByDescending { it.updatedAt ?: it.createdAt ?: 0L }
+    var used = 0
+    val json = buildJsonArray {
+        for (memory in ordered.take(MAX_MEMORY_PROMPT_ENTRIES)) {
+            val content = memory.content.take(MAX_MEMORY_ENTRY_CHARS)
+            // id/category/JSON 结构开销的保守估算
+            val cost = content.length + 32
+            if (used > 0 && used + cost > MEMORY_SECTION_CHAR_BUDGET) break
+            used += cost
+            add(buildJsonObject {
+                put("id", memory.id)
+                memory.category?.let { put("category", it.name) }
+                put("content", content)
+            })
+        }
+    }
+    if (json.isEmpty()) return ""
+    return buildString {
+        appendLine("<memories>")
+        appendLine("Relevant long-term memories about the user:")
+        append(JsonInstantPretty.encodeToString(json))
         appendLine()
-        append("**Memories**")
+        append("</memories>")
+    }
+}
+
+/** 语气预设对应的稳定指令文本；FOLLOW_ASSISTANT 或 CUSTOM 空文本返回 null（不限制）。 */
+internal fun toneDescription(preset: ResponseTonePreset, custom: String): String? = when (preset) {
+    ResponseTonePreset.FOLLOW_ASSISTANT -> null
+    ResponseTonePreset.CONCISE -> "Concise: short and direct answers, skip filler and unnecessary detail."
+    ResponseTonePreset.DETAILED -> "Detailed: thorough explanations with context and examples."
+    ResponseTonePreset.FORMAL -> "Formal: professional and polite register."
+    ResponseTonePreset.CASUAL -> "Casual: friendly conversational tone."
+    ResponseTonePreset.CUSTOM -> custom.trim().takeIf { it.isNotBlank() }
+}
+
+/**
+ * 全局用户基本资料块的稳定注入文本。作为 system 的固定前缀段，
+ * 只在设置变更时变化 → 对 provider 前缀缓存友好。无实质内容返回 null。
+ */
+internal fun buildUserProfilePrompt(profile: UserProfileSetting, nickname: String): String? {
+    if (!profile.enabled) return null
+    if (!profile.hasContent() && nickname.isBlank()) return null
+    return buildString {
+        append("**User Profile**")
         appendLine()
-        append("Memories from past conversations. Reference them when relevant.")
+        append("Stable information about the user, provided directly by them. Personalize your responses accordingly.")
         appendLine()
-        val json = buildJsonArray {
-            memories.take(MAX_MEMORY_PROMPT_ENTRIES).forEach { memory ->
-                add(buildJsonObject {
-                    put("id", memory.id)
-                    put("content", memory.content.take(MAX_MEMORY_ENTRY_CHARS))
-                })
+        val json = buildJsonObject {
+            if (nickname.isNotBlank()) put("name", nickname)
+            if (profile.occupation.isNotBlank()) put("occupation", profile.occupation)
+            if (profile.language.isNotBlank()) put("language_preference", profile.language)
+            if (profile.additionalInfo.isNotBlank()) {
+                put("additional_info", profile.additionalInfo.take(MAX_PROFILE_INFO_CHARS))
             }
         }
         append(JsonInstantPretty.encodeToString(json))
         appendLine()
+        toneDescription(profile.tonePreset, profile.toneCustom)?.let { tone ->
+            appendLine()
+            append("**Response Style**")
+            appendLine()
+            append("The user prefers this response style:")
+            appendLine()
+            append(tone)
+        }
     }
+}
 
 /**
  * 收集本轮每个工具要注入 system 的说明，并按内容去重。

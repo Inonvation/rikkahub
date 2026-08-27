@@ -25,7 +25,6 @@
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string", "description": "服务器显示名" },
-        "description": { "type": "string", "description": "服务器的一句话描述（能力摘要），帮助 AI 发现并使用该服务器" },
         "type": { "type": "string", "enum": ["sse", "streamable_http"] },
         "url": { "type": "string" },
         "enable": { "type": "boolean" },

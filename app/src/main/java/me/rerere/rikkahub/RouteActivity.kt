@@ -117,6 +117,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingAgentActionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
+import me.rerere.rikkahub.ui.pages.setting.UserProfileSettingPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNetworkPage
 import me.rerere.rikkahub.ui.pages.setting.SettingStudyToolsPage
 import me.rerere.rikkahub.ui.pages.recyclebin.RecycleBinPage
@@ -512,6 +513,9 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.SettingPreferencesGeneral> {
                                 SettingPreferencesGeneralPage()
                             }
+                            entry<Screen.SettingUserProfile> {
+                                UserProfileSettingPage()
+                            }
 
                             entry<Screen.SettingStudyTools> {
                                 SettingStudyToolsPage()
@@ -888,6 +892,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferencesGeneral : Screen
+
+    @Serializable
+    data object SettingUserProfile : Screen
 
     @Serializable
     data object SettingStudyTools : Screen

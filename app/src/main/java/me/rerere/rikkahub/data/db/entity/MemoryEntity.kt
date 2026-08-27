@@ -12,6 +12,9 @@ data class MemoryEntity(
     val assistantId: String,
     @ColumnInfo("content")
     val content: String = "",
+    /** MemoryCategory 枚举名，null 为历史数据 */
+    @ColumnInfo("category")
+    val category: String? = null,
     @ColumnInfo("created_at", defaultValue = "0")
     val createdAt: Long = 0,
     @ColumnInfo("updated_at", defaultValue = "0")

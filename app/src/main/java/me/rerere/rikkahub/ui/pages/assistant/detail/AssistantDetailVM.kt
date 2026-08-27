@@ -187,21 +187,38 @@ class AssistantDetailVM(
             }
             memoryRepository.addMemory(
                 assistantId = memoryAssistantId,
-                content = memory.content
+                content = memory.content,
+                category = memory.category,
             )
         }
     }
 
     fun updateMemory(memory: AssistantMemory) {
         viewModelScope.launch {
-            memoryRepository.updateContent(id = memory.id, content = memory.content)
+            // 归属校验失败（用户切换过全局开关导致池不一致）静默忽略，避免协程异常崩应用
+            runCatching {
+                memoryRepository.updateContent(
+                    assistantId = currentMemoryPoolId(),
+                    id = memory.id,
+                    content = memory.content,
+                    category = memory.category,
+                )
+            }
         }
     }
 
     fun deleteMemory(memory: AssistantMemory) {
         viewModelScope.launch {
-            memoryRepository.deleteMemory(id = memory.id)
+            runCatching {
+                memoryRepository.deleteMemoryInScope(currentMemoryPoolId(), memory.id)
+            }
         }
+    }
+
+    private fun currentMemoryPoolId(): String = if (assistant.value.useGlobalMemory) {
+        MemoryRepository.GLOBAL_MEMORY_ID
+    } else {
+        assistantId.toString()
     }
 
     fun checkAvatarDelete(old: Assistant, new: Assistant) {

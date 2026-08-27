@@ -182,9 +182,7 @@ object AgentConfigImporter {
     private fun mergeMcp(current: McpServerConfig, dto: McpServerConfigDto): McpServerConfig {
         val common = current.commonOptions.copy(
             enable = dto.enable,
-            name = dto.name.ifBlank { current.commonOptions.name },
-            // 缺失/为空保留本地值，与 name 合并语义一致，避免旧文件误清空描述
-            description = dto.description.ifBlank { current.commonOptions.description },
+            name = dto.name.ifBlank { current.commonOptions.name },
         )
         return when (current) {
             is McpServerConfig.SseTransportServer ->

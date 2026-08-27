@@ -62,6 +62,7 @@ import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.UserProfileSetting
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.data.sync.SyncConfig
 import me.rerere.rikkahub.ui.theme.CustomTheme
@@ -112,6 +113,7 @@ class SettingsStore(
         val CUSTOM_THEMES = stringPreferencesKey("custom_themes")
         val DISPLAY_SETTING = stringPreferencesKey("display_setting")
         val NETWORK_SETTING = stringPreferencesKey("network_setting")
+        val USER_PROFILE_SETTING = stringPreferencesKey("user_profile_setting")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
 
         // 模型选择
@@ -300,6 +302,7 @@ class SettingsStore(
                 developerMode = preferences[DEVELOPER_MODE] == true,
                 displaySetting = decodeOrDefault<DisplaySetting>(preferences[DISPLAY_SETTING], DisplaySetting()),
                 networkSetting = decodeOrDefault<NetworkSetting>(preferences[NETWORK_SETTING], NetworkSetting()),
+                userProfile = decodeOrDefault<UserProfileSetting>(preferences[USER_PROFILE_SETTING], UserProfileSetting()),
                 searchServices = decodeListOrDefault<SearchServiceOptions>(preferences[SEARCH_SERVICES], listOf(SearchServiceOptions.DEFAULT)),
                 searchCommonOptions = decodeOrDefault<SearchCommonOptions>(preferences[SEARCH_COMMON], SearchCommonOptions()),
                 searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
@@ -490,6 +493,7 @@ class SettingsStore(
             preferences[DEVELOPER_MODE] = settings.developerMode
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
             preferences[NETWORK_SETTING] = JsonInstant.encodeToString(settings.networkSetting)
+            preferences[USER_PROFILE_SETTING] = JsonInstant.encodeToString(settings.userProfile)
 
             preferences[FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
             preferences[SELECT_MODEL] = settings.chatModelId.toString()
@@ -849,6 +853,8 @@ data class Settings(
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val networkSetting: NetworkSetting = NetworkSetting(),
+    /** 用户基本资料（全局稳定注入的档案层，见 UserProfileSetting） */
+    val userProfile: UserProfileSetting = UserProfileSetting(),
     val favoriteModels: List<Uuid> = emptyList(),
     val chatModelId: Uuid = Uuid.random(),
     val fastModelId: Uuid = Uuid.random(),

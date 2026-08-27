@@ -123,7 +123,6 @@ class AgentConfigExporterTest {
             commonOptions = McpCommonOptions(
                 enable = true,
                 name = "test-mcp",
-                description = "Repository search and issue management",
                 headers = listOf("Authorization" to "Bearer secret-token-999"),
                 tools = listOf(McpTool(name = "search")),
                 oauth = McpOAuthState(enabled = true, accessToken = "oauth-token-abc"),
@@ -168,7 +167,6 @@ class AgentConfigExporterTest {
             assertEquals(2, mcpFile.servers.size)
             assertEquals("streamable_http", mcpFile.servers[0].type)
             assertEquals(1, mcpFile.servers[0].toolCount)
-            assertEquals("Repository search and issue management", mcpFile.servers[0].description)
             assertTrue(mcpFile.servers[0].oauthEnabled)
             assertEquals(manifestFile.files.values.toSet(), setOf("ok"))
         } finally {
