@@ -169,7 +169,9 @@ import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvide
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
+import me.rerere.rikkahub.ui.components.message.pruneSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
+import me.rerere.rikkahub.ui.components.message.trimToolBubbleExpanded
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListAtBottom
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListUserControlled
@@ -198,6 +200,9 @@ import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import java.io.File
 import kotlin.uuid.Uuid
+
+/** 会话切换时保留的最近会话数：更早会话的展开折叠记忆被回收，回落默认态 */
+private const val KEEP_RECENT_CONVERSATIONS_FOR_EXPAND_STATE = 8
 
 @Composable
 fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mode: String? = null) {
@@ -529,6 +534,22 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
     // 思考冻结栏：折叠按钮被顶栏遮住时，在顶栏下方悬浮显示便于折叠
     val thinkingFreezeState = remember { ThinkingFreezeState() }
+
+    // 展开折叠进程级缓存（sectionExpanded / toolBubbleExpanded）的生命周期治理：
+    // 切换会话时只保留最近 N 个会话的记忆，避免长会话 + 多会话切换下只增不减的慢性累积。
+    // 最近列表包含当前会话，正在使用的记忆绝不会被清；GroupDiscussion/SubAgent 详情页等
+    // 使用独立会话 id 的页面，其记忆会在主聊天再切换数轮后被回收（回落默认展开态），可接受。
+    val recentConversationIds = remember { ArrayDeque<String>() }
+    LaunchedEffect(conversation.id) {
+        val convId = conversation.id.toString()
+        recentConversationIds.remove(convId)
+        recentConversationIds.addFirst(convId)
+        while (recentConversationIds.size > KEEP_RECENT_CONVERSATIONS_FOR_EXPAND_STATE) {
+            recentConversationIds.removeLast()
+        }
+        pruneSectionExpanded(recentConversationIds.toSet())
+        trimToolBubbleExpanded()
+    }
 
     // 用户手动滚动闩锁：折叠思考/过程内容后的延迟贴底，只在用户没有滑离底部时执行。
     // 用户在贴底等待窗口内开始滚动 → 置位，贴底直接放弃，避免"看历史时被拽回底部"；

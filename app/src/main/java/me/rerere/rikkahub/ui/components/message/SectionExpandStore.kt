@@ -28,3 +28,22 @@ fun getSectionExpanded(key: String): Boolean? = sectionExpanded[key]
 fun setSectionExpanded(key: String, expanded: Boolean) {
     sectionExpanded[key] = expanded
 }
+
+/**
+ * 生命周期治理：仅保留 [keepConversationIds] 会话的记忆，删除其余会话的全部记录，返回删除条数。
+ *
+ * 所有 section key 统一为 `<语义前缀>:<conversationId>:<条目>` 两/三段式（chain:/reasoning:/process:/todo:），
+ * 会话 id 固定位于第二段，故取第二段作为会话作用域匹配；无冒号的孤立 key（不应出现）
+ * 整段视为作用域、不在保留集合即删除。**调用方必须把当前会话 id 放进保留集合**，
+ * 否则正在显示的界面记忆会被误清；分批遍历移除发生在快照写中，不会撕裂可见状态。
+ */
+fun pruneSectionExpanded(keepConversationIds: Set<String>): Int {
+    var removed = 0
+    for (key in sectionExpanded.keys.toList()) {
+        if (key.substringAfter(':').substringBefore(':') !in keepConversationIds) {
+            sectionExpanded.remove(key)
+            removed++
+        }
+    }
+    return removed
+}

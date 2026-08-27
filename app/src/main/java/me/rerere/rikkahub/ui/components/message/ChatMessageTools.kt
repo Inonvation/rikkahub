@@ -106,6 +106,27 @@ private fun isCollapsedByDefaultTool(toolName: String): Boolean =
  */
 internal val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
 
+/** toolBubbleExpanded 的容量上限：超过即从最早插入的记录开始淘汰（见 trimToolBubbleExpanded） */
+internal const val MAX_TOOL_BUBBLE_ENTRIES = 600
+
+/**
+ * 生命周期治理：toolBubbleExpanded 按 toolCallId 存储、不含会话 id，无法随会话切换精准清理，
+ * 采用插入序容量上限淘汰（SnapshotStateMap 保插入序）。超限时从最早的记录开始丢弃，
+ * 返回删除条数。最早的多是最久未触达的消息，其气泡回默认展开态影响可忽略；
+ * 上限 600 远超单会话正常工具量，常态使用不会触发淘汰。
+ */
+fun trimToolBubbleExpanded(maxEntries: Int = MAX_TOOL_BUBBLE_ENTRIES): Int {
+    var removed = 0
+    val excess = toolBubbleExpanded.size - maxEntries
+    if (excess <= 0) return 0
+    for (key in toolBubbleExpanded.keys.toList()) {
+        if (removed >= excess) break
+        toolBubbleExpanded.remove(key)
+        removed++
+    }
+    return removed
+}
+
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
     val loading = !tool.isFinished
