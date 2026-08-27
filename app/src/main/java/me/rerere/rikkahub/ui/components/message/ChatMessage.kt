@@ -440,9 +440,19 @@ private fun MessagePartsBlock(
     }
     val hasProcessContent =
         role == MessageRole.ASSISTANT && (finalOutputStart > 0 || hasThinkingSteps)
-    // 整体折叠：开启开关且消息完成后，过程内容折叠成"已处理 n分m秒"卡片，只保留最终输出
+    // 手动折叠记忆 key（与思考步骤 sectionExpanded / 工具气泡 toolBubbleExpanded 同款进程级存储）：
+    // item 滚出视口会被 LazyColumn 销毁，本地 remember 重建后只能按开关强制推导折叠态，
+    // 此前以展开态出现过的过程区会在重新进入视口的瞬间塌缩（高度骤减触发 LazyColumn 锚点修正，
+    // 即"下拉历史回弹抽搐"根源），故手动形态须落入进程级 store。
+    // 前缀 process: 不与思考链的 chain: 冲突；无会话上下文（导出预览等）为 null → 退化为纯推导。
+    val chainStateKey = LocalConversationId.current?.let { "process:$it:$nodeId" }
+    // 整体折叠：开启开关且消息完成后，过程内容折叠成“已处理 n分m秒”卡片，只保留最终输出。
+    // 初始形态优先读用户手动记录（true=展开）；无记录时按开关推导——自动折叠不落库，仅用户点击写入。
     var chainCollapsed by remember(nodeId, autoCollapseAll) {
-        mutableStateOf(autoCollapseAll && !loading && hasProcessContent)
+        mutableStateOf(
+            chainStateKey?.let { getSectionExpanded(it) }
+                ?: (autoCollapseAll && !loading && hasProcessContent)
+        )
     }
     // 开关开启时：生成中强制展开（含重新生成场景），完成后自动折叠；关闭时不干预，保留用户手动折叠状态。
     // 完成后折叠仅在列表贴底时执行：折叠会把本消息的过程内容收掉（高度骤减，含视口上方的历史消息），
@@ -753,8 +763,12 @@ private fun MessagePartsBlock(
         if (hasProcessContent) {
             Card(
                 onClick = {
-                    collapseAtBottom = !chainCollapsed && (isChatListAtBottom?.invoke() == true)
-                    chainCollapsed = !chainCollapsed
+                    val willCollapse = !chainCollapsed
+                    collapseAtBottom = willCollapse && (isChatListAtBottom?.invoke() == true)
+                    chainCollapsed = willCollapse
+                    // 记录用户手动选择的形态（true=展开，与思考步骤同语义）：滚出回收重建后保持所见形态。
+                    // 自动折叠的两个 LaunchedEffect 刻意不写 store（只改内存态），守卫/动画行为不受影响。
+                    chainStateKey?.let { setSectionExpanded(it, !willCollapse) }
                     // 用户手动展开/收起过程区：通知列表取消自动跟随，避免高度骤增被拽到底部
                     onManualContentToggle?.invoke()
                 },
