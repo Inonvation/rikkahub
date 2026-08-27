@@ -44,6 +44,7 @@ import me.rerere.rikkahub.data.db.entity.SubAgentUsageEntity
 import me.rerere.rikkahub.data.db.entity.SubAgentTaskEntity
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.ai.canonicalToolOrder
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.renderReference
 import me.rerere.rikkahub.utils.JsonInstant
@@ -595,7 +596,7 @@ class SubAgentRunner(
         // 装配工具（按能力）
         val tools = withContext(Dispatchers.IO) {
             toolAssembler.assemble(def, settings, parentConversation)
-        }
+        }.canonicalToolOrder()
         addStep("装配工具 ${tools.size} 个")
 
         // 构造消息：system（子代理职责 + 工具提示词）+ 父代理上下文摘要 + 用户任务

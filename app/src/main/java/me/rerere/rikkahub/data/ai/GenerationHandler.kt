@@ -315,6 +315,8 @@ class GenerationHandler(
                 resumeContext
             }
 
+            // 规范化排序：provider 前缀缓存以 tools 数组顺序为键的一部分，
+            // 与装配路径的书写顺序解耦（见 ToolCanonicalOrder.kt）
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
                 if ((policy?.allowMemory ?: true) && assistant?.enableMemory == true) {
@@ -337,7 +339,7 @@ class GenerationHandler(
                     ).let(this::addAll)
                 }
                 addAll(tools)
-            }
+            }.canonicalToolOrder()
 
             // Check if we have tool calls ready to continue after user interaction.
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {

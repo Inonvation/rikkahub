@@ -1749,9 +1749,15 @@ class ChatService(
                     messages = messagesToGenerate,
                 ),
                 inputTransformers = buildList {
+                    // 注入顺序 = system 内容的堆叠顺序（P0 约定，改动前先读懂）：
+                    // 1. 时间提醒：USER 前插合成消息，与后续环节无耦合；
+                    // 2-4. 文档解析 / todo 提醒 / Pebble 模板：消息内容级转换；
+                    // 5-7. 环境声明追加进 system：<workspace> → <trusted_folder> → <knowledge_base>；
+                    // 8. 模式/lorebook 注入：对「已含环境块的最终 system」做 BEFORE/AFTER 包裹，
+                    //    AFTER 才能落在真·末尾，不会被后续 transformer 顶到中间；
+                    // 9. 占位符：注入文本也要展开 {{}}，故跑在注入之后（尾部易变值规则见其 KDoc）；
+                    // 10. 记忆上下文必须最后（见 MemoryContextTransformer）。
                     if (modePolicy.includeReminders) add(TimeReminderTransformer)
-                    if (modePolicy.includePromptInjection) add(PromptInjectionTransformer)
-                    add(PlaceholderTransformer)
                     if (modePolicy.allowDocument) add(DocumentAsPromptTransformer)
                     if (modePolicy.allowDocument) add(OcrTransformer)
                     if (modePolicy.includeReminders) add(todoReminderTransformer)
@@ -1759,6 +1765,8 @@ class ChatService(
                     if (modePolicy.allowWorkspace) add(workspaceReminderTransformer)
                     if (modePolicy.allowTrustedFolder) add(trustedFolderReminderTransformer)
                     if (modePolicy.allowKnowledge) add(knowledgeBaseReminderTransformer)
+                    if (modePolicy.includePromptInjection) add(PromptInjectionTransformer)
+                    add(PlaceholderTransformer)
                     // 必须在最后：记忆块追加到模板渲染后的最后一条 USER 消息，保持 system 前缀稳定
                     add(MemoryContextTransformer)
                 },
