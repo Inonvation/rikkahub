@@ -15,13 +15,15 @@ class ToolDescriptionConventionTest {
     fun highTrafficToolsDescribeWhenToUseOrAvoid() {
         val skillTools = createSkillTools(
             enabledSkills = setOf("alpha"),
-            allSkills = listOf(
-                SkillMetadata(
-                    name = "alpha",
-                    description = "Test skill",
-                    skillDir = File("."),
+            listAllSkills = {
+                listOf(
+                    SkillMetadata(
+                        name = "alpha",
+                        description = "Test skill",
+                        skillDir = File("."),
+                    )
                 )
-            ),
+            },
         )
         val memoryTools = buildMemoryTools(
             json = Json,

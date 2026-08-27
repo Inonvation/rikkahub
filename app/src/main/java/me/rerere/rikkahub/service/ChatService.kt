@@ -1806,12 +1806,14 @@ class ChatService(
                         addAll(createTrustedFolderTools(trustedFolderRepository))
                     }
                     if (modePolicy.allowSkillUse || modePolicy.allowSkillAdmin) {
+                        // 快照仅用于决定工具 schema 组成与 <enabled_skills> 系统提示（前缀缓存稳定）；
+                        // skill_admin_* 的执行体通过 provider 实时读盘，同轮内新装的技能立即可查。
                         val allSkills = skillManager.listSkills()
                         if (allSkills.isNotEmpty()) {
                             addAll(
                                 createSkillTools(
                                     enabledSkills = assistant.enabledSkills,
-                                    allSkills = allSkills,
+                                    listAllSkills = { skillManager.listSkills() },
                                     setEnabledSkills = { skills ->
                                         settingsStore.updateAssistantSkills(assistant.id, skills)
                                     },

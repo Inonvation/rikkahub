@@ -17,15 +17,28 @@ import me.rerere.rikkahub.data.files.SkillPaths
  * 管理工具参照 [me.rerere.rikkahub.data.ai.tools.createMcpManagerTools] 的模式，
  * 写操作通过 [setEnabledSkills] 回调交给调用方（[me.rerere.rikkahub.service.ChatService]
  * 中落到 `SettingsStore.updateAssistantSkills`）。
+ *
+ * 快照与实时的边界（改动前先读懂）：
+ * - 开局快照：[listAllSkills] 在创建时取一次，决定 `use_skill` 是否注册及其可用集、
+ *   `<enabled_skills>` 系统提示 —— 保证同轮内 tools 数组与 system 前缀不变（provider
+ *   前缀缓存以 tools 为键的一部分），语义与"改动的启用状态下一条消息生效"一致。
+ * - 执行时实时：`skill_admin_list` / `skill_admin_set_enabled` 通过 [listAllSkills]
+ *   现扫技能目录，使 AI 在同一轮里新装的技能立即可查、可校验存在性（查询结果只是
+ *   tool result 文本，不影响 schema，不会破坏缓存）。
  */
 fun createSkillTools(
     enabledSkills: Set<String>,
-    allSkills: List<SkillMetadata>,
+    listAllSkills: () -> List<SkillMetadata>,
     setEnabledSkills: suspend (Set<String>) -> Unit = {},
 ): List<Tool> {
+    val allSkills = listAllSkills()
     val available = allSkills.filter { it.name in enabledSkills }
 
-    fun skillEnabled(skill: SkillMetadata): Boolean = skill.name in enabledSkills
+    // 轮内启用的动态视图：skill_admin_set_enabled 成功后立即更新，
+    // 使同一轮内的 list 展示与后续 set 操作基于最新状态（生效仍从下一条消息开始）。
+    var currentEnabled = enabledSkills
+
+    fun skillEnabled(skill: SkillMetadata): Boolean = skill.name in currentEnabled
 
     fun skillStateLine(skill: SkillMetadata): String = buildString {
         appendLine("- name: ${skill.name}")
@@ -36,15 +49,15 @@ fun createSkillTools(
         }
     }
 
-    fun listSummary(): String {
-        if (allSkills.isEmpty()) {
+    fun listSummary(skills: List<SkillMetadata>): String {
+        if (skills.isEmpty()) {
             return "No skills installed. Skills live in the app's skills directory; import a skill to make it available."
         }
         return buildString {
             appendLine("Installed skills:")
-            allSkills.forEach { appendLine(skillStateLine(it)) }
+            skills.forEach { appendLine(skillStateLine(it)) }
             appendLine()
-            appendLine("Enabled for current assistant: ${enabledSkills.sorted().joinToString(", ").ifEmpty { "(none)" }}")
+            appendLine("Enabled for current assistant: ${currentEnabled.sorted().joinToString(", ").ifEmpty { "(none)" }}")
         }
     }
 
@@ -121,8 +134,9 @@ fun createSkillTools(
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {})
         },
+        // 执行时实时读盘：同轮内新装的技能立即可见（不依赖下一条消息的快照重建）
         execute = {
-            listOf(UIMessagePart.Text(listSummary()))
+            listOf(UIMessagePart.Text(listSummary(listAllSkills())))
         },
     )
 
@@ -149,10 +163,12 @@ fun createSkillTools(
                 ?: error("name is required")
             val enabled = it.jsonObject["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
                 ?: error("enabled must be a boolean")
-            val skill = allSkills.firstOrNull { skill -> skill.name == name }
+            // 实时校验存在性：本轮内刚装的技能也要能立即启用
+            val skill = listAllSkills().firstOrNull { skill -> skill.name == name }
                 ?: error("Skill '$name' not found. Use `skill_admin_list` to see available skills.")
-            val newEnabled = if (enabled) enabledSkills + name else enabledSkills - name
+            val newEnabled = if (enabled) currentEnabled + name else currentEnabled - name
             setEnabledSkills(newEnabled)
+            currentEnabled = newEnabled
             listOf(
                 UIMessagePart.Text(
                     "Skill '${skill.name}' ${if (enabled) "enabled" else "disabled"} for the current assistant."
