@@ -166,13 +166,14 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ContextStatusPopover
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
-import me.rerere.rikkahub.ui.components.ai.resolveContextTokenLimit
 import me.rerere.rikkahub.ui.components.ai.autoCompressResetThreshold
 import me.rerere.rikkahub.ui.components.ai.autoCompressShouldTrigger
+import me.rerere.rikkahub.utils.resolveContextTokenLimit
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBaseChips
 import me.rerere.rikkahub.ui.components.ai.ModePickerSheet
@@ -718,7 +719,7 @@ private fun ChatPageContent(
             vm.handleCompressContext(
                 additionalPrompt = "",
                 targetTokens = (effectiveContextTokenLimit / 2).coerceAtLeast(1),
-                keepRecentMessages = 32,
+                keepRecentMessages = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES,
             )
         }
         if (usagePercent * 100f < autoCompressResetThreshold(setting.autoCompressThreshold)) {

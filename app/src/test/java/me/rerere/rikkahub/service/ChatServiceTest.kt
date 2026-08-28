@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
@@ -172,5 +173,60 @@ class ChatServiceTest {
         // 保留的原始消息不受影响
         assertTrue(result[0].isSynthetic)
         assertFalse(result[1].isSynthetic)
+    }
+
+    @Test
+    fun `parse compact command extracts optional instruction`() {
+        assertEquals("", parseCompactCommand("/compact"))
+        assertEquals("", parseCompactCommand("  /compact  "))
+        assertEquals("Focus on API changes", parseCompactCommand("/compact Focus on API changes"))
+        assertEquals("多行说明\n第二行", parseCompactCommand("/compact 多行说明\n第二行"))
+
+        // 非 /compact 一律拒绝：前缀撞车、其他命令、正文提及、空输入
+        assertNull(parseCompactCommand("/compactfoo"))
+        assertNull(parseCompactCommand("/clear"))
+        assertNull(parseCompactCommand("先看看 /compact 再说"))
+        assertNull(parseCompactCommand(null))
+    }
+
+    @Test
+    fun `split compress scope keeps recent tail and noop on short conversation`() {
+        val messages = (0 until 25).map {
+            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("m$it")))
+        }
+
+        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentMessages = 10)!!
+        assertEquals(15, toCompress.size)
+        assertEquals(messages.dropLast(10), toCompress)
+        assertEquals(messages.takeLast(10), toKeep)
+
+        // 会话比保留窗口还短 → null（无需压缩）
+        assertNull(splitCompressScope(messages.take(5), keepRecentMessages = 10))
+
+        // keep=0 → 全部压缩、不保留
+        val (all, none) = splitCompressScope(messages, keepRecentMessages = 0)!!
+        assertEquals(messages, all)
+        assertTrue(none.isEmpty())
+    }
+
+    @Test
+    fun `split by char budget preserves order and isolates oversized item`() {
+        val items = listOf("a".repeat(30), "b".repeat(30), "c".repeat(30))
+        // 30+30=60 不超过预算 60：[a,b] + [c] 两块
+        val chunks = splitByCharBudget(items, budget = 60)
+        assertEquals(2, chunks.size)
+        assertEquals(listOf(items[0], items[1]), chunks[0])
+        assertEquals(listOf(items[2]), chunks[1])
+
+        // 预算 50 装不下两条 30：逐条成块
+        assertEquals(3, splitByCharBudget(items, budget = 50).size)
+
+        // 单条超预算：独占一块，不与其余合并
+        val oversized = listOf("x".repeat(100), "y".repeat(5))
+        val oversizedChunks = splitByCharBudget(oversized, budget = 10)
+        assertEquals(listOf(oversized[0]), oversizedChunks[0])
+        assertEquals(listOf(oversized[1]), oversizedChunks[1])
+
+        assertTrue(splitByCharBudget(emptyList(), budget = 100).isEmpty())
     }
 }

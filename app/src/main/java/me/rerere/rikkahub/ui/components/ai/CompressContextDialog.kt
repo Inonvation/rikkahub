@@ -30,16 +30,11 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.DEFAULT_MODEL_CONTEXT_LENGTH
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
-
-internal fun resolveContextTokenLimit(
-    modelContextTokenLimit: Int?,
-    assistantContextTokenLimit: Int,
-): Int = modelContextTokenLimit?.takeIf { it > 0 }
-    ?: assistantContextTokenLimit.takeIf { it > 0 }
-    ?: DEFAULT_MODEL_CONTEXT_LENGTH
+import me.rerere.rikkahub.utils.resolveContextTokenLimit
 
 internal fun autoCompressShouldTrigger(
     totalTokens: Int,
@@ -72,8 +67,9 @@ fun CompressContextDialog(
         )
     }
     var additionalPrompt by remember { mutableStateOf("") }
-    var selectedTokens by remember { mutableIntStateOf(0) }
-    var keepRecentMessages by remember { mutableIntStateOf(0) }
+    // 默认值与自动压缩路径一致（keep=10 ≈ 5 轮、target=窗口一半），用户不改参数直接保存也能执行
+    var selectedTokens by remember { mutableIntStateOf((contextLimit / 2).coerceAtLeast(1)) }
+    var keepRecentMessages by remember { mutableIntStateOf(DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES) }
     val hapticController = rememberHaptic()
     var currentJob by remember { mutableStateOf<Job?>(null) }
     val isLoading = currentJob?.isActive == true

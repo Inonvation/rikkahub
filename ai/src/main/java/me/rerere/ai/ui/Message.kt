@@ -50,6 +50,81 @@ data class UIMessage(
         return if (text.length > maxLength) text.take(maxLength) + "..." else text
     }
 
+    /**
+     * 供上下文压缩摘要用的富序列化：文本 + 工具调用（入参/结果预览）+ 附件占位。
+     *
+     * 与 [summaryAsText]（只取 Text part，供标题/建议等轻量场景）不同：工具结果是上下文
+     * 占用的大头（agent 会话尤甚），摘要器必须能看到"读过/改过什么、结果如何"，否则压缩后
+     * 会丢失关键线索，模型只能重新调用工具摸索。Reasoning 刻意跳过（思考过程对续接任务是噪声）。
+     */
+    fun serializeForSummary(
+        textLimit: Int = 4_000,
+        toolInputLimit: Int = 500,
+        toolOutputLimit: Int = 1_200,
+    ): String = buildString {
+        append("[${role.name}]")
+        parts.forEach { part ->
+            when (part) {
+                is UIMessagePart.Text -> {
+                    val text = part.text.trim()
+                    if (text.isNotEmpty()) {
+                        append('\n')
+                        append(text.ellipsizeForSummary(textLimit))
+                    }
+                }
+
+                is UIMessagePart.Tool -> {
+                    append("\n[tool ")
+                    append(part.toolName)
+                    val input = part.input.trim()
+                    if (input.isNotEmpty()) {
+                        append(" input: ")
+                        append(input.ellipsizeForSummary(toolInputLimit))
+                    }
+                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("\n") { it.text }
+                        .trim()
+                    if (outputText.isNotEmpty()) {
+                        append(" -> output: ")
+                        append(outputText.ellipsizeForSummary(toolOutputLimit))
+                    }
+                    append(']')
+                }
+
+                is UIMessagePart.ServerTool -> {
+                    append("\n[server_tool ")
+                    append(part.toolName)
+                    append(" status=")
+                    append(part.status.name.lowercase())
+                    val outputText = part.output?.toString()?.trim().orEmpty()
+                    if (outputText.isNotEmpty()) {
+                        append(" -> output: ")
+                        append(outputText.ellipsizeForSummary(toolOutputLimit))
+                    }
+                    append(']')
+                }
+
+                is UIMessagePart.Image -> append("\n[image]")
+                is UIMessagePart.Video -> append("\n[video]")
+                is UIMessagePart.Audio -> append("\n[audio]")
+                is UIMessagePart.Document -> {
+                    append("\n[document: ")
+                    append(part.fileName)
+                    append(']')
+                }
+
+                // 刻意跳过：思考过程对续接任务是噪声
+                is UIMessagePart.Reasoning -> Unit
+                // 废弃类型（Search/ToolCall/ToolResult）：仅老数据可能出现，不进摘要
+                else -> Unit
+            }
+        }
+    }
+
+    /** 摘要序列化的截断：超限追加截断标记，让摘要模型知道内容不完整 */
+    private fun String.ellipsizeForSummary(limit: Int): String =
+        if (length <= limit) this else take(limit) + "...[truncated]"
+
     fun toText() = parts.joinToString(separator = "\n") { part ->
         when (part) {
             is UIMessagePart.Text -> part.text

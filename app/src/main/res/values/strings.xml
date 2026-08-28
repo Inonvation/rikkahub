@@ -367,6 +367,8 @@
   <string name="chat_page_compress_context_token_limit">上下文 Token 上限</string>
   <string name="chat_page_compress_save">保存</string>
   <string name="chat_page_compressing">压缩中...</string>
+  <string name="chat_page_compress_nothing_to_compress">对话较短，暂无需压缩</string>
+  <string name="error_compact_group_unsupported">群组会话暂不支持 /compact 压缩</string>
   <string name="chat_page_conversation_system_prompt">Conversation System Prompt</string>
   <string name="chat_page_conversation_system_prompt_clear">Clear</string>
   <string name="chat_page_conversation_system_prompt_hint">Override the assistant\'s system prompt for this conversation</string>
@@ -1022,7 +1024,7 @@
   <string name="setting_page_built_in_tools_search_desc">启用 Google 搜索集成</string>
   <string name="setting_page_built_in_tools_url_context">URL 上下文</string>
   <string name="setting_page_built_in_tools_url_context_desc">启用 URL 内容处理</string>
-  <string name="setting_page_chat_storage">聊天记录存储</string>
+  <string name="setting_page_chat_storage">Storage Management</string>
   <string name="setting_page_chat_storage_desc">%1$d 个文件，%2$.2f MB</string>
   <string name="setting_page_code_display_settings">代码显示</string>
   <string name="setting_page_color_mode">颜色模式</string>
@@ -1826,5 +1828,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_console_audit_desc">Operation records and permission-blocked attempts</string>
   <string name="setting_page_console_config_files_summary">%1$d providers · %2$d assistants · %3$d MCP</string>
   <string name="chat_page_context_popover_indicators_hint">No indicators enabled — enable them in the management console</string>
+  <string name="setting_files_page_clean_all">All files</string>
+  <string name="setting_files_page_clean_older_than_days">Older than %1$d days</string>
+  <string name="setting_files_page_clean_range_description">Select files to permanently delete. This action cannot be undone.</string>
 </resources>
 

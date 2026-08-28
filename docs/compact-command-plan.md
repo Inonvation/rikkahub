@@ -4,6 +4,19 @@
 >
 > 结论先行：**本项目压缩管线已完成约 80%**（分块摘要、快照、非破坏性 UI、自动压缩、Codex 式提示词均已存在），真正的缺口是 ①`/compact` 命令入口、②工具调用结果没有进入摘要器输入、③（可选）无 LLM 成本的旧工具结果修剪层。
 
+## 实施状态（2026-08-28）
+
+**已落地**（P0 全部 + P1 摘要质量 + P2 弹窗默认值，`:app:compileDebugKotlin` 与 `:ai`/`:app` 全量单测通过）：
+
+- `/compact [附加指令]` 命令：`parseCompactCommand`（ChatService.kt，internal 纯函数）+ `sendMessage` 内拦截分支（不落库、processingStatus 反馈、群组会话友好拒绝、默认 keep=10 / target=窗口一半、附加指令透传 `additional_context`）。
+- 摘要输入增强：`UIMessage.serializeForSummary()`（ai/ui/Message.kt）——工具调用入参/结果预览（500/1200 截断）、附件占位、Reasoning 跳过；`compressConversation` 切换到该序列化。
+- 压缩范围/分块重构：`splitCompressScope`（短会话返回 null → no-op 语义，`compressConversation` 返回 `Result<Boolean>`）、`splitByCharBudget`（96k 字符预算切块替代固定 256 条，防压爆压缩模型窗口）。
+- `DEFAULT_COMPRESS_PROMPT` 升级：6 段结构化 + 防语境漂移（关键原文直引）+ 工具交互要点，占位符与用户自定义机制不变。
+- UI 收尾：自动压缩与弹窗默认值统一 `DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES = 10`；弹窗 target 默认窗口一半（修掉 0 值静默关闭 bug）；`resolveContextTokenLimit` 下沉 `utils/ContextTokenLimit.kt` 三处共用；新增字符串 `chat_page_compress_nothing_to_compress`、`error_compact_group_unsupported`。
+- 测试：`ChatServiceTest`（命令解析/范围切分/字符预算切块）、`MessageSummaryTest`（ai 模块，6 用例）。
+
+**未实施（Phase 3 可选项，待后续任务）**：microcompact 旧工具结果修剪层（4.3）、超长反应式压缩 + 熔断（4.4）、`CompressedHistoryCard` 元信息行（4.6 剩余项）。
+
 ## 一、现状盘点（已有能力）
 
 | 能力 | 位置 | 说明 |
@@ -59,8 +72,8 @@
 - **命令本身不落库**：不追加 messageNodes、不生成回复轮。主流 agent 均不把命令当消息（避免污染历史 + 烧 token）；用户反馈靠 ① 顶部 `CompressedHistoryCard` 出现 ② 输入框上方 processingStatus ③ 上下文占用圈下轮刷新。
 - **复用生成 job 通道**：分支内直接跑 `compressConversation`，仍包在 `launchGenerationJob` 里（`keepAliveInBackground = true`，长压缩有前台服务保活）；`sendMessage` 既有 `previousJob.join()` 语义让「生成中输入 /compact」自然排队而不是打断。
 - **状态反馈**：压缩前 `session.processingStatus.value = "正在压缩上下文…"`，结束置 null（该状态流 UI 已接）。
-- **默认参数**（与自动压缩保持一致，`ChatPage.kt:719`）：`targetTokens = (contextTokenLimit / 2).coerceAtLeast(1)`、`keepRecentMessages = 32`。contextTokenLimit 取 `resolveContextTokenLimit(modelContextTokenLimit, assistant.contextTokenLimit)`（`CompressContextDialog.kt:37` 同款逻辑，下沉到可共用处）。
-- **守卫**：群组会话直接 return；压缩模型缺失走现有 `IllegalStateException("No model available for compression")` → `addError` 报错；消息内容含附件/非文本时只取文本指令部分。
+- **默认参数**：`targetTokens = (contextTokenLimit / 2).coerceAtLeast(1)`、`keepRecentMessages = 10`（约 5 轮：保住最后意图与当前工作集，又不至于在 agent 会话里把压缩释放的空间吃回去——一条 assistant 消息会打包整轮工具结果，32 条可能让压缩后占用仍高于自动压缩的重置带）。contextTokenLimit 取 `resolveContextTokenLimit(modelContextTokenLimit, assistant.contextTokenLimit)`（`CompressContextDialog.kt:37` 同款逻辑，下沉到可共用处）。自动压缩路径（`ChatPage.kt:719`）的 32 同步改为 10，两入口一致。
+- **守卫**：群组会话直接 return；压缩模型缺失走现有 `IllegalStateException("No model available for compression")` → `addError` 报错；消息内容含附件/非文本时只取文本指令部分。`compressConversation` 在 `allMessages.size <= keep` 时会抛"消息不够"（`ChatService.kt:2617`）——`/compact` 与弹窗默认值场景应改为友好 no-op 提示（"会话太短，无需压缩"），不报错。
 - **与子代理命令的关系**：`SubAgentCommands.parseAll` 目前不含 `/compact` 不冲突；在 `sendMessage` 注释中声明优先级——`/compact` 先于子代理命令解析。
 
 **改动面**：`ChatService.kt`（一个分支 + 常量）、`ChatVM.kt`（无需新方法，走 sendMessage）、`strings.xml`（状态文案，可选）。ChatVM 已有的 `handleCompressContext`（`ChatVM.kt:266`）保留给弹窗使用。
@@ -106,7 +119,7 @@ fun UIMessage.serializeForSummary(
 
 ### 4.6 P2：UX 收尾
 
-- `CompressContextDialog` 初始值改为 `keep = 32`、`target = limit/2`（修掉 0 值静默关闭问题）。
+- `CompressContextDialog` 初始值改为 `keep = 10`、`target = limit/2`（修掉 0 值静默关闭问题）；若后续要自适应聊天/agent 两种形态，可演进为按 token 预算保留（从尾部累计到 `contextTokenLimit` 的 10–15% 封顶，条数是它的退化近似）。
 - `CompressedHistoryCard` 增加元信息行：压缩时间、覆盖范围（N 条消息 → 摘要）、节省 tokens 估算（`ContextComposition` 快照的 messageTokens 前后差即可）。
 - `/compact` 完成后发 `AppEvent` toast（可选）；顶部占用圈在下轮请求时自然按快照刷新，无需额外处理。
 

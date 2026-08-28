@@ -49,6 +49,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.registry.contextLengthOrDefault
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -159,6 +160,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.applyPlaceholders
+import me.rerere.rikkahub.utils.resolveContextTokenLimit
 import me.rerere.workspace.WorkspaceShellStatus
 import java.time.Instant
 import java.util.Locale
@@ -263,6 +265,68 @@ internal fun createForkConversation(
     workspaceCwd = source.workspaceCwd,
     folderId = source.folderId,
 )
+
+/** /compact 与自动压缩共用的默认保留窗口（约 5 轮对话）。一条 assistant 消息会打包整轮
+ *  工具结果（agent 会话单条可达上万 token），保留窗口过大会把压缩释放的空间吃回去，
+ *  导致压缩后占用仍高于自动压缩的重置带、占用降不下来。 */
+internal const val DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES = 10
+
+/** 单个摘要块的最大字符预算（≈24k tokens）：防止超长块压爆压缩模型的上下文窗口 */
+private const val COMPRESS_CHUNK_CHAR_BUDGET = 96_000
+
+/**
+ * 解析 /compact [附加指令] 命令（对齐 Claude Code 的 `/compact Focus on API changes`）。
+ * 返回附加指令（可为空串）；非 /compact 命令返回 null。"/compact" 之后必须是命令结尾
+ * 或空白，避免 "/compactfoo" 误匹配。
+ */
+internal fun parseCompactCommand(text: String?): String? {
+    val trimmed = text?.trim() ?: return null
+    if (!trimmed.startsWith("/compact")) return null
+    val rest = trimmed.removePrefix("/compact")
+    if (rest.isEmpty() || rest.first().isWhitespace()) return rest.trim()
+    return null
+}
+
+/**
+ * 压缩范围切分：返回「待摘要 + 保留尾部」；返回 null 表示无需压缩
+ * （会话比保留窗口还短时保留窗口已覆盖全部消息，语义上无事可做）。
+ */
+internal fun splitCompressScope(
+    allMessages: List<UIMessage>,
+    keepRecentMessages: Int,
+): Pair<List<UIMessage>, List<UIMessage>>? {
+    return when {
+        keepRecentMessages > 0 && allMessages.size > keepRecentMessages ->
+            allMessages.dropLast(keepRecentMessages) to allMessages.takeLast(keepRecentMessages)
+
+        keepRecentMessages > 0 -> null
+
+        else -> allMessages to emptyList()
+    }
+}
+
+/**
+ * 按字符预算切块：保序、单条超预算的消息独占一块。
+ * serializeForSummary 后单条消息体积不可预估，固定条数切块可能产出超长块，
+ * 按字符累积切块保证每块都不超过压缩模型可安全处理的体量。
+ */
+internal fun splitByCharBudget(items: List<String>, budget: Int): List<List<String>> {
+    if (items.isEmpty()) return emptyList()
+    val chunks = mutableListOf<List<String>>()
+    var current = mutableListOf<String>()
+    var currentChars = 0
+    for (item in items) {
+        if (current.isNotEmpty() && currentChars + item.length > budget) {
+            chunks.add(current)
+            current = mutableListOf()
+            currentChars = 0
+        }
+        current.add(item)
+        currentChars += item.length
+    }
+    if (current.isNotEmpty()) chunks.add(current)
+    return chunks
+}
 
 data class ChatError(
     val id: Uuid = Uuid.random(),
@@ -1097,6 +1161,66 @@ class ChatService(
                 val settings = settingsStore.settingsFlow.first()
                 val assistant = settings.getAssistantById(currentConversation.assistantId)
                     ?: settings.getCurrentAssistant()
+
+                // /compact [附加指令]：手动触发上下文压缩（对齐 Claude Code/Codex 的 /compact）。
+                // 命令本身不落库、不产生对话轮——压缩不是消息，结果由顶部压缩摘要卡与下轮请求的
+                // 上下文占用变化反馈；附加指令非空时透传给压缩提示词的 additional_context。
+                // 放在群组分支之前解析：群组会话友好拒绝，避免 "/compact" 被当成普通消息发给群成员。
+                val compactInstruction = if (answer) {
+                    parseCompactCommand(content.filterIsInstance<UIMessagePart.Text>().firstOrNull()?.text)
+                } else {
+                    null
+                }
+                if (compactInstruction != null) {
+                    if (currentConversation.isGroupDiscussion) {
+                        addError(
+                            IllegalStateException(context.getString(R.string.error_compact_group_unsupported)),
+                            conversationId,
+                            title = context.getString(R.string.error_title_compress_conversation),
+                        )
+                        return@launchGenerationJob
+                    }
+                    val compactContextTokenLimit = resolveContextTokenLimit(
+                        modelContextTokenLimit = settings.findModelById(
+                            assistant.chatModelId ?: settings.chatModelId
+                        )?.contextLengthOrDefault(),
+                        assistantContextTokenLimit = assistant.contextTokenLimit,
+                    )
+                    session.processingStatus.value = context.getString(R.string.chat_page_compressing)
+                    try {
+                        compressConversation(
+                            conversationId = conversationId,
+                            conversation = session.state.value,
+                            additionalPrompt = compactInstruction,
+                            targetTokens = (compactContextTokenLimit / 2).coerceAtLeast(1),
+                            keepRecentMessages = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES,
+                        ).fold(
+                            onSuccess = { compressed ->
+                                if (!compressed) {
+                                    // 无需压缩（会话太短）：不报错的友好提示，也不改动任何状态
+                                    addError(
+                                        IllegalStateException(
+                                            context.getString(R.string.chat_page_compress_nothing_to_compress)
+                                        ),
+                                        conversationId,
+                                        title = context.getString(R.string.error_title_compress_conversation),
+                                    )
+                                }
+                            },
+                            onFailure = {
+                                addError(
+                                    it,
+                                    conversationId,
+                                    title = context.getString(R.string.error_title_compress_conversation),
+                                )
+                            },
+                        )
+                    } finally {
+                        session.processingStatus.value = null
+                    }
+                    // 压缩不是生成回合，不发 generationDoneFlow（避免误触发震动/TTS）
+                    return@launchGenerationJob
+                }
 
                 // 群组讨论：跳过助手正则预处理，直接追加用户消息，交给调度器继续讨论
                 if (currentConversation.isGroupDiscussion) {
@@ -2586,13 +2710,19 @@ class ChatService(
 
     // ---- 压缩对话历史 ----
 
+    /**
+     * 压缩对话历史。
+     *
+     * 返回 `Result<Boolean>`：true = 已生成新压缩快照；false = 无需压缩（会话比保留窗口还短、
+     * 或没有可摘要内容）——调用方（/compact 命令）据此给友好提示，不当作错误。
+     */
     suspend fun compressConversation(
         conversationId: Uuid,
         conversation: Conversation,
         additionalPrompt: String,
         targetTokens: Int,
-        keepRecentMessages: Int = 32
-    ): Result<Unit> = runCatching {
+        keepRecentMessages: Int = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
+    ): Result<Boolean> = runCatching {
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getAssistantById(conversation.assistantId)
         val model = settings.findModelById(settings.compressModelId)
@@ -2603,60 +2733,36 @@ class ChatService(
 
         val providerHandler = providerManager.getProviderByType(provider)
 
-        val maxMessagesPerChunk = 256
         // 压缩同样剔除预设消息（开场展示不入上下文，也不进摘要）
         val allMessages = conversation.effectiveMessages()
             .dropPresetMessages(assistant?.presetMessages.orEmpty())
 
-        // Split messages into those to compress and those to keep
-        val messagesToCompress: List<UIMessage>
-        val messagesToKeep: List<UIMessage>
+        val (messagesToCompress, messagesToKeep) = splitCompressScope(allMessages, keepRecentMessages)
+            // 会话比保留窗口还短：保留窗口已覆盖全部消息，没有可摘要的内容，按「无需压缩」处理
+            ?: return@runCatching false
+        if (messagesToCompress.isEmpty()) return@runCatching false
 
-        if (keepRecentMessages > 0 && allMessages.size > keepRecentMessages) {
-            messagesToCompress = allMessages.dropLast(keepRecentMessages)
-            messagesToKeep = allMessages.takeLast(keepRecentMessages)
-        } else if (keepRecentMessages > 0) {
-            // Not enough messages to compress while keeping recent ones
-            throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages))
-        } else {
-            messagesToCompress = allMessages
-            messagesToKeep = emptyList()
-        }
-
-        fun splitMessages(messages: List<UIMessage>): List<List<UIMessage>> {
-            if (messages.size <= maxMessagesPerChunk) return listOf(messages)
-            val mid = messages.size / 2
-            val left = splitMessages(messages.subList(0, mid))
-            val right = splitMessages(messages.subList(mid, messages.size))
-            return left + right
-        }
-
-        suspend fun compressMessages(messages: List<UIMessage>): String {
-            val contentToCompress = messages.joinToString("\n\n") { it.summaryAsText(maxLength = 2000) }
-            val prompt = settings.compressPrompt.applyPlaceholders(
-                "content" to contentToCompress,
-                "target_tokens" to targetTokens.toString(),
-                "additional_context" to if (additionalPrompt.isNotBlank()) {
-                    "Additional instructions from user: $additionalPrompt"
-                } else "",
-                "locale" to Locale.getDefault().displayName
-            )
-
-            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
-                providerHandler.generateText(
-                    providerSetting = provider,
-                    messages = listOf(UIMessage.user(prompt)),
-                    params = backgroundTextGenerationParams(model),
-                )
-            }
-
-            return result.message.toText().trim().takeIf { it.isNotBlank() }
-                ?: throw IllegalStateException("Failed to generate compressed summary")
-        }
-
+        // serializeForSummary 含工具调用入参/结果预览（上下文占用的大头），单条消息体积不可预估
+        // （agent 会话一条消息可含整轮工具结果），按字符预算切块替代旧的固定 256 条切块，
+        // 避免产出压爆压缩模型窗口的超长块
         val compressedSummaries = coroutineScope {
-            splitMessages(messagesToCompress)
-                .map { chunk -> async { compressMessages(chunk) } }
+            splitByCharBudget(
+                items = messagesToCompress.map { it.serializeForSummary() },
+                budget = COMPRESS_CHUNK_CHAR_BUDGET,
+            )
+                .map { chunk ->
+                    async {
+                        compressChunkToSummary(
+                            settings = settings,
+                            model = model,
+                            providerHandler = providerHandler,
+                            provider = provider,
+                            serializedChunk = chunk,
+                            targetTokens = targetTokens,
+                            additionalPrompt = additionalPrompt,
+                        )
+                    }
+                }
                 .awaitAll()
         }
 
@@ -2678,6 +2784,39 @@ class ChatService(
         )
 
         saveConversation(conversationId, newConversation)
+        true
+    }
+
+    /** 单块摘要生成：块内容为 serializeForSummary 的富序列化文本，走后台小预算重试 */
+    private suspend fun compressChunkToSummary(
+        settings: Settings,
+        model: Model,
+        providerHandler: Provider<ProviderSetting>,
+        provider: ProviderSetting,
+        serializedChunk: List<String>,
+        targetTokens: Int,
+        additionalPrompt: String,
+    ): String {
+        val contentToCompress = serializedChunk.joinToString("\n\n")
+        val prompt = settings.compressPrompt.applyPlaceholders(
+            "content" to contentToCompress,
+            "target_tokens" to targetTokens.toString(),
+            "additional_context" to if (additionalPrompt.isNotBlank()) {
+                "Additional instructions from user: $additionalPrompt"
+            } else "",
+            "locale" to Locale.getDefault().displayName
+        )
+
+        val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+            providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(UIMessage.user(prompt)),
+                params = backgroundTextGenerationParams(model),
+            )
+        }
+
+        return result.message.toText().trim().takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Failed to generate compressed summary")
     }
 
     // ---- 对话状态更新 ----

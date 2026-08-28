@@ -7,7 +7,7 @@ import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import kotlin.math.max
 
 /**
- * 斜杠命令补全: 输入 "/" 时列出 /init 与全部子代理命令(/plan /search /doc /code /data)。
+ * 斜杠命令补全: 输入 "/" 时列出 /compact、/init 与全部子代理命令(/plan /search /doc /code /data)。
  * 选中后替换当前命令词。与 workspace 路径补全(@) 触发条件互斥。
  * 子代理有短别名时补全只显示别名; 全 id 形式(/planner 等) 保留给系统提示词派发, 不进输入补全。
  */
@@ -38,7 +38,8 @@ class CommandCompletionProvider : ChatCompletionProvider {
                     insertText = def.command,
                     detail = def.detail,
                     icon = HugeIcons.ComputerTerminal01,
-                    sortScore = if (def.command.lowercase() == "/$query") 100 else 0,
+                    // 精确匹配(100) > 置顶命令 pin(2/1) > 其余(0, 字母序)
+                    sortScore = if (def.command.lowercase() == "/$query") 100 else def.pin,
                 )
             }
             .sortedWith(compareByDescending<ChatCompletionItem> { it.sortScore }.thenBy { it.label })
@@ -53,14 +54,18 @@ class CommandCompletionProvider : ChatCompletionProvider {
         )
     }
 
-    private data class CommandDef(val command: String, val detail: String)
+    private data class CommandDef(val command: String, val detail: String, val pin: Int = 0)
 
     private companion object {
         const val MAX_COMPLETION_ITEMS = 10
 
-        /** 命令列表: /init + 子代理命令(仅短别名, 无别名才用全 id 形式)。有别名时全 id 不进补全 */
+        /**
+         * 命令列表: /compact(置顶) + /init(第二) + 子代理命令(仅短别名, 无别名才用全 id 形式)。
+         * 有别名时全 id 不进补全。pin 越大排序越靠前（0 = 按字母序跟随其后）。
+         */
         val COMMANDS: List<CommandDef> = buildList {
-            add(CommandDef("/init", "初始化当前工作区（生成 .agent 配置与结构索引）"))
+            add(CommandDef("/compact", "压缩上下文为摘要（可附加关注点，如：/compact 只保留关键结论）", pin = 2))
+            add(CommandDef("/init", "初始化当前工作区（生成 .agent 配置与结构索引）", pin = 1))
             SubAgentCatalog.all.forEach { def ->
                 if (def.commandAlias != null) {
                     add(CommandDef("/${def.commandAlias}", "${def.name} — ${def.description.orEmpty()}"))
