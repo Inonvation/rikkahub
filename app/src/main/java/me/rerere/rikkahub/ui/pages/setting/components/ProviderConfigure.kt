@@ -47,7 +47,7 @@ import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
 import me.rerere.ai.provider.OpenAIAuthType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.mcp.launchOAuthAuthorization
+import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
 import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.openai.OpenAICodexDeviceCode
 import me.rerere.rikkahub.data.ai.openai.parseCodexCredentialImport
@@ -408,7 +408,7 @@ private fun ProviderConfigureOpenAI(
                                         ?.setPrimaryClip(
                                             ClipData.newPlainText("OpenAI Codex device code", code.userCode)
                                         )
-                                    launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
+                                    CustomTabsOAuthAuthorizationLauncher.launch(context.applicationContext, code.verificationUrl)
                                 }
                                 deviceCode = null
                                 onEdit(
@@ -642,7 +642,7 @@ private fun ProviderConfigureOpenAI(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        launchOAuthAuthorization(context.applicationContext, code.verificationUrl)
+                        CustomTabsOAuthAuthorizationLauncher.launch(context.applicationContext, code.verificationUrl)
                     }
                 ) {
                     Text(stringResource(R.string.setting_provider_page_open_browser))

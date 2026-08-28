@@ -2,6 +2,40 @@
 
 本日志记录每次上游同步的分类清单与落地结果。同步流程见 `AGENTS.md`「上游同步流程（禁止直接 merge）」：不直接 merge，按「无需合并 / 可放心合并 / 需本地化手动同步」三分类逐条落地。
 
+## 2026-08-28 — 第二次同步（10 个提交，范围 2.4.14 → 2.4.15）
+
+### A. 无需合并（3 个）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `321443d8` | tool-only 消息操作可见 | 本地 `isEmptyUIMessage` 已有 `Tool/ServerTool -> false` 等价实现 |
+| `7aa909b8` | 上游回滚输入栏折叠功能 | 本地从未吸收 `ca31612d`，无需动作 |
+| `5662945c` | bump 2.4.15 | 版本号独立演进 |
+
+### B. 可放心合并（4 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `5b890d22` | HY4 移除 vision | 删 ModelRegistry `visionInput()` 1 行 |
+| `ecc6d910` | claude-api skill 精简 | 删 SKILL.md 触发器 2 行 |
+| `9687f97a` | daily-build 加 17:00 触发 | cron 改 `0 9,18 * * *` |
+| `eba2e96c` | 依赖升级 | cameraCore 1.6.2 / material3 alpha27 / nav3Core 1.1.7 / okhttp 5.5.0 / baselineprofile rc02；nav2 条目本地零引用一并删除；sqlite-vector 本地无此条目跳过 |
+
+### C. 需本地化手动同步（3 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `9851d037` | Gemini 服务端/客户端工具共存 | 本地已实现合并 tools 数组（含 trim 定制），仅把外层条件收紧为 `useFunctionTools \|\| model.tools.isNotEmpty()`，避免发出空 `tools: []` |
+| `7da69770` | 文件清理按时间范围 bottom sheet | FilesManager 加 `deleteOlderThan`；SettingFilesPage 清理对话框改 ModalBottomSheet + CleanRange 单选（本地批量选择/来源筛选功能保留）；3 个新字符串 + `setting_page_chat_storage` 改名，6 语言经 locale-tui 落地 |
+| `b6df5f04` | OAuth 重构（新 oauth 模块 + loopback 回调） | `git checkout` 上游 oauth/ 模块、McpOAuthCoordinator、McpOAuthDiscoveryClient；删除 McpOAuthClient/McpOAuthCallback/McpOAuthCallbackActivity 及 Manifest 声明；McpConfig 加 `redirectUri`；McpManager/McpSessionRegistry 本地定制（InvalidConfig、aiModifiedServers、configError）全部保留；本地 ProviderConfigure 的设备码流程复用旧 `launchOAuthAuthorization`，改用新模块 `CustomTabsOAuthAuthorizationLauncher.launch` 等价替换 |
+
+### 验证
+
+- `:oauth:compileDebugKotlin` `:app:compileDebugKotlin` BUILD SUCCESSFUL
+- 单测：`:oauth:testDebugUnitTest`（2 类）、`:ai:testDebugUnitTest` 全量、`:app:testDebugUnitTest --tests "*Mcp*"`（8 例）全部通过
+- 6 语言 strings.xml well-formed 校验通过
+- `:app:assembleDebug` BUILD SUCCESSFUL（manifest 合并 + 资源链接验证）
+
 ## 2026-08-27 — 首次同步（落后 29 个提交，范围 2.4.12 → 2.4.14）
 
 ### A. 无需合并（16 个）

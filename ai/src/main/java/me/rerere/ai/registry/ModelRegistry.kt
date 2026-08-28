@@ -563,7 +563,6 @@ object ModelRegistry {
 
     private val HY4 = defineModel {
         tokens("hy", "4")
-        visionInput()
         toolReasoningAbility()
     }
 

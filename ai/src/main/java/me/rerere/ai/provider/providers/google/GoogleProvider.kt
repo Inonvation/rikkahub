@@ -398,9 +398,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         // Tools：函数工具与内置工具（googleSearch/urlContext）合并进同一个 tools 数组。
         // 之前两处分别 put("tools") 会互相覆盖——同时启用时函数工具被静默丢弃。
-        if (params.tools.isNotEmpty() || params.model.tools.isNotEmpty()) {
+        val useFunctionTools =
+            params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)
+        if (useFunctionTools || params.model.tools.isNotEmpty()) {
             put("tools", buildJsonArray {
-                if (params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)) {
+                if (useFunctionTools) {
                     add(buildJsonObject {
                         put("functionDeclarations", buildJsonArray {
                             params.tools.forEach { tool ->

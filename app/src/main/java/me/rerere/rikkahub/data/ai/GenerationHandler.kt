@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
@@ -284,7 +285,8 @@ class GenerationHandler(
             val queue = steeringQueue
             val pendingSteering = queue?.value?.firstOrNull { it.immediate }
             if (pendingSteering != null) {
-                queue!!.value = queue.value.filterNot { it.id == pendingSteering.id }
+                // update 保证消费与 UI 并发入队不互吞（CAS 重试）
+                queue!!.update { it.filterNot { item -> item.id == pendingSteering.id } }
                 messages = messages + UIMessage(
                     role = MessageRole.USER,
                     parts = listOf(UIMessagePart.Text(pendingSteering.text)),

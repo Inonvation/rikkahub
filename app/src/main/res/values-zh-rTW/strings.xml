@@ -805,7 +805,7 @@
   <string name="setting_page_built_in_tools_search_desc">啟用 Google 搜尋整合</string>
   <string name="setting_page_built_in_tools_url_context">URL 上下文</string>
   <string name="setting_page_built_in_tools_url_context_desc">啟用 URL 內容處理</string>
-  <string name="setting_page_chat_storage">聊天記錄儲存</string>
+  <string name="setting_page_chat_storage">儲存空間管理</string>
   <string name="setting_page_chat_storage_desc">%1$d 個檔案，%2$.2f MB</string>
   <string name="setting_page_code_display_settings">程式碼顯示</string>
   <string name="setting_page_color_mode">顏色模式</string>
@@ -1377,5 +1377,8 @@
   <string name="setting_page_console_audit_desc">管理操作紀錄與權限攔截紀錄</string>
   <string name="setting_page_console_config_files_summary">%1$d 個供應商 · %2$d 個助手 · %3$d 個 MCP</string>
   <string name="chat_page_context_popover_indicators_hint">未開啟任何指標，可在管理控制台中開啟</string>
+  <string name="setting_files_page_clean_all">所有檔案</string>
+  <string name="setting_files_page_clean_older_than_days">%1$d 天前</string>
+  <string name="setting_files_page_clean_range_description">選擇要永久刪除的檔案。此操作無法復原。</string>
 </resources>
 

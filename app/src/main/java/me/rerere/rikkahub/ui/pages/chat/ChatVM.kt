@@ -222,8 +222,8 @@ class ChatVM(
         chatService.cancelPendingSend(_conversationId, itemId)
     }
 
-    /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：合并进 AI 气泡、不单独成条。
-     *  默认排队，等当前回合输出完成后自动引导。 */
+    /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：作为普通用户消息注入。
+     *  默认排队，等当前回合输出完成后自动发送。 */
     fun sendGuidance(text: String) {
         if (text.isBlank()) return
         chatService.sendGuidance(_conversationId, text, immediate = false)

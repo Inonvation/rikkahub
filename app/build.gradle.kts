@@ -308,6 +308,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":material3"))
     implementation(project(":workspace"))
+    implementation(project(":oauth"))
     implementation(kotlin("reflect"))
 
     // Leak Canary

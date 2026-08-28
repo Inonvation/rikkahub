@@ -1376,6 +1376,14 @@ class ChatService(
             return
         }
 
+        // drain 在途但当前没有生成 job（正在两条引导之间）：入队交给 drain 按序发送。
+        // 直接 sendMessage 会与 drain 的 sendMessage 互相 setJob 取消对方刚启动的生成。
+        if (session.steeringDrainJob?.isActive == true) {
+            session.steeringQueue.update { it + PendingSteering(text = text, immediate = false) }
+            ensureSteeringDrain(session, conversationId)
+            return
+        }
+
         // AI 空闲：引导就是一条普通用户消息，直接发送（sendMessage 自带 job 管理，
         // 停止按钮 / 排队联动均生效）
         sendMessage(conversationId, listOf(UIMessagePart.Text(text)), clearPendingQueue = false)

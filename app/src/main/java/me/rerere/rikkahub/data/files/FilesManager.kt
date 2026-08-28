@@ -518,6 +518,30 @@ class FilesManager(
         deleted
     }
 
+    /** 按时间范围清理：删除创建时间早于 cutoffMillis 的文件，返回是否全部成功。 */
+    suspend fun deleteOlderThan(
+        folder: String = FileFolders.UPLOAD,
+        cutoffMillis: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        var allDeleted = true
+        repository.listByFolder(folder).first()
+            .filter { it.createdAt < cutoffMillis }
+            .forEach { entity ->
+                val file = getFile(entity)
+                val deletedFromDisk = !file.exists() || runCatching {
+                    file.deleteRecursively()
+                }.getOrDefault(false)
+                if (deletedFromDisk) {
+                    if (repository.deleteById(entity.id) == 0) {
+                        allDeleted = false
+                    }
+                } else {
+                    allDeleted = false
+                }
+            }
+        allDeleted
+    }
+
     suspend fun deleteAll(folder: String = FileFolders.UPLOAD): Boolean = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, folder)
         val entries = dir.listFiles()

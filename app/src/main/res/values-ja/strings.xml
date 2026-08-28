@@ -799,7 +799,7 @@
   <string name="setting_page_built_in_tools_search_desc">Google検索連携を有効化</string>
   <string name="setting_page_built_in_tools_url_context">URLコンテキスト</string>
   <string name="setting_page_built_in_tools_url_context_desc">URLコンテンツ処理を有効化</string>
-  <string name="setting_page_chat_storage">チャット保存</string>
+  <string name="setting_page_chat_storage">ストレージ管理</string>
   <string name="setting_page_chat_storage_desc">%1$d ファイル、%2$.2f MB</string>
   <string name="setting_page_code_display_settings">コード表示</string>
   <string name="setting_page_color_mode">カラーモード</string>
@@ -1373,5 +1373,8 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_page_console_audit_desc">管理操作の記録と権限ブロックの記録</string>
   <string name="setting_page_console_config_files_summary">プロバイダー %1$d 件 · アシスタント %2$d 件 · MCP %3$d 件</string>
   <string name="chat_page_context_popover_indicators_hint">指標が有効になっていません。管理コンソールで有効にできます</string>
+  <string name="setting_files_page_clean_all">すべてのファイル</string>
+  <string name="setting_files_page_clean_older_than_days">%1$d日以上前</string>
+  <string name="setting_files_page_clean_range_description">完全に削除するファイルを選択してください。この操作は元に戻せません。</string>
 </resources>
 
