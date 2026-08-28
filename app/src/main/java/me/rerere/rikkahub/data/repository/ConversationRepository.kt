@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
+import me.rerere.rikkahub.data.db.dao.ContextCompositionDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
@@ -26,6 +27,7 @@ import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
 import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
+import me.rerere.rikkahub.data.ai.ContextCompositionStore
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.DiscussionConfig
@@ -54,6 +56,7 @@ class ConversationRepository(
     private val todoStorage: TodoStorage,
     private val subAgentUsageDAO: SubAgentUsageDAO,
     private val subAgentTaskDAO: SubAgentTaskDAO,
+    private val contextCompositionDAO: ContextCompositionDAO,
     /** 会话增量同步的单调时钟来源（版本号生成）。 */
     private val syncStateStore: SyncStateStore,
     /** Lazy 注入打破循环依赖：SubAgentRunner 依赖本 Repository，本类依赖它（删会话级联取消子代理）。
@@ -528,6 +531,9 @@ class ConversationRepository(
             // 同步清理该会话的子代理 token 统计与任务历史，避免残留计入全局统计/历史
             subAgentUsageDAO.deleteByConversation(conversation.id.toString())
             subAgentTaskDAO.deleteByConversation(conversation.id.toString())
+            // 上下文构成快照随会话删除联动清理，避免重启后恢复出已删除会话的占用数据
+            contextCompositionDAO.deleteByConversationId(conversation.id.toString())
+            ContextCompositionStore.remove(conversation.id.toString())
         }
         filesManager.deleteChatFilesPermanently(fullConversation.files)
         todoStorage.delete(conversation.id.toString())

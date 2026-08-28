@@ -21,6 +21,7 @@ import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+import me.rerere.rikkahub.data.repository.ContextCompositionRepository
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.VocabularySettingsStore
@@ -54,6 +55,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_42_43
 import me.rerere.rikkahub.data.db.migrations.Migration_43_44
 import me.rerere.rikkahub.data.db.migrations.Migration_44_45
 import me.rerere.rikkahub.data.db.migrations.Migration_45_46
+import me.rerere.rikkahub.data.db.migrations.Migration_46_47
 import me.rerere.rikkahub.data.db.dao.VocabularyDao
 import me.rerere.rikkahub.data.db.dao.WrongQuestionDao
 import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
@@ -109,7 +111,7 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40, Migration_40_41, Migration_41_42, Migration_42_43, Migration_43_44, Migration_44_45, Migration_45_46)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30, Migration_30_31, Migration_31_32, Migration_32_33, Migration_33_34, Migration_34_35, Migration_35_36, Migration_36_37, Migration_37_38, Migration_38_39, Migration_39_40, Migration_40_41, Migration_41_42, Migration_42_43, Migration_43_44, Migration_44_45, Migration_45_46, Migration_46_47)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     // 消息 FTS 初始化任一步失败都不能让 DB open 崩溃（否则应用启动即崩）。
@@ -183,6 +185,14 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().conversationDao()
+    }
+
+    single {
+        get<AppDatabase>().contextCompositionDao()
+    }
+
+    single {
+        ContextCompositionRepository(dao = get(), scope = get())
     }
 
     single {
@@ -285,7 +295,8 @@ val dataSourceModule = module {
             context = get(),
             providerManager = get(),
             json = get(),
-            memoryRepo = get()
+            memoryRepo = get(),
+            contextCompositionRepository = get(),
         )
     }
 

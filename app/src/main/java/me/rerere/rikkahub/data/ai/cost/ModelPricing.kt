@@ -154,19 +154,21 @@ object CostCalculator {
     }
 
     /**
-     * 缓存命中率 0..1；无输入 token 时返回 null（UI 显示 `-`）。
+     * 平均缓存命中率 0..1；无输入 token 时返回 null（UI 显示 `-`）。
      *
-     * 口径：命中「读缓存」的 token ÷ 全部输入中参与读取的部分。
-     * 分母剔除 cacheWriteTokens（写缓存那次天然全 miss，如 Anthropic 首次写入 cache_creation，
-     * 计入分母会把「读」的命中率系统性拉低）；OpenAI/Gemini 无写缓存字段，行为不变。
+     * 口径对齐主流定义（DeepSeek 官方：命中率 = prompt_cache_hit_tokens ÷
+     * (hit + miss)，hit + miss = 本次输入总 token）：`Σ 读缓存 ÷ Σ 全部输入`。
+     * 本项目 TokenUsage 已把缓存部分并入 promptTokens（Anthropic 显式合并
+     * cache_read/cache_creation，Gemini 的 promptTokenCount 官方即含
+     * cachedContentTokenCount，OpenAI/DeepSeek 的 prompt_tokens 含缓存子集），
+     * 故统一为 cached / promptTokens；cache_creation（写缓存）计入 miss——
+     * 写缓存那次输入按未命中计费，DeepSeek 同样将其计入 miss。
      */
     fun cacheHitRate(usages: List<TokenUsage?>): Double? {
         val cached = usages.sumOf { it?.cachedTokens ?: 0 }.toDouble()
         val input = usages.sumOf { it?.promptTokens ?: 0 }.toDouble()
-        val write = usages.sumOf { it?.cacheWriteTokens ?: 0 }.toDouble()
-        val readInput = input - write
-        if (readInput <= 0) return null
-        return (cached / readInput).coerceIn(0.0, 1.0)
+        if (input <= 0) return null
+        return (cached / input).coerceIn(0.0, 1.0)
     }
 
     /**

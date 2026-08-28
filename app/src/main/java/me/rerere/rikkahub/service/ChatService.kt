@@ -140,6 +140,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.CompressedHistory
+import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.resolveConversationPolicy
@@ -1718,7 +1719,9 @@ class ChatService(
             // start generating
             val session = getOrCreateSession(conversationId)
             var hasEmittedGenerationStarted = false
-            // 生成用消息（重生成时是 messageRange 子序列）
+            // 生成用消息（重生成时是 messageRange 子序列）。
+            // 预设消息（开场展示）剔除：按消息 id 前缀对齐，只作 UI 开场展示，
+            // 不随请求发送（欢迎语无信息量，却占用窗口与计费）
             val messagesToGenerate = if (messageRange != null) {
                 conversation.currentMessages.subList(
                     messageRange.start,
@@ -1726,7 +1729,7 @@ class ChatService(
                 )
             } else {
                 conversation.effectiveMessages()
-            }
+            }.dropPresetMessages(assistant.presetMessages)
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -2661,6 +2664,7 @@ class ChatService(
         keepRecentMessages: Int = 32
     ): Result<Unit> = runCatching {
         val settings = settingsStore.settingsFlow.first()
+        val assistant = settings.getAssistantById(conversation.assistantId)
         val model = settings.findModelById(settings.compressModelId)
             ?: settings.getCurrentChatModel()
             ?: throw IllegalStateException("No model available for compression")
@@ -2670,7 +2674,9 @@ class ChatService(
         val providerHandler = providerManager.getProviderByType(provider)
 
         val maxMessagesPerChunk = 256
+        // 压缩同样剔除预设消息（开场展示不入上下文，也不进摘要）
         val allMessages = conversation.effectiveMessages()
+            .dropPresetMessages(assistant?.presetMessages.orEmpty())
 
         // Split messages into those to compress and those to keep
         val messagesToCompress: List<UIMessage>

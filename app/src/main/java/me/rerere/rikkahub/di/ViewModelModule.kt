@@ -57,6 +57,7 @@ val viewModelModule = module {
             filesManager = get(),
             favoriteRepository = get(),
             chatDraftStore = get(),
+            contextCompositionRepository = get(),
         )
     }
     viewModelOf(::ChatDrawerVM)

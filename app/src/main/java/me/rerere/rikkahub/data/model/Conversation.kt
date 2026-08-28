@@ -198,6 +198,21 @@ private fun List<UIMessagePart>.collectAllParts(): List<UIMessagePart> =
     this + filterIsInstance<UIMessagePart.Tool>().flatMap { it.output.collectAllParts() }
 
 /**
+ * 剔除开头的预设消息段（assistant.presetMessages 注入的开场展示）。
+ *
+ * 判定与 ChatList 的 presetMessageCount 同款：按消息 id 逐条对齐前缀，任一失配即停止
+ * （内容相同但被用户编辑的消息 id 已变，不会被误判）。预设消息只作开场展示，
+ * 不应进入发给 provider 的请求与上下文占用统计。
+ */
+fun List<UIMessage>.dropPresetMessages(presetMessages: List<UIMessage>): List<UIMessage> {
+    if (presetMessages.isEmpty()) return this
+    val presetCount = presetMessages.indices.takeWhile { index ->
+        this.getOrNull(index)?.id == presetMessages[index].id
+    }.size
+    return drop(presetCount)
+}
+
+/**
  * 提取 part 中引用的本地文件 URI，新增文件类型时只需在此处添加。
  */
 private fun UIMessagePart.fileUri(): Uri? = when (this) {

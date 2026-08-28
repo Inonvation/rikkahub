@@ -1569,6 +1569,16 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_terminal_close_confirm_message">关闭此标签页将终止其中仍在运行的任何进程。</string>
   <string name="workspace_terminal_close">关闭</string>
   <string name="chat_page_context_usage_title">上下文占用</string>
+  <string name="chat_page_context_estimated">估算</string>
+  <string name="chat_page_context_composition_title">构成详情</string>
+  <string name="chat_page_context_composition_system">系统提示词</string>
+  <string name="chat_page_context_composition_builtin_tools">系统工具</string>
+  <string name="chat_page_context_composition_mcp">MCP 工具</string>
+  <string name="chat_page_context_composition_skills">技能</string>
+  <string name="chat_page_context_composition_messages">消息历史</string>
+  <string name="chat_page_context_composition_none">发送消息后可查看构成统计</string>
+  <string name="chat_page_context_composition_note">4 字符 ≈ 1 token 估算，发送后按实际构成刷新</string>
+  <string name="chat_page_context_composition_no_snapshot_note">工具 / MCP / 技能构成将在发送后统计</string>
   <string name="setting_page_console_footer_usage">会话用量</string>
   <string name="setting_page_console_footer_usage_desc">显示所有会话累计的消息数与 tokens</string>
   <string name="setting_page_console_footer">上下文浮窗显示</string>

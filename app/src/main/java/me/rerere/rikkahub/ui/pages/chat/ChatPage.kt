@@ -146,6 +146,10 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.ai.ContextCompositionStore
+import me.rerere.rikkahub.data.ai.estimateFallbackComposition
+import me.rerere.rikkahub.data.ai.hasRealMessages
+import me.rerere.rikkahub.data.ai.lastRealPromptTokens
 import me.rerere.rikkahub.data.ai.tools.TodoItem
 import me.rerere.rikkahub.data.ai.tools.TodoList
 import me.rerere.rikkahub.data.ai.tools.TodoStatus
@@ -751,6 +755,8 @@ private fun ChatPageContent(
             TopBar(
                 settings = setting,
                 conversation = conversation,
+                // 上下文用量统计在 ChatPageContent 已算好，直接传入（口径单源，见 computeTokenStats）
+                tokenStats = tokenStats,
                 previewMode = previewMode,
                 // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。
                 // 不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
@@ -1407,6 +1413,7 @@ private fun ChatFilesPickerSheet(
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
+    tokenStats: TokenStats,
     previewMode: Boolean,
     modeSwitchEnabled: Boolean,
     onSwitchMode: (String?) -> Unit,
@@ -1425,8 +1432,7 @@ private fun TopBar(
     val hapticController = rememberHaptic()
     var showContextPopover by remember { mutableStateOf(false) }
 
-    // 上下文用量：顶栏圆圈与浮窗共用同一份统计，避免两处口径不一致
-    val tokenStats = computeTokenStats(conversation, settings)
+    // 上下文用量：由 ChatPageContent 计算一次传入，顶栏圆圈与浮窗共用同一份统计，避免两处口径不一致
     val totalTokens = tokenStats.totalTokens
     val usagePercent = tokenStats.usagePercent
     val tokenText = when {
@@ -2004,7 +2010,23 @@ private fun computeTokenStats(
         modelContextTokenLimit = modelContextTokenLimit,
         assistantContextTokenLimit = assistant.contextTokenLimit,
     )
-    val totalTokens = conversation.effectiveMessages().sumOf { it.usage?.totalTokens ?: 0 }
+    // 上下文占用 = 当前请求构成估算（系统提示 + 系统工具 + MCP + 技能 + 消息，见
+    // ContextComposition.kt），与浮窗「构成详情」共用同一数据源，数字必然自洽；
+    // 有最近一次 provider 实测输入量时按实测校准总量（比例保持估算口径）。
+    // 此前按消息 usage 求和会把每次请求的全量 prompt 重复累计，导致占用虚高、与
+    // 实际窗口严重不符（主流 agent 展示的是当前上下文而非累计账单）。
+    val snapshot = ContextCompositionStore.get(conversation.id.toString())
+    val assistantForPreset = settings.getCurrentAssistant()
+    val totalTokens = snapshot
+        ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+        ?.totalTokens
+        // 未开始的会话（无消息或仅预设开场展示）尚未发生过请求，占用为 0；
+        // 已开始的会话才用兜底估算（历史消息下次发送时确实占用窗口）
+        ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages)) {
+            estimateFallbackComposition(conversation, settings).totalTokens
+        } else {
+            0
+        }
     val usagePercent = if (contextTokenLimit > 0) {
         totalTokens / contextTokenLimit.toFloat()
     } else {

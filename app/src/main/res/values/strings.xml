@@ -1811,6 +1811,16 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_test_tool_called">Called: %1$s  Args: %2$s</string>
   <string name="setting_provider_page_test_tool_not_called">Tool not called, response: %s</string>
   <string name="chat_page_context_usage_title">Context Usage</string>
+  <string name="chat_page_context_estimated">Estimated</string>
+  <string name="chat_page_context_composition_title">Composition</string>
+  <string name="chat_page_context_composition_system">System prompt</string>
+  <string name="chat_page_context_composition_builtin_tools">Tools</string>
+  <string name="chat_page_context_composition_mcp">MCP</string>
+  <string name="chat_page_context_composition_skills">Skills</string>
+  <string name="chat_page_context_composition_messages">Messages</string>
+  <string name="chat_page_context_composition_none">Send a message to see the composition</string>
+  <string name="chat_page_context_composition_note">Estimate (~4 chars ≈ 1 token), refreshed on each send</string>
+  <string name="chat_page_context_composition_no_snapshot_note">Tool / MCP / skill tokens will be counted after you send a message</string>
   <string name="setting_page_console_footer_usage">Session Usage</string>
   <string name="setting_page_console_footer_usage_desc">Total counts of messages and tokens across all conversations</string>
   <string name="setting_page_console_audit_desc">Operation records and permission-blocked attempts</string>

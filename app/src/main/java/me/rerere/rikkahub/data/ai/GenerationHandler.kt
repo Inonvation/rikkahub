@@ -54,6 +54,8 @@ import me.rerere.ai.util.RetryPolicy
 import me.rerere.ai.util.isRetryable
 import me.rerere.ai.util.retryBackoffDelay
 import me.rerere.ai.util.retryWithPolicy
+import me.rerere.rikkahub.data.repository.ContextCompositionRepository
+import me.rerere.rikkahub.data.ai.buildContextComposition
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
 import me.rerere.rikkahub.data.ai.subagent.boundJson
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -232,6 +234,7 @@ class GenerationHandler(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepo: MemoryRepository,
+    private val contextCompositionRepository: ContextCompositionRepository,
 ) {
     fun generateText(
         settings: Settings,
@@ -601,6 +604,8 @@ class GenerationHandler(
         policy: ChatModePolicy? = null,
         resumeContext: String? = null,
     ) {
+        // 捕获最终 system 文本，供下方构成快照使用（buildList lambda 内不可见）
+        var builtSystem: String? = null
         val internalMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
@@ -676,6 +681,7 @@ class GenerationHandler(
                     "staticBudget=${"%.2f".format(PromptMetrics.lastStaticCostRatio)}" +
                     "overBudget=${PromptMetrics.lastStaticCostOverBudget}"
             )
+            builtSystem = system
             if (system.isNotBlank()) add(UIMessage.system(prompt = system).copy(isSynthetic = true))
             addAll(messages.limitContext(assistant.contextMessageLimit))
         }.transforms(
@@ -703,6 +709,20 @@ class GenerationHandler(
             )
         } else {
             internalMessages
+        }
+
+        // 上下文构成快照：以本请求实际发送内容为准（system 全文 + 工具 schema 按
+        // 系统/MCP/技能拆分 + transforms 后消息），供顶栏圆圈 / 浮窗构成详情 / 自动压缩
+        // 共用一个数据源；同写入落库，app 重启后按会话恢复（见 ContextCompositionRepository）。
+        if (conversationId != null) {
+            contextCompositionRepository.save(
+                conversationId.toString(),
+                buildContextComposition(
+                    systemText = builtSystem.orEmpty(),
+                    tools = tools,
+                    messages = messagesToSend,
+                ),
+            )
         }
 
         var messages: List<UIMessage> = messages

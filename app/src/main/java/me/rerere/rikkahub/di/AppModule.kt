@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.di
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
 import me.rerere.knowledge.KnowledgeManager
 import me.rerere.knowledge.retrieval.KeywordSearcher
@@ -58,6 +59,10 @@ val appModule = module {
     single {
         AppScope()
     }
+
+    // 以接口类型暴露同一 AppScope 实例：只依赖 CoroutineScope 的使用方（如
+    // ContextCompositionRepository）无需耦合具体 AppScope 类型，也便于 JVM 单测注入假 scope
+    single<CoroutineScope> { get<AppScope>() }
 
     single<EmojiData> {
         EmojiUtils.loadEmoji(get())

@@ -36,6 +36,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.repository.ContextCompositionRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
@@ -59,6 +60,7 @@ class ChatVM(
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
     private val chatDraftStore: ChatDraftStore,
+    private val contextCompositionRepository: ContextCompositionRepository,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
@@ -94,6 +96,13 @@ class ChatVM(
 
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
+
+        // 恢复该会话最近一次生成的上下文构成快照（进程重启后进程级 store 为空）：
+        // 浮窗构成详情 / 顶栏圆圈 / 自动压缩因此不回落兜底估算；本进程已生成过
+        // （store 有值）时 restoreIfAbsent 直接跳过。
+        viewModelScope.launch {
+            contextCompositionRepository.restoreIfAbsent(_conversationId.toString())
+        }
 
         // 初始化对话
         viewModelScope.launch {

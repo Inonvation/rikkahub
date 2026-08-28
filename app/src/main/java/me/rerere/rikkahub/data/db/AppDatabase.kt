@@ -13,6 +13,7 @@ import me.rerere.knowledge.data.dao.KnowledgeDocumentDao
 import me.rerere.knowledge.data.entity.KnowledgeBaseEntity
 import me.rerere.knowledge.data.entity.KnowledgeChunkEntity
 import me.rerere.knowledge.data.entity.KnowledgeDocumentEntity
+import me.rerere.rikkahub.data.db.dao.ContextCompositionDAO
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
@@ -29,6 +30,7 @@ import me.rerere.rikkahub.data.db.dao.NoteDao
 import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
 import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
+import me.rerere.rikkahub.data.db.entity.ContextCompositionEntity
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
@@ -53,11 +55,13 @@ import me.rerere.rikkahub.data.db.migrations.Migration_40_41
 import me.rerere.rikkahub.data.db.migrations.Migration_43_44
 import me.rerere.rikkahub.data.db.migrations.Migration_44_45
 import me.rerere.rikkahub.data.db.migrations.Migration_45_46
+import me.rerere.rikkahub.data.db.migrations.Migration_46_47
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
 @Database(
     entities = [
+        ContextCompositionEntity::class,
         ConversationEntity::class,
         MemoryEntity::class,
         GenMediaEntity::class,
@@ -78,7 +82,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         GroupEntity::class,
         ManagementAuditEntity::class,
     ],
-    version = 46,
+    version = 47,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -104,6 +108,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun contextCompositionDao(): ContextCompositionDAO
+
     abstract fun conversationDao(): ConversationDAO
 
     abstract fun memoryDao(): MemoryDAO
