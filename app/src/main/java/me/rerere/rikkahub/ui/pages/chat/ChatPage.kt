@@ -2016,7 +2016,9 @@ private fun computeTokenStats(
     // 此前按消息 usage 求和会把每次请求的全量 prompt 重复累计，导致占用虚高、与
     // 实际窗口严重不符（主流 agent 展示的是当前上下文而非累计账单）。
     val snapshot = ContextCompositionStore.get(conversation.id.toString())
-    val assistantForPreset = settings.getCurrentAssistant()
+    // 预设剔除/兜底必须用会话绑定的助手（getCurrentAssistant 是全局当前助手，切换后与旧会话不一致）
+    val assistantForPreset = settings.getAssistantById(conversation.assistantId)
+        ?: settings.getCurrentAssistant()
     val totalTokens = snapshot
         ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
         ?.totalTokens

@@ -11,6 +11,8 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.ai.hasRealMessages
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.model.Assistant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -237,6 +239,35 @@ class ContextCompositionTest {
         // 已有真实消息（含预设后追加）：已开始
         assertTrue(conversationWith(preset, user).hasRealMessages(listOf(preset)))
         assertTrue(conversationWith(user).hasRealMessages(listOf(preset)))
+    }
+
+    // ---- estimateFallbackComposition ----
+
+    @Test
+    fun `fallback uses conversation-bound assistant preset not global current assistant`() {
+        // 全局当前助手与会话绑定助手不同（用户在主界面切换助手后打开旧会话）：
+        // 预设剔除必须按会话绑定的助手走，否则失配导致预设消息重新计入占用
+        val presetA = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("我是A的开场欢迎")))
+        val assistantA = Assistant(id = Uuid.random(), name = "A", presetMessages = listOf(presetA))
+        val assistantB = Assistant(
+            id = Uuid.random(),
+            name = "B",
+            presetMessages = listOf(
+                UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("B的预设")))
+            ),
+        )
+        val settings = Settings.dummy().copy(
+            assistantId = assistantB.id, // 全局当前助手 = B
+            assistants = listOf(assistantA, assistantB),
+        )
+        val conversation = Conversation(
+            assistantId = assistantA.id,
+            messageNodes = listOf(MessageNode.of(presetA)),
+        )
+        // 会话绑定的 A 的预设被剔除 → 消息占 0；若误用全局 B 的预设会失配 → > 0
+        assertEquals(0, estimateFallbackComposition(conversation, settings).messageTokens)
+        assertFalse(conversation.hasRealMessages(listOf(presetA)))
+        assertTrue(conversation.hasRealMessages(assistantB.presetMessages))
     }
 
     // ---- ContextCompositionStore ----

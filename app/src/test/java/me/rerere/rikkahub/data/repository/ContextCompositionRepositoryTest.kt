@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.repository
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -18,8 +19,11 @@ private fun cleanupStore(id: String) {
 
 private class FakeContextCompositionDAO : ContextCompositionDAO {
     val map = mutableMapOf<String, ContextCompositionEntity>()
+    /** 测试用闸门：非空时 upsert 挂起等待放行，模拟真实 Room 落库的异步窗口 */
+    var gate: CompletableDeferred<Unit>? = null
 
     override suspend fun upsert(entity: ContextCompositionEntity) {
+        gate?.await()
         map[entity.conversationId] = entity
     }
 
@@ -91,6 +95,19 @@ class ContextCompositionRepositoryTest {
         repo.delete("conv-1")
         assertNull(ContextCompositionStore.get("conv-1"))
         assertNull(dao.map["conv-1"])
+    }
+
+    @Test
+    fun `pending persist after delete does not resurrect row`() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val dao = FakeContextCompositionDAO().apply { this.gate = gate }
+        val repo = ContextCompositionRepository(dao, CoroutineScope(Dispatchers.Unconfined))
+        repo.save("conv-1", composition) // launch 挂起在闸门处，落库尚未发生
+        assertEquals(composition, ContextCompositionStore.get("conv-1"))
+        repo.delete("conv-1") // 删除先完成：store 清空 + 行删除
+        gate.complete(Unit) // 放行落库：守卫发现 store 已无本次快照 → 不写回
+        assertNull(dao.map["conv-1"])
+        assertNull(ContextCompositionStore.get("conv-1"))
     }
 
     @Test

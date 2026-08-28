@@ -28,6 +28,13 @@ class ContextCompositionRepository(
         scope.launch {
             runCatching { dao.upsert(entity) }
                 .onFailure { Log.w(TAG, "save: persist context composition failed", it) }
+            // 落库挂起期间会话可能已被删除（delete 清 store + 删行）：如果写入发生在
+            // 删除之后，复查发现 store 已不是本次快照，就把刚写入的行清掉，避免已删除
+            // 会话的快照行复活成孤儿数据
+            if (ContextCompositionStore.get(conversationId) !== composition) {
+                runCatching { dao.deleteByConversationId(conversationId) }
+                    .onFailure { Log.w(TAG, "save: cleanup stale composition row failed", it) }
+            }
         }
     }
 

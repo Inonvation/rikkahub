@@ -282,9 +282,11 @@ private fun ContextStatusPanel(
     // 比例保持估算口径）；无快照时仅对已开始的会话（有真实消息）做兜底估算——
     // 系统提示 + 消息历史的字符估算；未开始的会话没有任何请求发生过，构成置空，
     // 浮窗给出「发送消息后统计」的空态引导，而不是把系统提示配置当占用
+    // 预设剔除/兜底必须用会话绑定的助手（getCurrentAssistant 是全局当前助手，切换后与旧会话不一致）
     val storeSnapshot = ContextCompositionStore.get(conversation.id.toString())
     val hasCompositionSnapshot = storeSnapshot != null
-    val assistantForPreset = settings.getCurrentAssistant()
+    val assistantForPreset = settings.getAssistantById(conversation.assistantId)
+        ?: settings.getCurrentAssistant()
     val composition = storeSnapshot
         ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
         ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages)) {

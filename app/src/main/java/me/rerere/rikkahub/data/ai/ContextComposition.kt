@@ -7,6 +7,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.dropPresetMessages
@@ -161,7 +162,10 @@ fun estimateFallbackComposition(
     conversation: Conversation,
     settings: Settings,
 ): ContextComposition {
-    val assistant = settings.getCurrentAssistant()
+    // 预设剔除必须用会话绑定的助手：getCurrentAssistant 是全局当前助手（用户在主界面
+    // 切换后与旧会话不一致），用它会在「全局切助手后打开旧会话」时把预设消息重新计入
+    // 占用（预设不复存在导致 id 失配，与 hasRealMessages 口径同理）
+    val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
     val systemText = if (assistant.allowConversationSystemPrompt && !conversation.customSystemPrompt.isNullOrBlank()) {
         conversation.customSystemPrompt
     } else {
