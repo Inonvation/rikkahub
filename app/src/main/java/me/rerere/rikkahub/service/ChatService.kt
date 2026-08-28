@@ -52,7 +52,6 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.ai.buildGuidanceInstruction
 import me.rerere.rikkahub.data.ai.subagent.SubAgentCatalog
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.ai.subagent.SubAgentStatus
@@ -226,12 +225,21 @@ internal fun displayMessagesForChunk(
     displayMessages: List<UIMessage>,
     chunkMessages: List<UIMessage>,
 ): List<UIMessage> {
+    // 先建 id → index 映射（putIfAbsent 保留第一个匹配，与 indexOfFirst 语义一致），再 O(1) 定位替换：
+    // chunk.messages 是每 chunk 全量累积列表，逐条 indexOfFirst 是 O(N²)，
+    // 长对话 60~120 chunk/秒时比较次数可达数十万次/秒
+    val indexById = HashMap<Uuid, Int>(displayMessages.size)
+    displayMessages.forEachIndexed { index, message ->
+        indexById.putIfAbsent(message.id, index)
+    }
     val result = displayMessages.toMutableList()
     chunkMessages.forEach { message ->
-        val index = result.indexOfFirst { it.id == message.id }
-        if (index >= 0) {
+        val index = indexById[message.id]
+        if (index != null) {
             result[index] = message
-        } else if (message.role == MessageRole.ASSISTANT) {
+        } else if (!message.isSynthetic) {
+            // 新消息追加：assistant 输出、steering 边界注入的真实用户引导。合成消息
+            // （压缩摘要等只进请求上下文、不在显示列表）不追加。
             result.add(message)
         }
     }
@@ -760,8 +768,9 @@ class ChatService(
 
             Log.i(TAG, "resumeAfterSubAgent: task=${task.taskId} status=${task.status} conversation=$conversationId")
 
-            // 唤醒指令：作为 resume 上下文注入，handleMessageComplete 会把 resumeContext
-            // 拼进 system prompt 末尾（BUG3 修复），模型据此续答、并入同一条 assistant 消息。
+            // 唤醒指令：作为 resume 上下文注入，GenerationHandler 只在续答生成的第一步
+            // 把它追加为最后一条 USER 消息（一次性消费，不逐步重复），模型据此续答、并入
+            // 同一条 assistant 消息。
             // 摘要直接内联在指令里，不依赖 spawn tool result 的可见性——长对话被 limitContext
             // 截断或模型忽略工具输出时，结果仍能送达模型，杜绝"结果接了模型却没看到"。
             val agentName = SubAgentCatalog.byId(task.agentId)?.name ?: task.agentId
@@ -1198,20 +1207,18 @@ class ChatService(
     // ---- 引导消息 ----
 
     /**
-     * 向主 AI 发送引导消息：不新增独立用户消息，而是把引导文本以可见工具气泡合并进
-     * 最后一条 assistant 消息，并注入 AI 上下文让它按引导继续生成（并入同一个气泡）。
+     * 向主 AI 发送引导消息：引导文本作为**普通用户消息**进入对话（对齐 Codex turn/steer：
+     * 一次、尾部、append-only——引导落地后就是历史的一部分，不再向后续每步重复下发
+     * 「请按引导续答」指令，避免模型每步都「重新收到」引导、思考内容反复提它）。
      *
      * AI 正在生成时按 [immediate] 分两种模式：
      * - immediate=false（默认）：引导进入 steering 队列，等当前回合输出完成后由
-     *   drain 依次自动注入并续答（自动引导）。
+     *   drain 作为用户消息依次发送（自动引导）。
      * - immediate=true（排队引导旁的「立即发送」）：把该项标记为立即注入，
-     *   GenerationHandler 在下一轮边界（工具调用完成/输出结束）消费注入。
-     * 队列里已有排队引导时，再次调用本方法会清空旧队列、打断当前生成并直接注入新引导，
+     *   GenerationHandler 在下一轮边界（工具调用完成/输出结束）消费，作为 USER 消息
+     *   追加到上下文尾部，不打断当前流式。
+     * 队列里已有排队引导时，再次调用本方法会清空旧队列、打断当前生成并直接发送新引导，
      * 避免引导越积越多、用户的新指令迟迟不生效。
-     *
-     * 实现复用 [handleMessageComplete] 的 resumeContext 续答机制：resumeContext 追加为
-     * provider 看到的最后一条 USER 消息、不落持久化列表，handleMessageChunk 仍并入上一条
-     * assistant 消息——正好满足"引导合并进 AI 气泡、不单独成条、继续生成"。
      *
      * 运行中子代理的引导走 [me.rerere.rikkahub.data.ai.subagent.SubAgentRunner.submitGuidance]
      * （详情页入口，每步注入子代理思维链），与本方法互不干扰。
@@ -1237,25 +1244,17 @@ class ChatService(
                 interruptGuidanceAndSend(session, conversationId, text)
                 return
             }
-            session.steeringQueue.value = session.steeringQueue.value + PendingSteering(
+            session.steeringQueue.update { it + PendingSteering(
                 text = text,
                 immediate = immediate,
-            )
+            ) }
             ensureSteeringDrain(session, conversationId)
             return
         }
 
-        // AI 空闲：直接注入续答（setJob 让续答可被停止按钮中断）
-        val job = appScope.launch {
-            try {
-                appendGuidancePart(conversationId, text)
-                handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(text))
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
-            }
-        }
-        session.setJob(job)
+        // AI 空闲：引导就是一条普通用户消息，直接发送（sendMessage 自带 job 管理，
+        // 停止按钮 / 排队联动均生效）
+        sendMessage(conversationId, listOf(UIMessagePart.Text(text)), clearPendingQueue = false)
     }
 
     /** 排队引导卡片上的「打断并发送」：清空排队，中断当前生成，直接注入该引导 */
@@ -1282,16 +1281,8 @@ class ChatService(
                 withTimeoutOrNull(2_000) {
                     while (session.getJob() != null) delay(20)
                 }
-                appendGuidancePart(conversationId, text)
-                val job = appScope.launch {
-                    try {
-                        handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(text))
-                    } catch (e: Exception) {
-                        if (e is CancellationException) throw e
-                        addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
-                    }
-                }
-                session.setJob(job)
+                // 引导作为普通用户消息发送（对齐 Codex；sendMessage 自带 job 管理）
+                sendMessage(conversationId, listOf(UIMessagePart.Text(text)), clearPendingQueue = false)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
@@ -1302,7 +1293,7 @@ class ChatService(
     /** 取消排队中的引导：从队列移除指定项（UI 气泡随之消失） */
     fun cancelPendingGuidance(conversationId: Uuid, itemId: Uuid) {
         val session = sessions[conversationId] ?: return
-        session.steeringQueue.value = session.steeringQueue.value.filterNot { it.id == itemId }
+        session.steeringQueue.update { it.filterNot { item -> item.id == itemId } }
     }
 
     /** 订阅会话的排队引导队列（UI 渲染气泡用），按入队顺序排列 */
@@ -1322,9 +1313,9 @@ class ChatService(
     }
 
     /**
-     * 串行消费 steering 队列：等当前回合（job）结束后取队首注入为 user_guidance 气泡并续答，
-     * 注入产生的下一回合结束后再取下一个，直到队列清空。用户停止生成时丢弃剩余排队项，
-     * 避免幽灵重启生成（#14）。
+     * 串行消费 steering 队列：等当前回合（job）结束后取队首作为**普通用户消息**发送
+     * （对齐 Codex 队列投递：新用户回合 → 新 AI 回复），发送产生的下一回合结束后再取
+     * 下一个，直到队列清空。用户停止生成时丢弃剩余排队项，避免幽灵重启生成（#14）。
      */
     private suspend fun drainSteeringQueue(conversationId: Uuid, session: ConversationSession) {
         try {
@@ -1337,16 +1328,13 @@ class ChatService(
                     break
                 }
                 val item = session.steeringQueue.value.firstOrNull() ?: break
-                session.steeringQueue.value = session.steeringQueue.value.drop(1)
-                appendGuidancePart(conversationId, item.text)
-                val job = appScope.launch {
-                    runCatching {
-                        handleMessageComplete(conversationId, resumeContext = buildGuidanceInstruction(item.text))
-                    }
-                }
-                session.setJob(job)
-                job.join()
-                if (job.isCancelled) {
+                // update 保证「取队首」与 UI 并发入队不互吞（CAS 重试）
+                session.steeringQueue.update { it.drop(1) }
+                // 引导作为普通用户消息发送（sendMessage 自带 job 管理与用户消息落库）
+                sendMessage(conversationId, listOf(UIMessagePart.Text(item.text)), clearPendingQueue = false)
+                val job = session.getJob()
+                job?.join()
+                if (job?.isCancelled == true) {
                     // 注入产生的回合被用户停止：丢弃剩余排队引导
                     session.steeringQueue.value = emptyList()
                     break
@@ -1359,68 +1347,6 @@ class ChatService(
         if (session.steeringQueue.value.isNotEmpty()) {
             ensureSteeringDrain(session, conversationId)
         }
-    }
-
-    /**
-     * 把引导文本以可见工具气泡追加到会话最后一条 assistant 消息（无 assistant 消息则新建）。
-     * toolName = "user_guidance"，渲染走 [GuidanceToolUI]（注册在 ToolUIRegistry）。
-     */
-    private suspend fun appendGuidancePart(conversationId: Uuid, text: String) {
-        val conversation = getConversationFlow(conversationId).value
-        val guidancePart = UIMessagePart.Tool(
-            toolCallId = Uuid.random().toString(),
-            toolName = "user_guidance",
-            input = "{}",
-            // 输出为 JSON（含 text 字段）：渲染器把 content 解析成 JSON 读取 text；
-            // 模型侧以工具结果形式读到引导文本。文本含引号/换行时经 buildJsonObject 正确转义。
-            output = listOf(
-                UIMessagePart.Text(
-                    buildJsonObject {
-                        put("text", JsonPrimitive(text))
-                    }.toString()
-                )
-            ),
-            approvalState = ToolApprovalState.Approved,
-        )
-        if (conversation.messageNodes.isEmpty()) {
-            // 空会话：新建仅含引导气泡的 assistant 消息，生成会往里续
-            updateConversationState(conversationId) { conv ->
-                conv.copy(
-                    messageNodes = conv.messageNodes + UIMessage(
-                        role = MessageRole.ASSISTANT,
-                        parts = listOf(guidancePart),
-                    ).toMessageNode(),
-                )
-            }
-        } else {
-            // 追加到最后一条消息的 parts 末尾。若最后一条是 USER（无 AI 气泡可合并），
-            // 也新建一条 assistant 消息承载引导。
-            val lastNode = conversation.messageNodes.last()
-            val lastMsg = lastNode.currentMessage
-            if (lastMsg.role == MessageRole.ASSISTANT) {
-                updateConversationState(conversationId) { conv ->
-                    val nodes = conv.messageNodes.toMutableList()
-                    val tailIndex = nodes.lastIndex
-                    val tail = nodes[tailIndex]
-                    nodes[tailIndex] = tail.copy(
-                        messages = tail.messages.map { m ->
-                            if (m.id == lastMsg.id) m.copy(parts = m.parts + guidancePart) else m
-                        },
-                    )
-                    conv.copy(messageNodes = nodes)
-                }
-            } else {
-                updateConversationState(conversationId) { conv ->
-                    conv.copy(
-                        messageNodes = conv.messageNodes + UIMessage(
-                            role = MessageRole.ASSISTANT,
-                            parts = listOf(guidancePart),
-                        ).toMessageNode(),
-                    )
-                }
-            }
-        }
-        saveConversation(conversationId, getConversationFlow(conversationId).value)
     }
 
     private fun preprocessUserInputParts(parts: List<UIMessagePart>, assistant: Assistant): List<UIMessagePart> {
@@ -1660,7 +1586,8 @@ class ChatService(
     private suspend fun handleMessageComplete(
         conversationId: Uuid,
         messageRange: ClosedRange<Int>? = null,
-        /** 异步唤醒续答上下文（子代理完成时注入）。非空时：messages 尾部追加该提示、跳过标题/建议生成。 */
+        /** 异步唤醒续答上下文（子代理完成时注入）。非空时：续答生成的**第一步**把该提示
+         *  追加为最后一条 USER 消息（GenerationHandler 一次性消费，不逐步重复）、跳过标题/建议生成。 */
         resumeContext: String? = null,
     ) {
         val settings = settingsStore.settingsFlow.first()
@@ -1734,9 +1661,10 @@ class ChatService(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
-                // 唤醒指令作为 provider 看到的最后一条 USER 消息注入（GenerationHandler 内部
-                // 追加到发送列表末尾），不写 system、不进持久化消息列表：system 前缀稳定 → 缓存命中；
-                // 持久化尾部保持上一条 ASSISTANT → 续答并入同一条消息（BUG3 修复 + 缓存优化）。
+                // 唤醒指令由 GenerationHandler 在续答生成的第一步追加为 provider 看到的
+                // 最后一条 USER 消息（一次性消费，不逐步重复），不写 system、不进持久化
+                // 消息列表：system 前缀稳定 → 缓存命中；持久化尾部保持上一条 ASSISTANT →
+                // 续答并入同一条消息（BUG3 修复 + 缓存优化）。
                 messages = messagesToGenerate,
                 assistant = assistant,
                 conversationId = conversationId,
@@ -2034,20 +1962,22 @@ class ChatService(
                             )
                         }
                         val currentConversation = getConversationFlow(conversationId).value
+                        val mergedDisplayMessages = displayMessagesForChunk(
+                            displayMessages = currentConversation.currentMessages,
+                            chunkMessages = chunk.messages,
+                        )
                         val updatedConversation = currentConversation
-                            .updateCurrentMessages(
-                                displayMessagesForChunk(
-                                    displayMessages = currentConversation.currentMessages,
-                                    chunkMessages = chunk.messages,
-                                )
-                            )
+                            .updateCurrentMessages(mergedDisplayMessages)
                         // 流式 chunk 只追加/更新消息内容，不会移除消息或附件，
                         // 跳过 checkFilesDelete 的全表文件扫描（每 chunk O(n)→O(1)）。
                         updateConversation(conversationId, updatedConversation, checkFiles = false)
 
                         // 防抖落库部分输出：崩溃/进程被杀时保住未输出完的会话。
-                        // 只在有 assistant 消息时调度，避免纯用户消息触发写库。
-                        if (chunk.messages.lastOrNull()?.role == MessageRole.ASSISTANT) {
+                        // 有新消息到达（steering 注入的用户引导 / 新 assistant 回复）或尾部
+                        // assistant 流式更新时调度；纯历史消息的 chunk 不触发写库。
+                        if (mergedDisplayMessages.size != currentConversation.currentMessages.size ||
+                            chunk.messages.lastOrNull()?.role == MessageRole.ASSISTANT
+                        ) {
                             scheduleGenerationAutoSave(conversationId)
                         }
 
@@ -2730,7 +2660,8 @@ class ChatService(
                 .awaitAll()
         }
 
-        // 只替换 AI 请求用的上下文快照，messageNodes 保留完整历史用于展示
+        // 只替换 AI 请求用的上下文快照，messageNodes 保留完整历史用于展示。
+        // 摘要消息的 isSynthetic 标记由 Conversation.effectiveMessages() 按结构统一还原。
         val compressedContextMessages = buildList {
             compressedSummaries.forEach { summary ->
                 add(UIMessage.user(summary))

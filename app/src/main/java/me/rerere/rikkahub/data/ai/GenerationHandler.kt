@@ -193,20 +193,6 @@ private fun UIMessagePart.Tool.inputFingerprint(): String {
 }
 
 /**
- * 构造「用户引导」续答指令（steering / sendGuidance 共用）：
- * 作为 provider 看到的最后一条 USER 消息注入，提示模型在既有回复上续答而非从头重来。
- */
-internal fun buildGuidanceInstruction(text: String): String = buildString {
-    appendLine("## User guidance")
-    appendLine("The user has sent you the following guidance. Continue your existing response according to it:")
-    appendLine("```")
-    appendLine(text.take(1000))
-    appendLine("```")
-    appendLine("- Follow the guidance in your ongoing reply. Do NOT re-answer from scratch; build on your existing answer.")
-    appendLine("- If you were waiting for a running sub-agent, you may incorporate this guidance now and continue when results arrive.")
-}
-
-/**
  * 构造「流式输出中断续答唤醒」指令：流式生成因网络/服务端错误中断时，作为最后一条 USER
  * 消息注入，提示模型在已生成的部分输出上继续，而不是从头重来。
  */
@@ -254,14 +240,16 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
         policy: ChatModePolicy? = null,
-        /** 续答唤醒指令（子代理完成时注入）。追加为 provider 看到的**最后一条 USER 消息**，
-         *  不写进 system（保持 system 前缀字节不变 → prompt cache 命中，对齐 Claude Code
-         *  "用消息不用 prompt 编辑"的做法）。只进 internalMessages（发送列表），不落持久化列表，
-         *  因此不会触发 handleMessageChunk 分段。默认 null 不影响普通生成。 */
+        /** 内部续答唤醒指令（子代理完成时注入）。只在本次生成的**第一步**追加为 provider
+         *  看到的最后一条 USER 消息，之后置空——指令注入一次即成为上下文历史，逐步重复
+         *  注入会让模型每步都把它当作刚收到的输入、在思考里反复确认。不写进 system（保持
+         *  system 前缀字节不变 → prompt cache 命中）。只进 internalMessages（发送列表），
+         *  不落持久化列表。默认 null 不影响普通生成。 */
         resumeContext: String? = null,
         /** steering 队列：会话级待注入引导（FIFO）。immediate=true 的项在下一轮边界
-         *  （工具调用/输出完成）消费并注入 user_guidance 气泡 + 续答指令，不打断当前流式；
-         *  其余项排队不消费，等回合结束后由 ChatService 依次自动注入。 */
+         *  （工具调用/输出完成）消费，引导文本作为真实 USER 消息追加到上下文尾部（对齐
+         *  Codex turn/steer：一次、尾部、append-only），不打断当前流式；其余项排队不消费，
+         *  等回合结束后由 ChatService 作为用户消息依次发送。 */
         steeringQueue: kotlinx.coroutines.flow.MutableStateFlow<List<PendingSteering>>? = null,
     ): Flow<GenerationChunk> = channelFlow<GenerationChunk> {
         // 工具开始事件由并行的 async 子协程发出；flow 的 emit 不允许跨协程，必须用 channelFlow 的 send。
@@ -270,6 +258,9 @@ class GenerationHandler(
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+
+        // 续答唤醒指令只发一次：哪一步用掉即置空（见循环内 effectiveResumeContext）
+        var pendingResumeContext = resumeContext
 
         // 防失控启发式状态（跨轮累积）：
         // prevRoundFingerprints = 上一轮工具调用指纹集合；identicalCallRounds = 连续完全相同调用轮数
@@ -285,38 +276,25 @@ class GenerationHandler(
             messages = messages.markLastAssistantFinished(false)
 
             // steering：仅消费「立即发送」模式的引导（用户点了对应气泡的发送按钮）——
-            // 在下一轮边界（上一个工具调用/输出完成后的自然边界）注入可见 user_guidance 气泡
-            // 并作为本轮续答指令，不打断上一轮已完成的输出。默认排队项不在轮内消费，
-            // 保留在队列中，等整个回合输出结束后由 ChatService 依次自动注入。
+            // 在下一轮边界（上一个工具调用/输出完成后的自然边界）把引导文本作为真实 USER
+            // 消息追加到上下文尾部，对齐 Codex turn/steer：一次、尾部、append-only（不改写
+            // 已发送内容，prompt cache 保住）。引导落地后即成为历史，后续步骤不再重复注入，
+            // 模型不会每步都「重新收到」引导。默认排队项不在轮内消费，保留在队列中，等整个
+            // 回合输出结束后由 ChatService 作为用户消息依次发送。
             val queue = steeringQueue
             val pendingSteering = queue?.value?.firstOrNull { it.immediate }
-            val effectiveResumeContext = if (pendingSteering != null) {
+            if (pendingSteering != null) {
                 queue!!.value = queue.value.filterNot { it.id == pendingSteering.id }
-                val guidancePart = UIMessagePart.Tool(
-                    toolCallId = Uuid.random().toString(),
-                    toolName = "user_guidance",
-                    input = "{}",
-                    output = listOf(
-                        UIMessagePart.Text(
-                            buildJsonObject { put("text", JsonPrimitive(pendingSteering.text)) }.toString()
-                        )
-                    ),
-                    approvalState = ToolApprovalState.Approved,
+                messages = messages + UIMessage(
+                    role = MessageRole.USER,
+                    parts = listOf(UIMessagePart.Text(pendingSteering.text)),
                 )
-                val lastMsg = messages.lastOrNull()
-                messages = if (lastMsg?.role == MessageRole.ASSISTANT) {
-                    // 正常情况：追加到最后一条 assistant 气泡
-                    messages.dropLast(1) + lastMsg.copy(parts = lastMsg.parts + guidancePart)
-                } else {
-                    // 空消息或最后一条是 USER（用户刚发完还没产出 AI 气泡）：
-                    // 新建 assistant 消息承载引导，避免气泡落进用户消息
-                    messages + UIMessage(role = MessageRole.ASSISTANT, parts = listOf(guidancePart))
-                }
                 emit(GenerationChunk.Messages(messages))
-                buildGuidanceInstruction(pendingSteering.text)
-            } else {
-                resumeContext
             }
+
+            // 续答唤醒指令只在第一步追加，之后置空（一次性消费）
+            val effectiveResumeContext = pendingResumeContext
+            pendingResumeContext = null
 
             // 规范化排序：provider 前缀缓存以 tools 数组顺序为键的一部分，
             // 与装配路径的书写顺序解耦（见 ToolCanonicalOrder.kt）

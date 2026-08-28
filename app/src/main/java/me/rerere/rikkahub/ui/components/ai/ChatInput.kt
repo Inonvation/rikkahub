@@ -5,10 +5,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -25,15 +22,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -61,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -162,7 +155,7 @@ fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
-    /** 当前会话是否有活跃子代理任务（运行中显示输入框左侧的子代理图标替代快捷消息按钮） */
+    /** 当前会话是否有活跃子代理任务（运行中底条快捷消息位置显示子代理图标替代快捷消息按钮） */
     subAgentActive: Boolean = false,
     /** 活跃子代理任务数（用于图标右上角数量角标，并行多个子代理时显示） */
     subAgentActiveCount: Int = 0,
@@ -196,9 +189,6 @@ fun ChatInput(
 
     // 输入框整体始终是圆角矩形，不随键盘状态改变形状；
     // 避免"贴合键盘变直角 + 收起时突变跳一下"。
-    val density = LocalDensity.current
-    // Unlike isImeVisible, the target changes as soon as the IME animation starts.
-    val imeTargetVisible = WindowInsets.imeAnimationTarget.getBottom(density) > 0
     // 模型选择：把 state 提升到 ChatInput 顶层，ModelListSheet 在顶层弹出，
     // 避免输入框焦点/IME 变化导致搜索模型时键盘被自动收起。
     val modelListState = rememberModelListState(
@@ -332,8 +322,6 @@ fun ChatInput(
                         completionProviders = completionProviders,
                         onSendMessage = { sendMessage() },
                         subAgentActive = subAgentActive,
-                        subAgentActiveCount = subAgentActiveCount,
-                        onOpenSubAgentPanel = onOpenSubAgentPanel,
                         onMoreClick = onMoreClick,
                         trailingContent = {
                             // 发送按钮固定右上：不随 IME 状态切换位置（键盘弹出/收起都在输入框内）
@@ -348,79 +336,80 @@ fun ChatInput(
                         },
                     )
 
-                    AnimatedVisibility(
-                        visible = !imeTargetVisible,
-                        enter = EnterTransition.None,
-                        exit = shrinkVertically() + fadeOut(),
+                    // 底条（Codex 风格）：左侧文本 pill（模型/思考强度），右侧快捷消息 + 录音。
+                    // 常驻显示（对齐上游「回滚输入栏折叠」：键盘弹出/收起都不再隐藏底条）。
+                    // 固定 36dp 高度，pill 与图标垂直居中，避免行高随内容抖动。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(36.dp)
+                            // 右侧图标保留 4dp 右内边距做光学对齐：图标为 20dp 墨迹近乎填满 24dp 盒，
+                            // 而发送按钮是 30dp 圆内 18dp 图标（墨迹约内缩 6dp），若与发送按钮右缘齐平
+                            // 会显得比发送按钮偏右；留 4dp 让图标墨迹与发送图标对齐
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        // 底条（Codex 风格）：左侧文本 pill（模型/思考强度），右侧快捷消息 + 录音。
-                        // 固定 36dp 高度，pill 与图标垂直居中，避免行高随内容抖动。
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(36.dp)
-                                .padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            // 禁用 Material3 默认 48dp 最小触摸尺寸，让按钮高度由内容决定，垂直对齐
-                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .horizontalScroll(rememberScrollState()),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    // Model Picker：文本 pill，名称超长截断，展示「供应商名/模型名」
-                                    ModelPillButton(
-                                        state = modelListState,
-                                        providers = settings.providers,
-                                        onLongClick = onOpenProviderSettings,
-                                    )
+                        // 禁用 Material3 默认 48dp 最小触摸尺寸，让按钮高度由内容决定，垂直对齐
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                // Model Picker：文本 pill，名称超长截断，展示「供应商名/模型名」
+                                ModelPillButton(
+                                    state = modelListState,
+                                    providers = settings.providers,
+                                    onLongClick = onOpenProviderSettings,
+                                )
 
-                                    // Reasoning：文本 pill（仅推理模型显示）
-                                    val model = settings.getCurrentChatModel()
-                                    if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                        ReasoningPillButton(
-                                            reasoningLevel = assistant.reasoningLevel,
-                                            onUpdateReasoningLevel = {
-                                                onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                            },
-                                        )
-                                    }
+                                // Reasoning：文本 pill（仅推理模型显示）
+                                val model = settings.getCurrentChatModel()
+                                if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                    ReasoningPillButton(
+                                        reasoningLevel = assistant.reasoningLevel,
+                                        onUpdateReasoningLevel = {
+                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                        },
+                                    )
                                 }
                             }
+                        }
 
-                            // 快捷消息保留在底条（高频）
-                            if (quickMessages.isNotEmpty()) {
-                                QuickMessageButton(quickMessages = quickMessages, state = state)
-                            }
+                        // 快捷消息保留在底条（高频）；子代理运行中该位置显示子代理图标
+                        // （延续改版前「子代理图标替代快捷消息按钮」的语义，位置随快捷消息移到底条）
+                        if (subAgentActive && onOpenSubAgentPanel != null) {
+                            SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount)
+                        } else if (quickMessages.isNotEmpty()) {
+                            QuickMessageButton(quickMessages = quickMessages, state = state)
+                        }
 
-                            if (asrState.isAvailable || asrState.isRecording) {
-                                AsrButton(
-                                    state = asrState,
-                                    onClick = {
-                                        when (asrState.status) {
-                                            ASRStatus.Listening -> asr.stop()
-                                            ASRStatus.Idle, ASRStatus.Error -> {
-                                                if (!asrPermission.allRequiredPermissionsGranted) {
-                                                    asrPermission.requestPermissions()
-                                                } else {
-                                                    asrBaseText = state.textContent.text.toString()
-                                                    asr.start { transcript ->
-                                                        val spacer =
-                                                            if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
-                                                        state.setMessageText(asrBaseText + spacer + transcript)
-                                                    }
+                        if (asrState.isAvailable || asrState.isRecording) {
+                            AsrButton(
+                                state = asrState,
+                                onClick = {
+                                    when (asrState.status) {
+                                        ASRStatus.Listening -> asr.stop()
+                                        ASRStatus.Idle, ASRStatus.Error -> {
+                                            if (!asrPermission.allRequiredPermissionsGranted) {
+                                                asrPermission.requestPermissions()
+                                            } else {
+                                                asrBaseText = state.textContent.text.toString()
+                                                asr.start { transcript ->
+                                                    val spacer =
+                                                        if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
+                                                    state.setMessageText(asrBaseText + spacer + transcript)
                                                 }
                                             }
-
-                                            ASRStatus.Connecting, ASRStatus.Stopping -> {}
                                         }
+
+                                        ASRStatus.Connecting, ASRStatus.Stopping -> {}
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
                     }
                 }
@@ -751,8 +740,6 @@ private fun TextInputRow(
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
     subAgentActive: Boolean = false,
-    subAgentActiveCount: Int = 0,
-    onOpenSubAgentPanel: (() -> Unit)? = null,
     /** 「＋」更多选项：常驻输入框 leading（与快捷消息对调），键盘弹出时也可加附件 */
     onMoreClick: () -> Unit,
     trailingContent: @Composable () -> Unit = {},
@@ -952,11 +939,15 @@ private fun TextInputRow(
                 unfocusedContainerColor = Color.Transparent,
             ),
             trailingIcon = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (isFocused) {
+                // 与 leadingIcon 一致禁用 M3 默认 48dp 最小交互尺寸：否则未聚焦时发送按钮
+                // 被居中在 ≥48dp 的 trailing 槽位内而偏左，聚焦后全屏按钮撑宽槽位才回贴边（发送位跳动）
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        // 全屏按钮常驻：若仅在聚焦时显示，出现/消失会改变 trailing 槽位宽度，
+                        // 引发文本重排与发送位感知跳动
                         IconButton(
                             onClick = {
                                 hapticController.lightTap()
@@ -964,32 +955,24 @@ private fun TextInputRow(
                             }) {
                             Icon(HugeIcons.Fullscreen, null)
                         }
+                        trailingContent()
                     }
-                    trailingContent()
                 }
             },
             leadingIcon = {
-                // 「＋」常驻输入框左侧；子代理运行中在其左侧补充子代理图标
+                // 「＋」常驻输入框左侧（子代理运行图标移至底条快捷消息位置，见 ChatInput 底条）
                 CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ActionIconButton(
+                        onClick = {
+                            hapticController.lightTap()
+                            onMoreClick()
+                        }
                     ) {
-                        if (subAgentActive && onOpenSubAgentPanel != null) {
-                            SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount)
-                        }
-                        ActionIconButton(
-                            onClick = {
-                                hapticController.lightTap()
-                                onMoreClick()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Add01,
-                                contentDescription = stringResource(R.string.more_options),
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
+                        Icon(
+                            imageVector = HugeIcons.Add01,
+                            contentDescription = stringResource(R.string.more_options),
+                            modifier = Modifier.size(22.dp),
+                        )
                     }
                 }
             },

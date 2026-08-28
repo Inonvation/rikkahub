@@ -947,8 +947,9 @@ object TodoWriteToolUI : ToolUIRenderer {
 }
 
 /**
- * 用户引导消息（user_guidance）：主聊天向 AI 发送引导时，由 ChatService.appendGuidancePart
- * 以可见工具气泡追加进 AI 消息。折叠行显示引导文本摘要，点击看 JSON 详情。
+ * 用户引导消息（user_guidance）：旧版引导以工具气泡合并进 AI 消息的持久化形态，
+ * 仅为渲染历史消息保留（新版引导作为普通用户消息注入，不再产出该工具气泡）。
+ * 折叠行显示引导文本摘要，点击看 JSON 详情。
  */
 object GuidanceToolUI : ToolUIRenderer {
     override val toolName: String = "user_guidance"

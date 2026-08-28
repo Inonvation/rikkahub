@@ -183,9 +183,8 @@ import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvide
 import me.rerere.rikkahub.ui.components.ai.PromptOptimizeSheet
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
-import me.rerere.rikkahub.ui.components.message.pruneSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
-import me.rerere.rikkahub.ui.components.message.trimToolBubbleExpanded
+import me.rerere.rikkahub.ui.components.message.trackRecentConversation
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListAtBottom
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListUserControlled
@@ -547,18 +546,16 @@ private fun ChatPageContent(
 
     // 展开折叠进程级缓存（sectionExpanded / toolBubbleExpanded）的生命周期治理：
     // 切换会话时只保留最近 N 个会话的记忆，避免长会话 + 多会话切换下只增不减的慢性累积。
-    // 最近列表包含当前会话，正在使用的记忆绝不会被清；GroupDiscussion/SubAgent 详情页等
-    // 使用独立会话 id 的页面，其记忆会在主聊天再切换数轮后被回收（回落默认展开态），可接受。
-    val recentConversationIds = remember { ArrayDeque<String>() }
+    // 最近记录是进程级单例（trackRecentConversation 内部维护），跨 ChatPage 导航实例累积：
+    // 本页按会话切换导航重建（cleanupChatPages 清栈），实例级 remember 队列每次只剩
+    // 当前会话，会把其它会话的记忆清空（"切走再切回折叠态重置"根因），故不放这里。
+    // GroupDiscussion/SubAgent 详情页等使用独立会话 id 的页面，其记忆会在主聊天
+    // 再切换数轮后被回收（回落默认展开态），可接受。
     LaunchedEffect(conversation.id) {
-        val convId = conversation.id.toString()
-        recentConversationIds.remove(convId)
-        recentConversationIds.addFirst(convId)
-        while (recentConversationIds.size > KEEP_RECENT_CONVERSATIONS_FOR_EXPAND_STATE) {
-            recentConversationIds.removeLast()
-        }
-        pruneSectionExpanded(recentConversationIds.toSet())
-        trimToolBubbleExpanded()
+        trackRecentConversation(
+            conversation.id.toString(),
+            KEEP_RECENT_CONVERSATIONS_FOR_EXPAND_STATE,
+        )
     }
 
     // 用户手动滚动闩锁：折叠思考/过程内容后的延迟贴底，只在用户没有滑离底部时执行。

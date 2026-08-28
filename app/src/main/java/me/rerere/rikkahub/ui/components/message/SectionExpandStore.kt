@@ -49,3 +49,31 @@ fun pruneSectionExpanded(keepConversationIds: Set<String>): Int {
     }
     return removed
 }
+
+/**
+ * 进程级"最近访问会话"记录，跨 ChatPage 导航实例共享。
+ *
+ * 不要放进某个 Composable 的 `remember`：切换会话走导航栈（旧 ChatPage 被
+ * `cleanupChatPages` 清栈销毁），实例级队列在每次切换后只剩当前会话一个元素，
+ * pruneSectionExpanded 会趁机把其它会话的折叠记忆全部清掉——"切走再切回，
+ * 思考/过程区折叠态重置"的根因。进程级单例与 sectionExpanded 同生命周期，
+ * 才能跨导航实例累积出真正的"最近 N 个会话"。
+ */
+internal val recentConversationIds = ArrayDeque<String>()
+
+/**
+ * 把 [conversationId] 记为最近访问并执行展开折叠记忆的生命周期治理：
+ * 进程级最近记录只保留最近 [keepRecentCount] 个会话（含本次访问），其余会话的
+ * section 记忆（process:/chain:/reasoning:/todo:）被回收；顺带对齐
+ * toolBubbleExpanded 的容量上限。返回本次回收的 section 记录数。
+ */
+fun trackRecentConversation(conversationId: String, keepRecentCount: Int): Int {
+    recentConversationIds.remove(conversationId)
+    recentConversationIds.addFirst(conversationId)
+    while (recentConversationIds.size > keepRecentCount) {
+        recentConversationIds.removeLast()
+    }
+    val removed = pruneSectionExpanded(recentConversationIds.toSet())
+    trimToolBubbleExpanded()
+    return removed
+}

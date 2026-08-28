@@ -16,6 +16,56 @@ class ExpandStateLifecycleTest {
     fun tearDown() {
         sectionExpanded.clear()
         toolBubbleExpanded.clear()
+        recentConversationIds.clear()
+    }
+
+    // ---------- trackRecentConversation（进程级最近会话 + 生命周期治理） ----------
+
+    @Test
+    fun `track keeps previous conversations across separate page instances`() {
+        // 模拟切换会话：每个 ChatPage 导航实例各调用一次（旧实例已被 cleanupChatPages 销毁），
+        // 进程级队列跨实例累积，切走时其它会话的记忆不能被下一次访问清掉。
+        sectionExpanded["process:c1:n1"] = true
+        sectionExpanded["reasoning:c1:t1"] = false
+        trackRecentConversation("c1", keepRecentCount = 8)
+
+        // 切到 c2：c2 自己的记忆由访问它的实例正常建立
+        sectionExpanded["chain:c2:n1"] = true
+        assertEquals(0, trackRecentConversation("c2", keepRecentCount = 8))
+
+        // 切到 c2 后 c1 的记忆仍在：切回 c1 时折叠态可恢复
+        assertTrue(sectionExpanded.containsKey("process:c1:n1"))
+        assertTrue(sectionExpanded.containsKey("reasoning:c1:t1"))
+        assertTrue(sectionExpanded.containsKey("chain:c2:n1"))
+    }
+
+    @Test
+    fun `track drops conversations beyond capacity by recency`() {
+        sectionExpanded["process:c1:n1"] = true
+        trackRecentConversation("c1", keepRecentCount = 8)
+        repeat(8) { i ->
+            val cid = "c${i + 2}"
+            sectionExpanded["process:$cid:n1"] = true
+            trackRecentConversation(cid, keepRecentCount = 8)
+        }
+
+        // 共访问 9 个会话（c1..c9），最早访问的 c1 被回收，其余保留
+        assertNull(sectionExpanded["process:c1:n1"])
+        assertTrue(sectionExpanded.containsKey("process:c9:n1"))
+    }
+
+    @Test
+    fun `track re-visit refreshes recency instead of dropping`() {
+        // c1 之后再访问 8 个会话、然后重新回到 c1：c1 变为最近访问，
+        // 被淘汰的是此时最旧的 c2，而不是重新访问过的 c1
+        listOf("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c1").forEach {
+            sectionExpanded["process:$it:n1"] = true
+            trackRecentConversation(it, keepRecentCount = 8)
+        }
+
+        assertNull(sectionExpanded["process:c2:n1"]) // 最旧的 c2 被回收
+        assertTrue(sectionExpanded.containsKey("process:c1:n1")) // 重新访问的 c1 保留
+        assertTrue(sectionExpanded.containsKey("process:c9:n1"))
     }
 
     // ---------- pruneSectionExpanded ----------

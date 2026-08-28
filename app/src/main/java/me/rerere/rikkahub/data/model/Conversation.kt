@@ -77,7 +77,13 @@ data class Conversation(
     /** AI 请求使用的消息：有压缩快照时用“摘要 + 保留消息 + 压缩后新增消息”，否则用完整历史。 */
     fun effectiveMessages(): List<UIMessage> {
         val compressed = compressedHistory ?: return currentMessages
-        val result = compressed.messages.toMutableList()
+        // 压缩摘要消息（id 不在 currentMessages 中的快照条目）打上 isSynthetic：该标记是
+        // @Transient 不落库，这里按结构还原。displayMessagesForChunk 据此不把摘要追加进
+        // 显示列表；steering 轮边界注入的真实用户引导（同样不在显示列表）因非合成得以放行。
+        val currentIds = currentMessages.mapTo(HashSet()) { it.id }
+        val result = compressed.messages.map { m ->
+            if (m.id in currentIds) m else m.copy(isSynthetic = true)
+        }.toMutableList()
         val lastOriginalMessageId = compressed.lastOriginalMessageId
         if (lastOriginalMessageId != null) {
             val index = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }

@@ -50,6 +50,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,6 +91,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
@@ -323,6 +325,8 @@ fun MarkdownBlock(
     // 监听内容变化，重新解析AST树
     // 后台线程解析AST树防掉帧。流式输出每 chunk 都变一次 content，去掉 debounce：
     // 每 chunk 即时解析即时上屏，避免「冻结→停顿后整段蹦出」的卡顿体验。
+    // conflate：flowOn 的默认缓冲会让主线程忙时解析结果在通道里排队、随后逐个 setData
+    // 连续全量排版（排版风暴）；只上屏最新解析结果即可，中间版本直接跳过。
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
@@ -330,7 +334,12 @@ fun MarkdownBlock(
             .mapLatest { parseMarkdown(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .conflate()
+            .collect {
+                // 对齐帧边沿再上屏，让整树排版与合成同帧；被取消至多少一次 setData（≤1 帧），无害
+                withFrameNanos { }
+                setData(it)
+            }
     }
 
     CompositionLocalProvider(

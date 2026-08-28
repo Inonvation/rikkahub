@@ -98,6 +98,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import me.rerere.ai.core.MessageRole
@@ -555,6 +556,10 @@ private fun ChatListNormal(
                     prefetchJob?.cancel()
                     prefetchJob = scope.launch(Dispatchers.Default) {
                         nodes.forEach { node ->
+                            // 循环体全是纯 CPU 操作、无挂起点，协程取消是协作式的：
+                            // 不检查 isActive 的话，被取消的 job 仍会把整批消息跑完，
+                            // 快速 fling 时多批解析叠加造成 CPU/GC 尖峰（并可能争抢 LruCache 锁）
+                            if (!isActive) return@launch
                             val msg = node.currentMessage
                             val affectScope = if (msg.role == MessageRole.USER) {
                                 AssistantAffectScope.USER

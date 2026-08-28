@@ -42,7 +42,9 @@ class CompressedHistoryTest {
         )
 
         assertEquals(
-            listOf(summary, old2, newMessage),
+            // 摘要消息（id 不在 currentMessages 中）被 effectiveMessages 标记为合成，
+            // 供 displayMessagesForChunk 区分「请求上下文快照」与「steering 注入的真实用户消息」
+            listOf(summary.copy(isSynthetic = true), old2, newMessage),
             conversation.effectiveMessages(),
         )
     }
@@ -58,6 +60,6 @@ class CompressedHistoryTest {
             )
         )
 
-        assertEquals(listOf(summary), conversation.effectiveMessages())
+        assertEquals(listOf(summary.copy(isSynthetic = true)), conversation.effectiveMessages())
     }
 }

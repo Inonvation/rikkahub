@@ -8,10 +8,13 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
 
@@ -64,6 +67,7 @@ class ChatServiceTest {
         val summary = UIMessage(
             id = Uuid.random(),
             role = MessageRole.USER,
+            isSynthetic = true,
             parts = listOf(UIMessagePart.Text("[Summary]")),
         )
         val newUser = UIMessage(
@@ -86,6 +90,28 @@ class ChatServiceTest {
     }
 
     @Test
+    fun `display messages append real user guidance injected at step boundary`() {
+        val assistantReply = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("working...")),
+        )
+        // steering 在轮边界注入的真实用户引导（非合成）必须进入显示列表
+        val guidance = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Text("聚焦在性能问题上继续")),
+        )
+
+        val result = displayMessagesForChunk(
+            displayMessages = listOf(assistantReply),
+            chunkMessages = listOf(assistantReply, guidance),
+        )
+
+        assertEquals(listOf(assistantReply, guidance), result)
+    }
+
+    @Test
     fun `display messages update existing message by id`() {
         val id = Uuid.random()
         val before = UIMessage(
@@ -101,5 +127,50 @@ class ChatServiceTest {
         )
 
         assertEquals(listOf(after), result)
+    }
+
+    @Test
+    fun `display messages duplicate id updates first occurrence and keeps order`() {
+        val id = Uuid.random()
+        val first = UIMessage(id = id, role = MessageRole.USER, parts = listOf(UIMessagePart.Text("first")))
+        val second = UIMessage(id = id, role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("second")))
+        val updated = first.copy(parts = listOf(UIMessagePart.Text("first updated")))
+
+        val result = displayMessagesForChunk(
+            displayMessages = listOf(first, second),
+            chunkMessages = listOf(updated),
+        )
+
+        // 与 indexOfFirst 语义一致：只替换首个匹配，且不移动位置、不追加
+        assertEquals(listOf(updated, second), result)
+    }
+
+    @Test
+    fun `effective messages mark compressed summaries synthetic keep originals untouched`() {
+        val kept = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Text("kept original")),
+        )
+        val summary = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Text("compressed summary")),
+        )
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(kept.toMessageNode()),
+            compressedHistory = CompressedHistory(
+                messages = listOf(summary, kept),
+                lastOriginalMessageId = kept.id,
+            ),
+        )
+
+        val result = conversation.effectiveMessages()
+
+        // 摘要（id 不在 currentMessages 中）标合成 → displayMessagesForChunk 不追加进显示列表；
+        // 保留的原始消息不受影响
+        assertTrue(result[0].isSynthetic)
+        assertFalse(result[1].isSynthetic)
     }
 }
