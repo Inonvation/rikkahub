@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.chat
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -39,8 +40,20 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 private enum class DrawerState { Closed, LeftOpen, RightOpen }
+
+// 落定动画统一参数：临界阻尼（无回弹）。visibilityThreshold 必须远小于默认 0.01：
+// 弹簧在阈值处提前结束、剩余位移会在最后一帧被一次性补齐（约 8-10px 的"吸附"跳变，
+// 且恰与落定触感同帧）。阈值 0.002 让弹簧自然减速滑入终点，最终修正 ≤2px 不可见。
+private val SettleSpringSpec: SpringSpec<Float> = spring(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+    visibilityThreshold = 0.002f,
+)
+// 临界阻尼固有频率 ω = sqrt(stiffness)，用于把松手速度收敛到无超调区间
+private val SettleOmega = sqrt(Spring.StiffnessMediumLow)
 
 /**
  * 左右双抽屉容器（纯位移动画）。
@@ -52,7 +65,8 @@ private enum class DrawerState { Closed, LeftOpen, RightOpen }
  *
  * 抽屉与卡片之间用 scrim 区分层次。手势方向驱动：
  * 拖动开始锁定起始状态，范围锁死（左开只能 [0,1]，右开只能 [-1,0]）。
- * 松手位移超小阈值或快速甩动即触发。
+ * 松手位移超小阈值或快速甩动即触发；松手速度带入落定弹簧（按无超调上限收敛），
+ * 手势与动画速度连续，松手不急停、到边不回弹。
  */
 @Composable
 fun DrawerScaffold(
@@ -113,13 +127,7 @@ fun DrawerScaffold(
             if (drawerWasOpen.value && (leftDrawerOpen || rightDrawerOpen)) {
                 progress.snapTo(target)
             } else {
-                progress.animateTo(
-                    target,
-                    spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
-                )
+                progress.animateTo(target, SettleSpringSpec)
             }
             drawerWasOpen.value = leftDrawerOpen || rightDrawerOpen
         }
@@ -133,30 +141,44 @@ fun DrawerScaffold(
     // 位移/圆角/阴影全部由 progress 派生，但只在 graphicsLayer 的 draw 阶段 lambda 里读取，
     // 避免在组合期读取 progress.value 导致每帧重组整个界面（聊天列表也随之参与重排）。
 
+    // 当前 progress 对应的状态（拖动基准判定用）
+    fun currentProgressState(): DrawerState = when {
+        progress.value > 0f -> DrawerState.LeftOpen
+        progress.value < 0f -> DrawerState.RightOpen
+        else -> DrawerState.Closed
+    }
+
+    // 拖动换算比例：当前手势实际驱动的那一侧宽度（progress 增量 = deltaPx / 该值），
+    // 使抽屉位移与手指 1:1；方向未锁定时退回左右平均
+    fun currentDragScale(): Float = when {
+        dragBaseState == DrawerState.LeftOpen -> leftWidthPx
+        dragBaseState == DrawerState.RightOpen -> rightWidthPx
+        dragDirection > 0f -> leftWidthPx
+        dragDirection < 0f -> rightWidthPx
+        else -> dragScale
+    }
+
     fun beginDrag() {
         isDragging = true
         settleJob?.cancel()
         // 用当前 progress 判定基准状态，避免展开动画进行中（布尔已 true 但 progress 未到 1）
         // 被误判为 Closed，从而在动画中段反向滑就能直接开另一侧
-        dragBaseState = when {
-            progress.value > 0f -> DrawerState.LeftOpen
-            progress.value < 0f -> DrawerState.RightOpen
-            else -> DrawerState.Closed
-        }
+        dragBaseState = currentProgressState()
         dragBaseProgress = progress.value
         dragTotalDelta = 0f
         dragDirection = 0f
     }
 
     fun updateProgress() {
+        val scale = currentDragScale()
         val newProgress = when (dragBaseState) {
-            DrawerState.LeftOpen -> (dragBaseProgress + dragTotalDelta / dragScale).coerceIn(0f, 1f)
-            DrawerState.RightOpen -> (dragBaseProgress + dragTotalDelta / dragScale).coerceIn(-1f, 0f)
+            DrawerState.LeftOpen -> (dragBaseProgress + dragTotalDelta / scale).coerceIn(0f, 1f)
+            DrawerState.RightOpen -> (dragBaseProgress + dragTotalDelta / scale).coerceIn(-1f, 0f)
             // Closed 下 dragBaseProgress 恒为 0，位移直接驱动进度；方向锁定后范围受限，不会误开另一侧
             DrawerState.Closed -> when {
-                dragDirection > 0f -> (dragTotalDelta / dragScale).coerceIn(0f, 1f)
-                dragDirection < 0f -> (dragTotalDelta / dragScale).coerceIn(-1f, 0f)
-                else -> (dragTotalDelta / dragScale).coerceIn(-1f, 1f)
+                dragDirection > 0f -> (dragTotalDelta / scale).coerceIn(0f, 1f)
+                dragDirection < 0f -> (dragTotalDelta / scale).coerceIn(-1f, 0f)
+                else -> (dragTotalDelta / scale).coerceIn(-1f, 1f)
             }
         }
         scope.launch { progress.snapTo(newProgress) }
@@ -173,13 +195,15 @@ fun DrawerScaffold(
         )
         settleJob?.cancel()
         settleJob = scope.launch {
-            progress.animateTo(
-                settledTarget,
-                spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
+            // 松手速度带入落定动画（换算为 progress/s），消除"先急停、再被弹簧拉走"的突兀感；
+            // 朝目标方向的速度按无超调上限收敛，保证到达终点不冲过头再弹回
+            val initialVelocity = capSettleVelocity(
+                velocity = velocity / currentDragScale(),
+                current = progress.value,
+                target = settledTarget,
+                omega = SettleOmega,
             )
+            progress.animateTo(settledTarget, SettleSpringSpec, initialVelocity = initialVelocity)
             onLeftDrawerOpenChange(settledTarget > 0f)
             onRightDrawerOpenChange(settledTarget < 0f)
             if (settledTarget != 0f) {
@@ -357,4 +381,27 @@ private fun decideSettleTarget(
             else -> 0f
         }
     }
+}
+
+/**
+ * 松手速度收敛：把手指速度（已换算到 progress 单位）带入落定动画的同时，保证临界阻尼
+ * 弹簧不越过目标点（视觉上"弹一下"）。
+ *
+ * 临界阻尼弹簧从 x0（= current - target）带初速 v0 出发，只有"朝向目标的速度超过
+ * ω·|x0|"时才会越过目标再折返。因此：
+ * - 朝目标方向的速度按 ω·|remaining| 封顶；
+ * - 背离目标的速度不封顶（弹簧先减速再折返，不会越过目标）；
+ * - 已落在目标上时速度清零（贴边松手直接停住，不冲出去再回来）。
+ */
+internal fun capSettleVelocity(
+    velocity: Float,
+    current: Float,
+    target: Float,
+    omega: Float,
+): Float {
+    val remaining = target - current
+    if (remaining == 0f) return 0f
+    if (velocity * remaining <= 0f) return velocity
+    val cap = abs(remaining) * omega
+    return velocity.coerceIn(-cap, cap)
 }
