@@ -12,6 +12,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -110,7 +111,12 @@ fun ModePickerSheet(
     showFollowGlobal: Boolean = false,
     followAssistantSummary: String? = null,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 跳过半展开锚点直接展开到完整高度：模式列表较长且内部可滚动，先停在半展开会被
+    // verticalScroll 消费拖拽手势，用户无法把面板拉满，看不到尾部的自定义模式
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

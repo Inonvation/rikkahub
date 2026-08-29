@@ -73,11 +73,6 @@ private class ReasoningState(
 ) {
     var expandState by mutableStateOf(ReasoningCardState.Collapsed)
     var duration by mutableStateOf(initialDuration)
-    // 自动跟随的「用户上翻」判定基准：上次自动滚动写入的位置。
-    // 我们的自动滚动只往底部方向增大 value，value 跌破该基准即用户手动上翻，
-    // 据此暂停跟随（不用「距底阈值」判定：单 chunk 内容增长超过阈值会被误判为上翻，
-    // 导致跟随永久脱落）。用户回到贴底附近后下个 chunk 自动恢复跟随。
-    var lastAutoScrollValue: Int = 0
 
     fun onExpandedChange(nextExpanded: Boolean, loading: Boolean) {
         expandState = if (loading) {
@@ -136,20 +131,11 @@ private fun rememberReasoningState(
             // 让位一帧，避免滚动抢占正文渲染与自动滚动，减少流式时的滚动卡顿
             yield()
             // 每 chunk 重启 animateScrollTo 会持续取消/重启动画占帧，改为无动画直接贴底。
-            // 用户上翻判定见 ReasoningState.lastAutoScrollValue 注释：我们的滚动只会增大 value，
-            // value 跌破基准 = 用户上翻；用户停在中途（基准 < value < 底部）也尊重不拽回；
-            // 用户回到底部（value == 底部）时接管，恢复正常跟随。
-            val scrollState = state.scrollState
-            val value = scrollState.value
-            val max = scrollState.maxValue
-            when {
-                value < state.lastAutoScrollValue -> Unit
-                value == state.lastAutoScrollValue || value >= max -> {
-                    scrollState.scrollTo(max)
-                    state.lastAutoScrollValue = scrollState.value
-                }
-                else -> Unit
-            }
+            // 对齐上游：每 chunk 无条件贴底，不做"用户上翻/停在中途"判定——
+            // maxValue 是布局后的快照、Markdown 流式重排还会把 value 回退（clamp），
+            // 两类时序错位都会让基准判定失效，跟随一旦脱落无法自行恢复
+            // （"思考预览概率性不跟随输出滚动"根因）。上翻预览被拽回是上游既有行为。
+            state.scrollState.scrollTo(state.scrollState.maxValue)
         } else {
             if (prevReasoningLoading && state.expandState.expanded) {
                 // 生成结束先让位一帧，再折叠，避免高度动画与 LazyColumn 锚点调整抢同一帧
