@@ -7,6 +7,7 @@ import io.ktor.util.StringValues
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.SseClientTransport
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
+import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpError
 import io.modelcontextprotocol.kotlin.sdk.shared.AbstractTransport
 import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
@@ -152,7 +153,15 @@ internal class McpSessionRegistry(
         }
     }
 
-    suspend fun callTool(serverId: Uuid, toolName: String, args: JsonObject): CallToolResult {
+    suspend fun callTool(serverId: Uuid, toolName: String, args: JsonObject): CallToolResult =
+        callToolWithRecovery(serverId, toolName, args, allowSessionRecovery = true)
+
+    private suspend fun callToolWithRecovery(
+        serverId: Uuid,
+        toolName: String,
+        args: JsonObject,
+        allowSessionRecovery: Boolean,
+    ): CallToolResult {
         val session = sessions[serverId]
             ?: throw McpClientUnavailableException("No MCP session for server $serverId")
         val freshConfig = oauthCoordinator.ensureFreshToken(session.config)
@@ -175,11 +184,38 @@ internal class McpSessionRegistry(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (oauthCoordinator.needsAuthorization(config, e)) {
+            val needsAuth = oauthCoordinator.needsAuthorization(config, e)
+            if (needsAuth) {
                 statusStore.update(config.id, McpStatus.NeedsAuthorization)
+            }
+            // 服务端会话失效（闲置过期/网关负载均衡丢会话）时 SDK 不会自动重新 initialize，
+            // 这里强制重建连接后原样重试一次，让瞬时失效对 AI 透明
+            if (allowSessionRecovery && !needsAuth && isSessionExpiredError(e) &&
+                reconnectExpiredSession(session, sdkClient)
+            ) {
+                return callToolWithRecovery(serverId, toolName, args, allowSessionRecovery = false)
             }
             throw e
         }
+    }
+
+    /** 会话失效兜底：强制重建连接（重新 initialize 换新 session id），返回是否成功。 */
+    private suspend fun reconnectExpiredSession(session: McpSession, failedClient: Client): Boolean {
+        if (session.client != null && session.client !== failedClient) {
+            Log.i(TAG, "Session for ${session.config.id} already recovered by another caller")
+            return true
+        }
+        Log.w(TAG, "MCP session expired for ${session.config.id} (${session.config.commonOptions.name}), reconnecting")
+        val result = connectSession(
+            session = session,
+            requestedConfig = session.config,
+            cancelPendingReconnect = true,
+            forceReconnect = true,
+        )
+        if (result != ConnectResult.Success) {
+            Log.w(TAG, "Session recovery for ${session.config.id} failed: $result")
+        }
+        return result == ConnectResult.Success
     }
 
     suspend fun addClient(configInput: McpServerConfig) {
@@ -541,6 +577,29 @@ private fun mergeTools(storedTools: List<McpTool>, serverTools: List<Tool>): Lis
             inputSchema = serverTool.inputSchema.toSchema(),
         )
     }
+}
+
+private const val HTTP_NOT_FOUND = 404
+private const val SESSION_KEYWORD = "session"
+private val SESSION_LOST_KEYWORDS = listOf("expired", "expire", "not found", "invalid", "unknown", "terminated")
+
+/**
+ * 判断异常链是否为「会话失效」类错误，可通过强制重连（重新 initialize）恢复：
+ * - HTTP 404：MCP 规范中 session 过期/不存在的标准信号；
+ * - 错误消息同时命中 session 与过期/丢失关键词：聚合网关（如 mcpmarket）自定义的 SessionExpired/Session not found 响应体。
+ */
+internal fun isSessionExpiredError(error: Throwable): Boolean {
+    var cause: Throwable? = error
+    while (cause != null) {
+        if ((cause as? StreamableHttpError)?.code == HTTP_NOT_FOUND) return true
+        val message = cause.message
+        if (message != null) {
+            val lowered = message.lowercase()
+            if (SESSION_KEYWORD in lowered && SESSION_LOST_KEYWORDS.any { it in lowered }) return true
+        }
+        cause = cause.cause?.takeIf { it !== cause }
+    }
+    return false
 }
 
 private fun ToolSchema.toSchema(): InputSchema =
