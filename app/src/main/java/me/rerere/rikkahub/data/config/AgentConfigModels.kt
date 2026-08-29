@@ -138,6 +138,7 @@ data class AssistantConfigDto(
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     val useGlobalMemory: Boolean = false,
+    val enableAutoMemory: Boolean = false,
     val enableWebSearch: Boolean = false,
     val workspaceId: String? = null,
     /** 绑定的信任文件夹项目 id；null = 未绑定 */

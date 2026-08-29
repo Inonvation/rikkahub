@@ -92,6 +92,7 @@ class AgentConfigExporterTest {
             systemPrompt = "You are a test assistant.",
             temperature = 0.7f,
             enableMemory = true,
+            enableAutoMemory = true,
             enableWebSearch = true,
             workspaceId = Uuid.random(),
             mcpServers = setOf(Uuid.random()),
@@ -169,6 +170,12 @@ class AgentConfigExporterTest {
             assertEquals(1, mcpFile.servers[0].toolCount)
             assertTrue(mcpFile.servers[0].oauthEnabled)
             assertEquals(manifestFile.files.values.toSet(), setOf("ok"))
+
+            // 助手 DTO 完整序列化：新增的自动记忆开关也要随导出走完整回环
+            val assistantFile = JsonInstant.decodeFromString<AssistantConfigFile>(
+                root.resolve(AgentConfigPaths.ASSISTANTS_DIR).listFiles()!!.first().readText()
+            )
+            assertTrue(assistantFile.assistant.enableAutoMemory)
         } finally {
             cleanup()
         }

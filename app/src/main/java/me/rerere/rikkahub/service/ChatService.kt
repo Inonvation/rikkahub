@@ -86,6 +86,10 @@ import me.rerere.rikkahub.data.ai.tools.SubAgentCommands
 import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
 import me.rerere.rikkahub.data.ai.tools.StudyTools
+import me.rerere.rikkahub.data.ai.MemoryOperation
+import me.rerere.rikkahub.data.ai.buildMemoryConsolidationPrompt
+import me.rerere.rikkahub.data.ai.latestTurnTexts
+import me.rerere.rikkahub.data.ai.parseMemoryOperations
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
@@ -1986,10 +1990,15 @@ class ChatService(
                 }
             }
 
-            // TODO(自动提取记忆挂载点)：计划在此仿照上方 generateTitle 串行追加一次后台辅助
-            //  模型调用（assistant.enableAutoMemory 开关控制，默认关闭）：取最近一轮对话让
-            //  辅助模型提炼候选原子事实，diff 现有记忆后执行 ADD/UPDATE/DELETE（Mem0 式两阶段
-            //  管线）。当前仅预留位置，未实现调用逻辑。
+            // 自动记忆整理（enableAutoMemory，默认关闭）：与标题/建议并行的独立协程——
+            // 只写记忆表（独立于会话落库，无整对象 copy 竞态），失败静默不进错误气泡。
+            // 续答轮（resumeContext 非空）跳过：其 (USER, ASSISTANT) 轮文本与首轮几乎相同，
+            // 首轮结束时已整理过，重复整理只会翻倍辅助调用并放大语义重复写入。
+            if (resumeContext == null && assistant.enableMemory && assistant.enableAutoMemory) {
+                launchWithConversationReference(conversationId) {
+                    runAutoMemoryConsolidation(assistant, finalConversation)
+                }
+            }
 
             // 母代理回合正常结束：补唤醒该会话已完成但未消费的子代理
             scheduleRoundEndResume(conversationId)
@@ -2000,13 +2009,15 @@ class ChatService(
     }
 
     /**
-     * 生成时的记忆注入：全量 → 话题相关 top-K + 最近兜底。
-     * 检索失败时回退全量注入，绝不崩。
+     * 生成时的记忆注入：全量 → 多查询并集检索（最新 USER + 最新 ASSISTANT 各查一路）+ 最近兜底。
+     * 检索失败时回退全量注入，绝不崩。助手未开启记忆时直接返回空（省一次 DB/FTS 开销，
+     * GenerationHandler 侧本也会丢弃）。
      */
     private suspend fun loadMemoriesForGeneration(
         assistant: Assistant,
         messages: List<UIMessage>,
     ): List<AssistantMemory> {
+        if (!assistant.enableMemory) return emptyList()
         val memoryAssistantId = if (assistant.useGlobalMemory) {
             MemoryRepository.GLOBAL_MEMORY_ID
         } else {
@@ -2015,7 +2026,7 @@ class ChatService(
         return runCatching {
             memoryRepository.getRelevantMemories(
                 assistantId = memoryAssistantId,
-                query = extractMemoryQuery(messages),
+                queries = MemoryRepository.extractMemoryQueries(messages),
             )
         }.getOrElse { e ->
             Log.w(TAG, "memory retrieval failed, fall back to full memories", e)
@@ -2025,22 +2036,65 @@ class ChatService(
     }
 
     /**
-     * 记忆检索词提取：默认取最近一条 USER 消息文本（最新话题，最贴当前意图）；
-     * 太短/无实质词（如「那这个呢？」）则回退拼接最近 3 条 USER 消息给 FTS 更多检索面。
-     * 返回 null → 无可用检索词，注入侧仅走「最近记忆」兜底。
+     * 回合结束后的自动记忆整理（assistant.enableAutoMemory 开关，默认关闭）：
+     * 辅助模型（titleModelId → fastModelId 兜底，与标题生成同一选模链）读「现有记忆 + 最近
+     * 一轮对话」，单次调用产出受限操作集；parseMemoryOperations 做代码层校验（UPDATE/DELETE
+     * 的 id 只允许本轮提供给模型的现有记忆、单回合 ≤5 条、内容截断）后经 repository 应用
+     * （复用其归属校验/精确去重/FTS 失效）。语义去重与冲突仲裁由整理提示词完成（模型可见
+     * 现有全量清单，等价即 update）。失败静默：不进会话错误气泡、绝不阻断主流程。
      */
-    private fun extractMemoryQuery(messages: List<UIMessage>): String? {
-        val userMessages = messages.filter { it.role == MessageRole.USER }
-        if (userMessages.isEmpty()) return null
-        val latest = userMessages.last().toText().trim()
-        if (latest.isBlank()) return null
-        return if (latest.length < 4 || latest.none { it.isLetterOrDigit() }) {
-            userMessages.takeLast(3)
-                .joinToString("\n") { it.toText().trim() }
-                .trim()
-                .takeIf { it.isNotBlank() }
+    private suspend fun runAutoMemoryConsolidation(
+        assistant: Assistant,
+        conversation: Conversation,
+    ) {
+        val memoryAssistantId = if (assistant.useGlobalMemory) {
+            MemoryRepository.GLOBAL_MEMORY_ID
         } else {
-            latest.take(MemoryRepository.MEMORY_QUERY_MAX_CHARS)
+            assistant.id.toString()
+        }
+        runCatching {
+            val settings = settingsStore.settingsFlow.first()
+            val model = settings.findModelById(settings.titleModelId, fallback = settings.fastModelId)
+                ?: return@runCatching
+            val provider = model.findProvider(settings.providers) ?: return@runCatching
+            val providerHandler = providerManager.getProviderByType(provider)
+            val existing = memoryRepository.getMemoriesOfAssistant(memoryAssistantId)
+            val (userText, assistantText) = latestTurnTexts(conversation.currentMessages)
+                ?: return@runCatching
+            val prompt = buildMemoryConsolidationPrompt(existing, userText, assistantText)
+            val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {
+                providerHandler.generateText(
+                    providerSetting = provider,
+                    messages = listOf(UIMessage.user(prompt = prompt)),
+                    params = backgroundTextGenerationParams(model),
+                )
+            }
+            val operations = parseMemoryOperations(
+                raw = result.message.toText(),
+                validIds = existing.map { it.id }.toSet(),
+            )
+            operations.forEach { operation ->
+                when (operation) {
+                    is MemoryOperation.Add ->
+                        memoryRepository.addMemory(memoryAssistantId, operation.content, operation.category)
+
+                    is MemoryOperation.Update ->
+                        memoryRepository.updateContent(
+                            memoryAssistantId,
+                            operation.id,
+                            operation.content,
+                            operation.category,
+                        )
+
+                    is MemoryOperation.Delete ->
+                        memoryRepository.deleteMemoryInScope(memoryAssistantId, operation.id)
+                }
+            }
+            if (operations.isNotEmpty()) {
+                Log.i(TAG, "auto memory consolidation applied ${operations.size} ops")
+            }
+        }.onFailure {
+            Log.w(TAG, "auto memory consolidation failed", it)
         }
     }
 

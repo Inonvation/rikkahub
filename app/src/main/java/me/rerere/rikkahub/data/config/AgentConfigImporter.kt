@@ -223,6 +223,7 @@ object AgentConfigImporter {
             streamOutput = if (has("streamOutput")) dto.streamOutput else current.streamOutput,
             enableMemory = if (has("enableMemory")) dto.enableMemory else current.enableMemory,
             useGlobalMemory = if (has("useGlobalMemory")) dto.useGlobalMemory else current.useGlobalMemory,
+            enableAutoMemory = if (has("enableAutoMemory")) dto.enableAutoMemory else current.enableAutoMemory,
             messageTemplate = if (has("messageTemplate")) {
                 dto.messageTemplate.ifBlank { current.messageTemplate }
             } else {

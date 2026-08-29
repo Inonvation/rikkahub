@@ -13,6 +13,9 @@ import me.rerere.rikkahub.data.ai.buildMemoryContextBlock
  *
  * 必须注册在管线最末尾：晚于 TemplateTransformer，避免记忆文本被消息模板二次渲染。
  * 末尾不是 USER 消息时（如续答唤醒流）本轮跳过注入。
+ *
+ * 已知取舍（刻意为之，勿当 bug 修）：续答轮（尾消息为 ASSISTANT）整轮不注入记忆，
+ * 该轮上下文不含记忆块——优先保护 system+历史的前缀缓存；记忆随下一次正常 USER 轮恢复注入。
  */
 object MemoryContextTransformer : InputMessageTransformer {
     override suspend fun transform(

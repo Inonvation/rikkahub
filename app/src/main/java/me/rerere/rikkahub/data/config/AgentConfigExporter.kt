@@ -211,6 +211,7 @@ object AgentConfigExporter {
             streamOutput = streamOutput,
             enableMemory = enableMemory,
             useGlobalMemory = useGlobalMemory,
+            enableAutoMemory = enableAutoMemory,
             enableWebSearch = enableWebSearch,
             workspaceId = workspaceId?.toString(),
             trustedFolderProjectId = trustedFolderProjectId,

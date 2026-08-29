@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
@@ -32,6 +34,33 @@ class MemoryRepository(
         /** 去重用的内容归一化：trim、折叠连续空白、忽略大小写 */
         private fun normalizeContent(content: String): String =
             content.trim().replace(Regex("\\s+"), " ").lowercase()
+
+        /**
+         * 记忆检索词提取（多查询，纯函数）：
+         * - 主查询 = 最新一条 USER 消息文本；太短/无实词（如「那这个呢？」）则回退拼接
+         *   最近 3 条 USER 消息，给 FTS 更多检索面；
+         * - 副查询 = 最新一条 ASSISTANT 回答文本：回答对话题的展开通常比单条用户输入更宽，
+         *   两路并集提升召回（FTS 本地检索，零额外成本）。
+         * 返回空列表 → 注入侧仅走「最近记忆」兜底。
+         */
+        fun extractMemoryQueries(messages: List<UIMessage>): List<String> {
+            val userMessages = messages.filter { it.role == MessageRole.USER }
+            if (userMessages.isEmpty()) return emptyList()
+            val latest = userMessages.last().toText().trim()
+            val primary = if (latest.isBlank() || latest.length < 4 || latest.none { it.isLetterOrDigit() }) {
+                userMessages.takeLast(3)
+                    .joinToString("\n") { it.toText().trim() }
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+            } else {
+                latest.take(MEMORY_QUERY_MAX_CHARS)
+            }
+            val secondary = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+                ?.toText()?.trim()
+                ?.takeIf { it.isNotBlank() && it != primary }
+                ?.take(MEMORY_QUERY_MAX_CHARS)
+            return listOfNotNull(primary, secondary)
+        }
     }
 
     private fun MemoryEntity.toAssistantMemory() = AssistantMemory(
@@ -160,18 +189,22 @@ class MemoryRepository(
     /**
      * 生成时的记忆注入入口：
      * - 记忆 ≤ MEMORY_FULL_INJECTION_THRESHOLD → 全量注入，不检索；
-     * - 否则：话题相关 top-K 检索 + 恒带最近 N 条兜底；检索不足 topK 用最近记忆补齐；
+     * - 否则：多查询并集检索（每个查询各自 top-K，按查询优先级合并，主查询命中排前）+
+     *   恒带最近 N 条兜底；检索不足 topK 用最近记忆补齐；
      * - FTS 任何失败都降级为「最近记忆」，绝不崩、绝不空。
      */
-    suspend fun getRelevantMemories(assistantId: String, query: String?): List<AssistantMemory> {
+    suspend fun getRelevantMemories(assistantId: String, queries: List<String>): List<AssistantMemory> {
         val all = getMemoriesOfAssistant(assistantId)
         if (all.size <= MEMORY_FULL_INJECTION_THRESHOLD) return all
 
         val recent = all.sortedByDescending { it.updatedAt ?: it.createdAt ?: 0L }
         val result = LinkedHashMap<Int, AssistantMemory>()
 
-        if (!query.isNullOrBlank()) {
-            searchMemories(assistantId, query, MEMORY_SEARCH_TOP_K).forEach { result[it.id] = it }
+        // 多查询并集：副查询只补新 id（保持主查询的 BM25 优先序），扩大检索面零额外成本
+        queries.filter { it.isNotBlank() }.forEach { query ->
+            searchMemories(assistantId, query, MEMORY_SEARCH_TOP_K).forEach { memory ->
+                result.putIfAbsent(memory.id, memory)
+            }
         }
         // 兜底：最近 N 条恒在
         recent.take(MEMORY_FALLBACK_RECENT_N).forEach { result[it.id] = it }

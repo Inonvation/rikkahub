@@ -216,6 +216,23 @@ private fun AssistantMemoryContent(
                 }
             )
             item(
+                headlineContent = { Text("自动记忆整理") },
+                supportingContent = { Text("回合结束后由辅助模型自动提炼与维护记忆") },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.enableAutoMemory,
+                        onCheckedChange = {
+                            onUpdateAssistant(
+                                assistant.copy(
+                                    enableAutoMemory = it
+                                )
+                            )
+                        },
+                        enabled = assistant.enableMemory
+                    )
+                }
+            )
+            item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_use_profile)) },
                 supportingContent = { Text(stringResource(R.string.assistant_page_use_profile_desc)) },
                 trailingContent = {

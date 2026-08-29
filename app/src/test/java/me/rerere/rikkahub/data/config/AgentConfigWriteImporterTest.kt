@@ -263,6 +263,7 @@ class AgentConfigWriteImporterTest {
                         streamOutput = false,
                         contextMessageLimit = 100,
                         enableMemory = true,
+                        enableAutoMemory = true,
                     )
                 ),
             )
@@ -285,6 +286,7 @@ class AgentConfigWriteImporterTest {
             assertFalse(applied.streamOutput)
             assertEquals(100, applied.contextMessageLimit)
             assertTrue(applied.enableMemory)
+            assertTrue(applied.enableAutoMemory)
         } finally {
             cleanup()
         }

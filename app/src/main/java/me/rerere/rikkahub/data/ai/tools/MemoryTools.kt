@@ -54,6 +54,7 @@ fun buildMemoryTools(
             Do not store sensitive information (e.g., ethnicity, religion, sexual orientation, political views, sex life, criminal records).
             Store only durable facts; avoid transient states or anything that can be looked up again.
             Duplicate records are rejected automatically: if an equivalent record exists, its existing record is returned — do not create it again; prefer `edit`.
+            Check the <memories> block first: if an equivalent record is already listed there this turn, edit that record's id instead of creating a new one.
             Edit and delete only work on records in the current memory space; other records are invisible to you.
             Do not show memory content directly in the conversation unless the user explicitly asks.
 
