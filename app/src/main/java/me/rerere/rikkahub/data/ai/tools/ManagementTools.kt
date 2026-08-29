@@ -1735,7 +1735,10 @@ fun createDataAdminTools(
                             )
                             appendLine("workspaces_bound: ${settings.assistants.count { it.workspaceId != null }}")
                             appendLine("trusted_folder_projects: ${trusted.projects.size}")
-                            appendLine("trusted_folder_active: ${trusted.activeProjectId != null}")
+                            appendLine(
+                                "trusted_folder_bindings: " +
+                                    settings.assistants.count { it.trustedFolderProjectId != null }
+                            )
                             appendLine("conversations: $conversationCount")
                         }
                     )
@@ -1861,59 +1864,93 @@ fun createWorkspaceAdminTools(
 }
 
 fun createTrustedFolderAdminTools(
+    settingsStore: SettingsStore,
     trustedFolderRepository: TrustedFolderRepository,
     auditStore: ManagementAuditStore,
 ): List<Tool> {
+    fun currentAssistantId(): Uuid = settingsStore.settingsFlow.value.getCurrentAssistant().id
+
     return listOf(
         Tool(
             name = "trusted_folder_admin_list",
-            description = "List trusted folder projects with id, name and active state.",
+            description = "List trusted folder projects with id, name and which assistants bind each project. Use when you need to inspect trusted folders or their assistant bindings.",
             parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
             execute = {
-                val settings = trustedFolderRepository.currentSettings()
-                val text = if (settings.projects.isEmpty()) {
+                val settings = settingsStore.settingsFlow.value
+                val trusted = trustedFolderRepository.currentSettings()
+                val text = if (trusted.projects.isEmpty()) {
                     "(no trusted folder projects)"
                 } else {
-                    settings.projects.joinToString("\n") { project ->
+                    trusted.projects.joinToString("\n") { project ->
+                        val boundAssistants = settings.assistants
+                            .filter { it.trustedFolderProjectId == project.id }
+                            .map { it.name.ifBlank { it.id.toString() } }
                         "- id: ${project.id} | name: ${project.name} | " +
-                            "active: ${project.id == settings.activeProjectId}"
+                            "bound_assistants: ${boundAssistants.joinToString(", ").ifEmpty { "(none)" }}"
                     }
                 }
                 listOf(UIMessagePart.Text(text))
             },
         ),
         Tool(
-            name = "trusted_folder_admin_activate",
-            description = "Activate an existing trusted folder project. Affects all assistants, so it requires approval.",
-            needsApproval = { true },
+            name = "trusted_folder_admin_bind",
+            description = "Bind a trusted folder project to an assistant (binding activates it for that assistant). Omit assistantId to bind the current assistant. Requires approval only when modifying another assistant. Use `trusted_folder_admin_list` first to discover project ids.",
+            needsApproval = { args ->
+                val currentId = currentAssistantId()
+                val targetId = args.jsonObject.uuid("assistantId") ?: currentId
+                targetId != currentId
+            },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
-                        put("id", buildJsonObject { put("type", "string") })
+                        put("id", buildJsonObject {
+                            put("type", "string")
+                            put("description", "The trusted folder project id")
+                        })
+                        put("assistantId", buildJsonObject { put("type", "string") })
                     },
                     required = listOf("id"),
                 )
             },
             execute = { args ->
                 val id = args.jsonObject.str("id").orEmpty()
-                val settings = trustedFolderRepository.currentSettings()
-                val project = settings.projects.find { it.id == id }
+                val assistantId = args.jsonObject.uuid("assistantId") ?: currentAssistantId()
+                val settings = settingsStore.settingsFlow.value
+                val project = trustedFolderRepository.currentSettings().projects.find { it.id == id }
                     ?: return@Tool errorText("trusted folder project '$id' not found")
-                audited(auditStore, "trusted_folder_admin_activate", project.name) {
-                    trustedFolderRepository.setActiveProject(id)
-                    listOf(UIMessagePart.Text("Trusted folder \"${project.name}\" activated."))
+                if (settings.assistants.none { it.id == assistantId }) {
+                    return@Tool errorText("assistant '$assistantId' not found")
+                }
+                audited(auditStore, "trusted_folder_admin_bind", project.name) {
+                    settingsStore.updateAssistantTrustedFolderProject(assistantId, project.id)
+                    listOf(UIMessagePart.Text("Trusted folder \"${project.name}\" bound to assistant '$assistantId'."))
                 }
             },
         ),
         Tool(
-            name = "trusted_folder_admin_deactivate",
-            description = "Deactivate the currently active trusted folder project. Requires approval.",
-            needsApproval = { true },
-            parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
-            execute = {
-                audited(auditStore, "trusted_folder_admin_deactivate", "active project") {
-                    trustedFolderRepository.setActiveProject(null)
-                    listOf(UIMessagePart.Text("Trusted folder deactivated."))
+            name = "trusted_folder_admin_unbind",
+            description = "Unbind the trusted folder project from an assistant (unbinding deactivates it). Omit assistantId to unbind the current assistant. Requires approval only when modifying another assistant.",
+            needsApproval = { args ->
+                val currentId = currentAssistantId()
+                val targetId = args.jsonObject.uuid("assistantId") ?: currentId
+                targetId != currentId
+            },
+            parameters = {
+                InputSchema.Obj(
+                    properties = buildJsonObject {
+                        put("assistantId", buildJsonObject { put("type", "string") })
+                    }
+                )
+            },
+            execute = { args ->
+                val assistantId = args.jsonObject.uuid("assistantId") ?: currentAssistantId()
+                val settings = settingsStore.settingsFlow.value
+                if (settings.assistants.none { it.id == assistantId }) {
+                    return@Tool errorText("assistant '$assistantId' not found")
+                }
+                audited(auditStore, "trusted_folder_admin_unbind", assistantId.toString()) {
+                    settingsStore.updateAssistantTrustedFolderProject(assistantId, null)
+                    listOf(UIMessagePart.Text("Trusted folder unbound from assistant '$assistantId'."))
                 }
             },
         ),

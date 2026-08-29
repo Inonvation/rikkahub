@@ -13,7 +13,8 @@ import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 
 /**
- * 信任文件夹项目页 VM：项目列表 + 激活切换 + 项目管理。
+ * 信任文件夹项目页 VM：文件夹库管理（添加/重命名/删除）。
+ * 激活语义在助手级绑定（Assistant.trustedFolderProjectId），不在本页操作。
  * 操作结果通过 [message] 以 toast 形式反馈给 UI。
  */
 class TrustedFoldersVM(
@@ -45,12 +46,6 @@ class TrustedFoldersVM(
         runCatching { repository.renameProject(id, name) }
             .onSuccess { _message.emit("已重命名") }
             .onFailure { _message.emit(it.message ?: "重命名失败") }
-    }
-
-    /** 激活/取消激活项目（null = 解除激活） */
-    fun setActive(id: String?) = launch {
-        runCatching { repository.setActiveProject(id) }
-            .onFailure { _message.emit(it.message ?: "切换失败") }
     }
 
     private fun launch(block: suspend () -> Unit) {

@@ -20,7 +20,7 @@ internal fun buildAgentBehaviorPrompt(
         appendLine("## Agent Behavior")
         appendLine()
         if (profile != AgentBehaviorProfile.LEGACY) {
-            appendLine(modeGuidanceSection(profile))
+            appendLine(modeGuidanceSection(profile, tools))
             appendLine()
         }
         appendLine(PLAN_AND_ACT_SECTION)
@@ -38,10 +38,10 @@ internal fun buildAgentBehaviorPrompt(
     }
 }
 
-private fun modeGuidanceSection(profile: AgentBehaviorProfile): String = when (profile) {
+private fun modeGuidanceSection(profile: AgentBehaviorProfile, tools: List<Tool>): String = when (profile) {
     AgentBehaviorProfile.STANDARD -> MODE_STANDARD_SECTION
     AgentBehaviorProfile.WORKSPACE -> MODE_WORKSPACE_SECTION
-    AgentBehaviorProfile.MANAGEMENT -> MODE_MANAGEMENT_SECTION
+    AgentBehaviorProfile.MANAGEMENT -> managementSection(tools)
     AgentBehaviorProfile.MINIMAL -> MODE_MINIMAL_SECTION
     AgentBehaviorProfile.LEGACY -> ""
 }
@@ -62,16 +62,27 @@ private val MODE_WORKSPACE_SECTION = """
     - Prefer workspace tools over pasting file contents into chat. If no workspace is configured, fall back to balanced behavior.
 """.trimIndent()
 
-private val MODE_MANAGEMENT_SECTION = """
-    ## Mode: Management
-    - You are in management mode: your work targets the assistant's own skills, MCP servers, providers, modes, logs, and environment.
-    - Inspect first: call admin_inventory and the relevant *_list tools (provider_list, assistant_list, mcp_admin_list, skill_admin_list, search_admin_list, workspace_admin_list, trusted_folder_admin_list, knowledge_admin_list, conversation_admin_list) before changing anything.
-    - Before a write, state the affected scope and expected effect, and wait for approval whenever the tool requires it.
-    - Prefer reversible changes; include a rollback or verification plan when modifying persistent configuration.
-    - After a settings-backed write, verify the result; if the change is wrong, use management_undo to revert it.
-    - Call out explicitly when an action affects global settings, other assistants, or running conversations.
-    - For file work in the workspace, keep workspace behavior: plan, execute continuously, and verify before reporting; management writes remain approval-gated.
-""".trimIndent()
+/**
+ * 管理段：感知工具名单按本轮实际注入动态生成——只点名 admin_inventory 与已注入的 *_list 工具，
+ * 部分管理能力的自定义模式不会引用不存在的工具；内置管理模式能力齐全，
+ * 产出覆盖旧静态文本列出的全部名单（settings_admin_list/audit_list/mode_list 也一并纳入）。
+ */
+private fun managementSection(tools: List<Tool>): String = buildString {
+    appendLine("## Mode: Management")
+    appendLine("- You are in management mode: your work targets the assistant's own skills, MCP servers, providers, modes, logs, and environment.")
+    val inspectTools = buildList {
+        if (tools.any { it.name == "admin_inventory" }) add("admin_inventory")
+        addAll(tools.map { it.name }.filter { it.endsWith("_list") })
+    }
+    if (inspectTools.isNotEmpty()) {
+        appendLine("- Inspect first: call ${inspectTools.joinToString(", ")} before changing anything.")
+    }
+    appendLine("- Before a write, state the affected scope and expected effect, and wait for approval whenever the tool requires it.")
+    appendLine("- Prefer reversible changes; include a rollback or verification plan when modifying persistent configuration.")
+    appendLine("- After a settings-backed write, verify the result; if the change is wrong, use management_undo to revert it.")
+    appendLine("- Call out explicitly when an action affects global settings, other assistants, or running conversations.")
+    appendLine("- For file work in the workspace, keep workspace behavior: plan, execute continuously, and verify before reporting; management writes remain approval-gated.")
+}
 
 private val MODE_MINIMAL_SECTION = """
     ## Mode: Minimal

@@ -20,7 +20,7 @@ enum class ChatMode {
     /** 极简：只注入用户自定义提示词，保留本地工具、联网搜索与附件解析（不注入 MCP/外部工具声明）。 */
     MINIMAL,
 
-    /** 标准：功能完整，遵循助手设置中的工具，默认不注入 use_skill，可在设置中按需开启；不注入工作区/信任文件夹工具与 AGENTS 说明，不支持 skill/MCP 感知与配置。 */
+    /** 标准：功能完整，遵循助手设置中的工具（含已绑定 MCP 服务器的 mcp__* 使用），默认不注入 use_skill，可在设置中按需开启；不注入工作区/信任文件夹工具与 AGENTS 说明，不含 skill 与 MCP 的管理面（skill_admin_*、mcp_admin_*）。 */
     STANDARD,
 
     /** PTC（UI 显示「工作区模式」）：包含标准全部能力，并启用信任文件夹与工作区的所有工具能力（未配置时自动降级）。 */
@@ -52,31 +52,73 @@ enum class ChatMode {
 fun ChatMode.effectivePolicy(settings: Settings): ChatModePolicy =
     settings.builtinModeOverrides[this] ?: policy()
 
-/** 模式能力中因当前助手或全局设置限制而实际不可用的项。 */
-fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> = buildSet {
+/**
+ * 模式能力中因当前助手或全局设置限制而实际不可用的项（设置页展示用近似视图）。
+ *
+ * 生成链路请使用 [withAvailability]，以运行时真实事实（技能安装情况、信任文件夹绑定解析）裁决。
+ */
+fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> {
     val assistant = settings.getCurrentAssistant()
-    val builtInSearchEnabled = settings.getCurrentChatModel()?.tools?.contains(BuiltInTools.Search) == true
-    if (Capability.SEARCH in capabilities && !assistant.enableWebSearch && !builtInSearchEnabled) {
-        add(Capability.SEARCH)
+    val effective = withAvailability(
+        assistant = assistant,
+        settings = settings,
+        skillsInstalled = true,
+        trustedFolderBound = assistant.trustedFolderProjectId != null,
+    )
+    return capabilities - effective.capabilities
+}
+
+/**
+ * 可用性裁决（单一出口）：从策略能力清单中扣除「因助手配置 / 全局设置 / 运行时事实而不可用」的能力。
+ *
+ * 门控公式：effective = policy.allows(family) && settings.globalEnabled(family)
+ *           && assistant.optIn(family) && runtime.ready(family)。
+ * 这里折叠前三层；L4 运行时就绪中「工具工厂能自行判空」的部分（MCP 连接状态、Shizuku、
+ * 工作区 rootfs）仍由各工具工厂兜底，此处只裁决声明级可用性。
+ *
+ * 「能用」与「能管理」分离：MCP_USE 只看助手是否绑定了服务器（optIn），
+ * 全局 [Settings.enableMcpManager] 仅授权 mcp_admin_*（MCP_ADMIN）——关掉管理开关
+ * 不会静默禁用已配置服务器的使用。
+ */
+fun ChatModePolicy.withAvailability(
+    assistant: Assistant,
+    settings: Settings,
+    /** 设备上是否安装了任意 skill（skillManager.listSkills() 非空） */
+    skillsInstalled: Boolean,
+    /** 当前助手绑定的信任文件夹项目是否存在（未绑定或项目已删除 = false） */
+    trustedFolderBound: Boolean,
+    /** 当前助手绑定的知识库是否至少一个真实存在（库已全部删除 = false） */
+    knowledgeReady: Boolean = true,
+): ChatModePolicy {
+    val restricted = buildSet {
+        val builtInSearchEnabled = settings.getCurrentChatModel()?.tools?.contains(BuiltInTools.Search) == true
+        if (Capability.SEARCH in capabilities && !assistant.enableWebSearch && !builtInSearchEnabled) {
+            add(Capability.SEARCH)
+        }
+        if (Capability.WORKSPACE in capabilities && assistant.workspaceId == null) add(Capability.WORKSPACE)
+        if (Capability.MCP_USE in capabilities && assistant.mcpServers.isEmpty()) {
+            add(Capability.MCP_USE)
+        }
+        if (Capability.MCP_ADMIN in capabilities && !settings.enableMcpManager) add(Capability.MCP_ADMIN)
+        if (Capability.SKILL_USE in capabilities && (!skillsInstalled || assistant.enabledSkills.isEmpty())) {
+            add(Capability.SKILL_USE)
+        }
+        if (Capability.SKILL_ADMIN in capabilities && !skillsInstalled) add(Capability.SKILL_ADMIN)
+        if (Capability.MEMORY in capabilities && !assistant.enableMemory) add(Capability.MEMORY)
+        if (Capability.TODO in capabilities && !settings.enableTodoList) add(Capability.TODO)
+        if (Capability.SUBAGENT in capabilities && !settings.enableSubAgent) add(Capability.SUBAGENT)
+        if (Capability.STUDY in capabilities && assistant.enabledStudyTools.isEmpty()) add(Capability.STUDY)
+        if (Capability.HISTORY in capabilities && !assistant.enableRecentChatsReference) {
+            add(Capability.HISTORY)
+        }
+        if (Capability.KNOWLEDGE in capabilities &&
+            (assistant.knowledgeBaseIds.isEmpty() || !knowledgeReady)
+        ) {
+            add(Capability.KNOWLEDGE)
+        }
+        if (Capability.TRUSTED_FOLDER in capabilities && !trustedFolderBound) add(Capability.TRUSTED_FOLDER)
     }
-    if (Capability.WORKSPACE in capabilities && assistant.workspaceId == null) add(Capability.WORKSPACE)
-    if (Capability.MCP_USE in capabilities &&
-        (assistant.mcpServers.isEmpty() || !settings.enableMcpManager)
-    ) {
-        add(Capability.MCP_USE)
-    }
-    if (Capability.MCP_ADMIN in capabilities && !settings.enableMcpManager) add(Capability.MCP_ADMIN)
-    if (Capability.SKILL_USE in capabilities && assistant.enabledSkills.isEmpty()) add(Capability.SKILL_USE)
-    if (Capability.MEMORY in capabilities && !assistant.enableMemory) add(Capability.MEMORY)
-    if (Capability.TODO in capabilities && !settings.enableTodoList) add(Capability.TODO)
-    if (Capability.SUBAGENT in capabilities && !settings.enableSubAgent) add(Capability.SUBAGENT)
-    if (Capability.STUDY in capabilities && assistant.enabledStudyTools.isEmpty()) add(Capability.STUDY)
-    if (Capability.HISTORY in capabilities && !assistant.enableRecentChatsReference) {
-        add(Capability.HISTORY)
-    }
-    if (Capability.KNOWLEDGE in capabilities && assistant.knowledgeBaseIds.isEmpty()) {
-        add(Capability.KNOWLEDGE)
-    }
+    return if (restricted.isEmpty()) this else copy(capabilities = capabilities - restricted)
 }
 
 /**
@@ -104,14 +146,14 @@ enum class Capability(val managementOnly: Boolean = false) {
     /** use_skill（已启用 skill 的使用） */
     SKILL_USE,
 
-    /** skill_admin_*（感知与配置 skill） */
-    SKILL_ADMIN,
+    /** skill_admin_*（感知与配置 skill，管理模式专属） */
+    SKILL_ADMIN(managementOnly = true),
 
     /** 外部 MCP 工具 mcp__* */
     MCP_USE,
 
-    /** mcp_admin_*（感知与配置 MCP） */
-    MCP_ADMIN,
+    /** mcp_admin_*（感知与配置 MCP，管理模式专属） */
+    MCP_ADMIN(managementOnly = true),
 
     /** 记忆工具与记忆提示词 */
     MEMORY,
@@ -257,15 +299,16 @@ data class ChatModePolicy(
         val MINIMAL_CAPABILITIES: Set<Capability> =
             setOf(Capability.LOCAL_TOOLS, Capability.SEARCH, Capability.DOCUMENT)
 
-        /** 极简模式策略：不注入工具声明，但仍保留一段「默认不主动调用工具」的行为准则 */
+        /** 极简模式策略：仅声明本地/搜索/文档工具（无工具 systemPrompt 说明），保留一段「默认不主动调用工具」的行为准则 */
         val MINIMAL = ChatModePolicy(
             capabilities = MINIMAL_CAPABILITIES,
             behaviorProfileOverride = AgentBehaviorProfile.MINIMAL,
         )
 
-        /** 跟随助手配置能力集合：等价于引入四个模式前的完整工具/提示词能力，仅排除管理模式专属工具。 */
+        /** 跟随助手配置能力集合：标准模式基础 + 工作区/信任文件夹/skill 使用（管理模式专属工具一律排除）。 */
         val UNRESTRICTED_CAPABILITIES: Set<Capability> =
-            Capability.entries.filterNot { it.managementOnly }.toSet()
+            DEFAULT_CAPABILITIES +
+                setOf(Capability.WORKSPACE, Capability.TRUSTED_FOLDER, Capability.SKILL_USE)
 
         /** 跟随助手配置策略：无模式门控，行为提示词还原无模式版本。 */
         val UNRESTRICTED = ChatModePolicy(
@@ -304,8 +347,7 @@ object ModeRefs {
  *
  * 未显式配置时返回 null，表示会话使用「跟随助手配置」。
  */
-@Suppress("UNUSED_PARAMETER")
-fun resolveModeRef(assistant: Assistant, settings: Settings, trustedFolderActive: Boolean): String? =
+fun resolveModeRef(assistant: Assistant, settings: Settings): String? =
     assistant.defaultMode
         ?: settings.defaultMode
 
@@ -322,12 +364,13 @@ fun resolveModePolicy(ref: String?, settings: Settings): ChatModePolicy? {
 /**
  * 会话级生效策略：mode 为 null 时使用「跟随助手配置」；显式模式按引用解析，
  * 非法或已删除的显式引用回退标准模式。
+ *
+ * 返回的是模式策略（能力上限）；生成链路还需经 [withAvailability] 折叠助手/全局/运行时可用性。
  */
 fun resolveConversationPolicy(
     conversation: Conversation,
     assistant: Assistant,
     settings: Settings,
-    trustedFolderActive: Boolean,
 ): ChatModePolicy {
     val modeStr = conversation.mode
     if (modeStr.isNullOrBlank() || modeStr == ModeRefs.FOLLOW_ASSISTANT) {

@@ -54,6 +54,8 @@ data class Assistant(
     ),
     val enableWebSearch: Boolean = false, // 网络搜索开关(每个助手独立)
     val workspaceId: Uuid? = null,
+    /** 绑定的信任文件夹项目 id（TrustedFolderProject.id）；null = 未绑定，不注入 trusted_folder_* 工具与环境说明 */
+    val trustedFolderProjectId: String? = null,
     /** 新建对话时默认的工作目录（Rootfs 内绝对路径）；用户切换 cwd 时同步保存 */
     val defaultWorkspaceCwd: String? = null,
     val background: String? = null, // 聊天页背景图地址(本地文件 URI 或网络 URL), 为 null 时无背景

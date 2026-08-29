@@ -34,43 +34,47 @@ private fun String.isImagePath(): Boolean =
     substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
 
 /**
- * 信任文件夹 AI 工具。全部操作基于**当前激活项目**内的真实文件（SAF）。
+ * 信任文件夹 AI 工具。全部操作基于**当前助手绑定的项目**内的真实文件（SAF）。
  *
  * 边界：
- * - **无激活项目时不注入任何工具**（[createTrustedFolderTools] 返回空列表），AI 无法触碰。
+ * - **助手未绑定项目（或项目已删除）时不注入任何工具**（[createTrustedFolderTools] 返回空列表），AI 无法触碰。
  * - 所有路径均为**相对项目根**的相对路径，经 [SafeFolderAccess.validateRelPath] 校验，拒绝 `..` 逃逸。
- * - 审批严格按设置中的操作开关（读/建/改/删），不做 forceNoApproval 旁路——真实文件系统上的写操作始终受开关约束。
+ * - 审批严格按绑定项目设置中的操作开关（读/建/改/删），不做 forceNoApproval 旁路——真实文件系统上的写操作始终受开关约束。
  */
-suspend fun createTrustedFolderTools(repository: TrustedFolderRepository): List<Tool> {
-    if (repository.currentSettings().activeProjectId == null) return emptyList()
+suspend fun createTrustedFolderTools(
+    repository: TrustedFolderRepository,
+    projectId: String,
+): List<Tool> {
+    runCatching { repository.withProject(projectId) { it } }.getOrNull() ?: return emptyList()
 
     fun needsApproval(op: TrustedOp): (JsonElement) -> Boolean = { input ->
         // 配置目录（.obsidian 等）内的写操作强制审批，即使设置里允许修改也要用户确认
         val protected = op != TrustedOp.READ && input.jsonObject.protectedPath(repository)
-        repository.approvalNeeded(op) || input.jsonObject.pathInvalid("path") || protected
+        repository.approvalNeeded(op, projectId) || input.jsonObject.pathInvalid("path") || protected
     }
 
     return listOf(
-        createListTool(repository, needsApproval(TrustedOp.READ)),
-        createReadTool(repository, needsApproval(TrustedOp.READ)),
-        createSearchTool(repository, needsApproval(TrustedOp.READ)),
-        createWriteTool(repository, needsApproval(TrustedOp.CREATE)),
-        createCreateFolderTool(repository, needsApproval(TrustedOp.CREATE)),
-        createEditTool(repository, needsApproval(TrustedOp.EDIT)),
-        createRenameTool(repository, needsApproval(TrustedOp.EDIT)),
-        createMoveTool(repository, needsApproval(TrustedOp.EDIT)),
-        createDeleteTool(repository, needsApproval(TrustedOp.DELETE)),
-        createHealthTool(repository, needsApproval(TrustedOp.READ)),
+        createListTool(repository, projectId, needsApproval(TrustedOp.READ)),
+        createReadTool(repository, projectId, needsApproval(TrustedOp.READ)),
+        createSearchTool(repository, projectId, needsApproval(TrustedOp.READ)),
+        createWriteTool(repository, projectId, needsApproval(TrustedOp.CREATE)),
+        createCreateFolderTool(repository, projectId, needsApproval(TrustedOp.CREATE)),
+        createEditTool(repository, projectId, needsApproval(TrustedOp.EDIT)),
+        createRenameTool(repository, projectId, needsApproval(TrustedOp.EDIT)),
+        createMoveTool(repository, projectId, needsApproval(TrustedOp.EDIT)),
+        createDeleteTool(repository, projectId, needsApproval(TrustedOp.DELETE)),
+        createHealthTool(repository, projectId, needsApproval(TrustedOp.READ)),
     )
 }
 
 private fun createListTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_list",
     description = """
-        List a directory inside the active trusted folder (real files on the device).
+        List a directory inside the trusted folder bound to this assistant (real files on the device).
         Path is RELATIVE to the trusted folder root; omit or use "" for the root.
         Returns entries with name, path, isDirectory and sizeBytes.
     """.trimIndent().replace("\n", " "),
@@ -83,7 +87,7 @@ private fun createListTool(
     needsApproval = needsApproval,
     execute = {
         val path = it.jsonObject.relPathOrEmpty("path")
-        val entries = repository.list(path)
+        val entries = repository.list(path, projectId)
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
@@ -97,11 +101,12 @@ private fun createListTool(
 
 private fun createReadTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_read",
     description = """
-        Read a file inside the active trusted folder. Path is RELATIVE to the trusted folder root.
+        Read a file inside the trusted folder bound to this assistant. Path is RELATIVE to the trusted folder root.
         Supports UTF-8 text files (Markdown, notes, etc.) and image files.
         Cannot list a directory - use trusted_folder_list instead.
     """.trimIndent().replace("\n", " "),
@@ -115,7 +120,7 @@ private fun createReadTool(
     execute = {
         val path = it.jsonObject.relPath("path")
         if (path.isImagePath()) {
-            val bytes = repository.readBytes(path)
+            val bytes = repository.readBytes(path, projectId)
             val filesManager = getKoin().get<FilesManager>()
             val uris = filesManager.createChatFilesByByteArrays(listOf(bytes))
             listOf(
@@ -128,7 +133,7 @@ private fun createReadTool(
                 ),
             )
         } else {
-            val text = repository.readText(path)
+            val text = repository.readText(path, projectId)
             listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
@@ -143,11 +148,12 @@ private fun createReadTool(
 
 private fun createWriteTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_write",
     description = """
-        Write a UTF-8 text file inside the active trusted folder (real files on the device).
+        Write a UTF-8 text file inside the trusted folder bound to this assistant (real files on the device).
         Path is RELATIVE to the trusted folder root; parent directories are created automatically.
         If the file already exists, overwrite=true replaces it; overwrite=false errors.
     """.trimIndent().replace("\n", " "),
@@ -173,8 +179,8 @@ private fun createWriteTool(
         val path = params.relPath("path")
         val text = params.string("text") ?: error("text is required")
         val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
-        val existedBefore = runCatching { repository.readText(path).isNotEmpty() }.getOrDefault(false)
-        val entry = repository.writeText(path, text, overwrite)
+        val existedBefore = runCatching { repository.readText(path, projectId).isNotEmpty() }.getOrDefault(false)
+        val entry = repository.writeText(path, text, overwrite, projectId)
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
@@ -188,11 +194,12 @@ private fun createWriteTool(
 
 private fun createCreateFolderTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_create_folder",
     description = """
-        Create a folder (or folders, if nested) inside the active trusted folder.
+        Create a folder (or folders, if nested) inside the trusted folder bound to this assistant.
         Path is RELATIVE to the trusted folder root. Parent directories are created automatically.
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -204,18 +211,19 @@ private fun createCreateFolderTool(
     needsApproval = needsApproval,
     execute = {
         val path = it.jsonObject.relPath("path")
-        val entry = repository.createFolder(path)
+        val entry = repository.createFolder(path, projectId)
         listOf(UIMessagePart.Text(buildJsonObject { toResultFields(entry, "created") }.toString()))
     },
 )
 
 private fun createEditTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_edit",
     description = """
-        Edit a UTF-8 text file inside the active trusted folder. Path is RELATIVE to the trusted folder root.
+        Edit a UTF-8 text file inside the trusted folder bound to this assistant. Path is RELATIVE to the trusted folder root.
         Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
         If no exact match is found, whitespace-tolerant line matching is attempted automatically.
     """.trimIndent().replace("\n", " "),
@@ -248,14 +256,14 @@ private fun createEditTool(
         val replaceAll = params["replace_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
         require(oldText.isNotEmpty()) { "old_text must not be empty" }
 
-        val original = repository.readText(path)
+        val original = repository.readText(path, projectId)
         // 逐级尝试 exact -> line_trimmed -> block_anchor 替换器（复用工作区的 TextReplacers）
         val result = try {
             replaceText(original, oldText, newText, replaceAll)
         } catch (e: IllegalArgumentException) {
             error("${e.message} (path: $path)")
         }
-        val entry = repository.writeText(path, result.updated, overwrite = true)
+        val entry = repository.writeText(path, result.updated, overwrite = true, projectId)
         val diff = generateUnifiedDiff(original, result.updated, entry.path)
         listOf(
             UIMessagePart.Text(
@@ -273,11 +281,12 @@ private fun createEditTool(
 
 private fun createRenameTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_rename",
     description = """
-        Rename a file or folder inside the active trusted folder. Path is RELATIVE to the trusted folder root.
+        Rename a file or folder inside the trusted folder bound to this assistant. Path is RELATIVE to the trusted folder root.
         new_name must be a plain name (no slashes).
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -297,18 +306,19 @@ private fun createRenameTool(
         val params = it.jsonObject
         val path = params.relPath("path")
         val newName = params.string("new_name") ?: error("new_name is required")
-        val entry = repository.rename(path, newName)
+        val entry = repository.rename(path, newName, projectId)
         listOf(UIMessagePart.Text(buildJsonObject { toResultFields(entry, "renamed") }.toString()))
     },
 )
 
 private fun createMoveTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_move",
     description = """
-        Move a file or folder to another directory inside the active trusted folder.
+        Move a file or folder to another directory inside the trusted folder bound to this assistant.
         Both path and target_dir are RELATIVE to the trusted folder root; target_dir may be "" for the root.
         The item keeps its name in the target directory.
     """.trimIndent().replace("\n", " "),
@@ -329,18 +339,19 @@ private fun createMoveTool(
         val params = it.jsonObject
         val path = params.relPath("path")
         val targetDir = params.relPathOrEmpty("target_dir")
-        val entry = repository.move(path, targetDir)
+        val entry = repository.move(path, targetDir, projectId)
         listOf(UIMessagePart.Text(buildJsonObject { toResultFields(entry, "moved") }.toString()))
     },
 )
 
 private fun createDeleteTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_delete",
     description = """
-        Delete a file or folder inside the active trusted folder (permanently, cannot be undone).
+        Delete a file or folder inside the trusted folder bound to this assistant (permanently, cannot be undone).
         Path is RELATIVE to the trusted folder root. Deleting a folder deletes everything under it.
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -352,7 +363,7 @@ private fun createDeleteTool(
     needsApproval = needsApproval,
     execute = {
         val path = it.jsonObject.relPath("path")
-        repository.delete(path)
+        repository.delete(path, projectId)
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
@@ -366,11 +377,12 @@ private fun createDeleteTool(
 
 private fun createSearchTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_search",
     description = """
-        Search file contents inside the active trusted folder. Path is RELATIVE to the trusted folder root.
+        Search file contents inside the trusted folder bound to this assistant. Path is RELATIVE to the trusted folder root.
         Returns matching lines with path and line number. Searches text files only.
         If the result is truncated (reached maxResults), narrow the search with path.
     """.trimIndent().replace("\n", " "),
@@ -406,7 +418,7 @@ private fun createSearchTool(
         val regex = params["regex"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
         val ignoreCase = params["ignoreCase"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
         val maxResults = params.string("maxResults")?.toIntOrNull()?.coerceIn(1, 500) ?: 50
-        val matches = repository.search(path, query, regex, ignoreCase, maxResults)
+        val matches = repository.search(path, query, regex, ignoreCase, maxResults, projectId)
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
@@ -432,11 +444,12 @@ private fun createSearchTool(
 
 private fun createHealthTool(
     repository: TrustedFolderRepository,
+    projectId: String,
     needsApproval: (JsonElement) -> Boolean,
 ) = Tool(
     name = "trusted_folder_check_links",
     description = """
-        Scan all Markdown notes in the active trusted folder for broken [[wikilinks]] (links to notes that don't exist)
+        Scan all Markdown notes in the bound trusted folder for broken [[wikilinks]] (links to notes that don't exist)
         and empty notes (no body). Returns totalNotes, emptyNotes and brokenLinks (source file, link, target).
         Useful to spot dead links in an Obsidian vault.
     """.trimIndent().replace("\n", " "),
@@ -445,7 +458,7 @@ private fun createHealthTool(
     },
     needsApproval = needsApproval,
     execute = {
-        val files = repository.scanMarkdownFiles()
+        val files = repository.scanMarkdownFiles(projectId)
         val report = analyzeMarkdownHealth(files)
         listOf(
             UIMessagePart.Text(
@@ -532,7 +545,7 @@ private fun kotlinx.serialization.json.JsonObject.relPath(name: String): String 
         // 绝对路径多半是模型把"沙盒绝对路径"或"设备真实路径"直接填进来了。
         // 引导到 workspace（信任文件夹内路径是相对当前激活项目的），避免模型反复试错。
         val hint = if (path.startsWith("/")) {
-            "信任文件夹内路径必须是相对当前激活项目的相对路径（如 notes/diary.md），不是绝对路径。" +
+            "信任文件夹内路径必须是相对当前绑定项目的相对路径（如 notes/diary.md），不是绝对路径。" +
                 "若你想操作工作区沙盒文件，请改用 workspace_* 工具（路径以 /workspace/ 开头）。"
         } else {
             null
@@ -550,7 +563,7 @@ private fun kotlinx.serialization.json.JsonObject.relPathOrEmpty(name: String): 
         SafeFolderAccess.validateRelPath(path)
     } catch (e: IllegalArgumentException) {
         val hint = if (path.startsWith("/")) {
-            "信任文件夹内路径必须是相对当前激活项目的相对路径（如 notes/diary.md），不是绝对路径。" +
+            "信任文件夹内路径必须是相对当前绑定项目的相对路径（如 notes/diary.md），不是绝对路径。" +
                 "若你想操作工作区沙盒文件，请改用 workspace_* 工具（路径以 /workspace/ 开头）。"
         } else {
             null

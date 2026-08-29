@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.MemoryCategory
@@ -77,5 +78,17 @@ class MemoryToolsTest {
     fun `non-string primitive degrades to OTHER`() = runBlocking {
         executeCreate("123")
         assertEquals(MemoryCategory.OTHER, captured.single())
+    }
+
+    @Test
+    fun `memory tool carries stable system pointer`() {
+        // 能力层指针与工具同源：systemPrompt 必须挂在 memory_tool 上而非外部拼装，
+        // 保证「何时写入」引导与工具注册严格同步出现/消失
+        val prompt = newTool().systemPrompt(Model(modelId = "test-model"), emptyList())
+        assertEquals(MEMORY_TOOL_SYSTEM_PROMPT, prompt)
+        assertTrue(prompt.contains("memory_tool"))
+        assertTrue(prompt.contains("<memories>"))
+        assertTrue(prompt.contains("When to save"))
+        assertTrue(prompt.contains("When not to save"))
     }
 }

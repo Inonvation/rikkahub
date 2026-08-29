@@ -44,11 +44,12 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import org.koin.compose.koinInject
 
 /**
- * 移动目标目录选择器：在激活信任文件夹内按目录树导航，选择目标目录后回调其相对路径（"" = 根目录）。
+ * 移动目标目录选择器：在指定信任文件夹项目内按目录树导航，选择目标目录后回调其相对路径（"" = 根目录）。
  * 目录源自身及其子目录禁用（避免把目录移进自己）。配置目录（.obsidian 等）不显示为移动目标。
  */
 @Composable
 fun TrustedFolderMoveTargetSheet(
+    projectId: String,
     sources: List<TrustedFolderEntry>,
     onSelectTarget: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -63,7 +64,7 @@ fun TrustedFolderMoveTargetSheet(
         loading = true
         runCatching {
             // 只列子目录；配置目录受保护，不作为移动目标
-            repository.list(browsePath)
+            repository.list(browsePath, projectId)
                 .filter { it.isDirectory && !it.name.startsWith(".") }
         }.onSuccess { entries = it }
             .onFailure { entries = emptyList() }

@@ -36,6 +36,7 @@ class AssistantDetailVM(
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val trustedFolderRepository: me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository,
 ) : ViewModel() {
     private val assistantId = Uuid.parse(id)
 
@@ -101,6 +102,16 @@ class AssistantDetailVM(
             started = SharingStarted.Eagerly,
             initialValue = emptyList(),
         )
+
+    /** 信任文件夹库（项目列表）：助手绑定选择用 */
+    val trustedFolderProjects: StateFlow<List<me.rerere.rikkahub.data.trustedfolders.TrustedFolderProject>> =
+        trustedFolderRepository.settingsFlow
+            .map { it.projects }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = emptyList(),
+            )
 
     fun updateTags(tagIds: List<Uuid>, tags: List<Tag>) {
         viewModelScope.launch {

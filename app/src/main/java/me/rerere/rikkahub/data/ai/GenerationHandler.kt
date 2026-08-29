@@ -594,20 +594,26 @@ class GenerationHandler(
                     } else {
                         assistant.systemPrompt
                     }
+                val profilePrompt = if (assistant.useUserProfile) {
+                    buildUserProfilePrompt(
+                        profile = settings.userProfile,
+                        nickname = settings.displaySetting.userNickname,
+                    )
+                } else {
+                    null
+                }
                 if (effectiveSystemPrompt.isNotBlank()) {
                     append(effectiveSystemPrompt)
+                } else if (profilePrompt == null) {
+                    // 身份层与用户层全空：注入最小身份行，避免 system 以工具自述开头
+                    append(BASE_IDENTITY_PROMPT)
                 }
 
                 // 用户基本资料（全局稳定注入）：紧跟助手提示词，只在设置变更时变化，
                 // 是 system 缓存前缀的一部分；空配置跳过。
-                if (assistant.useUserProfile) {
-                    buildUserProfilePrompt(
-                        profile = settings.userProfile,
-                        nickname = settings.displaySetting.userNickname,
-                    )?.let {
-                        appendLine()
-                        append(it)
-                    }
+                profilePrompt?.let {
+                    appendLine()
+                    append(it)
                 }
 
                 // 记忆不进 system：检索结果逐轮变化会打穿后续全部缓存前缀。

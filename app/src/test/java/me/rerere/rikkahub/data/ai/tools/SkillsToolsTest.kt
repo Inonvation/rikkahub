@@ -212,13 +212,31 @@ class SkillsToolsTest {
             enabledSkills = setOf("alpha"),
             listAllSkills = { listOf(createMetadata("alpha"), createMetadata("beta")) },
         )
-        val prompt = tools.first { it.name == "use_skill" }.systemPrompt(
+        val usePrompt = tools.first { it.name == "use_skill" }.systemPrompt(
             Model(modelId = "test-model"),
             emptyList(),
         )
 
-        assertTrue(prompt.contains("alpha"))
-        assertFalse(prompt.contains("beta"))
-        assertTrue(prompt.contains("skill_admin_list"))
+        assertTrue(usePrompt.contains("alpha"))
+        assertFalse(usePrompt.contains("beta"))
+        // 使用面提示词不提及管理工具（文本与工具集同源，禁止描述未注入的能力）
+        assertFalse(usePrompt.contains("skill_admin_list"))
+        assertFalse(usePrompt.contains("skill_admin_set_enabled"))
+    }
+
+    @Test
+    fun `admin prompt is attached to admin tools and does not narrate use_skill`() {
+        val tools = createSkillTools(
+            enabledSkills = emptySet(),
+            listAllSkills = { listOf(createMetadata("alpha")) },
+        )
+        val listPrompt = tools.first { it.name == "skill_admin_list" }.systemPrompt(
+            Model(modelId = "test-model"),
+            emptyList(),
+        )
+
+        assertTrue(listPrompt.contains("skill_admin_list"))
+        assertTrue(listPrompt.contains("skill_admin_set_enabled"))
+        assertFalse(listPrompt.contains("<enabled_skills>"))
     }
 }

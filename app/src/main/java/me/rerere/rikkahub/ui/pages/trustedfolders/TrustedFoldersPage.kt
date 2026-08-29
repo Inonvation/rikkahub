@@ -7,19 +7,14 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
@@ -27,7 +22,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -52,13 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CheckmarkCircle01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PencilEdit01
-import me.rerere.hugeicons.stroke.ToggleOff
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderProject
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
@@ -71,7 +63,8 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
 /**
- * 信任文件夹项目页：项目列表 + 添加（系统文件选择器）+ 激活切换 + 删除 + 审批开关设置。
+ * 信任文件夹项目页：文件夹库管理（添加/重命名/删除）+ 项目详情入口。
+ * 激活语义在助手级绑定（Assistant.trustedFolderProjectId），不在本页操作。
  * 审批设置独立于主设置页，按需求放在本界面内。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,8 +83,6 @@ fun TrustedFoldersPage() {
     var showAddDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<TrustedFolderProject?>(null) }
     var deleteTarget by remember { mutableStateOf<TrustedFolderProject?>(null) }
-    var activateTarget by remember { mutableStateOf<TrustedFolderProject?>(null) }
-    var deactivateTarget by remember { mutableStateOf<TrustedFolderProject?>(null) }
 
     // 系统文件选择器：选一个目录 → 持久授权 → 弹出项目名输入
     val folderPicker = rememberLauncherForActivityResult(
@@ -122,7 +113,7 @@ fun TrustedFoldersPage() {
                 title = {
                     Column {
                         Text("信任文件夹")
-                        Text("AI 可读写你信任的真实文件夹", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("文件夹库：在助手设置中绑定后 AI 可读写", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = { BackButton() },
@@ -146,59 +137,24 @@ fun TrustedFoldersPage() {
             if (settings.projects.isEmpty()) {
                 item {
                     Text(
-                        text = "还没有信任的文件夹。点击右上角 + 选择一个手机上的文件夹（如 Obsidian 笔记库），AI 就可在你确认后读写它。",
+                        text = "还没有信任的文件夹。点击右上角 + 选择一个手机上的文件夹（如 Obsidian 笔记库）加入文件夹库，再在助手设置中绑定给助手。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp),
                     )
                 }
             } else {
-                // 项目按激活状态分区：激活的在上（当前项目），其余在下（其他项目），分隔线区分
-                val activeProjects = settings.projects.filter { it.id == settings.activeProjectId }
-                val otherProjects = settings.projects.filter { it.id != settings.activeProjectId }
-                val projectItem: @Composable (TrustedFolderProject) -> Unit = { project ->
-                    val isActive = project.id == settings.activeProjectId
+                // 文件夹库平铺：激活语义在助手设置（绑定即激活），此处只管理项目
+                items(settings.projects, key = { it.id }) { project ->
                     ProjectCard(
                         project = project,
-                        isActive = isActive,
                         isAuthorized = remember(project.treeUri) { repository.isAuthorized(project) },
                         onClick = {
                             navController.navigate(Screen.TrustedFolderDetail(project.id, ""))
                         },
-                        onActivate = { activateTarget = project },
-                        onDeactivate = { deactivateTarget = project },
                         onRename = { renameTarget = project },
                         onDelete = { deleteTarget = project },
                     )
-                }
-
-                if (activeProjects.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "当前项目",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                    }
-                    items(activeProjects, key = { it.id }) { projectItem(it) }
-                }
-                if (otherProjects.isNotEmpty()) {
-                    item {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                        )
-                    }
-                    item {
-                        Text(
-                            text = "其他项目",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 4.dp).padding(top = 8.dp),
-                        )
-                    }
-                    items(otherProjects, key = { it.id }) { projectItem(it) }
                 }
             }
         }
@@ -243,51 +199,14 @@ fun TrustedFoldersPage() {
             },
         )
     }
-
-    activateTarget?.let { target ->
-        RikkaConfirmDialog(
-            show = true,
-            title = "激活项目",
-            confirmText = "激活",
-            dismissText = "取消",
-            onConfirm = {
-                vm.setActive(target.id)
-                activateTarget = null
-            },
-            onDismiss = { activateTarget = null },
-            text = {
-                Text("将「${target.name}」设为激活项目？激活后 AI 将读写该文件夹。同一时间只能激活一个项目。")
-            },
-        )
-    }
-
-    deactivateTarget?.let { target ->
-        RikkaConfirmDialog(
-            show = true,
-            title = "取消激活",
-            confirmText = "取消激活",
-            dismissText = "返回",
-            onConfirm = {
-                vm.setActive(null)
-                deactivateTarget = null
-            },
-            onDismiss = { deactivateTarget = null },
-            text = {
-                Text("取消激活「${target.name}」？取消后 AI 将无法读写该文件夹，直到你重新激活。")
-            },
-        )
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProjectCard(
     project: TrustedFolderProject,
-    isActive: Boolean,
     isAuthorized: Boolean,
     onClick: () -> Unit,
-    onActivate: () -> Unit,
-    onDeactivate: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -295,22 +214,17 @@ private fun ProjectCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 左侧统一文件夹图标：激活态由卡片底色 + 副标题文案体现，不额外放对勾
             Icon(
                 imageVector = HugeIcons.Folder01,
                 contentDescription = null,
-                tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column(
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
@@ -322,37 +236,15 @@ private fun ProjectCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = when {
-                        isActive && isAuthorized -> "当前激活 · AI 可读写 · 点击进入"
-                        isActive -> "当前激活 · 授权已失效，请重新信任"
-                        isAuthorized -> "未激活 · 点 ⋮ 激活 · 点击卡片进入"
-                        else -> "授权已失效，请删除后重新添加"
-                    },
+                    text = if (isAuthorized) "已信任 · 点击进入 · 在助手设置中绑定后 AI 可读写"
+                    else "授权已失效，请删除后重新添加",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isAuthorized) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 已激活：取消激活按钮保持在卡片右侧（主题色圆底对勾），点击弹二次确认
-            if (isActive) {
-                IconButton(onClick = onDeactivate) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.CheckmarkCircle01,
-                            contentDescription = "取消激活",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
-            // 三点菜单：激活（仅未激活时，位于重命名之上）/ 重命名 / 删除
+            // 三点菜单：重命名 / 删除（库管理；绑定在助手设置中操作）
             Box {
                 var menuExpanded by remember { mutableStateOf(false) }
                 IconButton(onClick = { menuExpanded = true }) {
@@ -362,13 +254,6 @@ private fun ProjectCard(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
-                    if (!isActive) {
-                        DropdownMenuItem(
-                            text = { Text("激活") },
-                            leadingIcon = { Icon(HugeIcons.ToggleOff, null) },
-                            onClick = { menuExpanded = false; onActivate() },
-                        )
-                    }
                     DropdownMenuItem(
                         text = { Text("重命名") },
                         leadingIcon = { Icon(HugeIcons.PencilEdit01, null) },

@@ -13,9 +13,9 @@ import kotlin.uuid.Uuid
 /**
  * 信任文件夹门面类。给 UI 和 AI 工具统一入口。
  *
- * - 项目管理：添加（SAF 树 URI）/删除/重命名/激活切换
- * - 审批判定：[approvalNeeded] 按操作类型读对应开关
- * - 文件操作：全部走当前激活项目（未激活则报错）
+ * - 项目管理：添加（SAF 树 URI）/删除/重命名（文件夹库管理；激活=助手级绑定，见 Assistant.trustedFolderProjectId）
+ * - 审批判定：[approvalNeeded] 按操作类型读对应项目的开关
+ * - 文件操作：全部显式指定项目（AI 工具操作当前助手绑定的项目，UI 按所在页面项目操作）
  */
 class TrustedFolderRepository(
     private val context: Context,
@@ -88,9 +88,9 @@ class TrustedFolderRepository(
     }
 
     /** 后台预热笔记 + 图片索引，加速后续双链跳转与附件图片加载。失败静默（回退到惰性构建） */
-    suspend fun prewarmNoteIndex(projectId: String? = null) {
+    suspend fun prewarmNoteIndex(projectId: String) {
         runCatching {
-            project(projectId) {
+            withProject(projectId) {
                 getNoteIndex(it.treeUri)
                 getImageIndex(it.treeUri)
             }
@@ -98,9 +98,9 @@ class TrustedFolderRepository(
     }
 
     /** 按图片名（Obsidian 附件 `![[name.jpg]]` 或 `![[name]]`）全局查找图片，返回相对路径；找不到返回 null */
-    suspend fun resolveImagePath(name: String, projectId: String? = null): String? {
+    suspend fun resolveImagePath(name: String, projectId: String): String? {
         if (name.isBlank()) return null
-        val uri = project(projectId) { it.treeUri }
+        val uri = withProject(projectId) { it.treeUri }
         return getImageIndex(uri)[noteKey(name)]
     }
 
@@ -176,11 +176,7 @@ class TrustedFolderRepository(
     suspend fun removeProject(id: String) {
         store.update(
             store.current().let { s ->
-                s.copy(
-                    projects = s.projects.filterNot { it.id == id },
-                    // 删除的是激活项目时解除激活
-                    activeProjectId = s.activeProjectId?.takeIf { it != id },
-                )
+                s.copy(projects = s.projects.filterNot { it.id == id })
             }
         )
     }
@@ -199,54 +195,32 @@ class TrustedFolderRepository(
         return true
     }
 
-    suspend fun setActiveProject(id: String?) {
-        store.update(store.current().copy(activeProjectId = id))
-    }
-
     // ---------- 审批判定 ----------
-
     /**
-     * 按操作类型查【激活项目】的审批开关。同步返回以匹配 [me.rerere.ai.core.Tool.needsApproval] 的同步签名；
+     * 按操作类型查指定项目的审批开关。同步返回以匹配 [me.rerere.ai.core.Tool.needsApproval] 的同步签名；
      * DataStore 读取为毫秒级磁盘读，频率低（每次工具调用一次），可接受。
-     * 无激活项目时回退默认值（此时工具本就不会注入）。
+     * 项目不存在时回退默认值（此时工具本就不会注入）。
      */
-    fun approvalNeeded(op: TrustedOp): Boolean = runBlocking {
+    fun approvalNeeded(op: TrustedOp, projectId: String): Boolean = runBlocking {
         val s = store.current()
-        val active = s.activeProjectId?.let { id -> s.projects.find { it.id == id } }
+        val project = s.projects.find { it.id == projectId }
         when (op) {
-            TrustedOp.READ -> active?.approvalRead ?: false
-            TrustedOp.CREATE -> active?.approvalCreate ?: true
-            TrustedOp.EDIT -> active?.approvalEdit ?: true
-            TrustedOp.DELETE -> active?.approvalDelete ?: true
+            TrustedOp.READ -> project?.approvalRead ?: false
+            TrustedOp.CREATE -> project?.approvalCreate ?: true
+            TrustedOp.EDIT -> project?.approvalEdit ?: true
+            TrustedOp.DELETE -> project?.approvalDelete ?: true
         }
     }
 
-    // ---------- 文件操作（仅激活项目） ----------
+    // ---------- 文件操作（显式指定项目） ----------
 
-    private suspend fun requireActive(): TrustedFolderProject {
-        val settings = store.current()
-        return settings.activeProjectId
-            ?.let { id -> settings.projects.find { it.id == id } }
-            ?: throw IllegalStateException("请先在「信任文件夹」中激活一个项目")
-    }
-
-    suspend fun <T> withActiveProject(block: suspend (TrustedFolderProject) -> T): T =
-        block(requireActive())
-
-    /** 按项目 id 执行操作（文件浏览器/编辑器按项目浏览时用）。项目不存在则报错 */
+    /** 按项目 id 执行操作。项目不存在则报错 */
     suspend fun <T> withProject(projectId: String, block: suspend (TrustedFolderProject) -> T): T {
         val s = store.current()
         val project = s.projects.find { it.id == projectId }
             ?: throw IllegalArgumentException("项目不存在或已删除")
         return block(project)
     }
-
-    /**
-     * 文件操作统一入口：传 [projectId] 用指定项目，否则用激活项目（AI 工具场景）。
-     * 让详情页/编辑器能按项目浏览，AI 工具现有调用（不带 projectId）行为不变。
-     */
-    private suspend fun <T> project(projectId: String?, block: suspend (TrustedFolderProject) -> T): T =
-        if (projectId != null) withProject(projectId, block) else withActiveProject(block)
 
     /** 是否位于配置目录（.obsidian 等点开头目录）内。同步，供工具审批判定使用 */
     fun isProtectedPath(relPath: String): Boolean =
@@ -263,93 +237,87 @@ class TrustedFolderRepository(
         }
     }
 
-    suspend fun list(relPath: String, projectId: String? = null): List<TrustedFolderEntry> =
-        project(projectId) { access.list(it.treeUri, relPath) }
+    suspend fun list(relPath: String, projectId: String): List<TrustedFolderEntry> =
+        withProject(projectId) { access.list(it.treeUri, relPath) }
 
-    suspend fun readText(relPath: String, projectId: String? = null): String =
-        project(projectId) { access.readText(it.treeUri, relPath) }
+    suspend fun readText(relPath: String, projectId: String): String =
+        withProject(projectId) { access.readText(it.treeUri, relPath) }
 
-    suspend fun readBytes(relPath: String, projectId: String? = null): ByteArray =
-        project(projectId) { access.readBytes(it.treeUri, relPath) }
+    suspend fun readBytes(relPath: String, projectId: String): ByteArray =
+        withProject(projectId) { access.readBytes(it.treeUri, relPath) }
 
     suspend fun writeText(
         relPath: String,
         text: String,
         overwrite: Boolean,
-        projectId: String? = null,
+        projectId: String,
     ): TrustedFolderEntry =
-        project(projectId) {
+        withProject(projectId) {
             invalidateNoteIndex()
             requireWritable(relPath, it.allowEditConfigFolders)
             access.writeText(it.treeUri, relPath, text, overwrite)
         }
 
-    suspend fun createFolder(relPath: String, projectId: String? = null): TrustedFolderEntry =
-        project(projectId) {
+    suspend fun createFolder(relPath: String, projectId: String): TrustedFolderEntry =
+        withProject(projectId) {
             invalidateNoteIndex()
             requireWritable(relPath, it.allowEditConfigFolders)
             access.createFolder(it.treeUri, relPath)
         }
 
-    suspend fun rename(relPath: String, newName: String, projectId: String? = null): TrustedFolderEntry =
-        project(projectId) {
+    suspend fun rename(relPath: String, newName: String, projectId: String): TrustedFolderEntry =
+        withProject(projectId) {
             invalidateNoteIndex()
             requireWritable(relPath, it.allowEditConfigFolders)
             access.rename(it.treeUri, relPath, newName)
         }
 
-    suspend fun move(relPath: String, targetDirRel: String, projectId: String? = null): TrustedFolderEntry =
-        project(projectId) {
+    suspend fun move(relPath: String, targetDirRel: String, projectId: String): TrustedFolderEntry =
+        withProject(projectId) {
             invalidateNoteIndex()
             requireWritable(relPath, it.allowEditConfigFolders)
             requireWritable(targetDirRel, it.allowEditConfigFolders)
             access.move(it.treeUri, relPath, targetDirRel)
         }
 
-    suspend fun delete(relPath: String, projectId: String? = null) =
-        project(projectId) {
+    suspend fun delete(relPath: String, projectId: String) =
+        withProject(projectId) {
             invalidateNoteIndex()
             requireWritable(relPath, it.allowEditConfigFolders)
             access.delete(it.treeUri, relPath)
         }
 
     suspend fun search(
-        relPath: String = "",
+        relPath: String,
         query: String,
         regex: Boolean = false,
         ignoreCase: Boolean = true,
         maxResults: Int = 50,
-        projectId: String? = null,
+        projectId: String,
     ): List<TrustedFolderSearchMatch> =
-        project(projectId) { access.search(it.treeUri, query, relPath, regex, ignoreCase, maxResults) }
+        withProject(projectId) { access.search(it.treeUri, query, relPath, regex, ignoreCase, maxResults) }
 
     /** 递归扫描全部 Markdown 笔记，返回 (相对路径, 内容) 列表。供断链/体检使用。 */
-    suspend fun scanMarkdownFiles(projectId: String? = null): List<Pair<String, String>> =
-        project(projectId) { access.scanMarkdownFiles(it.treeUri) }
+    suspend fun scanMarkdownFiles(projectId: String): List<Pair<String, String>> =
+        withProject(projectId) { access.scanMarkdownFiles(it.treeUri) }
 
     /**
-     * 按笔记名（Obsidian 双链目标，不含扩展名/目录前缀）在激活项目里解析对应 .md 的相对路径。
+     * 按笔记名（Obsidian 双链目标，不含扩展名/目录前缀）在指定项目里解析对应 .md 的相对路径。
      * 支持 `笔记名`、`子目录/笔记名`、带 .md 后缀等写法；找不到返回 null。
      */
-    suspend fun resolveNotePath(dest: String, projectId: String? = null): String? {
+    suspend fun resolveNotePath(dest: String, projectId: String): String? {
         // 目标来自双链预处理，可能被 percent-encode（如空格 → %20）
         val decoded = runCatching { java.net.URLDecoder.decode(dest, "UTF-8") }.getOrDefault(dest)
         // 只取最后一段作为笔记名（Obsidian 双链目标通常为纯笔记名；`子目录/笔记` 中前缀仅作提示）
         val noteName = decoded.substringAfterLast('/').trim()
         if (noteName.isEmpty()) return null
         // 命中索引（含惰性构建），O(1) 定位，不逐文件遍历、不读内容
-        return project(projectId) { getNoteIndex(it.treeUri)[noteKey(noteName)] }
+        return withProject(projectId) { getNoteIndex(it.treeUri)[noteKey(noteName)] }
     }
 
     /** 解析相对路径对应文件的 content:// URI（供图片预览直接用 Coil 加载）。非文件/不存在返回 null */
-    suspend fun contentUri(relPath: String, projectId: String? = null): Uri? =
-        runCatching { project(projectId) { access.resolveUri(it.treeUri, relPath) } }.getOrNull()
-
-    /** 激活项目授权是否仍有效（用于 UI 提示） */
-    suspend fun isActiveAuthorized(): Boolean =
-        runCatching {
-            withActiveProject { access.isAuthorized(it.treeUri) }
-        }.getOrDefault(false)
+    suspend fun contentUri(relPath: String, projectId: String): Uri? =
+        runCatching { withProject(projectId) { access.resolveUri(it.treeUri, relPath) } }.getOrNull()
 
     /** 查询某个项目的授权是否仍有效（同步，用于列表项状态展示） */
     fun isAuthorized(project: TrustedFolderProject): Boolean =

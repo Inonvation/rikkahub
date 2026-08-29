@@ -15,20 +15,22 @@ private val Context.trustedFolderDataStore by preferencesDataStore(
     name = "trusted_folders",
 )
 
-/** 信任文件夹整体设置：项目列表 + 激活项目。审批/配置目录等设置已下放到每个 [TrustedFolderProject] */
+/**
+ * 信任文件夹整体设置：项目列表（文件夹库）。
+ * 激活语义已收敛到助手级绑定（Assistant.trustedFolderProjectId）：绑定即激活，解绑即停用。
+ * 审批/配置目录等设置下放到每个 [TrustedFolderProject]。
+ */
 data class TrustedFolderSettings(
     val projects: List<TrustedFolderProject> = emptyList(),
-    val activeProjectId: String? = null,
 )
 
 /**
  * 信任文件夹设置持久化。独立 DataStore，不侵入主 Settings 聚合类。
- * 项目列表存为 JSON string（kotlinx.serialization），开关为独立 key。
+ * 项目列表存为 JSON string（kotlinx.serialization）。
  */
 class TrustedFolderStore(private val context: Context) {
     companion object {
         private val PROJECTS = stringPreferencesKey("projects_json")
-        private val ACTIVE_PROJECT_ID = stringPreferencesKey("active_project_id")
         private val RECENT_FILES = stringPreferencesKey("recent_files_json")
 
         /** 最近访问记录上限：超出裁掉最旧的，防止跨项目长期累积无限增长 */
@@ -46,7 +48,6 @@ class TrustedFolderStore(private val context: Context) {
                 projects = preferences[PROJECTS]?.let {
                     runCatching { json.decodeFromString<List<TrustedFolderProject>>(it) }.getOrNull()
                 }.orEmpty(),
-                activeProjectId = preferences[ACTIVE_PROJECT_ID],
             )
         }
 
@@ -86,11 +87,6 @@ class TrustedFolderStore(private val context: Context) {
     suspend fun update(settings: TrustedFolderSettings) {
         context.trustedFolderDataStore.edit { preferences ->
             preferences[PROJECTS] = json.encodeToString(settings.projects)
-            if (settings.activeProjectId != null) {
-                preferences[ACTIVE_PROJECT_ID] = settings.activeProjectId
-            } else {
-                preferences.remove(ACTIVE_PROJECT_ID)
-            }
         }
     }
 }

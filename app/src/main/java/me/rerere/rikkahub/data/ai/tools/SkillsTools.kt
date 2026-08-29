@@ -61,10 +61,10 @@ fun createSkillTools(
         }
     }
 
-    val systemPrompt: (me.rerere.ai.provider.Model, List<me.rerere.ai.ui.UIMessage>) -> String = { _, _ ->
+    val useSkillSystemPrompt: (me.rerere.ai.provider.Model, List<me.rerere.ai.ui.UIMessage>) -> String = { _, _ ->
         buildString {
             appendLine("**Skills**")
-            appendLine("The app ships a skills system. Each skill is a directory containing a SKILL.md with specialized instructions. You can read skill content with `use_skill`, inspect which skills the current assistant has enabled with `skill_admin_list`, and enable or disable them for the current assistant with `skill_admin_set_enabled`.")
+            appendLine("The following skills are enabled for the current assistant. Load one with `use_skill` when the user's request matches:")
             appendLine("<enabled_skills>")
             available.forEach { skill ->
                 appendLine("  <skill>")
@@ -73,8 +73,13 @@ fun createSkillTools(
                 appendLine("  </skill>")
             }
             append("</enabled_skills>")
-            appendLine()
-            appendLine("Use `skill_admin_list` to inspect all installed skills and their enablement.")
+        }
+    }
+
+    val adminSystemPrompt: (me.rerere.ai.provider.Model, List<me.rerere.ai.ui.UIMessage>) -> String = { _, _ ->
+        buildString {
+            appendLine("**Skill Management**")
+            append("You can inspect all installed skills with `skill_admin_list` and enable or disable them for the current assistant with `skill_admin_set_enabled`. Changes take effect from the next message.")
         }
     }
 
@@ -88,7 +93,7 @@ fun createSkillTools(
                 Call this tool when the user's request matches one of the available skills.
                 Avoid calling it when no enabled skill clearly matches the request.
             """.trimIndent(),
-            systemPrompt = systemPrompt,
+            systemPrompt = useSkillSystemPrompt,
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -130,7 +135,7 @@ fun createSkillTools(
     tools += Tool(
         name = "skill_admin_list",
         description = "List all installed skills and whether each one is enabled for the current assistant. Use when you need to inspect available skills or their enablement.",
-        systemPrompt = systemPrompt,
+        systemPrompt = adminSystemPrompt,
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {})
         },

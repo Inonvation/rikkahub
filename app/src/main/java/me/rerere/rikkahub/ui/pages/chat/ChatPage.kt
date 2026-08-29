@@ -1667,9 +1667,10 @@ private fun TopBarModeChip(
 private fun rememberFollowAssistantSummary(settings: Settings): String {
     val trustedFolderRepository: TrustedFolderRepository = koinInject()
     val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
-    val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
     val assistant = settings.getCurrentAssistant()
-    return remember(assistant, settings, activeTrustedProject) {
+    val boundTrustedProject = assistant.trustedFolderProjectId
+        ?.let { pid -> trustedSettings.projects.find { it.id == pid } }
+    return remember(assistant, settings, boundTrustedProject) {
         val enabled = buildList {
             val mcpCount = settings.mcpServers.count { it.id in assistant.mcpServers && it.commonOptions.enable }
             if (mcpCount > 0) add("MCP $mcpCount")
@@ -1678,7 +1679,7 @@ private fun rememberFollowAssistantSummary(settings: Settings): String {
             if (assistant.enabledSkills.isNotEmpty()) add("技能 ${assistant.enabledSkills.size}")
             if (assistant.knowledgeBaseIds.isNotEmpty()) add("知识库")
             if (assistant.workspaceId != null) add("工作区")
-            if (activeTrustedProject != null) add("信任文件夹")
+            if (boundTrustedProject != null) add("信任文件夹")
             if (assistant.enableRecentChatsReference) add("历史引用")
             if (assistant.enabledStudyTools.isNotEmpty()) add("学习工具")
             if (assistant.enableTimeReminder) add("时间提醒")

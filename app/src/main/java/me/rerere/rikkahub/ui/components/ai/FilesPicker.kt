@@ -157,15 +157,15 @@ internal fun FilesPicker(
         // ===== 能力入口：统一为「主标题 + 次标题」宽卡片
         // 排序：MCP 服务 / 网络搜索服务 / 扩展管理 / 工作区 / 信任文件夹 / 知识库 =====
 
-        // 共享依赖：信任文件夹状态 + 会话能力策略（MCP / 知识库卡片用）
+        // 共享依赖：信任文件夹状态（助手级绑定）+ 会话能力策略（MCP / 知识库卡片用）
         val trustedFolderRepository: TrustedFolderRepository = koinInject()
         val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
-        val activeTrustedProject = trustedSettings.projects.find { it.id == trustedSettings.activeProjectId }
+        val boundTrustedProject = assistant.trustedFolderProjectId
+            ?.let { pid -> trustedSettings.projects.find { it.id == pid } }
         val modePolicy = resolveConversationPolicy(
             conversation = conversation,
             assistant = assistant,
             settings = settings,
-            trustedFolderActive = activeTrustedProject != null,
         )
 
         // 1. MCP 服务
@@ -366,7 +366,7 @@ internal fun FilesPicker(
             },
             supportingContent = {
                 Text(
-                    text = activeTrustedProject?.name ?: "未激活",
+                    text = boundTrustedProject?.name ?: "未绑定",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

@@ -170,8 +170,9 @@ fun createMcpManagerTools(
             description = """
                 Add a new MCP server. Supported transport types: "sse" (SSE transport) and "streamable_http" (Streamable HTTP transport).
                 Headers are passed as a JSON object of key-value pairs and are persisted with the config.
-                The server will be connected automatically after creation.
+                The server will be connected automatically after creation. Requires user approval.
             """.trimIndent(),
+            needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -249,8 +250,9 @@ fun createMcpManagerTools(
             description = """
                 Update an existing MCP server. Only the provided fields are changed.
                 To enable/disable specific tools, pass enableTools / disableTools with tool names (list them first with mcp_admin_get).
-                Headers are replaced entirely when provided.
+                Headers are replaced entirely when provided. Requires user approval.
             """.trimIndent(),
+            needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -338,8 +340,9 @@ fun createMcpManagerTools(
             description = """
                 Enable or disable a configured MCP server for the current assistant.
                 When enabled, the server's tools become available to this assistant (next message onwards).
-                Use `mcp_admin_list` first to discover available server ids.
+                Use `mcp_admin_list` first to discover available server ids. Requires user approval.
             """.trimIndent(),
+            needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {

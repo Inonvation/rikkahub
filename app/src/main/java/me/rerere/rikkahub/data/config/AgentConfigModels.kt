@@ -140,6 +140,8 @@ data class AssistantConfigDto(
     val useGlobalMemory: Boolean = false,
     val enableWebSearch: Boolean = false,
     val workspaceId: String? = null,
+    /** 绑定的信任文件夹项目 id；null = 未绑定 */
+    val trustedFolderProjectId: String? = null,
     val mcpServerIds: List<String> = emptyList(),
     val enabledSkills: List<String> = emptyList(),
     val knowledgeBaseIds: List<String> = emptyList(),

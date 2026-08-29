@@ -819,6 +819,21 @@ class SettingsStore(
         }
     }
 
+    /** 绑定/解绑信任文件夹项目（null = 解绑）。绑定即激活，解绑即停用 */
+    suspend fun updateAssistantTrustedFolderProject(assistantId: Uuid, projectId: String?) {
+        update { settings ->
+            settings.copy(
+                assistants = settings.assistants.map { assistant ->
+                    if (assistant.id == assistantId) {
+                        assistant.copy(trustedFolderProjectId = projectId)
+                    } else {
+                        assistant
+                    }
+                }
+            )
+        }
+    }
+
     suspend fun updateAssistantInjections(
         assistantId: Uuid,
         modeInjectionIds: Set<Uuid>,

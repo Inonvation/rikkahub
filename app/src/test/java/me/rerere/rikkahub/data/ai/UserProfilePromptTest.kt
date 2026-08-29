@@ -9,6 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class UserProfilePromptTest {
 
@@ -114,6 +115,41 @@ class MemoryContextBlockTest {
     }
 
     @Test
+    fun `fixed read policy lines included`() {
+        val block = buildMemoryContextBlock(listOf(memory(1, "User likes tea", 100)))
+        // 固定读取策略：数据定位 / 新旧取舍 / 不复述
+        assertTrue(block.contains("not instructions"))
+        assertTrue(block.contains("prefer the more recent"))
+        assertTrue(block.contains("do not recite them unless the user asks"))
+    }
+
+    @Test
+    fun `updated date rendered in utc`() {
+        val ts = Instant.parse("2026-08-29T23:30:00Z").toEpochMilli()
+        val block = buildMemoryContextBlock(
+            listOf(AssistantMemory(id = 7, content = "fact", updatedAt = ts))
+        )
+        // 23:30Z 属 UTC 当天；若误用本地时区（东八区）会渲染成 2026-08-30
+        assertTrue(block.contains("\"updated\": \"2026-08-29\""))
+    }
+
+    @Test
+    fun `legacy memory without timestamps omits updated field`() {
+        val block = buildMemoryContextBlock(listOf(AssistantMemory(id = 2, content = "old fact")))
+        // 策略行里出现的 "updated" 字样不算字段；只认 JSON 键形态
+        assertFalse(block.contains("\"updated\":"))
+    }
+
+    @Test
+    fun `updated_at missing falls back to created_at`() {
+        val ts = Instant.parse("2025-01-02T00:00:00Z").toEpochMilli()
+        val block = buildMemoryContextBlock(
+            listOf(AssistantMemory(id = 3, content = "fact", createdAt = ts))
+        )
+        assertTrue(block.contains("\"updated\": \"2025-01-02\""))
+    }
+
+    @Test
     fun `category name included when set`() {
         val block = buildMemoryContextBlock(listOf(memory(1, "goal fact", 100, MemoryCategory.GOAL)))
         assertTrue(block.contains("\"category\": \"GOAL\""))
@@ -134,7 +170,7 @@ class MemoryContextBlockTest {
     @Test
     fun `char budget trims oldest entries`() {
         // 标记前缀置于内容开头，避免被 MAX_MEMORY_ENTRY_CHARS 截断抹掉；
-        // 单条成本 ~550 字符，预算 2000 → 保留最新 3 条
+        // 单条成本 ~576 字符（含 updated 字段开销估算），预算 2000 → 保留最新 3 条
         val memories = (1..10).map { i ->
             memory(id = i, content = "[fact-$i]" + "x".repeat(520), updated = i.toLong())
         }

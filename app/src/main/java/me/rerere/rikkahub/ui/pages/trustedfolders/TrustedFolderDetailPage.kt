@@ -187,7 +187,7 @@ fun TrustedFolderDetailPage(
         }
         searchLoading = true
         delay(300)
-        val results = runCatching { repository.search(query = q, projectId = projectId) }
+        val results = runCatching { repository.search(relPath = "", query = q, projectId = projectId) }
             .getOrDefault(emptyList())
         // 输入可能已变化，只在仍是当前关键词时落结果
         if (q == searchQuery.trim()) {
@@ -449,6 +449,7 @@ fun TrustedFolderDetailPage(
 
     moveTarget?.let { target ->
         TrustedFolderMoveTargetSheet(
+            projectId = projectId,
             sources = listOf(target),
             onSelectTarget = { dir ->
                 vm.moveTo(target, dir)
@@ -495,6 +496,7 @@ fun TrustedFolderDetailPage(
     if (batchMoveDialog) {
         val entries = state.entries.filter { it.path in selectedPaths }
         TrustedFolderMoveTargetSheet(
+            projectId = projectId,
             sources = entries,
             onSelectTarget = { dir ->
                 vm.moveEntries(entries, dir)
@@ -510,7 +512,7 @@ fun TrustedFolderDetailPage(
         var uriError by remember(entry.path) { mutableStateOf(false) }
         LaunchedEffect(entry.path) {
             val uri = try {
-                repository.contentUri(entry.path)
+                repository.contentUri(entry.path, projectId)
             } catch (e: Exception) {
                 null
             }

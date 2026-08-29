@@ -22,6 +22,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
@@ -29,6 +30,7 @@ import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderProject
 import me.rerere.rikkahub.ui.components.ai.KnowledgeBasePickerButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.IosGroup
@@ -55,6 +57,7 @@ fun AssistantToolsPage(id: String) {
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val workspaces by vm.workspaces.collectAsStateWithLifecycle()
+    val trustedProjects by vm.trustedFolderProjects.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
 
     SettingScaffold(title = "工具与服务") { innerPadding ->
@@ -177,22 +180,52 @@ fun AssistantToolsPage(id: String) {
 
             item {
                 IosGroup(
+                    title = "信任文件夹",
+                    subtitle = "绑定后 AI 可读写该真实文件夹（SAF）",
+                ) {
+                    item(
+                        leadingContent = { Icon(HugeIcons.FolderLocked, contentDescription = null) },
+                        headlineContent = { Text("信任文件夹") },
+                        supportingContent = {
+                            Text(
+                                text = if (assistant.trustedFolderProjectId == null) {
+                                    "未绑定，trusted_folder 工具不可用"
+                                } else {
+                                    "已绑定${if (trustedProjects.none { it.id == assistant.trustedFolderProjectId }) "（项目已删除）" else ""}"
+                                },
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            val selectedProject = trustedProjects.find { it.id == assistant.trustedFolderProjectId }
+                            Select(
+                                options = listOf<TrustedFolderProject?>(null) + trustedProjects,
+                                selectedOption = selectedProject,
+                                onOptionSelected = { project ->
+                                    vm.update(assistant.copy(trustedFolderProjectId = project?.id))
+                                },
+                                modifier = Modifier.width(160.dp),
+                                optionToString = { project ->
+                                    project?.name ?: "不绑定"
+                                },
+                            )
+                        },
+                    )
+                }
+            }
+
+            item {
+                IosGroup(
                     title = "工具绑定",
                     subtitle = "进入对应页面配置工具明细",
                 ) {
-                    item(
-                        onClick = { navController.navigate(Screen.AssistantLocalTool(id)) },
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
-                        headlineContent = { Text(stringResource(R.string.assistant_page_tab_local_tools)) },
-                        supportingContent = { Text("JavaScript、时间信息、询问用户等本地工具") },
-                        trailingContent = { SettingChevron() },
-                    )
                     item(
                         onClick = { navController.navigate(Screen.AssistantMcp(id)) },
                         leadingContent = { Icon(HugeIcons.Wrench01, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_mcp)) },
                         supportingContent = {
-                            Text(if (settings.enableMcpManager) "绑定外部 MCP 服务" else "全局 MCP 管理器未启用")
+                            Text("绑定外部 MCP 服务")
                         },
                         trailingContent = { SettingChevron() },
                     )

@@ -8,15 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -26,14 +22,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.BookOpen01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Globe02
+import me.rerere.hugeicons.stroke.IdentityCard
+import me.rerere.hugeicons.stroke.JavaScript
 import me.rerere.hugeicons.stroke.Message02
-import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.R
@@ -51,11 +44,10 @@ import org.koin.core.parameter.parametersOf
 
 /**
  * 助手设置 · 总览入口页。
- * 采用「单页分组入口」2 层结构：顶部为身份卡片，下方列出 6 大功能分组，
- * 每组直达对应页面，最多两级导航，避免旧的「基本信息/工具与服务」三级嵌套。
+ * 顶部为身份卡片，下方为一个并列目录直达各设置页，最多两级导航。
  *
- * 分组：① 身份与外观 / ② 模型与生成 / ③ 提示词与内容 / ④ 记忆与上下文 /
- * ⑤ 能力与工具 / ⑥ 高级与请求。每行展示实时摘要。
+ * 目录：模型与生成 / 提示词与内容 / 记忆与上下文 / 身份与外观 /
+ * 能力与工具 / 本地工具 / 高级与请求。每行展示实时摘要。
  */
 @Composable
 fun AssistantDetailPage(id: String) {
@@ -69,43 +61,8 @@ fun AssistantDetailPage(id: String) {
     val mcpServers by vm.mcpServerConfigs.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
 
-    var searchQuery by remember { mutableStateOf("") }
-
     val enabledMcpCount = remember(assistant.mcpServers, mcpServers) {
         assistant.mcpServers.count { serverId -> mcpServers.any { it.id == serverId } }
-    }
-
-    data class GroupEntry(
-        val title: String,
-        val summary: String,
-        val icon: ImageVector,
-        val section: String,
-        val onClick: () -> Unit,
-    )
-    val groups = listOf(
-        GroupEntry("模型与生成", modelSummary(assistant), HugeIcons.Settings03, "core") {
-            navController.navigate(Screen.AssistantModel(id))
-        },
-        GroupEntry("提示词与内容", promptSummary(assistant), HugeIcons.Message02, "core") {
-            navController.navigate(Screen.AssistantPrompt(id))
-        },
-        GroupEntry("记忆与上下文", memorySummary(assistant), HugeIcons.Brain02, "core") {
-            navController.navigate(Screen.AssistantMemory(id))
-        },
-        GroupEntry("身份与外观", basicSummary(assistant), HugeIcons.Puzzle, "more") {
-            navController.navigate(Screen.AssistantIdentity(id))
-        },
-        GroupEntry("能力与工具", toolsSummary(assistant, settings, enabledMcpCount), HugeIcons.Wrench01, "more") {
-            navController.navigate(Screen.AssistantTools(id))
-        },
-        GroupEntry("高级与请求", requestSummary(assistant), HugeIcons.Code, "more") {
-            navController.navigate(Screen.AssistantRequest(id))
-        },
-    )
-    val filtered = groups.filter {
-        searchQuery.isBlank() ||
-            it.title.contains(searchQuery, ignoreCase = true) ||
-            it.summary.contains(searchQuery, ignoreCase = true)
     }
 
     SettingListScaffold(
@@ -119,44 +76,29 @@ fun AssistantDetailPage(id: String) {
             )
         }
         item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                placeholder = { Text("搜索设置项") },
-                leadingIcon = { Icon(HugeIcons.Search01, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(HugeIcons.Cancel01, contentDescription = null)
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            )
-        }
-        item {
             IosGroup(
-                title = "核心设置",
-                subtitle = "最常调整的能力",
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) {
-                filtered.filter { it.section == "core" }.forEach { entry ->
-                    summaryItem(entry.title, entry.summary, entry.icon, entry.onClick)
+                settingItem("模型与生成", modelSummary(assistant), HugeIcons.Settings03) {
+                    navController.navigate(Screen.AssistantModel(id))
                 }
-            }
-        }
-        item {
-            IosGroup(
-                title = "更多",
-                subtitle = "身份外观、能力与高级项",
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) {
-                filtered.filter { it.section == "more" }.forEach { entry ->
-                    summaryItem(entry.title, entry.summary, entry.icon, entry.onClick)
+                settingItem("提示词与内容", promptSummary(assistant), HugeIcons.Message02) {
+                    navController.navigate(Screen.AssistantPrompt(id))
+                }
+                settingItem("记忆与上下文", memorySummary(assistant), HugeIcons.Brain02) {
+                    navController.navigate(Screen.AssistantMemory(id))
+                }
+                settingItem("身份与外观", basicSummary(assistant), HugeIcons.IdentityCard) {
+                    navController.navigate(Screen.AssistantIdentity(id))
+                }
+                settingItem("能力与工具", toolsSummary(assistant, settings, enabledMcpCount), HugeIcons.Wrench01) {
+                    navController.navigate(Screen.AssistantTools(id))
+                }
+                settingItem("本地工具", localToolsSummary(assistant), HugeIcons.JavaScript) {
+                    navController.navigate(Screen.AssistantLocalTool(id))
+                }
+                settingItem("高级与请求", requestSummary(assistant), HugeIcons.Code) {
+                    navController.navigate(Screen.AssistantRequest(id))
                 }
             }
         }
@@ -245,17 +187,14 @@ internal fun toolsSummary(
     append(if (assistant.knowledgeBaseIds.isEmpty()) "知识库 0" else "知识库 ${assistant.knowledgeBaseIds.size}")
     append(" · ")
     append(if (assistant.workspaceId == null) "工作区未绑定" else "工作区已绑定")
-    if (settings.enableMcpManager && enabledMcpCount > 0) append(" · MCP $enabledMcpCount")
+    append(" · ")
+    append(if (assistant.trustedFolderProjectId == null) "信任文件夹未绑定" else "信任文件夹已绑定")
+    // MCP 使用只看助手绑定（mcpServers），与全局管理开关解耦
+    if (enabledMcpCount > 0) append(" · MCP $enabledMcpCount")
 }
 
 internal fun localToolsSummary(assistant: Assistant): String =
     if (assistant.localTools.isEmpty()) "未启用本地工具" else "已启用 ${assistant.localTools.size} 项"
-
-internal fun mcpSummary(settings: Settings, enabledMcpCount: Int): String =
-    if (!settings.enableMcpManager) "全局 MCP 管理器未启用" else "已绑定 $enabledMcpCount 个 MCP 服务"
-
-internal fun extensionsSummary(assistant: Assistant, enabledSkillCount: Int): String =
-    "Skills $enabledSkillCount 个 · 快捷消息 ${assistant.quickMessageIds.size} 条 · 注入 ${assistant.modeInjectionIds.size + assistant.lorebookIds.size} 项"
 
 internal fun requestSummary(assistant: Assistant): String =
     "请求头 ${assistant.customHeaders.size} 项 · 请求体 ${assistant.customBodies.size} 项"
@@ -282,10 +221,3 @@ internal fun IosGroupScope.settingItem(
         trailingContent = { Icon(HugeIcons.ArrowRight01, contentDescription = null) },
     )
 }
-
-internal fun IosGroupScope.summaryItem(
-    headline: String,
-    supporting: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-) = settingItem(headline, supporting, icon, onClick)

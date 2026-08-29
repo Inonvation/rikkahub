@@ -88,6 +88,8 @@ import me.rerere.rikkahub.ui.components.richtext.DiffAddedColor
 import me.rerere.rikkahub.ui.components.richtext.DiffRemovedColor
 import me.rerere.rikkahub.ui.components.richtext.isWorkspaceImagePath
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalTabletAdaptation
@@ -952,11 +954,9 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
 
     val navController = LocalNavController.current
     val toaster = LocalToaster.current
-    // 信任文件夹编辑文件跳转按「当前激活项目」打开（工具编辑的是激活项目的文件）
+    // 信任文件夹编辑文件跳转按「当前助手绑定的项目」打开（工具编辑的是绑定项目的文件），点击时解析绑定
     val trustedFolderRepository: TrustedFolderRepository = koinInject()
-    val trustedActiveProjectId by trustedFolderRepository.settingsFlow
-        .map { it.activeProjectId }
-        .collectAsState(initial = null)
+    val settingsStore: SettingsStore = koinInject()
     var expanded by remember(messageId) { mutableStateOf(editedFilesExpanded[messageId] ?: false) }
     val haptic = rememberHaptic()
     val scope = rememberCoroutineScope()
@@ -964,8 +964,8 @@ internal fun TrustedFolderEditedFilesList(parts: List<UIMessagePart>, messageId:
     var previewImageUri by remember { mutableStateOf<String?>(null) }
 
     fun openChangedFile(path: String) {
-        val pid = trustedActiveProjectId ?: run {
-            toaster.show("未激活信任文件夹，无法打开编辑的文件")
+        val pid = settingsStore.settingsFlow.value.getCurrentAssistant().trustedFolderProjectId ?: run {
+            toaster.show("当前助手未绑定信任文件夹，无法打开编辑的文件")
             return
         }
         if (isWorkspaceImagePath(path)) {

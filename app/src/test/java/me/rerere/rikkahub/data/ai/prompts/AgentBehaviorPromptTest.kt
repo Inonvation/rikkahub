@@ -32,9 +32,11 @@ class AgentBehaviorPromptTest {
         assertTrue(prompt.contains("wait for approval"))
         assertTrue(prompt.contains("rollback or verification plan"))
         assertTrue(prompt.contains("keep workspace behavior"))
-        assertTrue(prompt.contains("admin_inventory"))
         assertTrue(prompt.contains("management_undo"))
         assertFalse(prompt.contains("## Mode: Workspace"))
+        // 感知工具名单按注入集合动态生成：空工具集时不点名任何 admin 工具，
+        // 有注入时的点名行为由 PromptBudgetTest.managementSectionReferencesOnlyInjectedInspectionTools 覆盖
+        assertFalse(prompt.contains("admin_inventory"))
     }
 
     @Test

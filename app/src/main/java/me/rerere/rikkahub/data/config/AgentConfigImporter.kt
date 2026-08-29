@@ -182,7 +182,7 @@ object AgentConfigImporter {
     private fun mergeMcp(current: McpServerConfig, dto: McpServerConfigDto): McpServerConfig {
         val common = current.commonOptions.copy(
             enable = dto.enable,
-            name = dto.name.ifBlank { current.commonOptions.name },
+            name = dto.name.ifBlank { current.commonOptions.name },
         )
         return when (current) {
             is McpServerConfig.SseTransportServer ->
@@ -254,6 +254,11 @@ object AgentConfigImporter {
                 dto.workspaceId?.let { runCatching { Uuid.parse(it) }.getOrNull() } ?: current.workspaceId
             } else {
                 current.workspaceId
+            },
+            trustedFolderProjectId = if (has("trustedFolderProjectId")) {
+                dto.trustedFolderProjectId ?: current.trustedFolderProjectId
+            } else {
+                current.trustedFolderProjectId
             },
             defaultWorkspaceCwd = if (has("defaultWorkspaceCwd")) dto.defaultWorkspaceCwd else current.defaultWorkspaceCwd,
             background = if (has("background")) dto.background else current.background,

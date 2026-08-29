@@ -78,35 +78,14 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
-import me.rerere.rikkahub.data.ai.tools.createCreativeTools
-import me.rerere.rikkahub.data.ai.tools.createProviderAdminTools
-import me.rerere.rikkahub.data.ai.tools.createAssistantAdminTools
-import me.rerere.rikkahub.data.ai.tools.createSettingsAdminTools
-import me.rerere.rikkahub.data.ai.tools.createDataAdminTools
-import me.rerere.rikkahub.data.ai.tools.createAuditTools
-import me.rerere.rikkahub.data.ai.tools.createWorkspaceAdminTools
-import me.rerere.rikkahub.data.ai.tools.createTrustedFolderAdminTools
-import me.rerere.rikkahub.data.ai.tools.createKnowledgeAdminTools
-import me.rerere.rikkahub.data.ai.tools.createConversationAdminTools
-import me.rerere.rikkahub.data.ai.tools.createRollbackTools
-import me.rerere.rikkahub.data.ai.tools.createMcpManagerTools
-import me.rerere.rikkahub.data.ai.tools.createAgentConfigTools
-import me.rerere.rikkahub.data.ai.tools.createSearchTools
-import me.rerere.rikkahub.data.ai.tools.createSkillTools
-import me.rerere.rikkahub.data.ai.tools.createSubAgentTools
 import me.rerere.rikkahub.data.ai.tools.isSubAgentPlaceholder
 import me.rerere.rikkahub.data.ai.tools.subAgentResultPayload
-import me.rerere.rikkahub.data.ai.tools.createTodoTool
 import me.rerere.rikkahub.data.ai.tools.SubAgentCommands
 import me.rerere.rikkahub.data.ai.tools.TodoReminderTransformer
 import me.rerere.rikkahub.data.ai.tools.TodoStorage
-import me.rerere.rikkahub.data.ai.tools.StudyToolPermissions
 import me.rerere.rikkahub.data.ai.tools.StudyTools
-import me.rerere.rikkahub.data.ai.tools.createTrustedFolderTools
-import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
@@ -144,6 +123,7 @@ import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.resolveConversationPolicy
+import me.rerere.rikkahub.data.model.withAvailability
 import me.rerere.rikkahub.data.model.resolveModeRef
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.knowledge.KnowledgeManager
@@ -387,6 +367,31 @@ class ChatService(
 
     // Todo 被动提醒注入
     private val todoReminderTransformer = TodoReminderTransformer(todoStorage)
+
+    // 主聊工具注册表：Capability → 工具工厂的单一映射点（收编原 handleMessage 内的 buildList 分支）。
+    // 知识库装配依赖检索增强管线（改写/HyDE/MultiQuery，复用本类的后台生成设施），经工厂接缝注入。
+    private val chatToolRegistry = ChatToolRegistry(
+        context = context,
+        settingsStore = settingsStore,
+        mcpManager = mcpManager,
+        skillManager = skillManager,
+        subAgentRunner = subAgentRunner,
+        studyTools = studyTools,
+        localTools = localTools,
+        deviceTools = deviceTools,
+        conversationRepo = conversationRepo,
+        workspaceRepository = workspaceRepository,
+        trustedFolderRepository = trustedFolderRepository,
+        todoStorage = todoStorage,
+        providerManager = providerManager,
+        managementAuditStore = managementAuditStore,
+        managementRollbackStore = managementRollbackStore,
+        agentConfigRepository = agentConfigRepository,
+        knowledgeManager = knowledgeManager,
+        knowledgeToolFactory = KnowledgeToolFactory { assistant, conversation, settings ->
+            createKnowledgeBaseTools(settings, assistant, conversation)
+        },
+    )
 
     private val inputTransformers by lazy {
         listOf(
@@ -1058,7 +1063,6 @@ class ChatService(
                     mode = initialMode ?: resolveModeRef(
                         assistant = assistant,
                         settings = currentSettings,
-                        trustedFolderActive = trustedFolderRepository.currentSettings().activeProjectId != null,
                     ),
                 )
                 .updateCurrentMessages(assistant.presetMessages)
@@ -1767,12 +1771,23 @@ class ChatService(
             // check invalid messages
             checkInvalidMessages(conversationId)
             val conversation = getConversationFlow(conversationId).value
-            // 会话级能力模式策略：决定本次生成的工具族/提示词片段/环境说明注入
+            // 会话级生效策略：模式白名单 ∩ 助手/全局/运行时可用性（单一出口，
+            // 下游所有工具族与 transformer 门控只看这份 effective 策略）
             val modePolicy = resolveConversationPolicy(
                 conversation = conversation,
                 assistant = assistant,
                 settings = settings,
-                trustedFolderActive = trustedFolderRepository.currentSettings().activeProjectId != null,
+            ).withAvailability(
+                assistant = assistant,
+                settings = settings,
+                skillsInstalled = skillManager.listSkills().isNotEmpty(),
+                trustedFolderBound = assistant.trustedFolderProjectId?.let { pid ->
+                    trustedFolderRepository.currentSettings().projects.any { it.id == pid }
+                } == true,
+                knowledgeReady = assistant.knowledgeBaseIds.any { id ->
+                    runCatching { knowledgeManager.baseRepository.getById(id.toString()) != null }
+                        .getOrDefault(false)
+                },
             )
 
             // start generating
@@ -1789,6 +1804,26 @@ class ChatService(
             } else {
                 conversation.effectiveMessages()
             }.dropPresetMessages(assistant.presetMessages)
+            // 工具装配：注册表按 effective 策略过滤条目（模式 ∩ 助手 ∩ 全局可用性已在
+            // withAvailability 折叠）；各工厂内部的就绪检查（MCP 连接状态/Shizuku/rootfs）保留为运行时兜底。
+            val chatTools = try {
+                chatToolRegistry.assemble(
+                    ChatToolRegistry.Request(
+                        policy = modePolicy,
+                        assistant = assistant,
+                        conversation = conversation,
+                        settings = settings,
+                    )
+                )
+            } catch (e: McpServerNameInvalidException) {
+                addError(
+                    error = IllegalStateException(
+                        context.getString(R.string.error_mcp_invalid_server_name, e.invalidNames.joinToString(", "))
+                    ),
+                    conversationId = conversationId,
+                )
+                return
+            }
             generationHandler.generateText(
                 settings = settings,
                 model = model,
@@ -1834,218 +1869,9 @@ class ChatService(
                     add(MemoryContextTransformer)
                 },
                 outputTransformers = outputTransformers,
-                tools = buildList {
-                    if (modePolicy.allowTodo && settings.enableTodoList) {
-                        add(createTodoTool(conversation.id.toString(), todoStorage))
-                    }
-                    if (modePolicy.allowSubAgent && settings.enableSubAgent) {
-                        addAll(createSubAgentTools(subAgentRunner, conversation.id))
-                    }
-                    if (modePolicy.allowStudy && assistant.enabledStudyTools.isNotEmpty()) {
-                        addAll(studyTools.getTools(
-                            enabledTools = assistant.enabledStudyTools,
-                            conversationId = conversation.id.toString(),
-                            assistantId = assistant.id.toString(),
-                            studySubject = assistant.studySubject,
-                            permissions = StudyToolPermissions.fromSettings(settings),
-                        ))
-                    }
-                    if (modePolicy.allowSearch && assistant.enableWebSearch) {
-                        addAll(createSearchTools(settings))
-                    }
-                    if (modePolicy.allowLocalTools) {
-                        addAll(localTools.getTools(assistant.localTools))
-                    }
-                    if (modePolicy.allowDeviceTools) {
-                        addAll(deviceTools.getAllTools())
-                    }
-                    if (modePolicy.allowHistory && assistant.enableRecentChatsReference) {
-                        addAll(createConversationTools(conversationRepo, assistant.id))
-                    }
-                    if (modePolicy.allowWorkspace) {
-                        addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), conversation.workspaceCwd))
-                    }
-                    if (modePolicy.allowTrustedFolder) {
-                        addAll(createTrustedFolderTools(trustedFolderRepository))
-                    }
-                    if (modePolicy.allowSkillUse || modePolicy.allowSkillAdmin) {
-                        // 快照仅用于决定工具 schema 组成与 <enabled_skills> 系统提示（前缀缓存稳定）；
-                        // skill_admin_* 的执行体通过 provider 实时读盘，同轮内新装的技能立即可查。
-                        val allSkills = skillManager.listSkills()
-                        if (allSkills.isNotEmpty()) {
-                            addAll(
-                                createSkillTools(
-                                    enabledSkills = assistant.enabledSkills,
-                                    listAllSkills = { skillManager.listSkills() },
-                                    setEnabledSkills = { skills ->
-                                        settingsStore.updateAssistantSkills(assistant.id, skills)
-                                    },
-                                ).let { filterSkillToolsByMode(it, modePolicy) }
-                            )
-                        }
-                    }
-                    if (modePolicy.allowMcpAdmin) {
-                        addAll(
-                            createMcpManagerTools(
-                            mcpManager = mcpManager,
-                            settingsStore = settingsStore,
-                            assistant = assistant,
-                            isEnabled = settings.enableMcpManager,
-                        )
-                    )
-                    }
-                    if (modePolicy.allowMcpUse) {
-                        // 与上游一致：每个 MCP 工具注册独立 function schema（mcp__{server}__{tool}）
-                        mcpManager.getAllAvailableTools(assistant).also { allTools ->
-                            val invalidNames = allTools
-                                .map { it.second }
-                                .distinct()
-                                .filter { name -> name.isEmpty() || !name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } }
-                            if (invalidNames.isNotEmpty()) {
-                                addError(
-                                    error = IllegalStateException(
-                                        context.getString(
-                                            R.string.error_mcp_invalid_server_name,
-                                            invalidNames.joinToString(", ")
-                                        )
-                                    ),
-                                    conversationId = conversationId,
-                                )
-                                return
-                            }
-                        }.forEach { (serverId, serverName, tool) ->
-                            add(
-                                Tool(
-                                    name = "mcp__${serverName}__${tool.name}",
-                                    description = tool.description?.takeIf { it.isNotBlank() }
-                                        ?: "Tool from MCP server \"$serverName\".",
-                                    parameters = { tool.inputSchema },
-                                    needsApproval = { tool.needsApproval },
-                                    execute = {
-                                        mcpManager.callTool(serverId, tool.name, it.jsonObject)
-                                    },
-                                )
-                            )
-                        }
-                    }
-                    // 管理模式专属工具：环境/日志只读感知 + 提供商/新模式写入（需审批）
-                    if (modePolicy.allowCreativeTools) {
-                        addAll(
-                            createCreativeTools(
-                                context = context,
-                                settingsStore = settingsStore,
-                                assistant = assistant,
-                                conversationRepository = conversationRepo,
-                            )
-                        )
-                    }
-                    if (modePolicy.allowProviderAdmin) {
-                        addAll(
-                            createProviderAdminTools(
-                                settingsStore = settingsStore,
-                                providerManager = providerManager,
-                                auditStore = managementAuditStore,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                    }
-                    if (modePolicy.allowAssistantAdmin) {
-                        addAll(
-                            createAssistantAdminTools(
-                                settingsStore = settingsStore,
-                                auditStore = managementAuditStore,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                    }
-                    if (modePolicy.allowSettingsAdmin) {
-                        addAll(
-                            createSettingsAdminTools(
-                                settingsStore = settingsStore,
-                                auditStore = managementAuditStore,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                    }
-                    if (modePolicy.allowDataAdmin) {
-                        addAll(
-                            createDataAdminTools(
-                                settingsStore = settingsStore,
-                                auditStore = managementAuditStore,
-                                conversationRepo = conversationRepo,
-                                trustedFolderRepository = trustedFolderRepository,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                        addAll(
-                            createWorkspaceAdminTools(
-                                settingsStore = settingsStore,
-                                workspaceRepository = workspaceRepository,
-                                auditStore = managementAuditStore,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                        addAll(
-                            createTrustedFolderAdminTools(
-                                trustedFolderRepository = trustedFolderRepository,
-                                auditStore = managementAuditStore,
-                            )
-                        )
-                        addAll(
-                            createKnowledgeAdminTools(
-                                settingsStore = settingsStore,
-                                knowledgeManager = knowledgeManager,
-                                auditStore = managementAuditStore,
-                                rollbackStore = managementRollbackStore,
-                            )
-                        )
-                        addAll(
-                            createConversationAdminTools(
-                                settingsStore = settingsStore,
-                                conversationRepo = conversationRepo,
-                                auditStore = managementAuditStore,
-                                currentConversationId = conversation.id,
-                            )
-                        )
-                    }
-                    if (modePolicy.allowCreativeTools ||
-                        modePolicy.allowProviderAdmin ||
-                        modePolicy.allowAssistantAdmin ||
-                        modePolicy.allowSettingsAdmin ||
-                        modePolicy.allowDataAdmin ||
-                        modePolicy.allowSkillAdmin ||
-                        modePolicy.allowMcpAdmin
-                    ) {
-                        addAll(createAuditTools(managementAuditStore))
-                        addAll(
-                            createRollbackTools(
-                                rollbackStore = managementRollbackStore,
-                                settingsStore = settingsStore,
-                                auditStore = managementAuditStore,
-                            )
-                        )
-                        // 统一配置读写（config_view / config_read / config_refresh / config_schema / config_validate / config_write）
-                        addAll(
-                            createAgentConfigTools(
-                                agentConfigRepository,
-                                settingsStore,
-                                managementAuditStore,
-                                managementRollbackStore,
-                            )
-                        )
-                    }
-                    // Knowledge base tools
-                    if (modePolicy.allowKnowledge && assistant.knowledgeBaseIds.isNotEmpty()) {
-                        val kbTools = createKnowledgeBaseTools(
-                            settings = settings,
-                            assistant = assistant,
-                            conversation = conversation,
-                        )
-                        if (kbTools.isNotEmpty()) {
-                            addAll(kbTools)
-                        }
-                    }
-                },
+                // 工具装配：只看 effective 策略（模式 ∩ 助手 ∩ 全局可用性已在 withAvailability 折叠）；
+                // 各工厂内部的就绪检查（MCP 连接状态/Shizuku/rootfs）保留为运行时兜底。
+                tools = chatTools,
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
                 val currentConversation = getConversationFlow(conversationId).value
@@ -2247,19 +2073,6 @@ class ChatService(
                 resumeAfterSubAgent(pendingResume)
             }
         }
-    }
-
-    private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String? = null): List<Tool> {
-        if (workspaceId.isNullOrBlank()) return emptyList()
-        val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
-        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) {
-            Log.d(
-                TAG,
-                "createWorkspaceToolsIfReady: skip workspace tools, workspace=$workspaceId, status=${workspace.shellStatus}"
-            )
-            return emptyList()
-        }
-        return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
     }
 
     private suspend fun createKnowledgeBaseTools(

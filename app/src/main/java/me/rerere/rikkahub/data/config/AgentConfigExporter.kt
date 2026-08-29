@@ -213,6 +213,7 @@ object AgentConfigExporter {
             useGlobalMemory = useGlobalMemory,
             enableWebSearch = enableWebSearch,
             workspaceId = workspaceId?.toString(),
+            trustedFolderProjectId = trustedFolderProjectId,
             mcpServerIds = mcpServers.map { it.toString() }.sorted(),
             enabledSkills = enabledSkills.sorted(),
             knowledgeBaseIds = knowledgeBaseIds.map { it.toString() }.sorted(),
