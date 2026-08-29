@@ -133,7 +133,7 @@
   <string name="assistant_page_tab_memory">Память</string>
   <string name="assistant_page_tab_prompt">Подсказки</string>
   <string name="assistant_page_tab_request">Пользовательский запрос</string>
-  <string name="assistant_page_tags">Теги</string>
+  <string name="assistant_page_tags">Категории</string>
   <string name="assistant_page_temperature">Температура</string>
   <string name="assistant_page_temperature_warning">Обычно 1. Для моделей рассуждения изменение не рекомендуется.</string>
   <string name="assistant_page_template_preview">Предпросмотр:</string>
@@ -1093,12 +1093,12 @@
   <string name="stats_page_total_conversations">Всего бесед</string>
   <string name="stats_page_total_messages">Всего сообщений</string>
   <string name="stop">Остановить</string>
-  <string name="tag_input_dialog_create_new">Создать новый тег</string>
-  <string name="tag_input_dialog_existing_tags">Существующие теги</string>
-  <string name="tag_input_dialog_label">Название тега</string>
-  <string name="tag_input_dialog_placeholder">Введите имя тега...</string>
-  <string name="tag_input_dialog_tag_exists">Тег с таким именем уже существует</string>
-  <string name="tag_input_dialog_title">Добавить тег</string>
+  <string name="tag_input_dialog_create_new">Создать новую категорию</string>
+  <string name="tag_input_dialog_existing_tags">Существующие категории</string>
+  <string name="tag_input_dialog_label">Название категории</string>
+  <string name="tag_input_dialog_placeholder">Введите название категории...</string>
+  <string name="tag_input_dialog_tag_exists">Категория с таким именем уже существует</string>
+  <string name="tag_input_dialog_title">Добавить категорию</string>
   <string name="take_picture">Сделать фото</string>
   <string name="test_tts">Проверка TTS</string>
   <string name="text_area_fullscreen_edit">Полноэкранное редактирование</string>
@@ -1376,5 +1376,20 @@
   <string name="setting_files_page_clean_all">Все файлы</string>
   <string name="setting_files_page_clean_older_than_days">Старше %1$d дней</string>
   <string name="setting_files_page_clean_range_description">Выберите файлы для окончательного удаления. Это действие нельзя отменить.</string>
+  <string name="done">Готово</string>
+  <string name="assistant_category_all">Все</string>
+  <string name="assistant_category_manage">Управление категориями</string>
+  <string name="assistant_category_count">Ассистентов: %1$d</string>
+  <string name="assistant_category_rename">Переименовать категорию</string>
+  <string name="assistant_category_add">Добавить</string>
+  <string name="assistant_category_new_placeholder">Название новой категории...</string>
+  <string name="assistant_category_delete_title">Удалить категорию?</string>
+  <string name="assistant_category_delete_text">Категория «%1$s» будет удалена, %2$d ассистентов будут исключены из неё. Сами ассистенты не пострадают.</string>
+  <string name="assistant_edit_categories_title">Изменить категории</string>
+  <string name="assistant_edit_categories_create">Новая категория</string>
+  <string name="assistant_action_move_to_top">Переместить в начало</string>
+  <string name="assistant_add_to_category_title">Добавить ассистентов в «%1$s»</string>
+  <string name="assistant_add_to_category_action">Добавить ассистентов в «%1$s»</string>
+  <string name="assistant_add_to_category_empty">Все ассистенты уже в этой категории</string>
 </resources>
 

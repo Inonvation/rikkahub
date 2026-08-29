@@ -133,7 +133,7 @@
   <string name="assistant_page_tab_memory">記憶</string>
   <string name="assistant_page_tab_prompt">プロンプト</string>
   <string name="assistant_page_tab_request">カスタムリクエスト</string>
-  <string name="assistant_page_tags">タグ</string>
+  <string name="assistant_page_tags">カテゴリ</string>
   <string name="assistant_page_temperature">温度</string>
   <string name="assistant_page_temperature_warning">通常は 1 です。推論モデルでは変更を推奨しません。</string>
   <string name="assistant_page_template_preview">プレビュー:</string>
@@ -1093,12 +1093,12 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="stats_page_total_conversations">総会話数</string>
   <string name="stats_page_total_messages">メッセージ総数</string>
   <string name="stop">停止</string>
-  <string name="tag_input_dialog_create_new">新しいタグを作成</string>
-  <string name="tag_input_dialog_existing_tags">既存のタグ</string>
-  <string name="tag_input_dialog_label">タグ名</string>
-  <string name="tag_input_dialog_placeholder">タグ名を入力...</string>
-  <string name="tag_input_dialog_tag_exists">同じ名前のタグが既に存在します</string>
-  <string name="tag_input_dialog_title">タグを追加</string>
+  <string name="tag_input_dialog_create_new">新規カテゴリを作成</string>
+  <string name="tag_input_dialog_existing_tags">既存のカテゴリ</string>
+  <string name="tag_input_dialog_label">カテゴリ名</string>
+  <string name="tag_input_dialog_placeholder">カテゴリ名を入力...</string>
+  <string name="tag_input_dialog_tag_exists">同名のカテゴリが既に存在します</string>
+  <string name="tag_input_dialog_title">カテゴリを追加</string>
   <string name="take_picture">写真を撮る</string>
   <string name="test_tts">音声テスト</string>
   <string name="text_area_fullscreen_edit">全画面編集</string>
@@ -1376,5 +1376,20 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_files_page_clean_all">すべてのファイル</string>
   <string name="setting_files_page_clean_older_than_days">%1$d日以上前</string>
   <string name="setting_files_page_clean_range_description">完全に削除するファイルを選択してください。この操作は元に戻せません。</string>
+  <string name="done">完了</string>
+  <string name="assistant_category_all">すべて</string>
+  <string name="assistant_category_manage">カテゴリ管理</string>
+  <string name="assistant_category_count">アシスタント %1$d 件</string>
+  <string name="assistant_category_rename">カテゴリ名を変更</string>
+  <string name="assistant_category_add">追加</string>
+  <string name="assistant_category_new_placeholder">新しいカテゴリ名...</string>
+  <string name="assistant_category_delete_title">カテゴリを削除しますか？</string>
+  <string name="assistant_category_delete_text">カテゴリ「%1$s」を削除します。%2$d 件のアシスタントがこのカテゴリから外されますが、アシスタント自体は削除されません。</string>
+  <string name="assistant_edit_categories_title">カテゴリを編集</string>
+  <string name="assistant_edit_categories_create">新規カテゴリ</string>
+  <string name="assistant_action_move_to_top">一番上へ移動</string>
+  <string name="assistant_add_to_category_title">「%1$s」にアシスタントを追加</string>
+  <string name="assistant_add_to_category_action">「%1$s」にアシスタントを追加</string>
+  <string name="assistant_add_to_category_empty">すべてのアシスタントが既にこのカテゴリに含まれています</string>
 </resources>
 

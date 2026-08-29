@@ -12,8 +12,10 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import kotlin.uuid.Uuid
 
 class AssistantVM(
     private val settingsStore: SettingsStore,
@@ -89,4 +91,105 @@ class AssistantVM(
         } else {
             memoryRepository.getMemoriesOfAssistantFlow(assistant.id.toString())
         }
+
+    // ---------- 分类管理（分类即 Tag，零引用不自动清理，删除只走显式入口） ----------
+
+    fun addCategory(name: String) {
+        viewModelScope.launch {
+            val settings = settings.value
+            val trimmed = name.trim()
+            if (trimmed.isEmpty()) return@launch
+            if (settings.assistantTags.any { it.name.equals(trimmed, ignoreCase = true) }) return@launch
+            settingsStore.update(
+                settings.copy(
+                    assistantTags = settings.assistantTags + Tag(id = Uuid.random(), name = trimmed)
+                )
+            )
+        }
+    }
+
+    fun renameCategory(id: Uuid, newName: String) {
+        viewModelScope.launch {
+            val settings = settings.value
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) return@launch
+            // 与其他分类重名（忽略大小写）时放弃重命名
+            if (settings.assistantTags.any { it.id != id && it.name.equals(trimmed, ignoreCase = true) }) return@launch
+            settingsStore.update(
+                settings.copy(
+                    assistantTags = settings.assistantTags.map { tag ->
+                        if (tag.id == id) tag.copy(name = trimmed) else tag
+                    }
+                )
+            )
+        }
+    }
+
+    /** 删除分类并移除所有助手中对该分类的引用，助手本身不受影响 */
+    fun deleteCategory(id: Uuid) {
+        viewModelScope.launch {
+            val settings = settings.value
+            settingsStore.update(
+                settings.copy(
+                    assistantTags = settings.assistantTags.filter { it.id != id },
+                    assistants = settings.assistants.map { assistant ->
+                        if (id in assistant.tags) assistant.copy(tags = assistant.tags - id) else assistant
+                    }
+                )
+            )
+        }
+    }
+
+    fun reorderCategories(categories: List<Tag>) {
+        viewModelScope.launch {
+            val settings = settings.value
+            settingsStore.update(settings.copy(assistantTags = categories))
+        }
+    }
+
+    /** 全量编辑某个助手的分类归属；categories 为编辑后的完整分类列表（可能含对话框里新建的分类） */
+    fun updateAssistantTags(assistant: Assistant, tagIds: List<Uuid>, categories: List<Tag>) {
+        viewModelScope.launch {
+            val settings = settings.value
+            settingsStore.update(
+                settings.copy(
+                    assistantTags = categories,
+                    assistants = settings.assistants.map {
+                        if (it.id == assistant.id) it.copy(tags = tagIds) else it
+                    }
+                )
+            )
+        }
+    }
+
+    fun addAssistantsToCategory(categoryId: Uuid, assistantIds: Collection<Uuid>) {
+        viewModelScope.launch {
+            val settings = settings.value
+            settingsStore.update(
+                settings.copy(
+                    assistants = settings.assistants.map { assistant ->
+                        if (assistant.id in assistantIds && categoryId !in assistant.tags) {
+                            assistant.copy(tags = assistant.tags + categoryId)
+                        } else {
+                            assistant
+                        }
+                    }
+                )
+            )
+        }
+    }
+
+    fun moveAssistantToTop(assistant: Assistant) {
+        viewModelScope.launch {
+            val settings = settings.value
+            settingsStore.update(
+                settings.copy(
+                    assistants = buildList {
+                        add(assistant)
+                        addAll(settings.assistants.filter { it.id != assistant.id })
+                    }
+                )
+            )
+        }
+    }
 }

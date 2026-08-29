@@ -11,23 +11,19 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -53,6 +49,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.ui.components.ai.AssistantCategoryTabRow
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.RouteActivity
@@ -186,10 +183,15 @@ private fun AssistantPickerSheet(
 ) {
     val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     val scope = rememberCoroutineScope()
-    var selectedTagIds by remember { mutableStateOf(emptySet<Uuid>()) }
-    val filteredAssistants = remember(settings.assistants, selectedTagIds) {
-        if (selectedTagIds.isEmpty()) settings.assistants
-        else settings.assistants.filter { it.tags.any { id -> id in selectedTagIds } }
+    // 分类导航状态（null = 全部；选中分类被删除后归一化回退到全部）
+    var selectedCategoryId by remember { mutableStateOf<Uuid?>(null) }
+    val selectedCategoryIdNormalized = selectedCategoryId?.takeIf { id ->
+        settings.assistantTags.any { it.id == id }
+    }
+    val filteredAssistants = remember(settings.assistants, settings.assistantTags, selectedCategoryIdNormalized) {
+        val categoryId = selectedCategoryIdNormalized
+        if (categoryId == null) settings.assistants
+        else settings.assistants.filter { categoryId in it.tags }
     }
 
     ModalBottomSheet(
@@ -210,25 +212,11 @@ private fun AssistantPickerSheet(
             )
 
             if (settings.assistantTags.isNotEmpty()) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp)
-                ) {
-                    items(settings.assistantTags, key = { it.id }) { tag ->
-                        FilterChip(
-                            onClick = {
-                                selectedTagIds = if (tag.id in selectedTagIds) {
-                                    selectedTagIds - tag.id
-                                } else {
-                                    selectedTagIds + tag.id
-                                }
-                            },
-                            label = { Text(tag.name) },
-                            selected = tag.id in selectedTagIds,
-                            shape = RoundedCornerShape(50),
-                        )
-                    }
-                }
+                AssistantCategoryTabRow(
+                    categories = settings.assistantTags,
+                    selectedCategoryId = selectedCategoryIdNormalized,
+                    onSelectCategory = { selectedCategoryId = it },
+                )
             }
 
             LazyColumn(

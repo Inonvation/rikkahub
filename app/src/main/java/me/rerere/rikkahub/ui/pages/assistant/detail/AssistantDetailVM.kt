@@ -127,16 +127,20 @@ class AssistantDetailVM(
                 )
             )
             Log.d(TAG, "updateTags: ${tagIds.joinToString(",")}")
-            cleanupUnusedTags()
+            cleanupInvalidTagReferences()
         }
     }
 
-    fun cleanupUnusedTags() {
+    /**
+     * 只清理助手侧引用了不存在 tag id 的悬空引用。
+     * 不再隐式删除零引用的分类：分类是一级实体（助手页分类管理可见 0 助手分类），
+     * 删除只能走分类管理的显式入口并同步清理引用。
+     */
+    fun cleanupInvalidTagReferences() {
         viewModelScope.launch {
             val settings = settings.value
             val validTagIds = settings.assistantTags.map { it.id }.toSet()
 
-            // 清理 assistant 中的无效 tag id
             val cleanedAssistants = settings.assistants.map { assistant ->
                 val validTags = assistant.tags.filter { tagId ->
                     validTagIds.contains(tagId)
@@ -148,23 +152,10 @@ class AssistantDetailVM(
                 }
             }
 
-            // 获取清理后的 assistant 中使用的 tag id
-            val usedTagIds = cleanedAssistants.flatMap { it.tags }.toSet()
-
-            // 清理未使用的 tags
-            val cleanedTags = settings.assistantTags.filter { tag ->
-                usedTagIds.contains(tag.id)
-            }
-
-            // 检查是否需要更新
-            val needUpdateAssistants = cleanedAssistants != settings.assistants
-            val needUpdateTags = cleanedTags.size != settings.assistantTags.size
-
-            if (needUpdateAssistants || needUpdateTags) {
+            if (cleanedAssistants != settings.assistants) {
                 settingsStore.update(
                     settings = settings.copy(
-                        assistants = cleanedAssistants,
-                        assistantTags = cleanedTags
+                        assistants = cleanedAssistants
                     )
                 )
             }

@@ -17,13 +17,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,7 +46,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -56,7 +58,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.hugeicons.stroke.PreferenceHorizontal
+import me.rerere.hugeicons.stroke.Tag01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS_IDS
@@ -67,6 +72,8 @@ import me.rerere.rikkahub.data.ai.prompts.MECHANICS_TUTOR_PROMPT
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.ui.components.ai.AssistantCategoryTabRow
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -98,21 +105,29 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
 
     // 搜索关键词状态
     var searchQuery by remember { mutableStateOf("") }
-    // 标签过滤状态
-    var selectedTagIds by remember { mutableStateOf(emptySet<Uuid>()) }
+    // 分类导航状态（null = 全部；选中分类被删除后归一化回退到全部）
+    var selectedCategoryId by remember { mutableStateOf<Uuid?>(null) }
     // 操作菜单状态
     var actionSheetAssistant by remember { mutableStateOf<Assistant?>(null) }
     // 模板选择对话框
     var showTemplateDialog by remember { mutableStateOf(false) }
+    // 分类管理弹层
+    var showCategoryManage by remember { mutableStateOf(false) }
+    // 添加助手到当前分类
+    var showAddToCategory by remember { mutableStateOf(false) }
 
-    // 根据搜索关键词和选中的标签过滤助手
-    val filteredAssistants = remember(settings.assistants, selectedTagIds, searchQuery) {
+    val selectedCategory = selectedCategoryId?.let { id ->
+        settings.assistantTags.find { it.id == id }
+    }
+
+    // 根据搜索关键词和选中的分类过滤助手
+    val filteredAssistants = remember(settings.assistants, selectedCategory, searchQuery) {
+        val categoryId = selectedCategory?.id
         settings.assistants.filter { assistant ->
             val matchesSearch = searchQuery.isBlank() ||
                 assistant.name.contains(searchQuery, ignoreCase = true)
-            val matchesTags = selectedTagIds.isEmpty() ||
-                assistant.tags.any { tagId -> tagId in selectedTagIds }
-            matchesSearch && matchesTags
+            val matchesCategory = categoryId == null || categoryId in assistant.tags
+            matchesSearch && matchesCategory
         }
     }
 
@@ -149,7 +164,7 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val lazyListState = rememberLazyListState()
-            val isFiltering = selectedTagIds.isNotEmpty() || searchQuery.isNotBlank()
+            val isFiltering = selectedCategory != null || searchQuery.isNotBlank()
             val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
                 if (!isFiltering) {
                     val newAssistants = settings.assistants.toMutableList().apply {
@@ -182,13 +197,23 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // 标签过滤器
-            AssistantTagsFilterRow(
-                settings = settings,
-                vm = vm,
-                selectedTagIds = selectedTagIds,
-                onUpdateSelectedTagIds = { ids ->
-                    selectedTagIds = ids
+            // 分类单选 Tab + 分类管理入口（拖动排序收进管理弹层，此处只做导航）
+            AssistantCategoryTabRow(
+                categories = settings.assistantTags,
+                selectedCategoryId = selectedCategory?.id,
+                onSelectCategory = { selectedCategoryId = it },
+                modifier = Modifier.padding(horizontal = 16.dp),
+                trailingContent = {
+                    IconButton(onClick = {
+                        hapticController.lightTap()
+                        showCategoryManage = true
+                    }) {
+                        Icon(
+                            imageVector = HugeIcons.PreferenceHorizontal,
+                            contentDescription = stringResource(R.string.assistant_category_manage),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             )
 
@@ -238,6 +263,20 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                         )
                     }
                 }
+
+                // 添加助手到当前分类（选中分类时显示）
+                if (selectedCategory != null && searchQuery.isBlank()) {
+                    item(key = "add_assistant_to_category") {
+                        DashedAddCard(
+                            text = stringResource(R.string.assistant_add_to_category_action, selectedCategory.name),
+                            modifier = Modifier.animateItem(),
+                            onClick = {
+                                hapticController.lightTap()
+                                showAddToCategory = true
+                            },
+                        )
+                    }
+                }
             }
         }
     }
@@ -257,11 +296,46 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
 
     AssistantCreationSheet(createState)
 
+    // 分类管理弹层
+    if (showCategoryManage) {
+        CategoryManageSheet(
+            categories = settings.assistantTags,
+            assistants = settings.assistants,
+            onDismiss = { showCategoryManage = false },
+            onAdd = { vm.addCategory(it) },
+            onRename = { id, name -> vm.renameCategory(id, name) },
+            onDelete = { vm.deleteCategory(it.id) },
+            onReorder = { vm.reorderCategories(it) },
+        )
+    }
+
+    // 添加助手到当前分类
+    if (showAddToCategory && selectedCategory != null) {
+        AssistantAddToCategoryDialog(
+            categoryName = selectedCategory.name,
+            candidates = settings.assistants.filter { selectedCategory.id !in it.tags },
+            onConfirm = {
+                vm.addAssistantsToCategory(selectedCategory.id, it)
+                showAddToCategory = false
+            },
+            onDismiss = { showAddToCategory = false },
+        )
+    }
+
     // 操作菜单 Bottom Sheet
     actionSheetAssistant?.let { assistant ->
         AssistantActionSheet(
             assistant = assistant,
+            categories = settings.assistantTags,
             onDismiss = { actionSheetAssistant = null },
+            onEditCategories = { tagIds, editedCategories ->
+                vm.updateAssistantTags(assistant, tagIds, editedCategories)
+                actionSheetAssistant = null
+            },
+            onMoveToTop = {
+                vm.moveAssistantToTop(assistant)
+                actionSheetAssistant = null
+            },
             onCopy = {
                 vm.copyAssistant(assistant)
                 actionSheetAssistant = null
@@ -271,69 +345,6 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                 actionSheetAssistant = null
             }
         )
-    }
-}
-
-@Composable
-private fun AssistantTagsFilterRow(
-    settings: Settings,
-    vm: AssistantVM,
-    selectedTagIds: Set<Uuid>,
-    onUpdateSelectedTagIds: (Set<Uuid>) -> Unit
-) {
-    val hapticController = rememberHaptic()
-    if (settings.assistantTags.isNotEmpty()) {
-        val tagsListState = rememberLazyListState()
-        val tagsReorderableState = rememberReorderableLazyListState(tagsListState) { from, to ->
-            val newTags = settings.assistantTags.toMutableList().apply {
-                add(to.index, removeAt(from.index))
-            }
-            vm.updateSettings(settings.copy(assistantTags = newTags))
-        }
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 16.dp),
-            state = tagsListState
-        ) {
-            lazyItems(items = settings.assistantTags, key = { tag -> tag.id }) { tag ->
-                ReorderableItem(
-                    state = tagsReorderableState, key = tag.id
-                ) { isDragging ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        FilterChip(
-                            onClick = {
-                                onUpdateSelectedTagIds(
-                                    if (tag.id in selectedTagIds) {
-                                        selectedTagIds - tag.id
-                                    } else {
-                                        selectedTagIds + tag.id
-                                    }
-                                )
-                            },
-                            label = {
-                                Text(tag.name)
-                            },
-                            selected = tag.id in selectedTagIds,
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier
-                                .scale(if (isDragging) 0.95f else 1f)
-                                .longPressDraggableHandle(
-                                    onDragStarted = {
-                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        hapticController.perform(HapticFeedbackType.GestureEnd)
-                                    },
-                                )
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -661,11 +672,18 @@ private fun AssistantItem(
 @Composable
 private fun AssistantActionSheet(
     assistant: Assistant,
+    categories: List<Tag>,
     onDismiss: () -> Unit,
+    onEditCategories: (tagIds: List<Uuid>, categories: List<Tag>) -> Unit,
+    onMoveToTop: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showEditCategories by remember { mutableStateOf(false) }
+    val currentCategoryNames = assistant.tags.mapNotNull { tagId ->
+        categories.find { it.id == tagId }?.name
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss
@@ -695,6 +713,43 @@ private fun AssistantActionSheet(
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // 编辑分类
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.assistant_edit_categories_title)) },
+                supportingContent = {
+                    if (currentCategoryNames.isNotEmpty()) {
+                        Text(
+                            text = currentCategoryNames.joinToString("、"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                leadingContent = {
+                    Icon(
+                        imageVector = HugeIcons.Tag01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                modifier = Modifier.onClick { showEditCategories = true },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
+
+            // 移到顶部
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.assistant_action_move_to_top)) },
+                leadingContent = {
+                    Icon(
+                        imageVector = HugeIcons.ArrowUp01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                modifier = Modifier.onClick { onMoveToTop() },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
 
             // 克隆选项
             ListItem(
@@ -733,6 +788,17 @@ private fun AssistantActionSheet(
         }
     }
 
+    if (showEditCategories) {
+        AssistantEditCategoriesDialog(
+            assistant = assistant,
+            categories = categories,
+            onConfirm = { tagIds, editedCategories ->
+                onEditCategories(tagIds, editedCategories)
+            },
+            onDismiss = { showEditCategories = false },
+        )
+    }
+
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -753,5 +819,53 @@ private fun AssistantActionSheet(
                 }
             },
         )
+    }
+}
+
+/** 选中分类时列表末尾的「添加助手到此分类」虚线入口卡 */
+@Composable
+private fun DashedAddCard(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    val contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent,
+        modifier = modifier
+            .fillMaxWidth()
+            .onClick(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    drawRoundRect(
+                        color = borderColor,
+                        cornerRadius = CornerRadius(16.dp.toPx()),
+                        style = Stroke(
+                            width = 1.2.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f)),
+                        ),
+                    )
+                }
+                .padding(vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Add01,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = contentColor,
+            )
+        }
     }
 }

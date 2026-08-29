@@ -133,7 +133,7 @@
   <string name="assistant_page_tab_memory">记忆</string>
   <string name="assistant_page_tab_prompt">提示词</string>
   <string name="assistant_page_tab_request">自定义请求</string>
-  <string name="assistant_page_tags">标签</string>
+  <string name="assistant_page_tags">分类</string>
   <string name="assistant_page_temperature">温度</string>
   <string name="assistant_page_temperature_warning">通常为 1。对于推理模型不建议修改。</string>
   <string name="assistant_page_template_preview">预览:</string>
@@ -1302,12 +1302,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="stats_page_metric_tokens">Tokens</string>
   <string name="stats_page_others">其他</string>
   <string name="stop">停止</string>
-  <string name="tag_input_dialog_create_new">创建新标签</string>
-  <string name="tag_input_dialog_existing_tags">现有标签</string>
-  <string name="tag_input_dialog_label">标签名称</string>
-  <string name="tag_input_dialog_placeholder">请输入标签名称...</string>
-  <string name="tag_input_dialog_tag_exists">该名称的标签已存在</string>
-  <string name="tag_input_dialog_title">添加标签</string>
+  <string name="tag_input_dialog_create_new">新建分类</string>
+  <string name="tag_input_dialog_existing_tags">现有分类</string>
+  <string name="tag_input_dialog_label">分类名称</string>
+  <string name="tag_input_dialog_placeholder">请输入分类名称...</string>
+  <string name="tag_input_dialog_tag_exists">同名分类已存在</string>
+  <string name="tag_input_dialog_title">添加分类</string>
   <string name="take_picture">拍照</string>
   <string name="test_tts">测试语音</string>
   <string name="text_area_fullscreen_edit">全屏编辑</string>
@@ -1587,5 +1587,20 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_files_page_clean_all">全部文件</string>
   <string name="setting_files_page_clean_older_than_days">%1$d 天前</string>
   <string name="setting_files_page_clean_range_description">选择要永久删除的文件。此操作无法撤销。</string>
+  <string name="done">完成</string>
+  <string name="assistant_category_all">全部</string>
+  <string name="assistant_category_manage">分类管理</string>
+  <string name="assistant_category_count">%1$d 个助手</string>
+  <string name="assistant_category_rename">重命名分类</string>
+  <string name="assistant_category_add">添加</string>
+  <string name="assistant_category_new_placeholder">新分类名称...</string>
+  <string name="assistant_category_delete_title">删除分类？</string>
+  <string name="assistant_category_delete_text">将删除分类「%1$s」，%2$d 个助手会被移出该分类，助手本身不受影响。</string>
+  <string name="assistant_edit_categories_title">编辑分类</string>
+  <string name="assistant_edit_categories_create">新建分类</string>
+  <string name="assistant_action_move_to_top">移到顶部</string>
+  <string name="assistant_add_to_category_title">添加助手到「%1$s」</string>
+  <string name="assistant_add_to_category_action">添加助手到「%1$s」</string>
+  <string name="assistant_add_to_category_empty">该分类已包含全部助手</string>
 </resources>
 

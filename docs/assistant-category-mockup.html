@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>助手分类管理改造 · UI 草图</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --sub: #8e8e93;
+    --sep: #e5e5ea;
+    --accent: #007aff;
+    --accent-soft: #e5f1ff;
+    --chevron: #c7c7cc;
+    --frame: #1c1c1e;
+    --danger: #ff3b30;
+    --chip-selected: #1c1c1e;
+    --chip-selected-text: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; }
+  body { background: #d9dce3; min-height: 100vh; padding: 32px 24px 64px; }
+  .doc { max-width: 1400px; margin: 0 auto; }
+  .doc h1 { font-size: 22px; margin-bottom: 8px; }
+  .doc .intro { font-size: 13px; color: #555; line-height: 1.7; margin-bottom: 28px; max-width: 900px; }
+  .doc .intro b { color: var(--text); }
+  .stage { display: flex; flex-wrap: wrap; gap: 40px 36px; align-items: flex-start; }
+  .shot { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .shot .cap { font-size: 13px; color: #333; text-align: center; line-height: 1.6; max-width: 393px; }
+  .shot .cap b { color: var(--text); }
+  .phone {
+    width: 393px; height: 852px; background: var(--bg);
+    border-radius: 44px; border: 10px solid var(--frame);
+    box-shadow: 0 24px 60px rgba(0,0,0,.35);
+    overflow: hidden; position: relative; display: flex; flex-direction: column;
+    flex: none;
+  }
+  .statusbar { height: 50px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 28px 8px; font-size: 14px; font-weight: 600; }
+  .statusbar .right { display: flex; gap: 5px; align-items: center; }
+  .sig { display: inline-block; width: 16px; height: 10px; }
+  .batt { display: inline-block; width: 22px; height: 11px; border: 1.4px solid var(--text); border-radius: 3px; position: relative; }
+  .batt::after { content:""; position:absolute; inset: 1.5px; right: 5px; background: var(--text); border-radius: 1px; }
+  /* top bar */
+  .topbar { padding: 6px 20px 10px; display: flex; align-items: center; justify-content: space-between; }
+  .topbar .title { font-size: 30px; font-weight: 800; letter-spacing: .2px; }
+  .topbar .actions { display: flex; gap: 6px; }
+  .iconbtn { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: transparent; }
+  .iconbtn:active { background: rgba(0,0,0,.06); }
+  .iconbtn svg { width: 22px; height: 22px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  /* search */
+  .search { margin: 2px 16px 12px; background: #e3e3e8; border-radius: 12px; height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--sub); font-size: 15px; }
+  .search svg { width: 17px; height: 17px; stroke: var(--sub); fill: none; stroke-width: 2; stroke-linecap: round; }
+  /* category chips row */
+  .catrow { display: flex; align-items: center; gap: 8px; padding: 0 16px 4px; }
+  .catchips { display: flex; gap: 8px; overflow: hidden; flex: 1; }
+  .chip {
+    flex: none; height: 34px; padding: 0 15px; border-radius: 17px;
+    display: flex; align-items: center; font-size: 14px; font-weight: 500;
+    background: var(--card); color: var(--text); border: 1px solid var(--sep);
+  }
+  .chip.on { background: var(--chip-selected); color: var(--chip-selected-text); border-color: var(--chip-selected); }
+  .catrow .manage { flex: none; width: 34px; height: 34px; border-radius: 17px; background: var(--card); border: 1px solid var(--sep); display: flex; align-items: center; justify-content: center; }
+  .catrow .manage svg { width: 17px; height: 17px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; }
+  /* assistant list */
+  .list { flex: 1; overflow: hidden; padding: 10px 12px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .acard { background: var(--card); border-radius: 16px; padding: 12px; display: flex; gap: 12px; align-items: center; }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .acard .mid { flex: 1; min-width: 0; }
+  .acard .name { font-size: 15px; font-weight: 700; }
+  .acard .tags { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
+  .tchip { font-size: 11px; padding: 2px 9px; border-radius: 10px; background: #efe7fb; color: #6b4fa3; font-weight: 500; }
+  .tchip.mem { background: #e2f6e6; color: #2e7d43; }
+  .dots { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+  .dots svg { width: 20px; height: 20px; stroke: var(--sub); fill: none; stroke-width: 2; stroke-linecap: round; }
+  .addcard { border: 1.6px dashed var(--chevron); border-radius: 16px; padding: 13px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--sub); font-size: 14px; background: transparent; }
+  .addcard svg { width: 16px; height: 16px; stroke: var(--sub); fill: none; stroke-width: 2; stroke-linecap: round; }
+  /* bottom sheet overlay */
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.42); z-index: 5; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: var(--card); border-radius: 26px 26px 0 0; padding: 8px 0 26px;
+  }
+  .grab { width: 38px; height: 5px; border-radius: 3px; background: #d1d1d6; margin: 6px auto 12px; }
+  .sheet h3 { font-size: 17px; font-weight: 800; padding: 0 20px; }
+  .sheet .head { display: flex; align-items: center; justify-content: space-between; padding-right: 16px; }
+  .sheet .done { font-size: 15px; color: var(--accent); font-weight: 600; padding: 6px 10px; border-radius: 10px; }
+  .srow { display: flex; align-items: center; gap: 12px; padding: 13px 20px; }
+  .srow .grip { color: #c7c7cc; font-size: 15px; letter-spacing: 1px; flex: none; }
+  .srow .mid { flex: 1; min-width: 0; }
+  .srow .nm { font-size: 15px; font-weight: 600; }
+  .srow .ct { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .srow .op { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+  .srow .op svg { width: 18px; height: 18px; stroke: #555; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .srow .op.del svg { stroke: var(--danger); }
+  .newcat { display: flex; gap: 10px; padding: 10px 20px 0; align-items: center; }
+  .newcat .field { flex: 1; height: 44px; background: var(--bg); border-radius: 12px; display: flex; align-items: center; padding: 0 14px; color: var(--sub); font-size: 14px; }
+  .newcat .btn { height: 40px; padding: 0 18px; border-radius: 20px; background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 700; display: flex; align-items: center; }
+  .hint { font-size: 12px; color: var(--sub); text-align: center; margin-top: 12px; }
+  /* action menu rows */
+  .arow { display: flex; align-items: center; gap: 14px; padding: 14px 22px; }
+  .arow svg { width: 21px; height: 21px; stroke: var(--accent); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .arow .tx { font-size: 15.5px; font-weight: 500; }
+  .arow .sub { font-size: 12px; color: var(--sub); margin-top: 1px; }
+  .arow.danger svg { stroke: var(--danger); }
+  .arow.danger .tx { color: var(--danger); }
+  .sep { height: 1px; background: var(--sep); margin: 4px 20px; }
+  .ahead { display: flex; align-items: center; gap: 12px; padding: 6px 22px 12px; }
+  .ahead .nm { font-size: 16px; font-weight: 700; }
+  /* dialog */
+  .dlg {
+    position: absolute; z-index: 7; left: 34px; right: 34px; top: 240px;
+    background: var(--card); border-radius: 24px; padding: 20px 18px 14px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.3);
+  }
+  .dlg h4 { font-size: 16.5px; font-weight: 800; text-align: center; margin-bottom: 3px; }
+  .dlg .subt { font-size: 12.5px; color: var(--sub); text-align: center; margin-bottom: 14px; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px; }
+  .fchip { height: 32px; padding: 0 13px; border-radius: 16px; border: 1px solid var(--sep); background: var(--card); font-size: 13.5px; display: flex; align-items: center; gap: 5px; color: var(--text); }
+  .fchip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .fchip.add { color: var(--accent); border-style: dashed; font-weight: 600; }
+  .dlg .btns { display: flex; justify-content: flex-end; gap: 4px; margin-top: 16px; }
+  .dlg .btns span { font-size: 14.5px; font-weight: 700; color: var(--accent); padding: 8px 12px; border-radius: 10px; }
+  .homebar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 130px; height: 5px; border-radius: 3px; background: rgba(0,0,0,.85); z-index: 9; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>助手分类管理改造 · UI 草图</h1>
+  <div class="intro">
+    <b>目标</b>：把「助手」设置页升级为分类为中心的管理界面——分类可新建 / 重命名 / 删除 / 拖动排序；点分类即浏览该分类下的助手；支持把助手加入多个分类（多对多，沿用现有 Tag 数据）。助手卡片「⋯」菜单扩容为常用操作入口。<br>
+    <b>复用</b>：FilterChip 行、ModalBottomSheet、AlertDialog、Card 列表、长按拖排序组件全部沿用；数据层零改动。
+  </div>
+
+  <div class="stage">
+
+    <!-- ① 主界面 -->
+    <div class="shot">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right">
+          <svg class="sig" viewBox="0 0 16 10"><rect x="0" y="6" width="3" height="4" rx="1" fill="#1c1c1e"/><rect x="4.5" y="4" width="3" height="6" rx="1" fill="#1c1c1e"/><rect x="9" y="2" width="3" height="8" rx="1" fill="#1c1c1e"/></svg>
+          <span class="batt"></span></span>
+        </div>
+        <div class="topbar">
+          <div class="title">助手</div>
+          <div class="actions">
+            <div class="iconbtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>
+          </div>
+        </div>
+        <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>搜索助手</div>
+        <div class="catrow">
+          <div class="catchips">
+            <div class="chip on">全部</div>
+            <div class="chip">学习</div>
+            <div class="chip">工作</div>
+            <div class="chip">角色扮演</div>
+          </div>
+          <div class="manage"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.4"/><circle cx="7" cy="17" r="2.4"/></svg></div>
+        </div>
+        <div class="list">
+          <div class="acard">
+            <div class="avatar" style="background:#e8f0fe">🇬🇧</div>
+            <div class="mid">
+              <div class="name">英语导师</div>
+              <div class="tags"><span class="tchip">学习</span><span class="tchip mem">记忆 12</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="acard">
+            <div class="avatar" style="background:#fef4e5">💻</div>
+            <div class="mid">
+              <div class="name">代码助手</div>
+              <div class="tags"><span class="tchip">工作</span><span class="tchip">编程</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="acard">
+            <div class="avatar" style="background:#e5f6ea">🎭</div>
+            <div class="mid">
+              <div class="name">赛博酒馆 · NPC</div>
+              <div class="tags"><span class="tchip">角色扮演</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="acard">
+            <div class="avatar" style="background:#fdeaea">🏛️</div>
+            <div class="mid">
+              <div class="name">政治导师</div>
+              <div class="tags"><span class="tchip">学习</span><span class="tchip mem">记忆 5</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+        </div>
+        <div class="homebar"></div>
+      </div>
+      <div class="cap"><b>① 助手主页</b>：标签过滤行升级为<b>分类单选 Tab</b>（全部 / 各分类），行尾固定的 ⚙ 打开分类管理。搜索、卡片布局、长按拖排序助手不变。</div>
+    </div>
+
+    <!-- ② 分类管理 -->
+    <div class="shot">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right">
+          <svg class="sig" viewBox="0 0 16 10"><rect x="0" y="6" width="3" height="4" rx="1" fill="#1c1c1e"/><rect x="4.5" y="4" width="3" height="6" rx="1" fill="#1c1c1e"/><rect x="9" y="2" width="3" height="8" rx="1" fill="#1c1c1e"/></svg>
+          <span class="batt"></span></span>
+        </div>
+        <div class="dim"></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="head"><h3>分类管理</h3><span class="done">完成</span></div>
+          <div class="srow">
+            <span class="grip">≡</span>
+            <div class="mid"><div class="nm">学习</div><div class="ct">3 个助手</div></div>
+            <div class="op"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/></svg></div>
+            <div class="op del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13"/></svg></div>
+          </div>
+          <div class="srow">
+            <span class="grip">≡</span>
+            <div class="mid"><div class="nm">工作</div><div class="ct">2 个助手</div></div>
+            <div class="op"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/></svg></div>
+            <div class="op del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13"/></svg></div>
+          </div>
+          <div class="srow">
+            <span class="grip">≡</span>
+            <div class="mid"><div class="nm">角色扮演</div><div class="ct">1 个助手</div></div>
+            <div class="op"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/></svg></div>
+            <div class="op del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13"/></svg></div>
+          </div>
+          <div class="srow">
+            <span class="grip">≡</span>
+            <div class="mid"><div class="nm">编程</div><div class="ct">1 个助手</div></div>
+            <div class="op"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/></svg></div>
+            <div class="op del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13"/></svg></div>
+          </div>
+          <div class="newcat">
+            <div class="field">新分类名称…</div>
+            <div class="btn">＋ 添加</div>
+          </div>
+          <div class="hint">拖动 ≡ 调整分类顺序（同步到切换助手的 Tab 排序）· 删除分类需确认，助手不被删除</div>
+        </div>
+        <div class="homebar"></div>
+      </div>
+      <div class="cap"><b>② 分类管理（BottomSheet）</b>：每行显示分类名 + 助手数，支持 ✏️ 重命名、🗑 删除（确认弹窗 + 清理引用）、≡ 拖动排序；底部输入框直接新建。替代原计划里"藏在图标后的管理对话框"。</div>
+    </div>
+
+    <!-- ③ 卡片 ⋯ 菜单 -->
+    <div class="shot">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right">
+          <svg class="sig" viewBox="0 0 16 10"><rect x="0" y="6" width="3" height="4" rx="1" fill="#1c1c1e"/><rect x="4.5" y="4" width="3" height="6" rx="1" fill="#1c1c1e"/><rect x="9" y="2" width="3" height="8" rx="1" fill="#1c1c1e"/></svg>
+          <span class="batt"></span></span>
+        </div>
+        <div class="dim"></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="ahead">
+            <div class="avatar" style="background:#fef4e5">💻</div>
+            <div class="nm">代码助手</div>
+          </div>
+          <div class="sep"></div>
+          <div class="arow">
+            <svg viewBox="0 0 24 24"><path d="M8 4h12v12"/><path d="M4 8h12v12H4z"/></svg>
+            <div><div class="tx">编辑分类</div><div class="sub">当前：工作、编程</div></div>
+          </div>
+          <div class="arow">
+            <svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            <div><div class="tx">移到顶部</div></div>
+          </div>
+          <div class="arow">
+            <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            <div><div class="tx">克隆</div><div class="sub">复制助手全部配置</div></div>
+          </div>
+          <div class="sep"></div>
+          <div class="arow danger">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13"/></svg>
+            <div><div class="tx">删除</div><div class="sub">同时清除该助手的记忆与对话</div></div>
+          </div>
+        </div>
+        <div class="homebar"></div>
+      </div>
+      <div class="cap"><b>③ 卡片「⋯」菜单扩容</b>：新增 <b>编辑分类</b>（核心入口，显示当前归属）与 <b>移到顶部</b>；保留克隆 / 删除。默认助手不显示删除项（沿用现有 DEFAULT_ASSISTANTS_IDS 门控）。</div>
+    </div>
+
+    <!-- ④ 编辑分类对话框 -->
+    <div class="shot">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right">
+          <svg class="sig" viewBox="0 0 16 10"><rect x="0" y="6" width="3" height="4" rx="1" fill="#1c1c1e"/><rect x="4.5" y="4" width="3" height="6" rx="1" fill="#1c1c1e"/><rect x="9" y="2" width="3" height="8" rx="1" fill="#1c1c1e"/></svg>
+          <span class="batt"></span></span>
+        </div>
+        <div class="dim"></div>
+        <div class="dlg">
+          <h4>编辑分类</h4>
+          <div class="subt">代码助手 · 可属于多个分类</div>
+          <div class="flow">
+            <div class="fchip">学习</div>
+            <div class="fchip on">✓ 工作</div>
+            <div class="fchip">角色扮演</div>
+            <div class="fchip on">✓ 编程</div>
+            <div class="fchip add">＋ 新建分类</div>
+          </div>
+          <div class="btns"><span>取消</span><span>保存</span></div>
+        </div>
+        <div class="homebar"></div>
+      </div>
+      <div class="cap"><b>④ 编辑分类（AlertDialog）</b>：多选 chip，允许一个助手同时属于多个分类；「＋ 新建分类」就地建类并勾上（复用 TagsInput 的重名校验逻辑）。</div>
+    </div>
+
+    <!-- ⑤ 分类内视图 -->
+    <div class="shot">
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right">
+          <svg class="sig" viewBox="0 0 16 10"><rect x="0" y="6" width="3" height="4" rx="1" fill="#1c1c1e"/><rect x="4.5" y="4" width="3" height="6" rx="1" fill="#1c1c1e"/><rect x="9" y="2" width="3" height="8" rx="1" fill="#1c1c1e"/></svg>
+          <span class="batt"></span></span>
+        </div>
+        <div class="topbar">
+          <div class="title">助手</div>
+          <div class="actions">
+            <div class="iconbtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>
+          </div>
+        </div>
+        <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>搜索助手</div>
+        <div class="catrow">
+          <div class="catchips">
+            <div class="chip">全部</div>
+            <div class="chip on">学习</div>
+            <div class="chip">工作</div>
+            <div class="chip">角色扮演</div>
+          </div>
+          <div class="manage"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.4"/><circle cx="7" cy="17" r="2.4"/></svg></div>
+        </div>
+        <div class="list">
+          <div class="acard">
+            <div class="avatar" style="background:#e8f0fe">🇬🇧</div>
+            <div class="mid">
+              <div class="name">英语导师</div>
+              <div class="tags"><span class="tchip">学习</span><span class="tchip mem">记忆 12</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="acard">
+            <div class="avatar" style="background:#fdeaea">🏛️</div>
+            <div class="mid">
+              <div class="name">政治导师</div>
+              <div class="tags"><span class="tchip">学习</span><span class="tchip mem">记忆 5</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="acard">
+            <div class="avatar" style="background:#eef">🧮</div>
+            <div class="mid">
+              <div class="name">数学导师</div>
+              <div class="tags"><span class="tchip">学习</span></div>
+            </div>
+            <div class="dots"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="#8e8e93" stroke="none"/><circle cx="12" cy="19" r="1.3" fill="#8e8e93" stroke="none"/></svg></div>
+          </div>
+          <div class="addcard"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加助手到「学习」</div>
+        </div>
+        <div class="homebar"></div>
+      </div>
+      <div class="cap"><b>⑤ 选中分类的视图</b>：列表只显示该分类助手，末尾追加虚线「＋ 添加助手到此分类」卡 → 弹出多选对话框（列出未属于该分类的助手，勾选批量加入）。空分类时列表仅有此卡，不出现空态迷茫。</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

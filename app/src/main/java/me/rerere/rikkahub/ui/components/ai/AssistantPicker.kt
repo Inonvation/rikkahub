@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -11,12 +10,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -157,17 +154,19 @@ internal fun AssistantPickerSheet(
     val scope = rememberCoroutineScope()
     val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
 
-    // 标签过滤状态
-    var selectedTagIds by remember { mutableStateOf(emptySet<Uuid>()) }
+    // 分类导航状态（null = 全部；选中分类被删除后归一化回退到全部）
+    var selectedCategoryId by remember { mutableStateOf<Uuid?>(null) }
+    val selectedCategoryIdNormalized = selectedCategoryId?.takeIf { id ->
+        settings.assistantTags.any { it.id == id }
+    }
 
-    // 根据选中的标签过滤助手
-    val filteredAssistants = remember(settings.assistants, selectedTagIds) {
-        if (selectedTagIds.isEmpty()) {
+    // 根据选中的分类过滤助手
+    val filteredAssistants = remember(settings.assistants, settings.assistantTags, selectedCategoryIdNormalized) {
+        val categoryId = selectedCategoryIdNormalized
+        if (categoryId == null) {
             settings.assistants
         } else {
-            settings.assistants.filter { assistant ->
-                assistant.tags.any { tagId -> tagId in selectedTagIds }
-            }
+            settings.assistants.filter { assistant -> categoryId in assistant.tags }
         }
     }
 
@@ -189,28 +188,13 @@ internal fun AssistantPickerSheet(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // 标签过滤器
+            // 分类单选 Tab（与助手设置页一致）
             if (settings.assistantTags.isNotEmpty()) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp)
-                ) {
-                    items(settings.assistantTags, key = { tag -> tag.id }) { tag ->
-                        FilterChip(
-                            onClick = {
-                                hapticController.lightTap()
-                                selectedTagIds = if (tag.id in selectedTagIds) {
-                                    selectedTagIds - tag.id
-                                } else {
-                                    selectedTagIds + tag.id
-                                }
-                            },
-                            label = { Text(tag.name) },
-                            selected = tag.id in selectedTagIds,
-                            shape = RoundedCornerShape(50),
-                        )
-                    }
-                }
+                AssistantCategoryTabRow(
+                    categories = settings.assistantTags,
+                    selectedCategoryId = selectedCategoryIdNormalized,
+                    onSelectCategory = { selectedCategoryId = it },
+                )
                 Spacer(modifier = Modifier.height(8.dp))
             }
 

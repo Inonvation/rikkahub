@@ -133,7 +133,7 @@
   <string name="assistant_page_tab_memory">記憶</string>
   <string name="assistant_page_tab_prompt">提示詞</string>
   <string name="assistant_page_tab_request">自定義請求</string>
-  <string name="assistant_page_tags">標籤</string>
+  <string name="assistant_page_tags">分類</string>
   <string name="assistant_page_temperature">溫度</string>
   <string name="assistant_page_temperature_warning">通常為 1。對於推理模型不建議修改。</string>
   <string name="assistant_page_template_preview">預覽:</string>
@@ -1097,12 +1097,12 @@
   <string name="stats_page_total_conversations">總對話數</string>
   <string name="stats_page_total_messages">總訊息</string>
   <string name="stop">停止</string>
-  <string name="tag_input_dialog_create_new">創建新標籤</string>
-  <string name="tag_input_dialog_existing_tags">現有標籤</string>
-  <string name="tag_input_dialog_label">標籤名稱</string>
-  <string name="tag_input_dialog_placeholder">請輸入標籤名稱...</string>
-  <string name="tag_input_dialog_tag_exists">該名稱的標籤已存在</string>
-  <string name="tag_input_dialog_title">添加標籤</string>
+  <string name="tag_input_dialog_create_new">新建分類</string>
+  <string name="tag_input_dialog_existing_tags">現有分類</string>
+  <string name="tag_input_dialog_label">分類名稱</string>
+  <string name="tag_input_dialog_placeholder">請輸入分類名稱...</string>
+  <string name="tag_input_dialog_tag_exists">同名分類已存在</string>
+  <string name="tag_input_dialog_title">添加分類</string>
   <string name="take_picture">拍照</string>
   <string name="test_tts">測試語音</string>
   <string name="text_area_fullscreen_edit">全螢幕編輯</string>
@@ -1380,5 +1380,20 @@
   <string name="setting_files_page_clean_all">所有檔案</string>
   <string name="setting_files_page_clean_older_than_days">%1$d 天前</string>
   <string name="setting_files_page_clean_range_description">選擇要永久刪除的檔案。此操作無法復原。</string>
+  <string name="done">完成</string>
+  <string name="assistant_category_all">全部</string>
+  <string name="assistant_category_manage">分類管理</string>
+  <string name="assistant_category_count">%1$d 個助手</string>
+  <string name="assistant_category_rename">重新命名分類</string>
+  <string name="assistant_category_add">新增</string>
+  <string name="assistant_category_new_placeholder">新分類名稱...</string>
+  <string name="assistant_category_delete_title">刪除分類？</string>
+  <string name="assistant_category_delete_text">將刪除分類「%1$s」，%2$d 個助手會被移出該分類，助手本身不受影響。</string>
+  <string name="assistant_edit_categories_title">編輯分類</string>
+  <string name="assistant_edit_categories_create">新建分類</string>
+  <string name="assistant_action_move_to_top">移到頂部</string>
+  <string name="assistant_add_to_category_title">添加助手到「%1$s」</string>
+  <string name="assistant_add_to_category_action">添加助手到「%1$s」</string>
+  <string name="assistant_add_to_category_empty">該分類已包含全部助手</string>
 </resources>
 
