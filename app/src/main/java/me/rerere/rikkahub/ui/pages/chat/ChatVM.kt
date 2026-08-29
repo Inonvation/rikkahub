@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.net.toUri
@@ -17,6 +18,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -73,6 +76,18 @@ class ChatVM(
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
 
+    /**
+     * 当前草稿槽：未落库的会话 = 尚未发送过的新对话，共用 [ChatDraftStore.NEW_CHAT_KEY]
+     * 一个槽（新建对话的 id 每次都重新随机生成，按 id 存会随旧 id 失联，导致
+     * “新建对话打字 → 切历史会话 → 再新建切回”丢字）；已落库会话按各自 id 存取。
+     * 发送成功后（[clearDraft]）会话即将落库，槽位切到会话 id。
+     */
+    private var draftSlot: Uuid = _conversationId
+
+    /** 输入草稿恢复完成信号：ChatPage 的 initText/initFiles 注入需等它，保证预填内容覆盖草稿 */
+    private val inputReadyState = MutableStateFlow(false)
+    val inputReady: StateFlow<Boolean> = inputReadyState.asStateFlow()
+
     // 异步任务 (从ChatService获取，响应式)
     val conversationJob: StateFlow<Job?> =
         chatService
@@ -91,8 +106,33 @@ class ChatVM(
     // 无需在 VM 层收集。
 
     init {
-        // 恢复上次切换会话/助手离开时保存的输入草稿（仅当文本非空）
-        chatDraftStore.load(_conversationId)?.let { inputState.setMessageText(it) }
+        // 恢复输入草稿需先知道会话是否已落库（决定草稿槽），因此在 initializeConversation
+        // 完成后进行；ChatPage 的 initText/initFiles 注入会等待 inputReady，分享预填内容
+        // 最终覆盖草稿（顺序由 inputReady 保证，避免竞态）
+        viewModelScope.launch {
+            try {
+                chatService.initializeConversation(_conversationId, initialMode)
+                val persisted = conversationRepo.getConversationById(_conversationId) != null
+                draftSlot = if (persisted) _conversationId else ChatDraftStore.NEW_CHAT_KEY
+                chatDraftStore.load(draftSlot)?.let { draft ->
+                    if (draft.text.isNotEmpty()) inputState.setMessageText(draft.text)
+                    if (draft.parts.isNotEmpty()) inputState.messageContent = draft.parts
+                }
+            } finally {
+                inputReadyState.value = true
+            }
+        }
+        // 输入防抖落盘：进程被杀时 onCleared 不会执行，靠持续保存把丢失窗口压到 800ms。
+        // drop(1) 跳过恢复值的首帧发射：恢复为空时不写空槽，避免把共享 NEW_CHAT_KEY 槽里
+        // 其他未发送新会话的草稿误清掉；只有用户真实编辑才触发保存。
+        viewModelScope.launch {
+            snapshotFlow { inputState.textContent.text.toString() }
+                .drop(1)
+                .debounce(800)
+                .collect { text ->
+                    chatDraftStore.save(draftSlot, text, inputState.messageContent)
+                }
+        }
 
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
@@ -115,16 +155,22 @@ class ChatVM(
 
     override fun onCleared() {
         super.onCleared()
-        // 保存输入草稿：ChatVM 随导航栈清理（cleanupChatPages）被销毁前，
-        // 把未发送的输入暂存到会话级草稿缓存，重新进入该会话时恢复
-        chatDraftStore.save(_conversationId, inputState.textContent.text.toString())
+        // 保存输入草稿（文本 + 附件）：ChatVM 随导航栈清理（cleanupChatPages）被销毁前，
+        // 把未发送的输入暂存到草稿槽（未落库新会话为共享 NEW_CHAT_KEY 槽），重新进入该
+        // 会话或再次新建对话时恢复
+        chatDraftStore.save(draftSlot, inputState.textContent.text.toString(), inputState.messageContent)
         // 移除对话引用
         chatService.removeConversationReference(_conversationId)
     }
 
-    /** 清除本会话的输入草稿（发送成功后调用，避免已发送内容在下次进入时被误恢复） */
+    /**
+     * 发送成功后清除草稿：本次发送消费了当前草稿槽（未落库新会话为共享 NEW_CHAT_KEY 槽，
+     * 已有历史会话为会话 id 槽），避免已发送内容在下次进入时被误恢复。
+     * 此后会话已（即将）落库，后续草稿归位到会话 id 槽。
+     */
     fun clearDraft() {
-        chatDraftStore.remove(_conversationId)
+        chatDraftStore.remove(draftSlot)
+        draftSlot = _conversationId
     }
 
     // 用户设置

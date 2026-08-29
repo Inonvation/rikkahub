@@ -313,8 +313,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
         }
     }
 
-    // 初始化输入状态（处理传入的 files 和 text 参数）
+    // 初始化输入状态（处理传入的 files 和 text 参数）。
+    // 先等 VM 完成草稿恢复（inputReady）：分享/外部注入的预填内容优先级高于草稿，
+    // 直接覆盖之；不等的话草稿异步恢复完成可能反过来覆盖预填内容（竞态丢字）
     LaunchedEffect(files, text) {
+        vm.inputReady.first { it }
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
             val contentTypes = files.mapNotNull { file ->
@@ -1097,6 +1100,9 @@ private fun ChatPageContent(
                 onMoreClick = {
                     showFilesSheet = true
                 },
+                onOptimizePromptClick = {
+                    showPromptOptimizeSheet = true
+                },
                 subAgentActive = subAgentActiveCount > 0,
                 subAgentActiveCount = subAgentActiveCount,
                 pendingGuidance = pendingGuidance,
@@ -1162,7 +1168,6 @@ private fun ChatPageContent(
                 enableSearch = enableWebSearch,
                 onUpdateSearchMode = updateSearchMode,
                 onUpdateSearchService = updateSearchService,
-                onShowPromptOptimize = { showPromptOptimizeSheet = true },
                 onDismiss = { showFilesSheet = false },
             )
         }
@@ -1193,8 +1198,6 @@ private fun ChatFilesPickerSheet(
     enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
-    /** 打开提示词优化弹层（原输入栏 ✨ 按钮入口，已收入「＋」面板） */
-    onShowPromptOptimize: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1364,18 +1367,6 @@ private fun ChatFilesPickerSheet(
             enableSearch = enableSearch,
             onUpdateSearchMode = onUpdateSearchMode,
             onUpdateSearchService = onUpdateSearchService,
-            onOptimizePromptClick = {
-                // 与之前输入栏 ✨ 按钮一致的空输入校验；为空时保留面板仅提示
-                if (inputState.isEmpty()) {
-                    toaster.show(
-                        context.getString(R.string.prompt_optimize_empty_input),
-                        type = ToastType.Error,
-                    )
-                } else {
-                    dismissAll()
-                    onShowPromptOptimize()
-                }
-            },
             onUpdateAssistant = {
                 vm.updateSettings(
                     setting.copy(
@@ -1596,7 +1587,7 @@ private fun TopBar(
 
 /**
  * 顶栏会话标题旁的模式 chip：短按弹出模式选择（可切换时），长按进模式设置页；
- * 首条用户消息发送后锁定，仅展示 + 提示。
+ * 首条用户消息发送后锁定：灰色不可点（点击无反应），仅展示当前模式。
  */
 @Composable
 private fun TopBarModeChip(
@@ -1606,9 +1597,7 @@ private fun TopBarModeChip(
     onSwitchMode: (String?) -> Unit,
 ) {
     val navController = LocalNavController.current
-    val toaster = LocalToaster.current
     val hapticController = rememberHaptic()
-    val lockedModeDesc = stringResource(R.string.chat_mode_locked_desc)
     var showModePicker by remember { mutableStateOf(false) }
     val modeLabel = modeRefDisplayName(conversation.mode, settings.customModes, settings.builtinModeOverrides)
     val followAssistantSummary = rememberFollowAssistantSummary(settings)
@@ -1622,15 +1611,10 @@ private fun TopBarModeChip(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {
+                    // 已发送消息/生成中：锁定态灰色展示，点击无反应（不再弹提示）
                     if (modeSwitchEnabled) {
                         hapticController.lightTap()
                         showModePicker = true
-                    } else {
-                        // 有消息/生成中：模式锁定，给出提示而不是无响应
-                        toaster.show(
-                            message = lockedModeDesc,
-                            type = ToastType.Normal,
-                        )
                     }
                 },
                 onLongClick = {
@@ -1639,7 +1623,8 @@ private fun TopBarModeChip(
                 }
             )
             .padding(vertical = 2.dp, horizontal = 6.dp)
-            .alpha(if (modeSwitchEnabled) 1f else 0.6f),
+            // 锁定态用 Material 禁用透明度呈现灰色；长按进模式设置页与切换无关，保持可用
+            .alpha(if (modeSwitchEnabled) 1f else 0.38f),
     ) {
         Icon(
             imageVector = HugeIcons.SlidersVertical,

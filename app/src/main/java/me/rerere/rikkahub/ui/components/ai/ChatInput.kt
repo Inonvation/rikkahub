@@ -1,11 +1,16 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -110,6 +115,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Fullscreen
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
@@ -152,6 +158,8 @@ fun ChatInput(
     onOpenProviderSettings: () -> Unit = {},
     onUpdateAssistant: (Assistant) -> Unit,
     onMoreClick: () -> Unit,
+    /** 输入框有文字时底条显示的「优化提示词」入口：打开优化弹层（原「＋」面板条目，提为一级入口） */
+    onOptimizePromptClick: () -> Unit,
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
@@ -379,12 +387,37 @@ fun ChatInput(
                             }
                         }
 
-                        // 快捷消息保留在底条（高频）；子代理运行中该位置显示子代理图标
-                        // （延续改版前「子代理图标替代快捷消息按钮」的语义，位置随快捷消息移到底条）
+                        // 底条右侧：空输入显示快捷消息；检测到文字后原位换成「优化提示词」
+                        // （AnimatedContent 原地缩放+淡入换图标，同一位置两个入口不改变行高/右缘对齐）；
+                        // 子代理运行中该位置优先显示子代理图标（延续「子代理替代快捷消息」的语义）
                         if (subAgentActive && onOpenSubAgentPanel != null) {
                             SubAgentActiveButton(onClick = onOpenSubAgentPanel, count = subAgentActiveCount)
-                        } else if (quickMessages.isNotEmpty()) {
-                            QuickMessageButton(quickMessages = quickMessages, state = state)
+                        } else {
+                            AnimatedContent(
+                                targetState = !state.isEmpty(),
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(150, easing = FastOutSlowInEasing)) +
+                                        scaleIn(
+                                            initialScale = 0.6f,
+                                            animationSpec = tween(150, easing = FastOutSlowInEasing),
+                                        )) togetherWith (fadeOut(animationSpec = tween(100)) +
+                                        scaleOut(
+                                            targetScale = 0.6f,
+                                            animationSpec = tween(100),
+                                        ))
+                                },
+                                label = "quick_message_optimize_swap",
+                            ) { hasText ->
+                                when {
+                                    hasText -> OptimizePromptButton(onClick = onOptimizePromptClick)
+                                    quickMessages.isNotEmpty() -> QuickMessageButton(
+                                        quickMessages = quickMessages,
+                                        state = state,
+                                    )
+                                    // 无快捷消息且无文字：不占位（零宽），图标出现时由 SizeTransform 平滑过渡
+                                    else -> Spacer(Modifier)
+                                }
+                            }
                         }
 
                         if (asrState.isAvailable || asrState.isRecording) {
@@ -1163,6 +1196,34 @@ private fun QuickMessageButton(
                 }
             }
         }
+    }
+}
+
+/**
+ * 「优化提示词」入口：输入框有文字时出现在底条（与快捷消息同槽位互换），
+ * 点击打开优化弹层。用主色与快捷消息的灰阶图标区分两种状态。
+ */
+@Composable
+private fun OptimizePromptButton(onClick: () -> Unit) {
+    val hapticController = rememberHaptic()
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                hapticController.lightTap()
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = HugeIcons.MagicWand01,
+            contentDescription = stringResource(R.string.prompt_optimize),
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 

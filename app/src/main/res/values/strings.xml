@@ -1134,7 +1134,6 @@
   <string name="mode_deleted">已删除模式</string>
   <string name="mode_modified_suffix">（已修改）</string>
   <string name="mode_picker_title">切换模式</string>
-  <string name="chat_mode_locked_desc">会话已发送消息，模式已锁定；新建会话后可重新选择</string>
   <string name="setting_mode_page_delete_custom">删除此模式</string>
   <string name="setting_mode_page_edit">编辑模式</string>
   <string name="setting_mode_page_duplicate">复制模式</string>
@@ -1641,7 +1640,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="prompt_optimize_result_title">优化结果</string>
   <string name="prompt_optimize_apply">替换到输入框</string>
   <string name="prompt_optimize_reselect">重新选择</string>
-  <string name="prompt_optimize_empty_input">请先输入要优化的文字</string>
   <string name="prompt_optimize_failed">优化失败：</string>
   <string name="prompt_optimize_extra_note">附加说明（可选）</string>
   <string name="workspace_page_title">Workspace</string>
@@ -1821,8 +1819,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="chat_page_context_composition_skills">Skills</string>
   <string name="chat_page_context_composition_messages">Messages</string>
   <string name="chat_page_context_composition_none">Send a message to see the composition</string>
-  <string name="chat_page_context_composition_note">Estimate (~4 chars ≈ 1 token), refreshed on each send</string>
-  <string name="chat_page_context_composition_no_snapshot_note">Tool / MCP / skill tokens will be counted after you send a message</string>
   <string name="setting_page_console_footer_usage">Session Usage</string>
   <string name="setting_page_console_footer_usage_desc">Total counts of messages and tokens across all conversations</string>
   <string name="setting_page_console_audit_desc">Operation records and permission-blocked attempts</string>

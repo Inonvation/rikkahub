@@ -80,9 +80,9 @@ val appModule = module {
         TodoStorage(get())
     }
 
-    // 会话级输入草稿缓存：切换会话/助手时保存未发送的输入，重新进入时恢复
+    // 会话级输入草稿缓存：切换会话/助手时保存未发送的输入，重新进入时恢复；写穿磁盘兜底进程被杀
     single {
-        ChatDraftStore()
+        ChatDraftStore(get())
     }
 
     // 会话级消息列表滚动位置缓存：切换会话时保存，重新进入时恢复（短暂记忆）

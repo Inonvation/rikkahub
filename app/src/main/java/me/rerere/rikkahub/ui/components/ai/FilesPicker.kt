@@ -66,7 +66,6 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
@@ -109,8 +108,6 @@ internal fun FilesPicker(
     enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
-    /** 优化提示词（面板卡片）：由调用方负责空输入校验与弹层 */
-    onOptimizePromptClick: () -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
     showCompressDialog: Boolean,
@@ -408,28 +405,6 @@ internal fun FilesPicker(
                 .clickable(enabled = modePolicy.allowKnowledge) {
                     hapticController.lightTap()
                     showKbSheet = true
-                },
-        )
-
-        // 7. 优化提示词（从输入栏工具行收起，低频功能归位到「＋」面板）
-        ListItem(
-            leadingContent = { Icon(HugeIcons.MagicWand01, contentDescription = null) },
-            headlineContent = { Text("优化提示词") },
-            supportingContent = {
-                Text(
-                    text = "用 AI 改写当前输入内容",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.large)
-                .clickable {
-                    hapticController.lightTap()
-                    onOptimizePromptClick()
                 },
         )
 

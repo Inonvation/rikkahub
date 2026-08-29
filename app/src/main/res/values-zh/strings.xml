@@ -1577,8 +1577,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="chat_page_context_composition_skills">技能</string>
   <string name="chat_page_context_composition_messages">消息历史</string>
   <string name="chat_page_context_composition_none">发送消息后可查看构成统计</string>
-  <string name="chat_page_context_composition_note">4 字符 ≈ 1 token 估算，发送后按实际构成刷新</string>
-  <string name="chat_page_context_composition_no_snapshot_note">工具 / MCP / 技能构成将在发送后统计</string>
   <string name="setting_page_console_footer_usage">会话用量</string>
   <string name="setting_page_console_footer_usage_desc">显示所有会话累计的消息数与 tokens</string>
   <string name="setting_page_console_footer">上下文浮窗显示</string>
