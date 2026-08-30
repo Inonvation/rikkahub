@@ -66,7 +66,9 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.Download04
+import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.rikkahub.R
@@ -88,6 +90,10 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
+import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
+import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -181,6 +187,10 @@ private fun ContextStatusPanel(
     onOpenConsole: () -> Unit,
 ) {
     val conversationRepository: ConversationRepository = koinInject()
+    val workspaceRepository: WorkspaceRepository = koinInject()
+    val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
+    val trustedFolderRepository: TrustedFolderRepository = koinInject()
+    val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
 
     // 会话级统计：主模型消息 + 当前会话子代理用量（任务终态落库后并入）合并计算
     val subAgentUsages by conversationRepository.observeSubAgentUsage(conversation.id.toString())
@@ -281,6 +291,13 @@ private fun ContextStatusPanel(
     val hasCompositionSnapshot = storeSnapshot != null
     val assistantForPreset = settings.getAssistantById(conversation.assistantId)
         ?: settings.getCurrentAssistant()
+    // 绑定环境（与「＋」面板工作区/信任文件夹卡片同源）：助手级工作区绑定 + 信任文件夹项目绑定
+    val boundWorkspace = assistantForPreset.workspaceId?.let { wid ->
+        workspaces.find { it.id == wid.toString() }
+    }
+    val boundTrustedProject = assistantForPreset.trustedFolderProjectId?.let { pid ->
+        trustedSettings.projects.find { it.id == pid }
+    }
     val composition = storeSnapshot
         ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
         ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages)) {
@@ -353,6 +370,38 @@ private fun ContextStatusPanel(
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+            // 绑定环境区：助手绑定的工作区 / 信任文件夹，仅有绑定时出现（含分隔线）；
+            // 工作区 shell 未就绪时整行置灰——工具未装配，绑定暂不生效
+            if (boundWorkspace != null || boundTrustedProject != null) {
+                val workspaceReady = boundWorkspace != null &&
+                    boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (boundWorkspace != null) {
+                        BindingRow(
+                            icon = HugeIcons.Codesandbox,
+                            label = stringResource(R.string.assistant_page_workspace),
+                            value = if (workspaceReady) {
+                                "${boundWorkspace.name} · ${conversation.workspaceCwd ?: "/workspace"}"
+                            } else {
+                                boundWorkspace.name
+                            },
+                            dimmed = !workspaceReady,
+                        )
+                    }
+                    if (boundTrustedProject != null) {
+                        BindingRow(
+                            icon = HugeIcons.FolderLocked,
+                            label = "信任文件夹",
+                            value = boundTrustedProject.name,
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            }
 
             // 指标区（行式）：模型历史 / 输入输出 / 平均缓存各占一行，由管理控制台
             // 「上下文浮窗显示」勾选项驱动；全部关闭时给一行轻提示，避免浮窗只剩
@@ -659,6 +708,45 @@ private fun SessionIndicators(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/**
+ * 绑定环境行：图标 + 类别 + 值的行式布局，标签列宽与构成详情行对齐；
+ * [dimmed] 用于工作区 shell 未就绪时整行置灰（此时工具未装配，绑定暂不生效）。
+ */
+@Composable
+private fun BindingRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    dimmed: Boolean = false,
+) {
+    val alpha = if (dimmed) 0.4f else 1f
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(12.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+            modifier = Modifier.width(60.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

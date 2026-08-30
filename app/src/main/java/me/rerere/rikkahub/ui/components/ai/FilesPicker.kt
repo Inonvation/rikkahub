@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -209,7 +208,7 @@ internal fun FilesPicker(
 
         // 2. 网络搜索服务（新增卡片，与输入栏搜索按钮同源）
         var showSearchSheet by remember { mutableStateOf(false) }
-        val currentSearchService = settings.searchServices.getOrNull(settings.searchServiceSelected)
+        val enabledSearchServices = settings.searchServices.filter { it.id in settings.enabledSearchServiceIds }
         val builtInSearchEnabled = chatModel?.tools?.contains(BuiltInTools.Search) == true
         ListItem(
             leadingContent = { Icon(HugeIcons.GlobalSearch, contentDescription = null) },
@@ -218,14 +217,13 @@ internal fun FilesPicker(
                 Text(
                     text = when {
                         builtInSearchEnabled -> "使用模型内置搜索"
-                        enableSearch && currentSearchService != null -> "已开启 · ${currentSearchService.displayName}"
+                        enableSearch && enabledSearchServices.isNotEmpty() ->
+                            "已开启 · " + enabledSearchServices.joinToString("、") { it.displayName }
                         enableSearch -> "已开启"
                         else -> "未开启"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             },
             trailingContent = {
@@ -285,7 +283,7 @@ internal fun FilesPicker(
                 },
         )
 
-        // 4. 工作区：点击进入对应工作区文件目录页；长按切换工作目录（未绑定时点击/长按均引导绑定）
+        // 4. 工作区：点击卡片切换工作目录（未绑定/未就绪时引导选择工作区）；右侧设置图标进入工作区文件目录
         var showWorkspaceSheet by remember { mutableStateOf(false) }
         var showCwdSheet by remember { mutableStateOf(false) }
         val boundWorkspace = remember(workspaces, assistant.workspaceId) {
@@ -336,21 +334,10 @@ internal fun FilesPicker(
             ),
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
-                .combinedClickable(
-                    onClick = {
-                        hapticController.lightTap()
-                        if (boundWorkspace != null) {
-                            onDismiss()
-                            navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
-                        } else {
-                            showWorkspaceSheet = true
-                        }
-                    },
-                    onLongClick = {
-                        hapticController.lightTap()
-                        if (workspaceReady) showCwdSheet = true else showWorkspaceSheet = true
-                    },
-                ),
+                .clickable {
+                    hapticController.lightTap()
+                    if (workspaceReady) showCwdSheet = true else showWorkspaceSheet = true
+                },
         )
 
         // 5. 信任文件夹：激活项目名入主标题下的次标题
