@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -46,6 +47,38 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
     overrides[name] ?: WorkspaceToolDefaultApprovals[name] ?: false
 
+/**
+ * 写入/编辑工具的动态审批判定（每次工具调用按输入路径执行）：
+ * 1. 输入缺失/无法解析 → 审批（fail-closed，宁误批不放行）
+ * 2. 落在可写安全区（/workspace、/tmp）之外 → 强制审批。路径越界检查独立于覆写与
+ *    forceNoApproval（execute 阶段会再报错引导 trusted_folder_*）
+ * 3. forceNoApproval（子代理/讨论可信委派）→ 免审批
+ * 4. per-workspace 覆写要求审批 → 审批
+ * 5. cwd 审批域：/workspace 子树内、cwd 子树外的写入需审批。安全边界，不受覆写关闭；
+ *    读取类工具不设 cwd 边界（信息只进不出）；/tmp 为临时暂存不在此域
+ *
+ * [cwd] 须为 [normalizeWorkspaceCwd] 归一化后的绝对路径（null = /workspace 根）。
+ */
+internal fun workspaceWriteNeedsApproval(
+    rawPath: String?,
+    toolName: String,
+    approvalOverrides: Map<String, Boolean>,
+    cwd: String?,
+    forceNoApproval: Boolean,
+): Boolean {
+    val resolved = rawPath?.takeIf { it.isNotBlank() }
+        ?.let { runCatching { resolveWorkspaceToolPath(it, cwd) }.getOrNull() }
+    if (resolved == null || isOutsideWorkspaceWritableRoots(resolved)) return true
+    if (forceNoApproval) return false
+    if (resolveWorkspaceToolApproval(toolName, approvalOverrides)) return true
+    if (isUnderWorkspaceTree(resolved, WORKSPACE_ROOT) &&
+        !isUnderWorkspaceTree(resolved, cwd ?: WORKSPACE_ROOT)
+    ) {
+        return true
+    }
+    return false
+}
+
 suspend fun createWorkspaceTools(
     workspaceId: String?,
     workspaceRepository: WorkspaceRepository,
@@ -54,22 +87,31 @@ suspend fun createWorkspaceTools(
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
-    // MED-7: forceNoApproval 只跳过"用户审批门"，不跳过工具的路径越界检查（后者在工具 needsApproval lambda 的 || 后半段）
+    // 工具链工作目录：文件工具的缺省目录与相对路径解析基准（Rootfs 绝对路径；null = /workspace 根）
+    val cwdAbsolute = normalizeWorkspaceCwd(cwd)
+    val shellCwd = cwdAbsolute?.removePrefix("$WORKSPACE_ROOT/")?.takeIf { it.isNotEmpty() }
+    // MED-7: forceNoApproval 只跳过"用户审批门"，不跳过工具的路径越界检查（见 workspaceWriteNeedsApproval 第 2 条）
     fun needsApproval(name: String) =
         if (forceNoApproval) false else resolveWorkspaceToolApproval(name, approvalOverrides)
 
-    val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
+    fun writeApproval(toolName: String): (JsonElement) -> Boolean = { input ->
+        val rawPath = runCatching { input.jsonObject.string("path") }.getOrNull()
+        workspaceWriteNeedsApproval(rawPath, toolName, approvalOverrides, cwdAbsolute, forceNoApproval)
+    }
 
     return listOf(
-        createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
+        createReadFileTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
+        createWriteFileTool(workspaceId, writeApproval("workspace_write_file"), cwdAbsolute, workspaceRepository),
+        createEditFileTool(workspaceId, writeApproval("workspace_edit_file"), cwdAbsolute, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
-        createListFilesTool(workspaceId, ::needsApproval, workspaceRepository),
-        createGlobTool(workspaceId, ::needsApproval, workspaceRepository),
-        createGrepTool(workspaceId, ::needsApproval, workspaceRepository),
+        createListFilesTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
+        createGlobTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
+        createGrepTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
     )
 }
+
+/** cwd 展示值：内嵌进工具描述与 schema，模型无需从上下文猜测当前目录 */
+private fun cwdDisplay(cwd: String?): String = cwd ?: WORKSPACE_ROOT
 
 private val IMAGE_EXTENSIONS = setOf(
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif", "avif", "ico",
@@ -81,12 +123,13 @@ private fun String.isImagePath(): Boolean =
 private fun createReadFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_read_file",
     description = """
-        Read a file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
+        Read a file (UTF-8 text or image) from the assistant's bound workspace Rootfs.
+        path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
         Cannot list a directory - use workspace_list_files instead.
         For files larger than 8MB, use workspace_shell with head/tail/grep to read parts.
         Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
@@ -94,14 +137,14 @@ private fun createReadFileTool(
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = true)
+                putPathProperty(required = true, cwd = cwd)
             },
             required = listOf("path"),
         )
     },
     needsApproval = { needsApproval("workspace_read_file") },
     execute = {
-        val path = it.jsonObject.absolutePath("path")
+        val path = it.jsonObject.resolveRequiredToolPath("path", cwd)
         if (path.isImagePath()) {
             workspaceRepository.readImageInRootfs(workspaceId, path)
         } else {
@@ -120,18 +163,20 @@ private fun createReadFileTool(
 
 private fun createWriteFileTool(
     workspaceId: String,
-    needsApproval: (String) -> Boolean,
+    needsApproval: (JsonElement) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_write_file",
     description = """
-        Write a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
+        Write a UTF-8 text file in the assistant's bound workspace Rootfs.
+        path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
+        Writing files under /workspace but outside the current working directory requires user approval.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = true)
+                putPathProperty(required = true, cwd = cwd)
                 put("text", buildJsonObject {
                     put("type", "string")
                     put("description", "UTF-8 text content to write")
@@ -144,13 +189,13 @@ private fun createWriteFileTool(
             required = listOf("path", "text"),
         )
     },
-    needsApproval = { needsApproval("workspace_write_file") || it.pathOutsideWritableRoots("path") },
+    needsApproval = { needsApproval(it) },
     execute = {
         val params = it.jsonObject
-        val path = params.absolutePath("path")
+        val path = params.resolveRequiredToolPath("path", cwd)
         // 路径落在沙盒可写区（/workspace、/tmp）之外时，直接报错并引导到真实文件工具，
         // 避免模型把"真实文件"误当沙盒文件写、造成"文件到底改没改"的混乱
-        if (path.isOutsideWritableRoots()) {
+        if (isOutsideWorkspaceWritableRoots(path)) {
             error(
                 "路径 $path 位于工作区沙盒的可写区之外（沙盒内只能用 /workspace 或 /tmp）。" +
                     "如果你要操作设备上的真实文件（笔记/错题/信任文件夹等），请改用 trusted_folder_* 工具。"
@@ -179,20 +224,22 @@ private fun createWriteFileTool(
 
 private fun createEditFileTool(
     workspaceId: String,
-    needsApproval: (String) -> Boolean,
+    needsApproval: (JsonElement) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_edit_file",
     description = """
-        Edit a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
+        Edit a UTF-8 text file in the assistant's bound workspace Rootfs.
+        path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
+        Writing files under /workspace but outside the current working directory requires user approval.
         Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
         If no exact match is found, whitespace-tolerant line matching is attempted automatically.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = true)
+                putPathProperty(required = true, cwd = cwd)
                 put("old_text", buildJsonObject {
                     put("type", "string")
                     put("description", "Exact text to replace")
@@ -209,12 +256,12 @@ private fun createEditFileTool(
             required = listOf("path", "old_text", "new_text"),
         )
     },
-    needsApproval = { needsApproval("workspace_edit_file") || it.pathOutsideWritableRoots("path") },
+    needsApproval = { needsApproval(it) },
     execute = {
         val params = it.jsonObject
-        val path = params.absolutePath("path")
+        val path = params.resolveRequiredToolPath("path", cwd)
         // 同上：沙盒可写区之外直接引导到真实文件工具
-        if (path.isOutsideWritableRoots()) {
+        if (isOutsideWorkspaceWritableRoots(path)) {
             error(
                 "路径 $path 位于工作区沙盒的可写区之外（沙盒内只能用 /workspace 或 /tmp）。" +
                     "如果你要操作设备上的真实文件（笔记/错题/信任文件夹等），请改用 trusted_folder_* 工具。"
@@ -343,25 +390,26 @@ private fun createShellTool(
 private fun createListFilesTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_list_files",
     description = """
-        List a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area. Defaults to /workspace.
+        List a directory in the assistant's bound workspace Rootfs.
+        path defaults to the current working directory ${cwdDisplay(cwd)}; relative paths resolve against it, absolute Rootfs paths are also accepted.
         Returns file entries with name, path, isDirectory and sizeBytes.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = false)
+                putPathProperty(required = false, cwd = cwd)
             },
             required = emptyList(),
         )
     },
     needsApproval = { needsApproval("workspace_list_files") },
     execute = {
-        val path = it.jsonObject.optionalRootfsPath("path") ?: "/workspace"
+        val path = it.jsonObject.resolveOptionalToolPath("path", cwd) ?: cwd ?: WORKSPACE_ROOT
         val entries = workspaceRepository.listFilesInRootfs(workspaceId, path)
         listOf(
             UIMessagePart.Text(
@@ -379,22 +427,23 @@ private fun createListFilesTool(
 private fun createGlobTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_glob",
     description = """
-        Glob-match files under a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area. Defaults to /workspace.
+        Glob-match files under a directory in the assistant's bound workspace Rootfs.
+        path defaults to the current working directory ${cwdDisplay(cwd)}; relative paths resolve against it, absolute Rootfs paths are also accepted.
         pattern is relative to the search path: e.g. with path /workspace use "ai-output/txt/*.txt" or "**/*.txt".
         A leading /workspace prefix in pattern is tolerated and stripped. Returns matching entries with absolute Rootfs paths.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = false)
+                putPathProperty(required = false, cwd = cwd)
                 put("pattern", buildJsonObject {
                     put("type", "string")
-                    put("description", "Glob pattern, relative to the workspace files root")
+                    put("description", "Glob pattern, relative to the search path")
                 })
             },
             required = listOf("pattern"),
@@ -403,7 +452,7 @@ private fun createGlobTool(
     needsApproval = { needsApproval("workspace_glob") },
     execute = {
         val params = it.jsonObject
-        val path = params.optionalRootfsPath("path") ?: "/workspace"
+        val path = params.resolveOptionalToolPath("path", cwd) ?: cwd ?: WORKSPACE_ROOT
         val rawPattern = params.string("pattern") ?: error("pattern is required")
         // 容错: AI 常把 Rootfs 绝对前缀(如 /workspace/...)写进 pattern, 剥离到相对基准, 避免匹配落空
         val pattern = rawPattern.removePrefix(path.trimEnd('/')).removePrefix("/")
@@ -425,19 +474,20 @@ private fun createGlobTool(
 private fun createGrepTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
+    cwd: String?,
     workspaceRepository: WorkspaceRepository,
 ) = Tool(
     name = "workspace_grep",
     description = """
-        Search file contents under a directory in the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area. Defaults to /workspace.
+        Search file contents under a directory in the assistant's bound workspace Rootfs.
+        path defaults to the current working directory ${cwdDisplay(cwd)}; relative paths resolve against it, absolute Rootfs paths are also accepted.
         Returns matching lines with absolute Rootfs path, line number and text.
         Searching large directories (e.g. the whole rootfs) can be slow.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                putPathProperty(required = false)
+                putPathProperty(required = false, cwd = cwd)
                 put("query", buildJsonObject {
                     put("type", "string")
                     put("description", "Text or regex to search for")
@@ -452,7 +502,7 @@ private fun createGrepTool(
                 })
                 put("includeGlob", buildJsonObject {
                     put("type", "string")
-                    put("description", "Only search files matching this glob (relative to the workspace files root). Optional.")
+                    put("description", "Only search files matching this glob (relative to the search path). Optional.")
                 })
             },
             required = listOf("query"),
@@ -461,7 +511,7 @@ private fun createGrepTool(
     needsApproval = { needsApproval("workspace_grep") },
     execute = {
         val params = it.jsonObject
-        val path = params.optionalRootfsPath("path") ?: "/workspace"
+        val path = params.resolveOptionalToolPath("path", cwd) ?: cwd ?: WORKSPACE_ROOT
         val query = params.string("query") ?: error("query is required")
         val regex = params["regex"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
         val ignoreCase = params["ignoreCase"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
@@ -489,14 +539,13 @@ private fun createGrepTool(
     },
 )
 
-/** 可选 Rootfs 绝对路径: 缺省或空返回 null */
-private fun kotlinx.serialization.json.JsonObject.optionalRootfsPath(name: String): String? {
-    val path = string(name)?.replace('\\', '/')?.trim() ?: return null
-    if (path.isBlank()) return null
-    require(path.startsWith("/")) { "$name must be an absolute path inside Rootfs" }
-    require(path.none { it.code == 0 }) { "$name contains invalid character" }
-    return path
-}
+/** 必填路径参数 → Rootfs 绝对路径；缺失/空白/非法输入抛错（错误文案即工具回给模型的指引） */
+private fun kotlinx.serialization.json.JsonObject.resolveRequiredToolPath(name: String, cwd: String?): String =
+    resolveWorkspaceToolPath(string(name) ?: error("$name is required"), cwd)
+
+/** 可选路径参数 → Rootfs 绝对路径；缺失/空白返回 null，由调用方回退 cwd 默认值 */
+private fun kotlinx.serialization.json.JsonObject.resolveOptionalToolPath(name: String, cwd: String?): String? =
+    string(name)?.trim()?.takeIf { it.isNotEmpty() }?.let { resolveWorkspaceToolPath(it, cwd) }
 
 private fun kotlinx.serialization.json.JsonObject.string(name: String): String? =
     this[name]?.jsonPrimitive?.contentOrNull
@@ -625,29 +674,6 @@ private fun String.parseRootfsEntries(): List<WorkspaceFileEntry> {
     }
 }
 
-private fun kotlinx.serialization.json.JsonObject.absolutePath(name: String): String {
-    val path = string(name)?.replace('\\', '/')?.trim() ?: error("$name is required")
-    require(path.isNotBlank()) { "$name is required" }
-    require(path.startsWith("/")) { "$name must be an absolute path inside Rootfs" }
-    require(!path.contains('\u0000')) { "$name contains invalid character" }
-    return path
-}
-
-// 免强制审批的可写安全区: 工作区文件目录, 以及临时目录 /tmp
-private val WRITABLE_ROOT_PREFIXES = listOf("/workspace", "/tmp")
-
-private fun kotlinx.serialization.json.JsonElement.pathOutsideWritableRoots(name: String): Boolean =
-    runCatching {
-        jsonObject.absolutePath(name).isOutsideWritableRoots()
-    }.getOrDefault(true)
-
-private fun String.isOutsideWritableRoots(): Boolean {
-    val normalized = trimEnd('/').ifBlank { "/" }
-    return WRITABLE_ROOT_PREFIXES.none { prefix ->
-        normalized == prefix || normalized.startsWith("$prefix/")
-    }
-}
-
 private fun String.rootfsName(): String =
     trimEnd('/').substringAfterLast('/').ifBlank { "/" }
 
@@ -656,15 +682,16 @@ private fun String.shellQuote(): String =
 
 private fun Boolean.shellFlag(): Int = if (this) 1 else 0
 
-private fun JsonObjectBuilder.putPathProperty(required: Boolean) {
+private fun JsonObjectBuilder.putPathProperty(required: Boolean, cwd: String?) {
+    val cwdLabel = cwdDisplay(cwd)
     put("path", buildJsonObject {
         put("type", "string")
         put(
             "description",
             if (required) {
-                "Absolute path inside Rootfs. Use /workspace for the workspace files area."
+                "File path. Relative to the current working directory ($cwdLabel); absolute Rootfs paths are also accepted."
             } else {
-                "Optional absolute path inside Rootfs. Use /workspace for the workspace files area."
+                "Optional directory path. Defaults to the current working directory ($cwdLabel); absolute Rootfs paths are also accepted."
             }
         )
     })

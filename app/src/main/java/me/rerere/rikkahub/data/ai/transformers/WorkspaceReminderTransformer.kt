@@ -67,7 +67,7 @@ private fun buildWorkspacePrompt(
 ): String = buildString {
     appendLine("<workspace>")
     appendLine("Linux workspace \"${workspace.name}\" (PRoot sandbox on Android; not Windows — use Unix commands). Env & installed tools auto-refreshed below.")
-    appendLine("- cwd: ${cwd ?: "/workspace"} · Files persist in /workspace; use absolute paths.")
+    appendLine("- cwd: ${cwd ?: "/workspace"} · workspace_* tools resolve relative paths against it; use absolute paths to reach other directories (writes under /workspace outside cwd require approval).")
     appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout).")
     appendLine("- Prefer workspace_shell / workspace_edit_file / workspace_list_files / workspace_grep.")
     appendLine("- To show workspace images to the user: use Markdown image syntax ![alt](/workspace/<relative-path>) in your reply body (path is relative under /workspace; images only; the UI loads them automatically).")

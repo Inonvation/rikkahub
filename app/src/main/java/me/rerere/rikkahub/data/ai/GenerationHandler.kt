@@ -68,6 +68,7 @@ import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
+import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolPath
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -133,17 +134,23 @@ private class WorkspaceToolLockKey {
 
 private val workspaceToolLocks = ConcurrentHashMap<WorkspaceToolLockKey, Mutex>()
 
-/** 解析工具对应的串行化 key：workspace 文件类工具按 (workspaceId, path)，shell 按 workspaceId；非 workspace 工具返回 null（不串行） */
+/**
+ * 解析工具对应的串行化 key：workspace 文件类工具按 (workspaceId, path)，shell 按 workspaceId；非 workspace 工具返回 null（不串行）。
+ * path 以 [cwd] 为基准归一为 Rootfs 绝对路径（工具侧支持相对路径写法），保证同一文件的
+ * 相对/绝对两种写法串行到同一把锁；归一失败时退回原始字符串（该调用随后也会被审批/执行拦截）。
+ */
 private fun workspaceLockKeyFor(
     toolName: String,
     inputJson: JsonObject?,
     workspaceId: String?,
+    cwd: String? = null,
 ): WorkspaceToolLockKey? {
     if (workspaceId.isNullOrBlank()) return null
     return when (toolName) {
         "workspace_edit_file", "workspace_write_file" -> {
-            val path = inputJson?.get("path")?.jsonPrimitive?.contentOrNull
-            if (path.isNullOrBlank()) return null
+            val rawPath = inputJson?.get("path")?.jsonPrimitive?.contentOrNull
+            if (rawPath.isNullOrBlank()) return null
+            val path = runCatching { resolveWorkspaceToolPath(rawPath, cwd) }.getOrDefault(rawPath)
             WorkspaceToolLockKey(workspaceId, path)
         }
         "workspace_shell" -> WorkspaceToolLockKey(workspaceId, null)
@@ -156,6 +163,7 @@ private suspend fun executeToolSerialized(
     tool: UIMessagePart.Tool,
     toolsInternal: List<Tool>,
     workspaceId: String?,
+    workspaceCwd: String?,
     json: Json,
     execute: suspend (UIMessagePart.Tool, List<Tool>, suspend (UIMessagePart.Tool) -> Unit) -> UIMessagePart.Tool?,
     onToolStarted: suspend (UIMessagePart.Tool) -> Unit,
@@ -164,7 +172,7 @@ private suspend fun executeToolSerialized(
     val inputJson = runCatching {
         json.parseToJsonElement(tool.input.ifBlank { "{}" }) as? JsonObject
     }.getOrNull()
-    val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId) ?: return execute(tool, toolsInternal, onToolStarted)
+    val key = workspaceLockKeyFor(tool.toolName, inputJson, workspaceId, workspaceCwd) ?: return execute(tool, toolsInternal, onToolStarted)
     val mutex = workspaceToolLocks.getOrPut(key) { Mutex() }
     // 非竞争：直接拿到锁，无需排队标识
     if (mutex.tryLock()) {
@@ -488,6 +496,7 @@ class GenerationHandler(
                             tool,
                             toolsInternal,
                             workspaceIdForLock,
+                            workspaceCwd,
                             json,
                             ::executeTool,
                             onToolStarted,

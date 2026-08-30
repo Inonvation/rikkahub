@@ -618,6 +618,10 @@ internal fun toolApprovalPurpose(
             val modelId = argObj?.get("modelId")?.jsonPrimitiveOrNull?.contentOrNull
             if (modelId.isNullOrBlank()) base else "$base：$modelId"
         }
+        "workspace_write_file", "workspace_edit_file" -> {
+            val path = argObj?.get("path")?.jsonPrimitiveOrNull?.contentOrNull
+            if (path.isNullOrBlank()) base else "$base：$path"
+        }
         else -> base
     }
     return detail
@@ -639,8 +643,8 @@ private val PURPOSE_MAP = mapOf(
     "trusted_folder_move" to "移动信任文件夹中的文件",
     "trusted_folder_delete" to "删除信任文件夹中的文件",
     "trusted_folder_create_folder" to "在信任文件夹中创建目录",
-    "workspace_write" to "写入工作区文件",
-    "workspace_edit" to "编辑工作区文件",
+    "workspace_write_file" to "写入工作区文件",
+    "workspace_edit_file" to "编辑工作区文件",
     "workspace_shell" to "在工作区执行命令",
     "subagent_spawn" to "派发子代理任务",
 )
