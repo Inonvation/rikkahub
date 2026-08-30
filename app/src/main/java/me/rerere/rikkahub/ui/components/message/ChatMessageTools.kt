@@ -54,7 +54,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.ToolApprovalState
@@ -70,6 +69,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.ai.AskUserQuestion
 import me.rerere.rikkahub.ui.components.ai.AskUserSheet
+import me.rerere.rikkahub.ui.components.ai.parseAskUserQuestions
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
 import me.rerere.rikkahub.ui.components.message.tools.toolApprovalPurpose
@@ -125,6 +125,36 @@ fun trimToolBubbleExpanded(maxEntries: Int = MAX_TOOL_BUBBLE_ENTRIES): Int {
         removed++
     }
     return removed
+}
+
+/**
+ * ask_user 已填未提交的作答草稿（key = toolCallId，UUID 全局唯一）。
+ *
+ * Navigation 3 对非栈顶 entry 会重建组合槽位，remember 的作答进度在切页返回后清零；
+ * 与 toolBubbleExpanded 同思路存进程级单例，只要 App 进程存活即可恢复草稿继续作答。
+ * 提交（Answered）后移除；超容量按插入序淘汰最早记录。
+ */
+internal val askUserAnswerDrafts = mutableStateMapOf<String, AskUserAnswerDraft>()
+
+/** askUserAnswerDrafts 容量上限：草稿体量比展开状态大，取 toolBubbleExpanded 的一半 */
+internal const val MAX_ASK_USER_DRAFT_ENTRIES = 300
+
+/** 单个 ask_user 工具调用的作答草稿；字段用 SnapshotStateMap 驱动 AskUserSheet 重组 */
+internal class AskUserAnswerDraft {
+    val answers: MutableMap<String, String> = mutableStateMapOf()
+    val multiAnswers: MutableMap<String, Set<String>> = mutableStateMapOf()
+}
+
+/** 取或创建 toolCallId 的作答草稿；超过容量上限时先按插入序淘汰最早的记录 */
+internal fun getOrCreateAskUserAnswerDraft(toolCallId: String): AskUserAnswerDraft {
+    if (askUserAnswerDrafts.size >= MAX_ASK_USER_DRAFT_ENTRIES && !askUserAnswerDrafts.containsKey(toolCallId)) {
+        var excess = askUserAnswerDrafts.size - MAX_ASK_USER_DRAFT_ENTRIES + 1
+        for (key in askUserAnswerDrafts.keys.toList()) {
+            if (excess <= 0) break
+            if (askUserAnswerDrafts.remove(key) != null) excess--
+        }
+    }
+    return askUserAnswerDrafts.getOrPut(toolCallId) { AskUserAnswerDraft() }
 }
 
 @Composable
@@ -622,7 +652,8 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     val onManualContentToggle = LocalOnManualContentToggle.current
 
     val title = remember(arguments) {
-        arguments.jsonObject["title"]?.jsonPrimitive?.contentOrNull
+        // title 类型漂移（对象/数组）时不至于在组合期抛异常
+        runCatching { arguments.jsonObject["title"]?.jsonPrimitive?.contentOrNull }.getOrNull()
     }
     val questions = remember(arguments) {
         parseAskUserQuestions(arguments)
@@ -631,9 +662,16 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     var showSheet by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(true) }
 
-    // Hoisted answer state — persists across sheet open/close
-    val answers = remember { mutableStateMapOf<String, String>() }
-    val multiAnswers = remember { mutableStateMapOf<String, Set<String>>() }
+    // Hoisted answer state — persists across sheet open/close.
+    // 草稿按 toolCallId 存进程级单例（见 askUserAnswerDrafts）：切页返回/组合槽位重建后作答进度不丢
+    val draft = remember(tool.toolCallId) { getOrCreateAskUserAnswerDraft(tool.toolCallId) }
+    val answers = draft.answers
+    val multiAnswers = draft.multiAnswers
+
+    // 提交（Answered）后草稿完成使命，移除释放
+    LaunchedEffect(isAnswered) {
+        if (isAnswered) askUserAnswerDrafts.remove(tool.toolCallId)
+    }
 
     // Auto-open the sheet when the tool becomes pending
     // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃
@@ -665,7 +703,11 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         label = {
             Text(
                 text = when {
+                    // 空态重试路径：用户已把「问题无效」回传模型
+                    isAnswered && questions.isEmpty() -> "已反馈问题无效"
                     isAnswered -> "已回答 ${questions.size} 个问题"
+                    // 流式生成参数期间 JSON 不完整、解析结果为空，不代表出错；生成结束仍为空才是真异常
+                    questions.isEmpty() && loading -> "正在生成问题…"
                     questions.isEmpty() -> "模型未返回有效问题"
                     questions.size <= 1 -> questions.firstOrNull()?.question ?: "..."
                     else -> stringResource(R.string.chat_message_tool_ask_questions, questions.size)
@@ -698,15 +740,25 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                     JsonInstant.parseToJsonElement(answeredState.answer)
                 }.getOrNull()
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    questions.forEach { q ->
-                        val answerText = answerJson?.jsonObject?.get("answers")
-                            ?.jsonObject?.get(q.id)?.jsonPrimitive?.contentOrNull
-                            ?: answeredState.answer
+                    if (questions.isEmpty()) {
+                        // 空态重试路径：没有可逐条展示的问题，展示回传内容（错误说明或旧数据原文）
                         Text(
-                            text = "${q.question}: $answerText",
+                            text = answerJson?.jsonObject?.get("error")
+                                ?.jsonPrimitive?.contentOrNull ?: answeredState.answer,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                    } else {
+                        questions.forEach { q ->
+                            val answerText = answerJson?.jsonObject?.get("answers")
+                                ?.jsonObject?.get(q.id)?.jsonPrimitive?.contentOrNull
+                                ?: answeredState.answer
+                            Text(
+                                text = "${q.question}: $answerText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -731,23 +783,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     }
 }
 
-/** Parse AskUserQuestion list from tool JSON arguments. Includes new optional fields. */
-private fun parseAskUserQuestions(arguments: kotlinx.serialization.json.JsonElement): List<AskUserQuestion> {
-    return runCatching {
-        arguments.jsonObject["questions"]?.jsonArray?.map { q ->
-            val obj = q.jsonObject
-            AskUserQuestion(
-                id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
-                question = obj["question"]?.jsonPrimitive?.contentOrNull ?: "",
-                rationale = obj["rationale"]?.jsonPrimitive?.contentOrNull ?: "",
-                options = obj["options"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
-                selectionType = obj["selection_type"]?.jsonPrimitive?.contentOrNull ?: "text",
-                placeholder = obj["placeholder"]?.jsonPrimitive?.contentOrNull ?: "",
-                required = obj["required"]?.jsonPrimitive?.contentOrNull?.let { it != "false" } ?: true,
-            )
-        } ?: emptyList()
-    }.getOrElse { emptyList() }
-}
+/** Parse AskUserQuestion list from tool JSON arguments: moved to AskUserQuestionParser.kt（可 JVM 单测） */
 
 @Composable
 private fun ToolDenyReasonDialog(

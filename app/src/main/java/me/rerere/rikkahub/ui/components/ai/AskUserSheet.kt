@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -47,19 +48,6 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tick02
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
-
-/**
- * Parsed representation of a single question from the ask_user tool arguments.
- */
-data class AskUserQuestion(
-    val id: String,
-    val question: String,
-    val rationale: String = "",
-    val options: List<String> = emptyList(),
-    val selectionType: String = "text",
-    val placeholder: String = "",
-    val required: Boolean = true,
-)
 
 /** Short tab title: just the question index. */
 private fun AskUserQuestion.tabTitle(index: Int): String = "Q${index + 1}"
@@ -118,6 +106,22 @@ fun AskUserSheet(
                         Spacer(Modifier.width(4.dp))
                         Text("关闭")
                     }
+                    TextButton(
+                        onClick = {
+                            // 空问题的死锁出口：把「问题无效」回传模型，让其修正参数重新提问
+                            onSubmit(
+                                buildJsonObject {
+                                    put("answers", buildJsonObject { })
+                                    put("error", "ask_user 未返回有效的问题列表，请检查参数后重新提问")
+                                }.toString()
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(HugeIcons.Tick01, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("请模型重新提问")
+                    }
                 }
             }
         }
@@ -132,6 +136,8 @@ fun AskUserSheet(
     /**
      * 回答完一个问题后自动跳到其后的第一个未回答问题。
      * 仅在「该问题确实已答」时前进；点击 tab 切换不会触发，保证用户可随时点任意问题修改。
+     * 仅单选/确认题调用：多选逐项勾选、文本输入都是连续操作，中途自动跳转会打断
+     * （文本题首字符跳转还会连焦点一起切到下一题，后续输入全部落错），由用户自行切换或提交。
      */
     fun advanceFrom(answeredIndex: Int) {
         if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers)) return
@@ -163,41 +169,43 @@ fun AskUserSheet(
                 style = MaterialTheme.typography.titleMedium,
             )
 
-            // ── Tabs — TabRow, evenly distributed filling full width ──
-            TabRow(
-                selectedTabIndex = selectedIndex,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = Color.Transparent,
-            ) {
-                questions.forEachIndexed { index, q ->
-                    val isAnswered = isQuestionAnswered(q, answers, multiAnswers)
-                    Tab(
-                        selected = index == selectedIndex,
-                        onClick = {
-                            hapticController.lightTap()
-                            selectedIndex = index
-                        },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                if (isAnswered) {
-                                    Icon(
-                                        HugeIcons.Tick02,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(12.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
+            // ── Tabs — 多问题才显示 Tab 行，等宽铺满；单问题无需切换直接隐藏 ──
+            if (questions.size > 1) {
+                TabRow(
+                    selectedTabIndex = selectedIndex,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = Color.Transparent,
+                ) {
+                    questions.forEachIndexed { index, q ->
+                        val isAnswered = isQuestionAnswered(q, answers, multiAnswers)
+                        Tab(
+                            selected = index == selectedIndex,
+                            onClick = {
+                                hapticController.lightTap()
+                                selectedIndex = index
+                            },
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    if (isAnswered) {
+                                        Icon(
+                                            HugeIcons.Tick02,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    Text(
+                                        text = q.tabTitle(index),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
                                     )
                                 }
-                                Text(
-                                    text = q.tabTitle(index),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                )
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
 
@@ -211,12 +219,21 @@ fun AskUserSheet(
                     .animateContentSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Question text
-                Text(
-                    text = q.question,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                )
+                // Question text + 类型标记（多选/选填）
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = q.question,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // required 默认 true 是常态，只把例外的选填题标出来，避免满屏星号噪音
+                    if (!q.required) QuestionTag("选填")
+                    if (q.selectionType == "multi") QuestionTag("多选")
+                }
 
                 // Rationale
                 if (q.rationale.isNotBlank()) {
@@ -244,7 +261,6 @@ fun AskUserSheet(
                             val cur = (multiAnswers[q.id] ?: emptySet()).toMutableSet()
                             if (cur.contains(option)) cur.remove(option) else cur.add(option)
                             multiAnswers[q.id] = cur
-                            advanceFrom(selectedIndex)
                         },
                     )
                     "confirmation" -> ConfirmationInput(
@@ -255,12 +271,8 @@ fun AskUserSheet(
                     else -> TextQuestionInput(
                         question = q,
                         answer = answers[q.id] ?: "",
-                        onAnswerChange = {
-                            val wasBlank = answers[q.id].isNullOrBlank()
-                            answers[q.id] = it
-                            // 文本题：从空变为非空时自动跳到下一个未回答问题
-                            if (wasBlank && it.isNotBlank()) advanceFrom(selectedIndex)
-                        },
+                        // 文本题不自动跳转：首字符跳转会连焦点一起切到下一题，后续输入全部落错地方
+                        onAnswerChange = { answers[q.id] = it },
                     )
                 }
 
@@ -283,14 +295,39 @@ fun AskUserSheet(
                         placeholder = { Text("填写以上未列出的内容…") },
                     )
                 }
+
+                // ── Skip — 必答题不想答的显式出口；已答或选填题不出现（选填留空即可） ──
+                val skipped = isQuestionSkipped(q, answers)
+                if (q.required && (skipped || !isQuestionAnswered(q, answers, multiAnswers))) {
+                    TextButton(
+                        onClick = {
+                            hapticController.lightTap()
+                            val key = q.id + SKIPPED_SUFFIX
+                            if (skipped) {
+                                answers.remove(key)
+                            } else {
+                                answers[key] = "1"
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text(
+                            text = if (skipped) "取消跳过" else "跳过本题",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
 
             // ── Footer ──
-            val unansweredCount = questions.count { !isQuestionAnswered(it, answers, multiAnswers) }
+            // 兑现工具 schema 的 required 承诺：必答问题作答或显式跳过后才能提交，选填留空不算未填
+            val requiredUnanswered = questions.count {
+                it.required && !isQuestionAnswered(it, answers, multiAnswers) && !isQuestionSkipped(it, answers)
+            }
 
-            if (unansweredCount > 0) {
+            if (requiredUnanswered > 0) {
                 Text(
-                    text = "还有 ${unansweredCount} 个问题未填",
+                    text = "还有 ${requiredUnanswered} 个必答问题未填",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -320,6 +357,7 @@ fun AskUserSheet(
                         }
                         onSubmit(payload.toString())
                     },
+                    enabled = requiredUnanswered == 0,
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(HugeIcons.Tick01, null, Modifier.size(16.dp))
@@ -445,9 +483,30 @@ private fun ConfirmationInput(answer: String, onAnswerChange: (String) -> Unit, 
     }
 }
 
+// ── Question tag badge ────────────────────────────────────────────────────────
+
+/** 问题文本旁的小标记（多选/选填），tonal 底色圆角小块 */
+@Composable
+private fun QuestionTag(text: String) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
 // ── "Other" custom-answer helpers ──────────────────────────────────────────────
 
 private val CUSTOM_SUFFIX = "::custom"
+
+/** 跳过标记存储键后缀：复用 answers 草稿持久化（切页/重组后跳过状态不丢），不参与提交 payload */
+private const val SKIPPED_SUFFIX = "::skipped"
 
 private fun getCustomAnswer(
     q: AskUserQuestion,
@@ -478,11 +537,14 @@ private fun getFinalAnswer(
         else -> answers[q.id] ?: ""
     }
     val custom = getCustomAnswer(q, answers, multiAnswers)
-    return if (custom.isNotBlank()) {
+    val direct = if (custom.isNotBlank()) {
         if (primary.isNotBlank()) "$primary\n(补充: $custom)" else custom
     } else {
         primary
     }
+    if (direct.isNotBlank()) return direct
+    // 必答题被显式跳过时回传明确语义，让模型知道用户拒绝作答而非漏答
+    return if (isQuestionSkipped(q, answers)) "(已跳过)" else ""
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -495,3 +557,7 @@ private fun isQuestionAnswered(
     "multi" -> (!multiAnswers[q.id].isNullOrEmpty() || getCustomAnswer(q, answers, multiAnswers).isNotBlank())
     else -> (!answers[q.id].isNullOrBlank() || getCustomAnswer(q, answers, multiAnswers).isNotBlank())
 }
+
+/** 是否已把该题显式标记为跳过（必答题不想答时的出口，与「已作答」互相独立） */
+private fun isQuestionSkipped(q: AskUserQuestion, answers: Map<String, String>): Boolean =
+    answers[q.id + SKIPPED_SUFFIX] == "1"
