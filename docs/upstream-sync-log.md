@@ -2,6 +2,20 @@
 
 本日志记录每次上游同步的分类清单与落地结果。同步流程见 `AGENTS.md`「上游同步流程（禁止直接 merge）」：不直接 merge，按「无需合并 / 可放心合并 / 需本地化手动同步」三分类逐条落地。
 
+## 2026-08-30 — 第三次同步（4 个提交，2.4.15 后 8/29 批次，上游待同步清零）
+
+| 提交 | 内容 | 分类 | 落地方式 |
+|---|---|---|---|
+| `8ea375a9` | Cloudflare MCP 无法匹配 OAuth | 可放心合并 | `needsAuthorization` 改为 `looksUnauthorized(error) && oauth.enabled` 才短路返回 true，其余场景落到受保护资源探测兜底（本地文件与上游父提交逐字节一致，直接套用） |
+| `ef94834a` | MCP SDK 仅用 client sdk | 可放心合并 | `libs.versions.toml` 单行 `kotlin-sdk` → `kotlin-sdk-client`；已核对本地 import 面仅 client/shared/types，无 server 引用 |
+| `5403bc96` `2f05019b` | TTS 合成自动重试 + 可重试判定 | 需本地化手动同步 | 新增 `TTSProviderException`（408/429/5xx 判可重试）；10 个 provider 的 HTTP/SSE 错误改抛带状态码异常；`TtsController` 移植 3 次指数退避重试（500ms base）、失败 Deferred 逐出、`isRetryableSynthesisError`（IOException 或可重试异常才重试）、预取窗口 4→2、移除 `lastPrefetchedIndex` 机制；本地磁盘发音缓存（命中跳过合成、成功落盘）完整保留 |
+
+### 验证
+
+- `:speech:compileDebugKotlin` `:app:compileDebugKotlin` BUILD SUCCESSFUL
+- 单测：`:app:testDebugUnitTest --tests "*Mcp*"`（4 类 26 例）全部通过
+- `prefetchFrom`/`lastPrefetchedIndex` 残留引用清零
+
 ## 2026-08-28 — 第二次同步（10 个提交，范围 2.4.14 → 2.4.15）
 
 ### A. 无需合并（3 个）
