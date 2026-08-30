@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.pages.extensions.workspace
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
@@ -26,6 +28,8 @@ class WorkspaceDetailVM(
     private val initialArea: WorkspaceStorageArea? = null,
     /** 初始目录路径（相对存储区根，""=根目录），用于定位到文件所在目录 */
     private val initialPath: String = "",
+    /** 目标文件名（或区相对路径）：目录加载后列表滚动到该项并高亮，超时自动渐隐 */
+    private val initialHighlight: String? = null,
     private val terminalSessionManager: WorkspaceTerminalSessionManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
@@ -46,10 +50,21 @@ class WorkspaceDetailVM(
     /** 目录缓存：进入过的目录条目快照（key = 存储区/路径），返回上级时秒开、不重复请求 */
     private val dirCache = mutableMapOf<String, List<WorkspaceFileEntry>>()
 
+    /** 定位高亮的自动清除任务；换目录时取消 */
+    private var highlightClearJob: Job? = null
+
     init {
         loadWorkspace()
         // 从聊天跳转定位：直接进入文件所在目录并加载该目录内容
         navigate(initialPath, initialArea ?: WorkspaceStorageArea.FILES)
+        // 定位高亮：列表滚动到目标文件并突出显示，数秒后渐隐（navigate 已把高亮清空的路径留在这里重新设置）
+        initialHighlight?.takeIf { it.isNotBlank() }?.let { highlight ->
+            _state.update { it.copy(highlightPath = highlight) }
+            highlightClearJob = viewModelScope.launch {
+                delay(HIGHLIGHT_AUTO_CLEAR_MS)
+                clearHighlight()
+            }
+        }
     }
 
     fun selectArea(area: WorkspaceStorageArea) {
@@ -69,6 +84,7 @@ class WorkspaceDetailVM(
 
     /** 导航到目录：缓存命中直接秒开；未命中则加载并写入缓存 */
     fun navigate(path: String, area: WorkspaceStorageArea? = null) {
+        clearHighlight()
         val targetArea = area ?: state.value.area
         val cached = dirCache[cacheKey(targetArea, path)]
         if (cached != null) {
@@ -118,6 +134,15 @@ class WorkspaceDetailVM(
     }
 
     private fun cacheKey(area: WorkspaceStorageArea, path: String): String = "${area.name}/$path"
+
+    /** 清除定位高亮（渐隐动画由 UI 侧 animateColorAsState 承担）；调用方负责取消挂起的清除任务 */
+    fun clearHighlight() {
+        highlightClearJob?.cancel()
+        highlightClearJob = null
+        if (_state.value.highlightPath != null) {
+            _state.update { it.copy(highlightPath = null) }
+        }
+    }
 
     /** 移入回收站(软删除), 可从统一回收站恢复 */
     fun delete(entry: WorkspaceFileEntry) {
@@ -490,7 +515,12 @@ data class WorkspaceDetailState(
     val entries: List<WorkspaceFileEntry> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    /** 定位高亮的条目（文件名或区相对路径），null=无高亮 */
+    val highlightPath: String? = null,
 )
+
+/** 定位高亮展示时长：足以注意到并确认目标，之后渐隐不常驻 */
+private const val HIGHLIGHT_AUTO_CLEAR_MS = 4500L
 
 data class InstallToolsState(
     val running: Boolean = false,

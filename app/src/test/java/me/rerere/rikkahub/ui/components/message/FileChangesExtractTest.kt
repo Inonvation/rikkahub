@@ -181,6 +181,45 @@ class FileChangesExtractTest {
     }
 
     @Test
+    fun `relative input path prefers resolved absolute path from output`() {
+        // P0 后工具入参允许相对 cwd：提取应优先取输出的 resolved 绝对路径，
+        // 否则定位/预览会把相对路径误判成 LINUX 区导致 "Path does not exist: <首段目录>"
+        val changes = extractFileChanges(
+            listOf(
+                tool(
+                    "1",
+                    "workspace_write_file",
+                    """{"path":"txt/todo.md"}""",
+                    textOutput("""{"path":"/workspace/txt/todo.md","changeStatus":"added"}"""),
+                )
+            )
+        )
+        assertEquals(1, changes.size)
+        assertEquals("/workspace/txt/todo.md", changes[0].path)
+        assertEquals(FileChangeStatus.ADDED, changes[0].status)
+    }
+
+    @Test
+    fun `relative input path falls back to input when output has no path`() {
+        val changes = extractFileChanges(
+            listOf(tool("1", "workspace_edit_file", """{"path":"docs/a.txt"}""", textOutput("""{"ok":true}""")))
+        )
+        assertEquals(1, changes.size)
+        assertEquals("docs/a.txt", changes[0].path)
+        assertEquals(FileChangeStatus.EDITED, changes[0].status)
+    }
+
+    @Test
+    fun `non-json output text falls back to input path`() {
+        val changes = extractFileChanges(
+            listOf(tool("1", "workspace_write_file", """{"path":"/workspace/c.txt"}""", textOutput("plain text")))
+        )
+        assertEquals(1, changes.size)
+        assertEquals("/workspace/c.txt", changes[0].path)
+        assertEquals(FileChangeStatus.ADDED, changes[0].status)
+    }
+
+    @Test
     fun `workspace shell with error word in stdout is still parsed by diff keys`() {
         // workspace_shell 的 stdout 是命令自由输出，可能含 "error" 字样，不能按 error 键过滤
         val output = """{"addedFiles":["a.txt"],"stdout":"error: build failed","exitCode":1}"""

@@ -1016,6 +1016,8 @@ sealed interface Screen : NavKey {
         val area: String? = null,
         /** 初始目录路径（相对存储区根，空串=根目录），用于定位到文件所在目录 */
         val path: String? = null,
+        /** 目标文件名（或区相对路径）：定位后列表滚动到该项并高亮渐隐 */
+        val highlight: String? = null,
     ) : Screen
 
     @Serializable

@@ -7,6 +7,8 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,11 +22,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -106,6 +110,7 @@ fun WorkspaceDetailPage(
     id: String,
     initialArea: String? = null,
     initialPath: String? = null,
+    initialHighlight: String? = null,
 ) {
     val navController = LocalNavController.current
     val vm: WorkspaceDetailVM = koinViewModel(parameters = {
@@ -113,6 +118,7 @@ fun WorkspaceDetailPage(
             id,
             initialArea?.let { runCatching { WorkspaceStorageArea.valueOf(it) }.getOrNull() },
             initialPath.orEmpty(),
+            initialHighlight?.takeIf { it.isNotBlank() },
         )
     })
     val state by vm.state.collectAsStateWithLifecycle()
@@ -942,7 +948,17 @@ private fun WorkspaceFilesPage(
     onExport: (WorkspaceFileEntry) -> Unit,
     onShare: (WorkspaceFileEntry) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
+    // 定位高亮：目录内容就绪后滚动到目标文件使其可见（前两项固定是区选择器与路径栏）
+    LaunchedEffect(state.entries, state.highlightPath) {
+        val highlight = state.highlightPath ?: return@LaunchedEffect
+        val index = state.entries.indexOfFirst { it.name == highlight || it.path == highlight }
+        if (index >= 0) listState.animateScrollToItem(index + 2)
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -977,6 +993,7 @@ private fun WorkspaceFilesPage(
         items(state.entries, key = { "${state.area.name}:${it.path}" }) { entry ->
             WorkspaceFileCard(
                 entry = entry,
+                highlighted = entry.name == state.highlightPath || entry.path == state.highlightPath,
                 selecting = selecting,
                 selected = entry.path in selectedPaths,
                 onToggleSelect = { onToggleSelect(entry) },
@@ -1125,6 +1142,7 @@ private fun WorkspaceFileCard(
     entry: WorkspaceFileEntry,
     selecting: Boolean,
     selected: Boolean,
+    highlighted: Boolean = false,
     onToggleSelect: () -> Unit,
     onLongPressSelect: () -> Unit,
     onOpen: () -> Unit,
@@ -1137,6 +1155,26 @@ private fun WorkspaceFileCard(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    // 定位高亮：primaryContainer 底色渐入，超时清除后渐隐回默认色
+    val containerColor by animateColorAsState(
+        targetValue = if (highlighted) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceBright
+        },
+        animationSpec = tween(durationMillis = 450),
+        label = "workspaceFileHighlightContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (highlighted) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(durationMillis = 450),
+        label = "workspaceFileHighlightContent",
+    )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1145,7 +1183,7 @@ private fun WorkspaceFileCard(
                 // 未进入多选时，长按进入多选并选中该项
                 onLongClick = { if (!selecting) onLongPressSelect() },
             ),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+        colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
     ) {
         Row(
             modifier = Modifier

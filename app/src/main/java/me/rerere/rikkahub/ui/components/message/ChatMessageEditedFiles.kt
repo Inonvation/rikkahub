@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
 import android.util.LruCache
+import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -77,6 +78,7 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FileMinus
 import me.rerere.hugeicons.stroke.FileView
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.Note01
 import me.rerere.hugeicons.stroke.Share08
 import me.rerere.knowledge.KnowledgeManager
@@ -178,22 +180,7 @@ internal fun EditedFilesList(
     val onChipClick: (String) -> Unit = { path ->
         when {
             path in deletedSet -> toaster.show(deletedMessage)
-            // 图片直接预览：导出到缓存后弹大图，不经过操作菜单
-            isWorkspaceImagePath(path) -> {
-                scope.launch {
-                    runCatching {
-                        val (area, relativePath) = resolveWorkspacePath(path)
-                        val dir = File(context.cacheDir, "workspace_edited_preview").apply { mkdirs() }
-                        val file = File(dir, path.substringAfterLast('/'))
-                        file.outputStream().use { output ->
-                            workspaceRepository.exportFile(workspaceId, area, relativePath, output)
-                        }
-                        previewImagePath = file.absolutePath
-                    }.onFailure {
-                        toaster.show("预览失败: ${explainErrorText(it.message)}")
-                    }
-                }
-            }
+            // 所有文件（含图片）统一弹操作菜单，预览方式在菜单内按文件类型区分
             else -> selectedPath = path
         }
     }
@@ -329,10 +316,27 @@ internal fun EditedFilesList(
                     onClick = {
                         val p = selectedPath ?: return@Card
                         selectedPath = null
-                        val (area, relativePath) = resolveWorkspacePath(p)
-                        navController.navigate(
-                            Screen.WorkspaceFileEditor(workspaceId, area.name, relativePath)
-                        )
+                        if (isWorkspaceImagePath(p)) {
+                            // 图片走大图预览（导出到缓存后加载），文本类文件才进编辑器
+                            scope.launch {
+                                runCatching {
+                                    val (area, relativePath) = resolveWorkspacePath(p)
+                                    val dir = File(context.cacheDir, "workspace_edited_preview").apply { mkdirs() }
+                                    val file = File(dir, p.substringAfterLast('/'))
+                                    file.outputStream().use { output ->
+                                        workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+                                    }
+                                    previewImagePath = file.absolutePath
+                                }.onFailure {
+                                    toaster.show("预览失败: ${explainErrorText(it.message)}")
+                                }
+                            }
+                        } else {
+                            val (area, relativePath) = resolveWorkspacePath(p)
+                            navController.navigate(
+                                Screen.WorkspaceFileEditor(workspaceId, area.name, relativePath)
+                            )
+                        }
                     },
                     shape = MaterialTheme.shapes.medium,
                 ) {
@@ -377,7 +381,8 @@ internal fun EditedFilesList(
                     onClick = {
                         val p = selectedPath ?: return@Card
                         selectedPath = null
-                        // 跳到文件所在目录：解析出存储区 + 相对路径，去掉文件名取父目录
+                        // 跳到文件所在目录：解析出存储区 + 相对路径，去掉文件名取父目录；
+                        // 文件名作 highlight 传给详情页，落地后滚动到该文件并高亮
                         val (area, relativePath) = resolveWorkspacePath(p)
                         val dir = relativePath.substringBeforeLast('/', missingDelimiterValue = "")
                         navController.navigate(
@@ -385,6 +390,7 @@ internal fun EditedFilesList(
                                 id = workspaceId,
                                 area = area.name,
                                 path = dir,
+                                highlight = relativePath.substringAfterLast('/').takeIf { it.isNotBlank() },
                             )
                         )
                     },
@@ -451,9 +457,32 @@ internal fun EditedFilesList(
                 Card(
                     onClick = {
                         val p = selectedPath ?: return@Card
-                        importPath = p
                         selectedPath = null
-                        showImportDialog = true
+                        scope.launch {
+                            runCatching {
+                                val (area, relativePath) = resolveWorkspacePath(p)
+                                val dir = File(context.cacheDir, "workspace_share").apply { mkdirs() }
+                                val file = File(dir, p.substringAfterLast('/'))
+                                file.outputStream().use { output ->
+                                    workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+                                }
+                                val uri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file,
+                                )
+                                val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
+                                    file.extension.lowercase()
+                                ) ?: "*/*"
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, mime)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(intent, null))
+                            }.onFailure {
+                                toaster.show("打开失败: ${explainErrorText(it.message)}")
+                            }
+                        }
                     },
                     shape = MaterialTheme.shapes.medium,
                 ) {
@@ -465,11 +494,38 @@ internal fun EditedFilesList(
                             .fillMaxWidth(),
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Archive02,
+                            imageVector = HugeIcons.Link01,
                             contentDescription = null,
                             modifier = Modifier.padding(4.dp),
                         )
-                        Text("导入到知识库", style = MaterialTheme.typography.titleMedium)
+                        Text("用其他应用打开", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                // 知识库只收文档，图片不提供导入入口
+                if (!isWorkspaceImagePath(path)) {
+                    Card(
+                        onClick = {
+                            val p = selectedPath ?: return@Card
+                            importPath = p
+                            selectedPath = null
+                            showImportDialog = true
+                        },
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .fillMaxWidth(),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Archive02,
+                                contentDescription = null,
+                                modifier = Modifier.padding(4.dp),
+                            )
+                            Text("导入到知识库", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
                 }
             }
@@ -598,11 +654,16 @@ private suspend fun importFileToKnowledgeBase(
 }
 
 private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, String> {
-    val trimmed = path.trimEnd('/')
-    return if (trimmed == "/workspace" || trimmed.startsWith("/workspace/")) {
-        WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
-    } else {
-        WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
+    // 统一分隔符再去尾斜杠：历史消息里可能存相对入参或 Windows 风格分隔符
+    val trimmed = path.trim().replace('\\', '/').trimEnd('/')
+    return when {
+        trimmed == "/workspace" || trimmed.startsWith("/workspace/") ->
+            WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
+        // 其余绝对路径按 Rootfs 内绝对路径落 LINUX 区（/tmp 等）
+        trimmed.startsWith("/") -> WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
+        // 相对路径（write/edit 相对 cwd 的原始入参，输出缺失时的回落）：cwd 恒在 /workspace 下，
+        // 按文件区近似定位，避免误判成 LINUX 区导致 "Path does not exist"
+        else -> WorkspaceStorageArea.FILES to trimmed.trimStart('/')
     }
 }
 
@@ -687,25 +748,20 @@ internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                 "workspace_write_file", "workspace_edit_file" -> {
                     // 失败（output 含 error）不计入变更，避免假阳性
                     if (isToolOutputError(tool)) return@forEach
-                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                    // path 优先取工具输出的 resolved 绝对路径（Rootfs 口径）：工具入参允许相对 cwd 的
+                    // 相对路径，原始入参直接拿去定位/预览会误判存储区；输出缺失（流式中途）回落 input
+                    val outputJson = tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .firstNotNullOfOrNull { part ->
+                            runCatching { JsonInstant.parseToJsonElement(part.text).jsonObject }.getOrNull()
+                        }
+                    val path = outputJson?.get("path")?.jsonPrimitive?.contentOrNull
+                        ?: tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     val status = if (tool.toolName == "workspace_edit_file") {
                         FileChangeStatus.EDITED
                     } else {
-                        tool.output.filterIsInstance<UIMessagePart.Text>()
-                            .firstOrNull()?.text
-                            ?.let { text ->
-                                // 预筛：output 不含 changeStatus 键时跳过解析（默认按 ADDED，与既有逻辑等价）
-                                if (text.indexOf("changeStatus") < 0) null
-                                else runCatching {
-                                    JsonInstant.parseToJsonElement(text).jsonObject["changeStatus"]
-                                        ?.jsonPrimitive?.contentOrNull
-                                }.getOrNull()
-                            }
-                            ?.let { status ->
-                                if (status == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
-                            }
-                            ?: FileChangeStatus.ADDED
+                        val changeStatus = outputJson?.get("changeStatus")?.jsonPrimitive?.contentOrNull
+                        if (changeStatus == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
                     }
                     changes.add(FileChange(path, status))
                 }
