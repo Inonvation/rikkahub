@@ -62,7 +62,7 @@ import kotlin.math.roundToInt
 fun SettingDisplayGroupPage(group: String, vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
-    var ttsPlaybackSpeed by remember(settings) {
+    var ttsPlaybackSpeed by remember(settings.defaultTTSPlaybackSpeed) {
         mutableFloatStateOf(settings.defaultTTSPlaybackSpeed)
     }
 
