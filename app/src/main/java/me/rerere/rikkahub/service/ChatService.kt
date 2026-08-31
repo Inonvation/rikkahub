@@ -206,6 +206,13 @@ internal fun backgroundTextGenerationParams(
     customBody = model.customBodies,
 )
 
+/**
+ * 辅助任务（标题/建议/记忆整理）的思考级别：解析到快速模型时应用「快速模型思考级别」配置；
+ * 用户显式指定的独立辅助模型（titleModelId/suggestionModelId）不受快速模型级别影响。
+ */
+internal fun backgroundReasoningLevel(settings: Settings, model: Model): ReasoningLevel =
+    if (model.id == settings.fastModelId) settings.fastModelReasoningLevel else ReasoningLevel.AUTO
+
 /** 生成器回写的消息包含压缩摘要等 provider 专用消息，这里映射回展示历史：按 id 更新，新助手消息才追加。 */
 internal fun displayMessagesForChunk(
     displayMessages: List<UIMessage>,
@@ -2066,7 +2073,7 @@ class ChatService(
                 providerHandler.generateText(
                     providerSetting = provider,
                     messages = listOf(UIMessage.user(prompt = prompt)),
-                    params = backgroundTextGenerationParams(model),
+                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
                 )
             }
             val operations = parseMemoryOperations(
@@ -2456,7 +2463,7 @@ class ChatService(
                                     .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
                         ),
                     ),
-                    params = backgroundTextGenerationParams(model),
+                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
                 )
             }
 
@@ -2560,7 +2567,7 @@ class ChatService(
                                     .takeLast(8).joinToString("\n\n") { it.summaryAsText(maxLength = 500) }),
                         )
                     ),
-                    params = backgroundTextGenerationParams(model),
+                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
                 )
             }
             val suggestions =

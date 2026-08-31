@@ -184,6 +184,18 @@ private fun GeneralGroup(settings: Settings, vm: SettingVM) {
             headlineContent = { Text(stringResource(R.string.setting_model_page_fast_model)) },
             trailingContent = { ModelItemTrailing(state = fastModelState) },
         )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_provider_page_reasoning)) },
+            trailingContent = {
+                ReasoningButton(
+                    onlyIcon = true,
+                    reasoningLevel = settings.fastModelReasoningLevel,
+                    onUpdateReasoningLevel = {
+                        vm.updateSettings(settings.copy(fastModelReasoningLevel = it))
+                    },
+                )
+            },
+        )
     }
 
     ModelListSheet(state = chatModelState, onSelect = { vm.updateSettings(settings.copy(chatModelId = it.id)) })

@@ -1395,5 +1395,7 @@
   <string name="assistant_add_to_category_title">添加助手到「%1$s」</string>
   <string name="assistant_add_to_category_action">添加助手到「%1$s」</string>
   <string name="assistant_add_to_category_empty">該分類已包含全部助手</string>
+  <string name="setting_tts_page_default_playback_speed">預設播放速度</string>
+  <string name="setting_tts_page_default_playback_speed_description">在本機套用至每個 TTS 提供者，不變更其合成設定。</string>
 </resources>
 

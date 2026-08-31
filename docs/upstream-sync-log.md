@@ -2,6 +2,48 @@
 
 本日志记录每次上游同步的分类清单与落地结果。同步流程见 `AGENTS.md`「上游同步流程（禁止直接 merge）」：不直接 merge，按「无需合并 / 可放心合并 / 需本地化手动同步」三分类逐条落地。
 
+## 2026-08-31 — 第四次同步（16 个新提交，2.4.16 批次，上游待同步清零）
+
+### A. 无需合并（2 个）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `4309fdfe` | bump 2.4.16 | 版本号独立演进 |
+| `41353567` | 支持关闭自动重试 | 本地 `aiRequestMaxRetries`（0..10，0=不重试）已含等价实现，UI 在能力管理页 |
+
+### B. 可放心合并（7 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `5c217d2e` | HTML/SVG 内嵌预览默认关闭 | HighlightCodeBlock `mutableStateOf(canInlinePreview)` → `false` 1 行 |
+| `1b9dd092` | 移除硅基流动余额查询 | DefaultProviders 删 SiliconFlow 的 balanceOption 块 |
+| `0651cad9` | 气泡透明度 roundToInt | 本地该滑条在「界面偏好→气泡」页，`toInt()` → `roundToInt()` + import |
+| `1231b8af` | 加密 reasoning 请求断言修正 | 测试改名 + 断言改断言 `encrypted_content` 存在且无 `content`；顺带补齐发送端门槛：已携带 encrypted_content 时不再重放明文 content（ResponseAPI 1 处，本地此前缺失） |
+| `ec20570b` | TTS 播放倍速 5 语言补全 | locale-tui `set` 逐语言落地 ja/ko-rKR/ru/zh-rTW/zh（values 源文件已有两 key） |
+| `d3a53e0a` | 图片选择改 PickVisualMedia | UIAvatar/BackgroundPicker 单图 `GetContent`→`PickVisualMedia`；ChatPage/GroupDiscussionPage/ImgGenPage 多图 `GetMultipleContents`→`PickMultipleVisualMedia`（本地无 ChatAttachmentPicker 组件，等价调用点直改），launch 统一 `PickVisualMediaRequest(ImageOnly)` |
+| `f6a5330f` | trace-cli 支持 Google Interactions API | 5 个 trace-cli 文件照抄；trace 目录 `google/`→`google-generateContent/`（git mv 纯改名 + gemini-tool/gemini-image 的 expected.json 更新），StreamTraceReplayTest 注册新路径；本地 `trimBlankLines` 语义下两 fixture 的 text 尾随空行按本地 pipeline 校准 |
+
+### C. 需本地化手动同步（2 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `883bde7d` | TTS 默认播放倍速设置从语音页移到偏好 | 本地落点 =「界面偏好设置→TTS 播放」分组（SettingDisplayGroupPage，与上游 GeneralPage 的 TTS 分区对应）：状态提升页面级、滑条 onValueChangeFinished 落库、0.5x-2.0x/14 档与上游一致；删除 SpeechPage 卡片 + 3 个无用 import |
+| `f7869e35` | Gemini 混合 server/client tool 修复 | 手工融合本地 ai 定制层（HttpException/jsonXxxOrNull/懒创建 Text part）：tools 条件收紧为 Search/UrlContext 才发数组，函数工具+内置工具混用时加 `toolConfig.includeServerSideToolInvocations=true`；`parseMessageParts` 按 toolCallId 归并 ServerTool（补名/补参/状态推进/metadata 合并）；functionCall part 回传 id；text/reasoning part 携带 thoughtSignature；Decoder/Provider 新增 `toolCall`/`toolResponse` 分支（本地 jsonObjectOrNull hardening 风格）；StreamChunk TextStart/TextDelta 加 metadata 字段（本地懒创建语义下 Start 元数据存 pending map，TextEnd/Finish 清理）；MessageMetadata 增加 `GOOGLE_GENERATE_CONTENT` 协议；新增 `GoogleToolCombinationTest` + gemini-tool expected.json 更新 |
+
+### D. 部分吸收（1 个）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `9365c297` | 快速模型思考级别；移除单独标题/建议模型配置 | 只吸收思考级别（本地保留标题/建议模型配置：辅助模型链 + ManagementTools 引用）：`Settings.fastModelReasoningLevel`（AUTO）→ PreferencesStore 新 key 读写 + SettingsSyncCodec ALLOWLIST 加入；SettingModelPage 通用分组「快速模型」行下新增 ReasoningButton 行（复用 `setting_provider_page_reasoning`，不新增字符串）；ChatService 新增 `backgroundReasoningLevel(settings, model)` 辅助（解析到快速模型才应用级别），标题/建议/记忆整理 3 处传入 |
+
+### 验证
+
+- `:ai:testDebugUnitTest` 全量 BUILD SUCCESSFUL（235 例，含新 GoogleToolCombinationTest、trace 回放、加密 reasoning 断言）
+- `:app:compileDebugKotlin` BUILD SUCCESSFUL
+- `:app:testDebugUnitTest --tests "*SettingsSyncCodec*" "*ChatService*"` 通过（11 + 10 例）
+- 6 语言 strings.xml well-formed
+- 备注：并行会话在改 `WorkspaceShellBoundTest.kt`（未跟踪、API 未解析）阻断了 app 单测编译，临时移出验证后已原样还原，未改动其内容
+
 ## 2026-08-30 — 第三次同步（4 个提交，2.4.15 后 8/29 批次，上游待同步清零）
 
 | 提交 | 内容 | 分类 | 落地方式 |

@@ -120,6 +120,7 @@ class SettingsStore(
         val FAVORITE_MODELS = stringPreferencesKey("favorite_models")
         val SELECT_MODEL = stringPreferencesKey("chat_model")
         val FAST_MODEL = stringPreferencesKey("fast_model")
+        val FAST_MODEL_REASONING_LEVEL = stringPreferencesKey("fast_model_reasoning_level")
         val TITLE_MODEL = stringPreferencesKey("title_model")
         val TRANSLATE_MODEL = stringPreferencesKey("translate_model")
         val ENABLE_SUGGESTION = booleanPreferencesKey("enable_suggestion")
@@ -263,6 +264,9 @@ class SettingsStore(
                 favoriteModels = decodeListOrDefault<Uuid>(preferences[FAVORITE_MODELS], emptyList()),
                 chatModelId = parseUuidOrNull(preferences[SELECT_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
                 fastModelId = parseUuidOrNull(preferences[FAST_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
+                fastModelReasoningLevel = preferences[FAST_MODEL_REASONING_LEVEL]
+                    ?.let { value -> ReasoningLevel.entries.find { it.name == value } }
+                    ?: ReasoningLevel.AUTO,
                 titleModelId = parseUuidOrNull(preferences[TITLE_MODEL]),
                 translateModeId = parseUuidOrNull(preferences[TRANSLATE_MODEL]) ?: DEFAULT_AUTO_MODEL_ID,
                 enableSuggestion = preferences[ENABLE_SUGGESTION] != false,
@@ -498,6 +502,7 @@ class SettingsStore(
             preferences[FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
             preferences[SELECT_MODEL] = settings.chatModelId.toString()
             preferences[FAST_MODEL] = settings.fastModelId.toString()
+            preferences[FAST_MODEL_REASONING_LEVEL] = settings.fastModelReasoningLevel.name
             settings.titleModelId?.let {
                 preferences[TITLE_MODEL] = it.toString()
             } ?: preferences.remove(TITLE_MODEL)
@@ -873,6 +878,8 @@ data class Settings(
     val favoriteModels: List<Uuid> = emptyList(),
     val chatModelId: Uuid = Uuid.random(),
     val fastModelId: Uuid = Uuid.random(),
+    /** 快速模型思考级别：标题/建议/记忆整理等辅助任务解析到快速模型时生效 */
+    val fastModelReasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
     val titleModelId: Uuid? = null,
     val imageGenerationModelId: Uuid = UNSET_MODEL_ID,
     val titlePrompt: String = DEFAULT_TITLE_PROMPT,

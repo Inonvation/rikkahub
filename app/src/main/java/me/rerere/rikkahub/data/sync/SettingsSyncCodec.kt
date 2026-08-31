@@ -35,6 +35,7 @@ object SettingsSyncCodec {
         "favoriteModels",
         "chatModelId",
         "fastModelId",
+        "fastModelReasoningLevel",
         "titleModelId",
         "imageGenerationModelId",
         "titlePrompt",

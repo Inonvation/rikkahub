@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -421,7 +422,7 @@ private fun GroupAttachmentSheet(
     }
 
     val imagePickerLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
+        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { selectedUris ->
             if (selectedUris.isNotEmpty()) {
                 inputState.addImages(filesManager.createChatFilesByContents(selectedUris))
                 onDismiss()
@@ -461,7 +462,11 @@ private fun GroupAttachmentSheet(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             TakePicButton(onLaunchCamera = onLaunchCamera)
-            ImagePickButton(onClick = { imagePickerLauncher.launch("image/*") })
+            ImagePickButton(onClick = {
+                imagePickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            })
             FilePickButton(onClick = { filePickerLauncher.launch(arrayOf("*/*")) })
         }
     }

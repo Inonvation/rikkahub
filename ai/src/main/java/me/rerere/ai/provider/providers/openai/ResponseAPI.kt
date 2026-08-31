@@ -394,10 +394,12 @@ class ResponseAPI(
                                                 })
                                             }
                                     })
+                                    val encryptedContent = reasoningMetadata?.encryptedContent
                                     val content = reasoningParts
                                         .filter { it.reasoningType == ReasoningType.REASONING_TEXT }
                                         .filter { it.reasoning.isNotEmpty() }
-                                    if (content.isNotEmpty()) {
+                                    // 已携带 encrypted_content 时不再重放明文 content
+                                    if (encryptedContent == null && content.isNotEmpty()) {
                                         put("content", buildJsonArray {
                                             content.forEach {
                                                 add(buildJsonObject {
@@ -407,7 +409,7 @@ class ResponseAPI(
                                             }
                                         })
                                     }
-                                    reasoningMetadata?.encryptedContent?.let {
+                                    encryptedContent?.let {
                                         put("encrypted_content", it)
                                     }
                                 })

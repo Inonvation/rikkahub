@@ -1391,5 +1391,7 @@
   <string name="assistant_add_to_category_title">Добавить ассистентов в «%1$s»</string>
   <string name="assistant_add_to_category_action">Добавить ассистентов в «%1$s»</string>
   <string name="assistant_add_to_category_empty">Все ассистенты уже в этой категории</string>
+  <string name="setting_tts_page_default_playback_speed">Скорость воспроизведения по умолчанию</string>
+  <string name="setting_tts_page_default_playback_speed_description">Применяется локально к каждому TTS-провайдеру без изменения его настроек синтеза.</string>
 </resources>
 

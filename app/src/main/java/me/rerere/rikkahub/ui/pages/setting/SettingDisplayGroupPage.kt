@@ -17,6 +17,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,6 +39,7 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -50,6 +52,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import org.koin.androidx.compose.koinViewModel
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * 界面偏好设置分组子页：接收 group 参数，渲染对应分组的设置项。
@@ -59,10 +62,19 @@ import java.io.File
 fun SettingDisplayGroupPage(group: String, vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
+    var ttsPlaybackSpeed by remember(settings) {
+        mutableFloatStateOf(settings.defaultTTSPlaybackSpeed)
+    }
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
         vm.updateSettings(settings.copy(displaySetting = setting))
+    }
+
+    fun commitTtsPlaybackSpeed() {
+        if (ttsPlaybackSpeed != settings.defaultTTSPlaybackSpeed) {
+            vm.updateSettings(settings.copy(defaultTTSPlaybackSpeed = ttsPlaybackSpeed))
+        }
     }
 
     val title = stringResource(
@@ -137,7 +149,13 @@ fun SettingDisplayGroupPage(group: String, vm: SettingVM = koinViewModel()) {
                     )
                     "render" -> RenderGroupItems(displaySetting, ::updateDisplaySetting)
                     "code" -> CodeGroupItems(displaySetting, ::updateDisplaySetting)
-                    "tts" -> TtsGroupItems(displaySetting, ::updateDisplaySetting)
+                    "tts" -> TtsGroupItems(
+                        displaySetting = displaySetting,
+                        updateDisplaySetting = ::updateDisplaySetting,
+                        ttsPlaybackSpeed = ttsPlaybackSpeed,
+                        onTtsPlaybackSpeedChange = { ttsPlaybackSpeed = (it * 10).roundToInt() / 10f },
+                        onTtsPlaybackSpeedCommit = ::commitTtsPlaybackSpeed,
+                    )
                     "haptic" -> HapticGroupItems(displaySetting, ::updateDisplaySetting)
                 }
             }
@@ -246,7 +264,7 @@ private fun IosGroupScope.BubblesGroupItems(
                     steps = 8,
                     modifier = Modifier.weight(1f)
                 )
-                Text(text = "${(displaySetting.bubbleOpacity * 100).toInt()}%")
+                Text(text = "${(displaySetting.bubbleOpacity * 100).roundToInt()}%")
             }
         }
     )
@@ -566,7 +584,33 @@ private fun IosGroupScope.CodeGroupItems(
 private fun IosGroupScope.TtsGroupItems(
     displaySetting: DisplaySetting,
     updateDisplaySetting: (DisplaySetting) -> Unit,
+    ttsPlaybackSpeed: Float,
+    onTtsPlaybackSpeedChange: (Float) -> Unit,
+    onTtsPlaybackSpeedCommit: () -> Unit,
 ) {
+    item(
+        headlineContent = { Text(stringResource(R.string.setting_tts_page_default_playback_speed)) },
+        supportingContent = {
+            Column {
+                Text(stringResource(R.string.setting_tts_page_default_playback_speed_description))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Slider(
+                        value = ttsPlaybackSpeed,
+                        onValueChange = onTtsPlaybackSpeedChange,
+                        onValueChangeFinished = onTtsPlaybackSpeedCommit,
+                        valueRange = 0.5f..2.0f,
+                        steps = 14,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(text = "x${"%.1f".format(ttsPlaybackSpeed)}")
+                }
+            }
+        },
+    )
     item(
         headlineContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_title)) },
         supportingContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_desc)) },

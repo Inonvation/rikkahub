@@ -57,6 +57,7 @@ import kotlin.time.Clock
 class StreamChunkHandler(private val model: Model? = null) {
     // Map 的值是对应 part 在当前助手消息 parts 列表中的下标。
     private val textPartIndexes = mutableMapOf<String, Int>()
+    private val textStartMetadata = mutableMapOf<String, JsonObject?>()
     private val reasoningPartIndexes = mutableMapOf<String, Int>()
     private val imagePartIndexes = mutableMapOf<String, Int>()
     private val serverToolInputBuffers = mutableMapOf<String, StringBuilder>()
@@ -87,6 +88,7 @@ class StreamChunkHandler(private val model: Model? = null) {
         when (chunk) {
             is StreamChunk.TextStart -> {
                 textPartIndexes.putIfAbsent(chunk.id, -1)
+                if (chunk.metadata != null) textStartMetadata[chunk.id] = chunk.metadata
                 this
             }
             is StreamChunk.TextDelta -> {
@@ -94,13 +96,19 @@ class StreamChunkHandler(private val model: Model? = null) {
                 val index = textPartIndexes[chunk.id]
                 // 容忍 Provider 未发送 Start：首次收到 Delta 时直接创建对应 part。
                 if (index == null || index < 0 || parts.getOrNull(index) !is UIMessagePart.Text) {
-                    copy(parts = parts + UIMessagePart.Text(chunk.text)).also {
+                    copy(parts = parts + UIMessagePart.Text(
+                        chunk.text,
+                        chunk.metadata ?: textStartMetadata.remove(chunk.id),
+                    )).also {
                         textPartIndexes[chunk.id] = parts.size
                     }
                 } else {
                     copy(parts = parts.toMutableList().apply {
                         val text = get(index) as UIMessagePart.Text
-                        set(index, text.copy(text = text.text + chunk.text))
+                        set(index, text.copy(
+                            text = text.text + chunk.text,
+                            metadata = chunk.metadata ?: text.metadata,
+                        ))
                     })
                 }
             }
@@ -108,6 +116,7 @@ class StreamChunkHandler(private val model: Model? = null) {
             is StreamChunk.TextEnd -> {
                 // 文本段结束：清理该段首尾的空白行，避免模型输出末尾多余的换行被渲染成空行
                 val index = textPartIndexes.remove(chunk.id)
+                textStartMetadata.remove(chunk.id)
                 if (index == null || parts.getOrNull(index) !is UIMessagePart.Text) this
                 else copy(parts = parts.toMutableList().apply {
                     val text = get(index) as UIMessagePart.Text
@@ -302,6 +311,7 @@ class StreamChunkHandler(private val model: Model? = null) {
             ).finishReasoning().cleanupBlankParts().also {
                 // Finish 同时结束尚未显式结束的 reasoning，并释放本次响应流的索引状态。
                 textPartIndexes.clear()
+                textStartMetadata.clear()
                 reasoningPartIndexes.clear()
                 imagePartIndexes.clear()
                 serverToolInputBuffers.clear()

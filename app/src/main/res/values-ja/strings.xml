@@ -1391,5 +1391,7 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="assistant_add_to_category_title">「%1$s」にアシスタントを追加</string>
   <string name="assistant_add_to_category_action">「%1$s」にアシスタントを追加</string>
   <string name="assistant_add_to_category_empty">すべてのアシスタントが既にこのカテゴリに含まれています</string>
+  <string name="setting_tts_page_default_playback_speed">デフォルトの再生速度</string>
+  <string name="setting_tts_page_default_playback_speed_description">すべてのTTSプロバイダーにローカルで適用され、合成設定は変更されません。</string>
 </resources>
 
