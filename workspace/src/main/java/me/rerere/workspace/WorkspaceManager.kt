@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
@@ -212,6 +213,42 @@ class WorkspaceManager(
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
+    /**
+     * 按字节区间导出 Rootfs 内文件（RandomAccessFile，不经 proot），支持 /workspace、bind mount
+     * 与 Rootfs 内部路径。越界安全：start 超过文件末尾时输出为空；实际读取长度取 min(length, 剩余字节)。
+     * 供 read_file 分片读取大文件（readRootfsBuffer 的全文件读有 8MB 上限）。
+     */
+    fun exportRootfsFileRange(
+        root: String,
+        path: String,
+        start: Long,
+        length: Long,
+        outputStream: OutputStream,
+    ) {
+        require(start >= 0) { "Range start must be non-negative: $start" }
+        require(length > 0) { "Range length must be positive: $length" }
+        require(length <= MAX_RANGE_READ_BYTES) {
+            "Range length exceeds max ${MAX_RANGE_READ_BYTES} bytes: $length"
+        }
+        val file = resolveRootfsFile(root, path)
+        file.requireReadableFile(path)
+        outputStream.use { out ->
+            RandomAccessFile(file, "r").use { raf ->
+                val size = raf.length()
+                if (start >= size) return@use
+                raf.seek(start)
+                val buffer = ByteArray(RANGE_READ_BUFFER_BYTES)
+                var left = minOf(length, size - start)
+                while (left > 0) {
+                    val read = raf.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
+                    if (read < 0) break
+                    out.write(buffer, 0, read)
+                    left -= read
+                }
+            }
+        }
+    }
+
     private fun resolveRootfsFile(root: String, path: String): File {
         val location = resolveRootfsPath(root, path)
         return fileSystem.resolve(location.rootDir, location.relativePath)
@@ -397,6 +434,10 @@ class WorkspaceManager(
         private const val LINUX_DIR = "linux"
         private const val TEMP_DIR = "tmp"
         const val DEFAULT_COMMAND_TIMEOUT_MS = 30_000L
+
+        /** read_file 分段读取的单次长度上限（RandomAccessFile 读入内存的预算） */
+        const val MAX_RANGE_READ_BYTES = 4L * 1024 * 1024
+        private const val RANGE_READ_BUFFER_BYTES = 64 * 1024
 
         /** Rootfs 内工作区文件区的挂载点 */
         const val ROOTFS_WORKSPACE_DIR = "/workspace"

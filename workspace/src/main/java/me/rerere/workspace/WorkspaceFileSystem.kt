@@ -5,8 +5,13 @@ import java.io.InputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileSystems
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.Collections
+import java.util.concurrent.Executors
 import kotlin.io.path.name
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -16,6 +21,11 @@ class WorkspaceFileSystem(
     private val config: WorkspaceConfig = WorkspaceConfig(),
 ) {
     private val trashJson = Json { ignoreUnknownKeys = true }
+
+    /** 快照 walk 的并行池：按顶层子目录并行；daemon 线程不阻止 JVM 退出 */
+    private val walkPool = Executors.newFixedThreadPool(4) { runnable ->
+        Thread(runnable, "ws-fs-walk").apply { isDaemon = true }
+    }
 
     fun list(root: File, path: String = ""): List<WorkspaceFileEntry> {
         val dir = resolvePath(root, path)
@@ -47,18 +57,40 @@ class WorkspaceFileSystem(
 
     /**
      * 递归列出 [root] 下所有非隐藏文件（不含目录），用于工作区变更检测快照。
-     * 会跳过隐藏目录及其子文件。
+     * 按顶层子目录并行 walk（.trash/.l2s.* 隐藏目录整体剪枝不下潜，其余点目录如 .git、
+     * .agent 仍纳入快照，与旧实现语义一致），大目录（node_modules 级别）比单线程全量 walk 快数倍；
+     * 结果顺序不保证。
      */
     fun listAllFiles(root: File): List<WorkspaceFileEntry> {
         require(root.exists() && root.isDirectory) { "Root must be an existing directory: ${root.path}" }
-        return root.walk()
-            .filter { it.isFile && !isHiddenWorkspaceName(it.name) }
-            .filter { file ->
-                val relative = file.relativeTo(root).path
-                relative.split(File.separatorChar).none { isHiddenWorkspaceName(it) }
+        val children = root.listFiles().orEmpty().filter { !isHiddenWorkspaceName(it.name) }
+        val directFiles = children.filter { it.isFile }.map { it.toEntry(root) }
+        val dirs = children.filter { it.isDirectory }
+        if (dirs.isEmpty()) return directFiles
+        val collected = Collections.synchronizedList(ArrayList(directFiles))
+        val futures = dirs.map { dir ->
+            walkPool.submit {
+                Files.walkFileTree(dir.toPath(), object : SimpleFileVisitor<Path>() {
+                    override fun preVisitDirectory(path: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        // .trash 与 .l2s.* 目录整体剪枝：快照不需要其中的文件，也不该扫出它们（旧实现需走完整棵树再滤，代价高）
+                        return if (isHiddenWorkspaceName(path.toFile().name)) {
+                            FileVisitResult.SKIP_SUBTREE
+                        } else {
+                            FileVisitResult.CONTINUE
+                        }
+                    }
+
+                    override fun visitFile(path: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        if (attrs.isRegularFile && !isHiddenWorkspaceName(path.toFile().name)) {
+                            collected.add(path.toFile().toEntry(root))
+                        }
+                        return FileVisitResult.CONTINUE
+                    }
+                })
             }
-            .map { it.toEntry(root) }
-            .toList()
+        }
+        futures.forEach { it.get() }
+        return collected
     }
 
     fun readText(root: File, path: String, charset: Charset = StandardCharsets.UTF_8): String {

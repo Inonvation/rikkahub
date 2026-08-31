@@ -64,5 +64,8 @@ data class WorkspaceCommandResult(
     val stdout: String,
     val stderr: String,
     val timedOut: Boolean = false,
+    /** 兼容聚合标志：stdout 或 stderr 任一被截断即 true；具体分流见 [stdoutTruncated]/[stderrTruncated] */
     val truncated: Boolean = false,
+    val stdoutTruncated: Boolean = false,
+    val stderrTruncated: Boolean = false,
 )
