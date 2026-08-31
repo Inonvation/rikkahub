@@ -137,7 +137,7 @@ internal fun EditedFilesList(
     // 不会出现异步补全导致的"卡片迟到出现、item 高度突变"跳动
     // 进程级缓存（key = messageId + parts 引用锚点）：item 划出视口再回来不再重复解析大 JSON
     val fileChanges = remember(messageId, parts) { extractFileChangesCached(messageId, parts) }
-    if (fileChanges.isEmpty()) return
+    if (fileChanges.isEmpty) return
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -151,9 +151,11 @@ internal fun EditedFilesList(
     var showImportDialog by remember { mutableStateOf(false) }
     var importPath by remember { mutableStateOf<String?>(null) }
 
-    val addedFiles = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
-    val editedFileList = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
-    val removedFiles = remember(fileChanges) { fileChanges.filter { it.status == FileChangeStatus.REMOVED }.map { it.path } }
+    // changes 为工具层限量后的展示列表（每类 ≤50）；计数徽章用 totals（真实总数，无上限报告时与列表口径一致）
+    val changes = fileChanges.changes
+    val addedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.ADDED }.map { it.path } }
+    val editedFileList = remember(changes) { changes.filter { it.status == FileChangeStatus.EDITED }.map { it.path } }
+    val removedFiles = remember(changes) { changes.filter { it.status == FileChangeStatus.REMOVED }.map { it.path } }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*"),
@@ -212,7 +214,7 @@ internal fun EditedFilesList(
                 Text(
                     text = stringResource(
                         R.string.workspace_file_changes,
-                        addedFiles.size + editedFileList.size + removedFiles.size
+                        fileChanges.addedTotal + fileChanges.modifiedTotal + fileChanges.removedTotal
                     ),
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
@@ -224,21 +226,21 @@ internal fun EditedFilesList(
                 ) {
                     if (addedFiles.isNotEmpty()) {
                         Text(
-                            text = "+${addedFiles.size}",
+                            text = "+${fileChanges.addedTotal}",
                             style = MaterialTheme.typography.labelSmall,
                             color = DiffAddedColor,
                         )
                     }
                     if (editedFileList.isNotEmpty()) {
                         Text(
-                            text = "~${editedFileList.size}",
+                            text = "~${fileChanges.modifiedTotal}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     if (removedFiles.isNotEmpty()) {
                         Text(
-                            text = "-${removedFiles.size}",
+                            text = "-${fileChanges.removedTotal}",
                             style = MaterialTheme.typography.labelSmall,
                             color = DiffRemovedColor,
                         )
@@ -673,6 +675,10 @@ private data class ShellOutput(
     val addedFiles: List<String> = emptyList(),
     val modifiedFiles: List<String> = emptyList(),
     val removedFiles: List<String> = emptyList(),
+    // 工具层对每个列表限量 50 条（防批量操作撑爆 JSON），超限时补真实总数；未限量/旧消息为 null，以数组长度为准
+    val addedFilesTotal: Int? = null,
+    val modifiedFilesTotal: Int? = null,
+    val removedFilesTotal: Int? = null,
 )
 
 /**
@@ -682,9 +688,22 @@ private data class ShellOutput(
  * LazyColumn item 划出视口后 remember 失效、再划回重新组合；本缓存让"每次滑过都重新解析
  * 大 JSON"变为 O(1) 命中，配合 ChatList 滚动预取（warmMessageExtractions）消除首帧同步解析。
  */
+/**
+ * 工作区文件变更提取结果：changes 供 chip 展示（工具层限量后为前 50 条），
+ * totals 为真实总数（有限量字段时来自工具输出，否则与 changes 推导口径一致），保证计数徽章不因限量失真。
+ */
+internal data class FileChangesResult(
+    val changes: List<FileChange>,
+    val addedTotal: Int,
+    val modifiedTotal: Int,
+    val removedTotal: Int,
+) {
+    val isEmpty: Boolean get() = changes.isEmpty()
+}
+
 private data class FileChangesCacheEntry(
     val partsRef: List<UIMessagePart>,
-    val changes: List<FileChange>,
+    val result: Any,
     val sizeKb: Int,
 )
 
@@ -700,19 +719,20 @@ private fun estimatePartsSizeKb(parts: List<UIMessagePart>): Int {
     return chars / 1024 + 1
 }
 
-private fun cachedExtract(
+private fun <T : Any> cachedExtract(
     key: String,
     parts: List<UIMessagePart>,
-    extract: (List<UIMessagePart>) -> List<FileChange>,
-): List<FileChange> {
-    fileChangesCache.get(key)?.let { e -> if (e.partsRef === parts) return e.changes }
+    extract: (List<UIMessagePart>) -> T,
+): T {
+    // 同一 key 的提取类型恒定：命中时按 T 转型安全（trusted folder 与 workspace 用不同 key 前缀）
+    fileChangesCache.get(key)?.let { e -> if (e.partsRef === parts) return e.result as T }
     val result = extract(parts)
     fileChangesCache.put(key, FileChangesCacheEntry(parts, result, estimatePartsSizeKb(parts)))
     return result
 }
 
 /** 工作区文件变更提取的缓存入口（组合/预取共用） */
-internal fun extractFileChangesCached(messageId: String, parts: List<UIMessagePart>): List<FileChange> =
+internal fun extractFileChangesCached(messageId: String, parts: List<UIMessagePart>): FileChangesResult =
     cachedExtract("workspace:$messageId", parts, ::extractFileChanges)
 
 /** 信任文件夹文件变更提取的缓存入口（组合/预取共用） */
@@ -739,8 +759,13 @@ private fun isToolOutputError(tool: UIMessagePart.Tool): Boolean =
         text.text.contains("\"error\"")
     }
 
-internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
+internal fun extractFileChanges(parts: List<UIMessagePart>): FileChangesResult {
     val changes = mutableListOf<FileChange>()
+    var addedTotal = 0
+    var modifiedTotal = 0
+    var removedTotal = 0
+    // 任一 shell 调用带有限量总数（*Total）时，徽章以累计总数为准；否则与旧口径一致按去重条目数
+    var sawCappedTotal = false
     parts.filterIsInstance<UIMessagePart.Tool>()
         .filter { it.isExecuted }
         .forEach { tool ->
@@ -763,6 +788,7 @@ internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                         val changeStatus = outputJson?.get("changeStatus")?.jsonPrimitive?.contentOrNull
                         if (changeStatus == "edited") FileChangeStatus.EDITED else FileChangeStatus.ADDED
                     }
+                    if (status == FileChangeStatus.ADDED) addedTotal++ else modifiedTotal++
                     changes.add(FileChange(path, status))
                 }
 
@@ -781,6 +807,15 @@ internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
                     val output = runCatching {
                         JsonInstant.decodeFromString<ShellOutput>(text)
                     }.getOrNull() ?: return@forEach
+                    // 数组本身已被工具层限量（每类 50 条），总数以 *Total 字段为准，保证徽章计数真实
+                    addedTotal += output.addedFilesTotal ?: output.addedFiles.size
+                    modifiedTotal += output.modifiedFilesTotal ?: output.modifiedFiles.size
+                    removedTotal += output.removedFilesTotal ?: output.removedFiles.size
+                    if (output.addedFilesTotal != null || output.modifiedFilesTotal != null ||
+                        output.removedFilesTotal != null
+                    ) {
+                        sawCappedTotal = true
+                    }
                     output.addedFiles.forEach { path ->
                         changes.add(FileChange(path, FileChangeStatus.ADDED))
                     }
@@ -794,7 +829,13 @@ internal fun extractFileChanges(parts: List<UIMessagePart>): List<FileChange> {
             }
         }
     // 同一消息内同一路径可能多次出现，保留最后一次状态
-    return changes.reversed().distinctBy { it.path }.reversed()
+    val deduped = changes.reversed().distinctBy { it.path }.reversed()
+    return FileChangesResult(
+        changes = deduped,
+        addedTotal = if (sawCappedTotal) addedTotal else deduped.count { it.status == FileChangeStatus.ADDED },
+        modifiedTotal = if (sawCappedTotal) modifiedTotal else deduped.count { it.status == FileChangeStatus.EDITED },
+        removedTotal = if (sawCappedTotal) removedTotal else deduped.count { it.status == FileChangeStatus.REMOVED },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

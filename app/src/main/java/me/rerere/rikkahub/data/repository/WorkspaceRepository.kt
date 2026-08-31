@@ -31,6 +31,7 @@ class WorkspaceRepository(
     private val manager: WorkspaceManager,
     private val rootfsInstaller: RootfsInstaller,
     private val settingsStore: SettingsStore,
+    private val asyncTaskRunner: WorkspaceAsyncTaskRunner,
 ) {
     fun listFlow(): Flow<List<WorkspaceEntity>> = dao.listFlow()
 
@@ -342,6 +343,72 @@ class WorkspaceRepository(
         manager.exportRootfsFile(workspace.root, path, outputStream)
     }
 
+    /** 分片读取结果：文本 + 文件总字节数（供模型规划后续分片） */
+    data class RootfsTextRange(
+        val sizeBytes: Long,
+        val text: String,
+    )
+
+    /**
+     * 按 Rootfs 内绝对路径读指定字节区间（RandomAccessFile，不经 proot）。
+     * 越界安全：start 超过文件末尾返回空文本；实际读取长度取 min(maxBytes, 剩余字节)。
+     */
+    suspend fun readRootfsTextRange(
+        id: String,
+        path: String,
+        start: Long,
+        maxBytes: Long,
+    ): RootfsTextRange = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        manager.ensureWorkspace(workspace.root)
+        RootfsTextRange(
+            sizeBytes = manager.rootfsFileSize(workspace.root, path),
+            text = ByteArrayOutputStream().use { out ->
+                manager.exportRootfsFileRange(workspace.root, path, start, maxBytes, out)
+                out.toString(Charsets.UTF_8.name())
+            },
+        )
+    }
+
+    /** 后台执行 shell 命令（workspace_shell_async 后端），立即返回 taskId */
+    fun launchAsyncCommand(
+        id: String,
+        command: String,
+        cwd: String,
+        timeoutMillis: Long,
+    ): String = asyncTaskRunner.launch(id, command, cwd, timeoutMillis)
+
+    fun asyncTaskStatus(taskId: String): AsyncTaskStatus? = asyncTaskRunner.status(taskId)
+
+    /**
+     * 把环境变量持久化到 rootfs /etc/profile.d（每次登录 shell 自动加载）；value 为 null 时移除该变量。
+     * 文件为 rootfs 内 app 托管配置，路径与内容格式受控，不走用户输入路径。
+     */
+    suspend fun setEnvPersistence(
+        id: String,
+        name: String,
+        value: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: return@withContext false
+        manager.ensureWorkspace(workspace.root)
+        val profileDir = File(manager.linuxDir(workspace.root), "etc/profile.d").apply { mkdirs() }
+        val envFile = File(profileDir, ENV_PROFILE_FILE)
+        val lines = if (envFile.isFile) {
+            runCatching { envFile.readLines() }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val updated = upsertEnvLine(lines, name, value)
+        if (updated == lines) return@withContext true
+        val tmp = File(profileDir, "$ENV_PROFILE_FILE.tmp")
+        tmp.writeText(updated.joinToString("\n") + "\n")
+        if (!tmp.renameTo(envFile)) {
+            envFile.writeText(updated.joinToString("\n") + "\n")
+            tmp.delete()
+        }
+        true
+    }
+
     suspend fun deleteFile(
         id: String,
         area: WorkspaceStorageArea,
@@ -616,6 +683,9 @@ class WorkspaceRepository(
 
         /** 经验索引文件名(注入 system prompt), 位于 .agent 目录; 细节放在 notes/ 按需读 */
         private const val MEMORY_FILE = ".agent/MEMORY.md"
+
+        /** workspace_set_env 写盘的 profile.d 文件名（rootfs 内，bash -l 登录时随 /etc/profile 加载） */
+        private const val ENV_PROFILE_FILE = "00-rikkahub-env.sh"
         private val MEMORY_INDEX_TEMPLATE = """
             # Workspace Memory (index)
 
@@ -658,7 +728,7 @@ class WorkspaceRepository(
             fi
             # 网络探测多地址尝试：阿里 DNS(国内) / Cloudflare / Google，任一可达即视为有网，避免 1.1.1.1 在国内误报 no
             if timeout 1 bash -c 'exec 3<>/dev/tcp/223.5.5.5/53' 2>/dev/null || timeout 1 bash -c 'exec 3<>/dev/tcp/1.1.1.1/53' 2>/dev/null || timeout 1 bash -c 'exec 3<>/dev/tcp/8.8.8.8/53' 2>/dev/null; then echo "- Network: yes"; else echo "- Network: no"; fi
-            echo "- Mounts: /workspace (persistent), /skills, /upload (read-only), /tool_outputs"
+            echo "- Mounts: /workspace (persistent), /skills, /upload, /tool_outputs"
             echo ""
             echo "## Installed"
             if command -v python3 >/dev/null 2>&1; then echo "- Python: ${'$'}(python3 --version 2>&1)"; fi
@@ -672,6 +742,7 @@ class WorkspaceRepository(
             echo ""
             echo "## Rules"
             echo "- Must use absolute paths — each workspace_shell call is a fresh process; cd/export don't persist."
+            echo "- Must treat /skills and /upload as read-only — do not write files there (shell-level writes are not blocked, only forbidden)."
             echo "- Must not edit this auto-generated section; put your own notes below."
             }
         """.trimIndent()
@@ -707,4 +778,21 @@ internal fun mergeAgentsContent(existing: String?, generated: String): String {
     } else {
         "$block\n\n$existing"
     }
+}
+
+/**
+ * 更新持久化 env 行列表: 替换/新增 `export NAME='value'` 行（单引号转义），
+ * value 为 null 时移除该变量的所有行。保留其它行（如用户自行编辑的内容）。
+ * internal: 供本模块单元测试验证。
+ */
+internal fun upsertEnvLine(lines: List<String>, name: String, value: String?): List<String> {
+    val prefix = "export $name="
+    val without = lines.filterNot { line ->
+        val trimmed = line.trimStart()
+        trimmed.startsWith(prefix) || trimmed == "export $name"
+    }
+    val newLine = value?.let {
+        "export $name='" + it.replace("'", "'\\''") + "'"
+    } ?: return without
+    return without + newLine
 }

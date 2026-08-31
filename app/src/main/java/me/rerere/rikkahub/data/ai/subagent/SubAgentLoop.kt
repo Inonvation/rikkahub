@@ -363,7 +363,7 @@ private fun truncateParts(parts: List<UIMessagePart>, json: Json): List<UIMessag
 internal fun truncateSafely(text: String, json: Json): String {
     val elem = runCatching { json.parseToJsonElement(text) }.getOrNull()
     if (elem == null) return text.take(MAX_TOOL_OUTPUT_CHARS) + "\n...[truncated]"
-    return json.encodeToString(boundJson(elem))
+    return json.encodeToString(boundToolOutput(elem))
 }
 
 internal fun boundJson(elem: JsonElement): JsonElement = when (elem) {
@@ -380,6 +380,40 @@ internal fun boundJson(elem: JsonElement): JsonElement = when (elem) {
     is JsonObject -> buildJsonObject {
         elem.forEach { (k, v) -> put(k, boundJson(v)) }
     }
+}
+
+/** stdout/stderr 的 head+tail 预算：编译/测试等报错通常在输出尾部，纯 head 会切掉关键信息 */
+internal const val SHELL_STREAM_HEAD_CHARS = 8 * 1024
+internal const val SHELL_STREAM_TAIL_CHARS = 8 * 1024
+
+/** 超长单流输出的 head+tail 展示截断：保留首尾、中段省略标记；未超限返回 null */
+internal fun headTailText(text: String): String? {
+    if (text.length <= SHELL_STREAM_HEAD_CHARS + SHELL_STREAM_TAIL_CHARS) return null
+    val omitted = text.length - SHELL_STREAM_HEAD_CHARS - SHELL_STREAM_TAIL_CHARS
+    return text.take(SHELL_STREAM_HEAD_CHARS) +
+        "\n…[middle $omitted chars omitted]…" +
+        text.takeLast(SHELL_STREAM_TAIL_CHARS)
+}
+
+/**
+ * 工具输出的有界重编码：含 stdout/stderr 字符串字段（shell 类）的对象走专用 head+tail 预算，
+ * 其余字段沿用 [boundJson] 的通用预算（字符串 500、数组前 6）——避免长命令输出被压到
+ * 500 字符的断崖。产物保证合法 JSON，渲染器/UI 不受影响。
+ */
+internal fun boundToolOutput(elem: JsonElement): JsonElement = when (elem) {
+    is JsonObject -> buildJsonObject {
+        elem.forEach { (key, value) ->
+            val shellStream = (key == "stdout" || key == "stderr") &&
+                value is JsonPrimitive && value.isString
+            put(
+                key,
+                if (shellStream) JsonPrimitive(headTailText(value.content) ?: value.content)
+                else boundJson(value)
+            )
+        }
+    }
+
+    else -> boundJson(elem)
 }
 
 private fun UIMessage.toText(): String = parts.joinToString(separator = "\n") { part ->

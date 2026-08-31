@@ -58,7 +58,7 @@ import me.rerere.ai.util.retryWithPolicy
 import me.rerere.rikkahub.data.repository.ContextCompositionRepository
 import me.rerere.rikkahub.data.ai.buildContextComposition
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
-import me.rerere.rikkahub.data.ai.subagent.boundJson
+import me.rerere.rikkahub.data.ai.subagent.boundToolOutput
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -922,13 +922,13 @@ class GenerationHandler(
             val elem = json.parseToJsonElement(fullText)
             when (elem) {
                 is JsonObject -> {
-                    val bounded = boundJson(elem).jsonObject.toMutableMap()
+                    val bounded = boundToolOutput(elem).jsonObject.toMutableMap()
                     bounded["truncated"] = JsonPrimitive(true)
                     bounded["full_output_path"] = JsonPrimitive(fullOutputPath)
                     json.encodeToString(JsonObject(bounded))
                 }
 
-                else -> json.encodeToString(boundJson(elem))
+                else -> json.encodeToString(boundToolOutput(elem))
             }
         }.getOrNull()
 

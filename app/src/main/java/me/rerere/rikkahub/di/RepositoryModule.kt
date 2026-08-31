@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.GroupRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.WorkspaceAsyncTaskRunner
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderStore
@@ -90,8 +91,16 @@ val repositoryModule = module {
         RootfsInstaller(get())
     }
 
+    // 后台 shell 任务执行器：输出目录与截断恢复目录（/tool_outputs）同源，由 RikkaHubApp 按 24h 保留制清理
     single {
-        WorkspaceRepository(get(), get(), get(), get())
+        WorkspaceAsyncTaskRunner(
+            manager = get(),
+            outputDir = File(get<Context>().filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
+        )
+    }
+
+    single {
+        WorkspaceRepository(get(), get(), get(), get(), get())
     }
 
     single {

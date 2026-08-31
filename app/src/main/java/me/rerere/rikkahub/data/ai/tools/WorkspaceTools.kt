@@ -16,9 +16,9 @@ import me.rerere.ai.ui.DiffMetadata
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.repository.AsyncTaskState
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.generateUnifiedDiff
-import me.rerere.workspace.MAX_OUTPUT_CHARS
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
@@ -30,9 +30,21 @@ import java.io.ByteArrayOutputStream
 private const val SHELL_TIMEOUT_MAX_SECONDS = 600L
 private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
 
-/** 输出被截断时追加在 stdout 末尾的提示, 让 AI 明确知道并改用分片读取 */
+/** workspace_shell 的 stdin 输入上限：喂给命令的文本内容，避免超大输入撑爆 StreamWriter 与内存 */
+private const val STDIN_MAX_BYTES = 512 * 1024
+
+// shell 单流输出的展示上限（head+tail 保留）。三层预算对齐：
+// 执行层 StreamCollector 128K/流(防 OOM) → 本层 10K/流 → GenerationHandler 32K 兜底头尾截断，
+// 正常路径下整体 JSON 不超 32K, 兜底不触发。
+private const val SHELL_STREAM_MAX_CHARS = 10 * 1024
+private const val SHELL_STREAM_HEAD_CHARS = 7 * 1024
+private const val SHELL_STREAM_TAIL_CHARS = 3 * 1024
+/** 单条 shell 命令的文件变更列表上限，防止批量操作（如装依赖）撑爆 JSON；超限以 *Total 字段上报真实总数 */
+private const val SHELL_FILE_DIFF_MAX_ENTRIES = 50
+
+/** 输出被截断时追加在流末尾的提示, 让 AI 明确知道并改用分片读取 */
 private val TRUNCATED_OUTPUT_MARKER =
-    "\n\n... [output truncated at ${MAX_OUTPUT_CHARS / 1024}KB, use head/tail or workspace_grep to read parts] ..."
+    "\n\n... [output truncated, use head/tail or workspace_grep to read specific parts] ..."
 
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
@@ -42,6 +54,12 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_list_files" to false,
     "workspace_glob" to false,
     "workspace_grep" to false,
+    "workspace_move" to false,
+    "workspace_delete" to false,
+    "workspace_restore" to false,
+    "workspace_shell_async" to true,
+    "workspace_task_status" to false,
+    "workspace_set_env" to false,
 )
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
@@ -99,6 +117,12 @@ suspend fun createWorkspaceTools(
         workspaceWriteNeedsApproval(rawPath, toolName, approvalOverrides, cwdAbsolute, forceNoApproval)
     }
 
+    /** 按指定参数名取路径的审批判定（workspace_move 的目标参数名为 target） */
+    fun writeApprovalOn(toolName: String, key: String): (JsonElement) -> Boolean = { input ->
+        val rawPath = runCatching { input.jsonObject.string(key) }.getOrNull()
+        workspaceWriteNeedsApproval(rawPath, toolName, approvalOverrides, cwdAbsolute, forceNoApproval)
+    }
+
     return listOf(
         createReadFileTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createWriteFileTool(workspaceId, writeApproval("workspace_write_file"), cwdAbsolute, workspaceRepository),
@@ -107,6 +131,12 @@ suspend fun createWorkspaceTools(
         createListFilesTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createGlobTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createGrepTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
+        createMoveFileTool(workspaceId, writeApprovalOn("workspace_move", "target"), cwdAbsolute, workspaceRepository),
+        createDeleteFileTool(workspaceId, writeApproval("workspace_delete"), cwdAbsolute, workspaceRepository),
+        createRestoreFileTool(workspaceId, writeApproval("workspace_restore"), cwdAbsolute, workspaceRepository),
+        createShellAsyncTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
+        createTaskStatusTool(workspaceId, workspaceRepository),
+        createSetEnvTool(workspaceId, workspaceRepository),
     )
 }
 
@@ -131,29 +161,52 @@ private fun createReadFileTool(
         Read a file (UTF-8 text or image) from the assistant's bound workspace Rootfs.
         path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
         Cannot list a directory - use workspace_list_files instead.
-        For files larger than 8MB, use workspace_shell with head/tail/grep to read parts.
+        Supports ranged reads: pass start (byte offset) and/or maxBytes to read any part of a file; for files larger than the single-read limit, read successive ranges (start = previous start + bytes read).
         Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 putPathProperty(required = true, cwd = cwd)
+                put("start", buildJsonObject {
+                    put("type", "integer")
+                    put("description", "Byte offset to start reading from. Defaults to 0.")
+                })
+                put("maxBytes", buildJsonObject {
+                    put("type", "integer")
+                    put(
+                        "description",
+                        "Maximum bytes to read (defaults to the single-read limit ${WorkspaceManager.MAX_RANGE_READ_BYTES / 1024 / 1024}MB). " +
+                            "For large files pass a smaller value and read successive ranges."
+                    )
+                })
             },
             required = listOf("path"),
         )
     },
     needsApproval = { needsApproval("workspace_read_file") },
     execute = {
-        val path = it.jsonObject.resolveRequiredToolPath("path", cwd)
+        val params = it.jsonObject
+        val path = params.resolveRequiredToolPath("path", cwd)
         if (path.isImagePath()) {
             workspaceRepository.readImageInRootfs(workspaceId, path)
         } else {
-            val text = workspaceRepository.readTextInRootfs(workspaceId, path)
+            val start = params["start"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+            require(start >= 0) { "start must be a non-negative byte offset, got $start" }
+            val maxBytes = params["maxBytes"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                ?: WorkspaceManager.MAX_RANGE_READ_BYTES
+            require(maxBytes > 0) { "maxBytes must be positive, got $maxBytes" }
+            require(maxBytes <= WorkspaceManager.MAX_RANGE_READ_BYTES) {
+                "maxBytes ${maxBytes / 1024}KB exceeds the single-read limit ${WorkspaceManager.MAX_RANGE_READ_BYTES / 1024 / 1024}MB; read in smaller ranges"
+            }
+            val range = workspaceRepository.readRootfsTextRange(workspaceId, path, start, maxBytes)
             listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
                         put("path", path)
-                        put("text", text)
+                        put("start", start)
+                        put("sizeBytes", range.sizeBytes)
+                        put("text", range.text)
                     }.toString()
                 )
             )
@@ -308,11 +361,13 @@ private fun createShellTool(
     description = buildString {
         append("Run a shell command in the workspace's Linux rootfs (bash — not Windows; use Unix commands). /workspace = persistent files. ")
         append("Each call is a fresh process: cd/export don't persist; use absolute paths or 'cd /path && cmd'. ")
-        append("cwd is relative to the workspace root. ")
+        append("cwd must be under /workspace. ")
         if (!defaultCwd.isNullOrBlank()) {
             append("Defaults to '$defaultCwd'. ")
         }
-        append("Output capped at 128KB. Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported.")
+        append("Output capped: each of stdout/stderr keeps first ~7KB + last ~3KB; for large outputs use head/tail/grep to read specific parts. ")
+        append("Optional stdin text (UTF-8, max ${STDIN_MAX_BYTES / 1024}KB) is piped to the command's stdin, then closed — e.g. {\"command\":\"cat > config.json\",\"stdin\":\"...\"}. ")
+        append("Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported.")
     },
     parameters = {
         InputSchema.Obj(
@@ -326,9 +381,11 @@ private fun createShellTool(
                     put(
                         "description",
                         if (!defaultCwd.isNullOrBlank()) {
-                            "Working directory relative to the workspace files root. Defaults to '$defaultCwd'."
+                            "Working directory: path relative to the workspace files root, or an absolute /workspace/... path. " +
+                                "Defaults to '$defaultCwd'. Paths outside /workspace are rejected — for other rootfs locations (e.g. /tmp) use 'cd /path && cmd' inside the command."
                         } else {
-                            "Working directory relative to the workspace files root. Defaults to root."
+                            "Working directory: path relative to the workspace files root, or an absolute /workspace/... path. " +
+                                "Defaults to root. Paths outside /workspace are rejected — for other rootfs locations (e.g. /tmp) use 'cd /path && cmd' inside the command."
                         }
                     )
                 })
@@ -339,6 +396,13 @@ private fun createShellTool(
                         "Command timeout in seconds. Defaults to 30, max $SHELL_TIMEOUT_MAX_SECONDS."
                     )
                 })
+                put("stdin", buildJsonObject {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Optional UTF-8 text piped to the command's standard input (then closed). Max ${STDIN_MAX_BYTES / 1024}KB."
+                    )
+                })
             },
             required = listOf("command"),
         )
@@ -347,16 +411,29 @@ private fun createShellTool(
     execute = {
         val params = it.jsonObject
         val command = params.string("command") ?: error("command is required")
-        val cwd = (params.string("cwd") ?: defaultCwd.orEmpty())
-            .removePrefix("/workspace/").removePrefix("/workspace")
-        val timeoutMillis = params.string("timeout")?.toLongOrNull()
-            ?.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS)
-            ?.times(1_000L)
-            ?: WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS
+        // cwd 语义与文件工具对齐：接受相对路径与 /workspace 绝对写法，词法归一（折叠 .. 与重复分隔符）。
+        // /workspace 子树之外（/tmp 等）宿主侧无法校验存在性，显式报错引导在命令内 cd，而非剥斜杠静默映射
+        val rawCwd = params.string("cwd")?.trim()?.takeIf { it.isNotEmpty() } ?: defaultCwd
+        val cwdNormalized = normalizeWorkspaceCwd(rawCwd)
+        require(cwdNormalized == null || isUnderWorkspaceTree(cwdNormalized, WORKSPACE_ROOT)) {
+            "cwd \"$rawCwd\" is outside /workspace; workspace_shell only supports cwd under /workspace " +
+                "(relative path or absolute /workspace/... path). " +
+                "For other rootfs locations, cd inside the command, e.g. \"cd /tmp && ls\""
+        }
+        val cwd = cwdNormalized?.removePrefix("$WORKSPACE_ROOT/") ?: ""
+        // timeout 容错：非法/0/负数回退默认值而非 clamp 成 1s，超过上限收敛到 600s
+        val timeoutSeconds = params.string("timeout")?.toLongOrNull()
+            ?.takeIf { it > 0 }
+            ?.coerceAtMost(SHELL_TIMEOUT_MAX_SECONDS)
+        val timeoutMillis = timeoutSeconds?.times(1_000L) ?: WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS
+        val stdinBytes = params.string("stdin")?.takeIf { it.isNotEmpty() }?.toByteArray(Charsets.UTF_8)
+        if (stdinBytes != null && stdinBytes.size > STDIN_MAX_BYTES) {
+            error("stdin exceeds max ${STDIN_MAX_BYTES / 1024}KB: ${stdinBytes.size} bytes")
+        }
         val beforeSnapshot = runCatching {
             workspaceRepository.listAllFiles(workspaceId, WorkspaceStorageArea.FILES)
         }.getOrDefault(emptyList())
-        val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis)
+        val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis, stdinBytes)
         val afterSnapshot = runCatching {
             workspaceRepository.listAllFiles(workspaceId, WorkspaceStorageArea.FILES)
         }.getOrDefault(emptyList())
@@ -364,23 +441,20 @@ private fun createShellTool(
             before = beforeSnapshot,
             after = afterSnapshot,
         )
+        // 分流截断标志：只有爆掉的那条流退化为 head-only，未爆的流仍保留真实尾部（报错通常落在爆掉的那条）
+        val stdoutShown = boundShellStream(result.stdout, result.stdoutTruncated)
+        val stderrShown = boundShellStream(result.stderr, result.stderrTruncated)
         listOf(
             UIMessagePart.Text(
                 buildJsonObject {
                     put("exitCode", result.exitCode)
-                    put("stdout", if (result.truncated) result.stdout + TRUNCATED_OUTPUT_MARKER else result.stdout)
-                    put("stderr", result.stderr)
+                    put("stdout", if (stdoutShown != null) stdoutShown + TRUNCATED_OUTPUT_MARKER else result.stdout)
+                    put("stderr", if (stderrShown != null) stderrShown + TRUNCATED_OUTPUT_MARKER else result.stderr)
                     put("timedOut", result.timedOut)
-                    if (result.truncated) put("truncated", true)
-                    if (addedFiles.isNotEmpty()) putJsonArray("addedFiles") {
-                        addedFiles.forEach { add(JsonPrimitive(it)) }
-                    }
-                    if (modifiedFiles.isNotEmpty()) putJsonArray("modifiedFiles") {
-                        modifiedFiles.forEach { add(JsonPrimitive(it)) }
-                    }
-                    if (removedFiles.isNotEmpty()) putJsonArray("removedFiles") {
-                        removedFiles.forEach { add(JsonPrimitive(it)) }
-                    }
+                    if (result.truncated || stdoutShown != null || stderrShown != null) put("truncated", true)
+                    putFileDiffList("addedFiles", addedFiles)
+                    putFileDiffList("modifiedFiles", modifiedFiles)
+                    putFileDiffList("removedFiles", removedFiles)
                 }.toString()
             )
         )
@@ -538,6 +612,333 @@ private fun createGrepTool(
         )
     },
 )
+
+private fun createMoveFileTool(
+    workspaceId: String,
+    needsApproval: (JsonElement) -> Boolean,
+    cwd: String?,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_move",
+    description = """
+        Move or rename a file/directory inside the assistant's bound workspace (/workspace).
+        Paths are relative to the current working directory ${cwdDisplay(cwd)} unless they start with '/'.
+        Moving to a location outside the current working directory requires user approval.
+        An existing target is only overwritten when overwrite=true. Only /workspace paths are supported — use shell mv for other rootfs locations.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("source", buildJsonObject {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Source file or directory to move. Relative to the current working directory (${cwdDisplay(cwd)}) or absolute /workspace path."
+                    )
+                })
+                put("target", buildJsonObject {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Destination path. Relative to the current working directory (${cwdDisplay(cwd)}) or absolute /workspace path."
+                    )
+                })
+                put("overwrite", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Overwrite an existing target. Defaults to false.")
+                })
+            },
+            required = listOf("source", "target"),
+        )
+    },
+    needsApproval = { needsApproval(it) },
+    execute = {
+        val params = it.jsonObject
+        val source = params.resolveRequiredToolPath("source", cwd)
+        val target = params.resolveRequiredToolPath("target", cwd)
+        val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        val entry = workspaceRepository.moveFile(
+            workspaceId,
+            source.requireWorkspaceRelative("workspace_move source"),
+            target.requireWorkspaceRelative("workspace_move target"),
+            overwrite,
+        )
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", entry.path.absoluteRootfsPath())
+                    put("movedFrom", source)
+                    put("name", entry.name)
+                    put("isDirectory", entry.isDirectory)
+                    put("sizeBytes", entry.sizeBytes)
+                    put("updatedAt", entry.updatedAt)
+                    put("changeStatus", "moved")
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createDeleteFileTool(
+    workspaceId: String,
+    needsApproval: (JsonElement) -> Boolean,
+    cwd: String?,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_delete",
+    description = """
+        Move a file or directory into the workspace trash (/workspace/.trash) — recoverable via workspace_restore, NOT a permanent delete.
+        Directories require recursive=true. Deleting outside the current working directory requires user approval.
+        Only /workspace paths are supported — use shell rm for other rootfs locations.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                putPathProperty(required = true, cwd = cwd)
+                put("recursive", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Delete a directory and its contents. Defaults to false.")
+                })
+            },
+            required = listOf("path"),
+        )
+    },
+    needsApproval = { needsApproval(it) },
+    execute = {
+        val params = it.jsonObject
+        val path = params.resolveRequiredToolPath("path", cwd)
+        val recursive = params["recursive"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        val trashed = workspaceRepository.trashFile(
+            workspaceId,
+            WorkspaceStorageArea.FILES,
+            path.requireWorkspaceRelative("workspace_delete"),
+            recursive,
+        )
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", path)
+                    put("trashed", trashed)
+                    if (!trashed) put("note", "Path does not exist or is already in the trash")
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createRestoreFileTool(
+    workspaceId: String,
+    needsApproval: (JsonElement) -> Boolean,
+    cwd: String?,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_restore",
+    description = """
+        Restore a previously deleted file or directory from the workspace trash back to its original path.
+        path is the original path of the deleted item (relative to the current working directory ${cwdDisplay(cwd)} or absolute /workspace path).
+        Restoring outside the current working directory requires user approval.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                putPathProperty(required = true, cwd = cwd)
+            },
+            required = listOf("path"),
+        )
+    },
+    needsApproval = { needsApproval(it) },
+    execute = {
+        val path = it.jsonObject.resolveRequiredToolPath("path", cwd)
+        val restored = workspaceRepository.restoreFile(
+            workspaceId,
+            WorkspaceStorageArea.FILES,
+            path.requireWorkspaceRelative("workspace_restore"),
+        )
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("path", path)
+                    put("restored", restored)
+                    if (!restored) put("note", "Path is not in the trash or its original location is unavailable")
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createShellAsyncTool(
+    workspaceId: String,
+    needsApproval: (String) -> Boolean,
+    workspaceRepository: WorkspaceRepository,
+    defaultCwd: String? = null,
+) = Tool(
+    name = "workspace_shell_async",
+    description = buildString {
+        append("Run a shell command in the workspace rootfs in the background; returns an id immediately. ")
+        append("Poll with workspace_task_status. Intended for long jobs (install/build/long scripts) that would exceed the normal 30s timeout. ")
+        append("cwd must be under /workspace. ")
+        if (!defaultCwd.isNullOrBlank()) {
+            append("Defaults to '$defaultCwd'. ")
+        }
+        append("Timeout default $SHELL_TIMEOUT_MAX_SECONDS s (max $SHELL_TIMEOUT_MAX_SECONDS s). Full output is saved to /tool_outputs/<taskId>.txt (24h retention). No file-change diff is reported.")
+    },
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("command", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Shell command to run in the background")
+                })
+                put("cwd", buildJsonObject {
+                    put("type", "string")
+                    put(
+                        "description",
+                        "Working directory: relative to the workspace files root, or an absolute /workspace/... path. Defaults to '${defaultCwd ?: "root"}'. Paths outside /workspace are rejected."
+                    )
+                })
+                put("timeout", buildJsonObject {
+                    put("type", "integer")
+                    put(
+                        "description",
+                        "Timeout in seconds. Defaults to $SHELL_TIMEOUT_MAX_SECONDS, max $SHELL_TIMEOUT_MAX_SECONDS."
+                    )
+                })
+            },
+            required = listOf("command"),
+        )
+    },
+    needsApproval = { needsApproval("workspace_shell_async") },
+    execute = {
+        val params = it.jsonObject
+        val command = params.string("command") ?: error("command is required")
+        // cwd 语义与 workspace_shell 保持一致：/workspace 子树内相对/绝对写法，子树外显式报错
+        val rawCwd = params.string("cwd")?.trim()?.takeIf { it.isNotEmpty() } ?: defaultCwd
+        val cwdNormalized = normalizeWorkspaceCwd(rawCwd)
+        require(cwdNormalized == null || isUnderWorkspaceTree(cwdNormalized, WORKSPACE_ROOT)) {
+            "cwd \"$rawCwd\" is outside /workspace; workspace_shell_async only supports cwd under /workspace " +
+                "(relative path or absolute /workspace/... path)."
+        }
+        val cwd = cwdNormalized?.removePrefix("$WORKSPACE_ROOT/") ?: ""
+        val timeoutSeconds = params.string("timeout")?.toLongOrNull()
+            ?.takeIf { it > 0 }
+            ?.coerceAtMost(SHELL_TIMEOUT_MAX_SECONDS)
+            ?: SHELL_TIMEOUT_MAX_SECONDS
+        val taskId = workspaceRepository.launchAsyncCommand(workspaceId, command, cwd, timeoutSeconds * 1_000L)
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("taskId", taskId)
+                    put("status", "running")
+                    put("note", "Poll with workspace_task_status(tool). Full output will be at /tool_outputs/$taskId.txt")
+                }.toString()
+            )
+        )
+    },
+)
+
+private fun createTaskStatusTool(
+    workspaceId: String,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_task_status",
+    description = """
+        Check the status of a background task started with workspace_shell_async.
+        Returns running/succeeded/failed/timed_out; for terminal states also exitCode and the bounded stdout/stderr.
+        Tasks live for the current app session (restart loses them); output files persist in /tool_outputs for 24h and can be read with shell.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("taskId", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Task id returned by workspace_shell_async")
+                })
+            },
+            required = listOf("taskId"),
+        )
+    },
+    needsApproval = { false },
+    execute = {
+        val taskId = it.jsonObject.string("taskId") ?: error("taskId is required")
+        val status = workspaceRepository.asyncTaskStatus(taskId)
+            ?: error("Task not found: $taskId (background tasks only live for the current app session — you may need to rerun the command)")
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("taskId", status.taskId)
+                    put("state", status.state.name.lowercase())
+                    status.exitCode?.let { exit -> put("exitCode", exit) }
+                    if (status.timedOut) put("timedOut", true)
+                    status.error?.let { put("error", it) }
+                    if (status.stdout.isNotEmpty()) put("stdout", status.stdout)
+                    if (status.stderr.isNotEmpty()) put("stderr", status.stderr)
+                    if (status.state != AsyncTaskState.RUNNING) put("outputPath", status.outputPath)
+                }.toString()
+            )
+        )
+    },
+)
+
+private val ENV_NAME_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*")
+
+private fun createSetEnvTool(
+    workspaceId: String,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_set_env",
+    description = """
+        Persist an environment variable for all future workspace_shell calls (every shell call is a fresh process; exports don't carry over).
+        Stored in the rootfs profile.d and loaded by each login shell. Name must match [A-Za-z_][A-Za-z0-9_]*; omit value to remove the variable.
+        Values are literal (no shell substitution or expansion). Caution: setting PATH to a broken value will break subsequent shell commands until you reset it.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Environment variable name, e.g. MIRROR_INDEX")
+                })
+                put("value", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Literal value. Omit to remove the variable.")
+                })
+            },
+            required = listOf("name"),
+        )
+    },
+    needsApproval = { false },
+    execute = {
+        val params = it.jsonObject
+        val name = params.string("name") ?: error("name is required")
+        require(ENV_NAME_REGEX.matches(name)) { "name must match [A-Za-z_][A-Za-z0-9_]*" }
+        val value = params.string("value")
+        if (value != null) require(!value.contains('\n') && !value.contains('\r')) { "value must be a single line" }
+        workspaceRepository.setEnvPersistence(workspaceId, name, value)
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("name", name)
+                    if (value == null) put("removed", true) else put("value", value)
+                }.toString()
+            )
+        )
+    },
+)
+
+/**
+ * 把工具入参的 Rootfs 绝对路径转成文件区相对根路径（workspace 文件工具的唯一可寻址域）。
+ * 仅允许 /workspace 子树；根自身与子树外路径显式拒绝，引导用 shell 处理其它 rootfs 位置。
+ */
+private fun String.requireWorkspaceRelative(what: String): String {
+    require(isUnderWorkspaceTree(this, WORKSPACE_ROOT)) {
+        "$what $this is outside /workspace — workspace file tools only support /workspace paths; use shell mv/rm for other rootfs locations"
+    }
+    val relative = removePrefix("$WORKSPACE_ROOT/")
+    require(relative.isNotBlank() && relative != ".") { "Cannot $what on the workspace root itself" }
+    return relative
+}
+
+private fun String.absoluteRootfsPath(): String = "$WORKSPACE_ROOT/$this"
 
 /** 必填路径参数 → Rootfs 绝对路径；缺失/空白/非法输入抛错（错误文案即工具回给模型的指引） */
 private fun kotlinx.serialization.json.JsonObject.resolveRequiredToolPath(name: String, cwd: String?): String =
@@ -731,4 +1132,26 @@ private fun computeWorkspaceFileDiff(
         .sorted()
         .map { "/workspace/$it" }
     return Triple(added, modified, removed)
+}
+
+/**
+ * shell 单流输出的展示截断：超限保留 head+tail（报错通常在尾部，纯 head 会切掉关键信息）。
+ * 执行层已截断（>128K 只保留头部、无真实尾部）时退化为 head-only，由 marker 说明。
+ * 返回 null 表示未截断。
+ */
+internal fun boundShellStream(text: String, execTruncated: Boolean): String? = when {
+    text.length <= SHELL_STREAM_MAX_CHARS -> null
+    execTruncated -> text.take(SHELL_STREAM_HEAD_CHARS)
+    else -> text.take(SHELL_STREAM_HEAD_CHARS) +
+        "\n…[${text.length - SHELL_STREAM_HEAD_CHARS - SHELL_STREAM_TAIL_CHARS} chars omitted]…" +
+        text.takeLast(SHELL_STREAM_TAIL_CHARS)
+}
+
+/** 文件变更列表限量写入：数组最多 [SHELL_FILE_DIFF_MAX_ENTRIES] 条，超限时补 <key>Total 字段上报真实总数 */
+private fun JsonObjectBuilder.putFileDiffList(key: String, files: List<String>) {
+    if (files.isEmpty()) return
+    putJsonArray(key) {
+        files.take(SHELL_FILE_DIFF_MAX_ENTRIES).forEach { add(JsonPrimitive(it)) }
+    }
+    if (files.size > SHELL_FILE_DIFF_MAX_ENTRIES) put("${key}Total", files.size)
 }

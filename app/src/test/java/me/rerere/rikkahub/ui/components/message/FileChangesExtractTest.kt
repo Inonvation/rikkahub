@@ -32,7 +32,7 @@ class FileChangesExtractTest {
                     textOutput("""{"changeStatus":"edited"}"""),
                 )
             )
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals("/workspace/a.txt", changes[0].path)
         assertEquals(FileChangeStatus.EDITED, changes[0].status)
@@ -42,7 +42,7 @@ class FileChangesExtractTest {
     fun `write_file without changeStatus defaults to ADDED`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_write_file", """{"path":"/workspace/a.txt"}""", textOutput("""{"ok":true}""")))
-        )
+        ).changes
         assertEquals(FileChangeStatus.ADDED, changes[0].status)
     }
 
@@ -50,28 +50,32 @@ class FileChangesExtractTest {
     fun `edit_file is EDITED from input path`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_edit_file", """{"path":"/workspace/b.kt"}""", textOutput("""{"ok":true}""")))
-        )
+        ).changes
         assertEquals(FileChangeStatus.EDITED, changes[0].status)
         assertEquals("/workspace/b.kt", changes[0].path)
     }
 
     @Test
     fun `shell output with added modified removed files is extracted`() {
-        val output = """{"addedFiles":["a.txt","b.txt"],"modifiedFiles":["c.txt"],"removedFiles":["d.txt"]}"""
-        val changes = extractFileChanges(
-            listOf(tool("1", "workspace_shell", """{"command":"ls"}""", textOutput(output)))
+        val result = extractFileChanges(
+            listOf(tool("1", "workspace_shell", """{"command":"ls"}""", textOutput("""{"addedFiles":["a.txt","b.txt"],"modifiedFiles":["c.txt"],"removedFiles":["d.txt"]}""")))
         )
+        val changes = result.changes
         assertEquals(4, changes.size)
         assertEquals(FileChangeStatus.ADDED, changes[0].status)
         assertEquals(FileChangeStatus.EDITED, changes[2].status)
         assertEquals(FileChangeStatus.REMOVED, changes[3].status)
+        // 无 *Total 时报总数按列表推导，与 changes 口径一致
+        assertEquals(2, result.addedTotal)
+        assertEquals(1, result.modifiedTotal)
+        assertEquals(1, result.removedTotal)
     }
 
     @Test
     fun `shell output without change keys is skipped`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_shell", "{}", textOutput("""{"stdout":"nothing changed"}""")))
-        )
+        ).changes
         assertEquals(0, changes.size)
     }
 
@@ -81,7 +85,7 @@ class FileChangesExtractTest {
         val output = """{"addedFiles":["big.txt"],"stdout":"$bigStdout","stderr":""}"""
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_shell", """{"command":"build"}""", textOutput(output)))
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals("big.txt", changes[0].path)
     }
@@ -89,12 +93,38 @@ class FileChangesExtractTest {
     @Test
     fun `duplicate path in output keeps later status`() {
         // 提取顺序为 addedFiles → modifiedFiles → removedFiles，同一路径后者胜（此处 removed 在后 → REMOVED）
-        val output = """{"addedFiles":["a.txt"],"removedFiles":["a.txt"]}"""
         val changes = extractFileChanges(
-            listOf(tool("1", "workspace_shell", "{}", textOutput(output)))
-        )
+            listOf(tool("1", "workspace_shell", "{}", textOutput("""{"addedFiles":["a.txt"],"removedFiles":["a.txt"]}""")))
+        ).changes
         assertEquals(1, changes.size)
         assertEquals(FileChangeStatus.REMOVED, changes[0].status)
+    }
+
+    @Test
+    fun `capped shell lists use Total fields for counts`() {
+        // 工具层对列表限量 50 条，超限时以 *Total 上报真实总数：徽章计数用总数，chip 展示前 50 条
+        val capped = (1..50).map { "f$it.txt" }
+        val output = """{"addedFiles":${jsonArrayOf(capped)},"addedFilesTotal":300,"modifiedFiles":[],"removedFiles":[]}"""
+        val result = extractFileChanges(
+            listOf(tool("1", "workspace_shell", """{"command":"gen"}""", textOutput(output)))
+        )
+        assertEquals(50, result.changes.size)
+        assertEquals(300, result.addedTotal)
+        assertEquals(0, result.modifiedTotal)
+        assertEquals(0, result.removedTotal)
+    }
+
+    @Test
+    fun `capped totals across multiple shell calls are aggregated`() {
+        val output = """{"addedFiles":["a.txt"],"addedFilesTotal":100,"modifiedFiles":[],"removedFiles":[]}"""
+        val result = extractFileChanges(
+            listOf(
+                tool("1", "workspace_shell", """{"command":"gen"}""", textOutput(output)),
+                tool("2", "workspace_write_file", """{"path":"/workspace/b.txt"}""", textOutput("""{"ok":true}""")),
+            )
+        )
+        assertEquals(101, result.addedTotal)
+        assertEquals(2, result.changes.size)
     }
 
     @Test
@@ -176,7 +206,7 @@ class FileChangesExtractTest {
     fun `workspace edit with error output is not reported`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_edit_file", """{"path":"/workspace/a.txt"}""", textOutput("""{"error":true,"message":"old_text not found"}""")))
-        )
+        ).changes
         assertEquals(0, changes.size)
     }
 
@@ -193,7 +223,7 @@ class FileChangesExtractTest {
                     textOutput("""{"path":"/workspace/txt/todo.md","changeStatus":"added"}"""),
                 )
             )
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals("/workspace/txt/todo.md", changes[0].path)
         assertEquals(FileChangeStatus.ADDED, changes[0].status)
@@ -203,7 +233,7 @@ class FileChangesExtractTest {
     fun `relative input path falls back to input when output has no path`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_edit_file", """{"path":"docs/a.txt"}""", textOutput("""{"ok":true}""")))
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals("docs/a.txt", changes[0].path)
         assertEquals(FileChangeStatus.EDITED, changes[0].status)
@@ -213,7 +243,7 @@ class FileChangesExtractTest {
     fun `non-json output text falls back to input path`() {
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_write_file", """{"path":"/workspace/c.txt"}""", textOutput("plain text")))
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals("/workspace/c.txt", changes[0].path)
         assertEquals(FileChangeStatus.ADDED, changes[0].status)
@@ -225,7 +255,7 @@ class FileChangesExtractTest {
         val output = """{"addedFiles":["a.txt"],"stdout":"error: build failed","exitCode":1}"""
         val changes = extractFileChanges(
             listOf(tool("1", "workspace_shell", """{"command":"build"}""", textOutput(output)))
-        )
+        ).changes
         assertEquals(1, changes.size)
         assertEquals(FileChangeStatus.ADDED, changes[0].status)
     }
@@ -272,4 +302,8 @@ class FileChangesExtractTest {
         )
         assertEquals(0, items.size)
     }
+
+    /** 供测试构造 capped 场景的 JSON 数组字面量 */
+    private fun jsonArrayOf(paths: List<String>): String =
+        paths.joinToString(prefix = "[", postfix = "]", transform = { "\"$it\"" })
 }

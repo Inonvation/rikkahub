@@ -45,6 +45,9 @@ import org.koin.core.context.startKoin
 
 private const val TAG = "RikkaHubApp"
 
+/** tool_outputs 截断恢复文件的保留时长（24h）：会话内/跨重启短时恢复可用，超龄删除防堆积 */
+private const val TOOL_OUTPUT_RETENTION_MS = 24 * 60 * 60 * 1000L
+
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
@@ -152,8 +155,13 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch(Dispatchers.IO) {
             runCatching {
                 val dir = File(filesDir, FileFolders.TOOL_OUTPUTS)
-                if (dir.exists()) {
-                    dir.deleteRecursively()
+                val cutoff = System.currentTimeMillis() - TOOL_OUTPUT_RETENTION_MS
+                dir.listFiles()?.forEach { file ->
+                    // 只清超过保留期的文件：截断恢复路径（cat /tool_outputs/<id>.txt）
+                    // 跨重启在保留期内仍然可用，不再启动即全删
+                    if (file.lastModified() < cutoff) {
+                        file.delete()
+                    }
                 }
             }
         }

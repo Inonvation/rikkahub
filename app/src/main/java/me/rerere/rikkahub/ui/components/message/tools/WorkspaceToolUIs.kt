@@ -7,23 +7,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
@@ -34,7 +45,10 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.highlight.CodeHighlightText
 import androidx.compose.ui.res.stringResource
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowExpand01
+import me.rerere.hugeicons.stroke.ArrowUpDown
 import me.rerere.hugeicons.stroke.ComputerTerminal01
+import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.FileAdd
 import me.rerere.hugeicons.stroke.FileEdit
 import me.rerere.hugeicons.stroke.FileView
@@ -46,6 +60,8 @@ import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.parseDiffStats
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
+import java.io.File
+import kotlinx.coroutines.launch
 
 /**
  * 工作空间编辑文件: 摘要显示增删统计与精简 diff, 详情为完整 diff view
@@ -324,8 +340,54 @@ object ShellToolUI : ToolUIRenderer {
                 .joinToString("\n")
                 .trim()
         }
+        var expanded by remember(content) { mutableStateOf(false) }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ShellExitStatus(content, MaterialTheme.typography.labelSmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ShellExitStatus(content, MaterialTheme.typography.labelSmall, Modifier.weight(1f))
+                if (combined.isNotEmpty()) {
+                    val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    // 一键复制完整输出：优先取 /tool_outputs 里的全文（大输出被兜底截断时才有），否则取消息内保存的内容
+                    val clipboard = LocalClipboard.current
+                    val appContext = LocalContext.current
+                    val scope = rememberCoroutineScope()
+                    IconButton(
+                        onClick = {
+                            val fullPath = content.getStringContent("full_output_path")
+                            val text = if (fullPath != null) {
+                                val file = File(appContext.filesDir, "tool_outputs/${fullPath.substringAfterLast('/')}")
+                                runCatching { file.readText() }.getOrNull() ?: combined
+                            } else {
+                                combined
+                            }
+                            scope.launch {
+                                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("tool output", text)))
+                            }
+                        },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Copy01,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = iconTint,
+                        )
+                    }
+                    IconButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (expanded) HugeIcons.ArrowUpDown else HugeIcons.ArrowExpand01,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = iconTint,
+                        )
+                    }
+                }
+            }
             if (combined.isNotEmpty()) {
                 Box(
                     modifier = Modifier
@@ -334,14 +396,27 @@ object ShellToolUI : ToolUIRenderer {
                         .background(MaterialTheme.colorScheme.surfaceContainer)
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
-                    Text(
-                        text = combined.lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n"),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        maxLines = SUMMARY_MAX_LINES,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    val textStyle = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace)
+                    when {
+                        expanded -> Text(
+                            text = combined,
+                            style = textStyle,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                        else -> Text(
+                            text = combined.lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n"),
+                            style = textStyle,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            maxLines = SUMMARY_MAX_LINES,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -408,7 +483,7 @@ object ShellToolUI : ToolUIRenderer {
 
 /** Shell 退出状态文本: exit code 为 0 显示绿色, 超时或非零显示错误色 */
 @Composable
-private fun ShellExitStatus(content: JsonElement, style: androidx.compose.ui.text.TextStyle) {
+private fun ShellExitStatus(content: JsonElement, style: androidx.compose.ui.text.TextStyle, modifier: Modifier = Modifier) {
     val exitCode = content.int("exitCode")
     val timedOut = content.boolean("timedOut") ?: false
     val ok = !timedOut && exitCode == 0
@@ -419,6 +494,7 @@ private fun ShellExitStatus(content: JsonElement, style: androidx.compose.ui.tex
         },
         style = style,
         color = if (ok) DiffAddedColor else MaterialTheme.colorScheme.error,
+        modifier = modifier,
     )
 }
 
