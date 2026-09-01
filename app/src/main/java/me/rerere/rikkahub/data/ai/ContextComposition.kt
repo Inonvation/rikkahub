@@ -150,6 +150,24 @@ fun Conversation.hasRealMessages(presetMessages: List<UIMessage>): Boolean =
     effectiveMessages().dropPresetMessages(presetMessages).isNotEmpty()
 
 /**
+ * 校准锚点是否已过时：压缩后、且最后一条带 usage 的消息仍在压缩点（含）之前，
+ * 说明最近的 provider 实测输入量来自压缩前的旧请求——用它校准会把压缩后写入的
+ * 新构成估算重新拉回压缩前的占用（虚高）。待压缩点之后出现新生成（锚点消息在
+ * 压缩点之后）恢复校准。
+ *
+ * 无压缩、无锚点或锚点无法定位时返回 false（保持旧行为可校准）。
+ * 顶栏圆圈与浮窗构成共用此判定（computeTokenStats / ContextStatusPanel）。
+ */
+fun Conversation.hasStaleCalibrationAnchor(): Boolean {
+    val compressed = compressedHistory ?: return false
+    val lastOriginalMessageId = compressed.lastOriginalMessageId ?: return false
+    val anchorIndex = currentMessages.indexOfLast { (it.usage?.promptTokens ?: 0) > 0 }
+    val compressIndex = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }
+    if (anchorIndex < 0 || compressIndex < 0) return false
+    return anchorIndex <= compressIndex
+}
+
+/**
  * 无生成快照（新会话 / 进程重启后未发送）时的兜底构成：系统提示词（助手/会话级
  * 文本，不含注入与工具 system prompt）+ 可见消息历史的字符估算，工具/MCP/技能
  * 在真实采样前不可知，以 0 占位（UI 据此显示「发送后统计」提示而非 0% 误导）。

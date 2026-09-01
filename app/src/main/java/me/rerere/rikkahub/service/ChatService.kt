@@ -77,6 +77,10 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.PendingSteering
+import me.rerere.rikkahub.data.ai.ContextComposition
+import me.rerere.rikkahub.data.ai.ContextCompositionStore
+import me.rerere.rikkahub.data.ai.estimateFallbackComposition
+import me.rerere.rikkahub.data.ai.estimateTokens
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
@@ -257,10 +261,12 @@ internal fun createForkConversation(
     folderId = source.folderId,
 )
 
-/** /compact 与自动压缩共用的默认保留窗口（约 5 轮对话）。一条 assistant 消息会打包整轮
- *  工具结果（agent 会话单条可达上万 token），保留窗口过大会把压缩释放的空间吃回去，
- *  导致压缩后占用仍高于自动压缩的重置带、占用降不下来。 */
-internal const val DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES = 10
+/** 保留窗口默认 token 预算：目标的一半取 1/4（默认 target = 窗口一半 → 预算 = 窗口 1/8），
+ *  与 compact-command-plan 4.6「从尾部累计到窗口 10–15% 封顶」一致。agent 会话一条消息可
+ *  打包整轮工具结果（单条上万 token），固定条数保留会把压缩释放的空间吃回去——按 token
+ *  预算从尾部自适应累计（Codex 式：只保当前轮必需上下文，更旧的整段收进摘要）。 */
+internal fun defaultKeepRecentTokens(targetTokens: Int): Int =
+    (targetTokens / 4).coerceAtLeast(1024)
 
 /** 单个摘要块的最大字符预算（≈24k tokens）：防止超长块压爆压缩模型的上下文窗口 */
 private const val COMPRESS_CHUNK_CHAR_BUDGET = 96_000
@@ -279,21 +285,26 @@ internal fun parseCompactCommand(text: String?): String? {
 }
 
 /**
- * 压缩范围切分：返回「待摘要 + 保留尾部」；返回 null 表示无需压缩
- * （会话比保留窗口还短时保留窗口已覆盖全部消息，语义上无事可做）。
+ * 压缩范围切分（Codex 式 token 预算保留窗口）：从尾部贪心纳入最近消息，累计估算
+ * token 不超过 [keepRecentTokens]；始终保留最后一条（当前轮上下文连续性，单条超预算
+ * 也保留）。返回「待摘要 + 保留尾部」；返回 null 表示无需压缩（全部消息都落在
+ * 保留窗口内，语义上无事可做）。
  */
 internal fun splitCompressScope(
     allMessages: List<UIMessage>,
-    keepRecentMessages: Int,
+    keepRecentTokens: Int,
 ): Pair<List<UIMessage>, List<UIMessage>>? {
-    return when {
-        keepRecentMessages > 0 && allMessages.size > keepRecentMessages ->
-            allMessages.dropLast(keepRecentMessages) to allMessages.takeLast(keepRecentMessages)
-
-        keepRecentMessages > 0 -> null
-
-        else -> allMessages to emptyList()
+    if (allMessages.isEmpty()) return null
+    var keepStart = allMessages.lastIndex
+    var accumulated = allMessages[keepStart].estimateTokens()
+    while (keepStart > 0) {
+        val tokens = allMessages[keepStart - 1].estimateTokens()
+        if (accumulated + tokens > keepRecentTokens) break
+        accumulated += tokens
+        keepStart -= 1
     }
+    if (keepStart == 0) return null
+    return allMessages.take(keepStart) to allMessages.drop(keepStart)
 }
 
 /**
@@ -317,6 +328,16 @@ internal fun splitByCharBudget(items: List<String>, budget: Int): List<List<Stri
     }
     if (current.isNotEmpty()) chunks.add(current)
     return chunks
+}
+
+/**
+ * 单块摘要目标：按字符占比分配全局摘要预算，保证所有块的目标之和 ≈ 预算
+ * （旧实现每块都拿完整 target，N 块压缩后摘要总量 ≈ N × target，远超目标窗口）。
+ * 单块至少 256 token：占比极小的块也能产出可用的段落，不为省几十 token 牺牲结构。
+ */
+internal fun chunkTargetTokens(chunkChars: Int, totalChars: Int, summaryBudget: Int): Int {
+    if (totalChars <= 0 || chunkChars <= 0) return summaryBudget
+    return (summaryBudget.toLong() * chunkChars / totalChars).toInt().coerceAtLeast(256)
 }
 
 data class ChatError(
@@ -1208,7 +1229,6 @@ class ChatService(
                             conversation = session.state.value,
                             additionalPrompt = compactInstruction,
                             targetTokens = (compactContextTokenLimit / 2).coerceAtLeast(1),
-                            keepRecentMessages = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES,
                         ).fold(
                             onSuccess = { compressed ->
                                 if (!compressed) {
@@ -2597,13 +2617,16 @@ class ChatService(
      *
      * 返回 `Result<Boolean>`：true = 已生成新压缩快照；false = 无需压缩（会话比保留窗口还短、
      * 或没有可摘要内容）——调用方（/compact 命令）据此给友好提示，不当作错误。
+     *
+     * @param keepRecentTokens 保留窗口 token 预算（从尾部自适应累计，至少保留最后一条）；
+     *   null = 按 [defaultKeepRecentTokens] 从 [targetTokens] 推导
      */
     suspend fun compressConversation(
         conversationId: Uuid,
         conversation: Conversation,
         additionalPrompt: String,
         targetTokens: Int,
-        keepRecentMessages: Int = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
+        keepRecentTokens: Int? = null
     ): Result<Boolean> = runCatching {
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getAssistantById(conversation.assistantId)
@@ -2619,32 +2642,44 @@ class ChatService(
         val allMessages = conversation.effectiveMessages()
             .dropPresetMessages(assistant?.presetMessages.orEmpty())
 
-        val (messagesToCompress, messagesToKeep) = splitCompressScope(allMessages, keepRecentMessages)
+        val (messagesToCompress, messagesToKeep) = splitCompressScope(
+            allMessages,
+            keepRecentTokens ?: defaultKeepRecentTokens(targetTokens),
+        )
             // 会话比保留窗口还短：保留窗口已覆盖全部消息，没有可摘要的内容，按「无需压缩」处理
             ?: return@runCatching false
         if (messagesToCompress.isEmpty()) return@runCatching false
 
         // serializeForSummary 含工具调用入参/结果预览（上下文占用的大头），单条消息体积不可预估
         // （agent 会话一条消息可含整轮工具结果），按字符预算切块替代旧的固定 256 条切块，
-        // 避免产出压爆压缩模型窗口的超长块
+        // 避免产出压爆压缩模型窗口的超长块。摘要预算 = 目标 − 保留窗口实际占用，按字符占比
+        // 分配给各块（Codex 式全局预算），保证压缩后消息总占用 ≈ targetTokens 而不是 N × target。
+        val serializedChunks = splitByCharBudget(
+            items = messagesToCompress.map { it.serializeForSummary() },
+            budget = COMPRESS_CHUNK_CHAR_BUDGET,
+        )
+        val totalChars = serializedChunks.sumOf { chunk -> chunk.sumOf(String::length) }
+        val keptTokens = messagesToKeep.sumOf { it.estimateTokens() }
+        val summaryBudget = (targetTokens - keptTokens).coerceAtLeast(1024)
         val compressedSummaries = coroutineScope {
-            splitByCharBudget(
-                items = messagesToCompress.map { it.serializeForSummary() },
-                budget = COMPRESS_CHUNK_CHAR_BUDGET,
-            )
-                .map { chunk ->
-                    async {
-                        compressChunkToSummary(
-                            settings = settings,
-                            model = model,
-                            providerHandler = providerHandler,
-                            provider = provider,
-                            serializedChunk = chunk,
-                            targetTokens = targetTokens,
-                            additionalPrompt = additionalPrompt,
-                        )
-                    }
+            serializedChunks.map { chunk ->
+                val chunkTarget = chunkTargetTokens(
+                    chunkChars = chunk.sumOf(String::length),
+                    totalChars = totalChars,
+                    summaryBudget = summaryBudget,
+                )
+                async {
+                    compressChunkToSummary(
+                        settings = settings,
+                        model = model,
+                        providerHandler = providerHandler,
+                        provider = provider,
+                        serializedChunk = chunk,
+                        targetTokens = chunkTarget,
+                        additionalPrompt = additionalPrompt,
+                    )
                 }
+            }
                 .awaitAll()
         }
 
@@ -2663,6 +2698,22 @@ class ChatService(
                 summaryText = compressedSummaries.joinToString("\n\n"),
             ),
             chatSuggestions = emptyList(),
+        )
+
+        // 顶栏上下文占用立即反映压缩后构成：保留旧快照的 system/工具 token（压缩不改变
+        // 工具装配），消息 token 换成压缩后 effectiveMessages 的估算——否则顶栏/浮窗停留在
+        // 压缩前的旧占用（用户报告的「压缩后不更新」）。system 兜底用无快照时的估算口径。
+        val preSnapshot = ContextCompositionStore.get(conversation.id.toString())
+        val fallbackEstimate = estimateFallbackComposition(newConversation, settings)
+        ContextCompositionStore.update(
+            conversation.id.toString(),
+            ContextComposition(
+                systemTokens = preSnapshot?.systemTokens ?: fallbackEstimate.systemTokens,
+                builtinToolTokens = preSnapshot?.builtinToolTokens ?: 0,
+                mcpToolTokens = preSnapshot?.mcpToolTokens ?: 0,
+                skillToolTokens = preSnapshot?.skillToolTokens ?: 0,
+                messageTokens = fallbackEstimate.messageTokens,
+            ),
         )
 
         saveConversation(conversationId, newConversation)

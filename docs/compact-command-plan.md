@@ -17,6 +17,16 @@
 
 **未实施（Phase 3 可选项，待后续任务）**：microcompact 旧工具结果修剪层（4.3）、超长反应式压缩 + 熔断（4.4）、`CompressedHistoryCard` 元信息行（4.6 剩余项）。
 
+## 实施状态（2026-09-01：压缩体验优化）
+
+**压缩质量（Codex 式预算化改造，`chat_page_compress_keep_recent` 文案与语义同步变更）**：
+
+- **保留窗口：条数 → token 预算**（落地 4.6 规划的演进方向）。`splitCompressScope` 从尾部按 `estimateTokens` 贪心累计，预算默认 = 目标 1/4（= 窗口 1/8，10–15% 封顶区间），至少保留最后一条（单条超预算仍保留，保当前轮连续性）。agent 会话单条消息可打包整轮工具结果，固定 10 条会把压缩释放的空间吃回去，预算化后压缩必能落到目标窗口。
+- **摘要预算全局化**：修复旧实现「每块都拿完整 target，N 块摘要总量 ≈ N × target」的质量缺陷。`chunkTargetTokens` 按字符占比把 `target − 保留窗口实际占用` 分给各块，压缩后消息总占用 ≈ target。
+- **顶栏上下文窗口压缩后立即刷新**：`compressConversation` 成功后向 `ContextCompositionStore` 写入压缩后构成（保留旧快照 system/工具 token，消息 token = 压缩后 `effectiveMessages` 估算）；`Conversation.hasStaleCalibrationAnchor()` 判定「最后一条 usage 仍在压缩点之前」时跳过旧实测校准（否则旧请求的 promptTokens 会把新估算重新拉回虚高），压缩点之后的新生成自动恢复 provider 实测校准。顶栏圆圈与浮窗构成共用该判定。
+- 弹窗「保留最近的消息」输入改为「保留窗口 Token 预算」（默认 = 窗口 1/8），自动压缩与 `/compact` 路径走同一默认推导 `defaultKeepRecentTokens(target)`。
+- 测试：`ChatServiceTest`（预算切分 ×2、`chunkTargetTokens`、默认预算推导）、`ContextCompositionTest`（过时锚点 ×4）；`:app:compileDebugKotlin` 通过，相关单测 39 条全绿。
+
 ## 一、现状盘点（已有能力）
 
 | 能力 | 位置 | 说明 |

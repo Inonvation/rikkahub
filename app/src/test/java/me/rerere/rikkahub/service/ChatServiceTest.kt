@@ -190,23 +190,62 @@ class ChatServiceTest {
     }
 
     @Test
-    fun `split compress scope keeps recent tail and noop on short conversation`() {
-        val messages = (0 until 25).map {
-            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("m$it")))
-        }
+    fun `split compress scope keeps tail within token budget`() {
+        // 每条消息 40 个 ASCII 字符 → 估算 10 token
+        fun msg() = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("m".repeat(40))))
 
-        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentMessages = 10)!!
-        assertEquals(15, toCompress.size)
-        assertEquals(messages.dropLast(10), toCompress)
-        assertEquals(messages.takeLast(10), toKeep)
+        val messages = (0 until 10).map { msg() }
 
-        // 会话比保留窗口还短 → null（无需压缩）
-        assertNull(splitCompressScope(messages.take(5), keepRecentMessages = 10))
+        // 预算 25：尾部 2 条（10+10）落在窗口内，第 3 条会超预算 → 摘要前 8 条
+        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentTokens = 25)!!
+        assertEquals(messages.take(8), toCompress)
+        assertEquals(messages.drop(8), toKeep)
 
-        // keep=0 → 全部压缩、不保留
-        val (all, none) = splitCompressScope(messages, keepRecentMessages = 0)!!
-        assertEquals(messages, all)
-        assertTrue(none.isEmpty())
+        // 预算 0（非法/极小）：仍保留最后一条，保证当前轮上下文连续
+        val (allButLast, last) = splitCompressScope(messages, keepRecentTokens = 0)!!
+        assertEquals(messages.dropLast(1), allButLast)
+        assertEquals(messages.takeLast(1), last)
+
+        // 全部消息都落在保留窗口内 → null（无需压缩）
+        assertNull(splitCompressScope(messages, keepRecentTokens = 10_000))
+
+        // 空会话 → null
+        assertNull(splitCompressScope(emptyList(), keepRecentTokens = 100))
+    }
+
+    @Test
+    fun `split compress scope keeps oversized last message`() {
+        // 单条 2000 字符 → 估算 500 token，远超预算 100：依旧保留该条，其余进摘要
+        val oversized = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("x".repeat(2000))))
+        val small = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("y".repeat(40))))
+        val messages = listOf(small, small, oversized)
+
+        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentTokens = 100)!!
+        assertEquals(listOf(small, small), toCompress)
+        assertEquals(listOf(oversized), toKeep)
+
+        // 会话只有一条消息：窗口覆盖全部 → null
+        assertNull(splitCompressScope(listOf(oversized), keepRecentTokens = 100))
+    }
+
+    @Test
+    fun `chunk target tokens distribute global budget by char share`() {
+        // 300 字符总量、9000 预算：100 字符的块分到 1/3
+        assertEquals(3000, chunkTargetTokens(chunkChars = 100, totalChars = 300, summaryBudget = 9000))
+        assertEquals(6000, chunkTargetTokens(chunkChars = 200, totalChars = 300, summaryBudget = 9000))
+
+        // 占比过小的块保底 256，不为节省几十 token 牺牲摘要结构
+        assertEquals(256, chunkTargetTokens(chunkChars = 1, totalChars = 100_000, summaryBudget = 9000))
+
+        // 退化输入：预算整体兜底
+        assertEquals(9000, chunkTargetTokens(chunkChars = 0, totalChars = 0, summaryBudget = 9000))
+    }
+
+    @Test
+    fun `default keep recent tokens derives from target`() {
+        assertEquals(16_000, defaultKeepRecentTokens(64_000))
+        // 目标过小时保底 1024，避免保留窗口小到只剩最后一条
+        assertEquals(1024, defaultKeepRecentTokens(2000))
     }
 
     @Test

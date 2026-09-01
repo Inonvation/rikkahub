@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.DEFAULT_MODEL_CONTEXT_LENGTH
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.service.DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -59,7 +58,7 @@ fun CompressContextDialog(
     onAutoCompressThresholdChange: (Int) -> Unit,
     onSaveContextTokenLimit: (Int) -> Unit,
     onDismiss: () -> Unit,
-    onCompress: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job
+    onCompress: (additionalPrompt: String, targetTokens: Int, keepRecentTokens: Int) -> Job
 ) {
     var contextLimit by remember {
         mutableIntStateOf(
@@ -67,9 +66,11 @@ fun CompressContextDialog(
         )
     }
     var additionalPrompt by remember { mutableStateOf("") }
-    // 默认值与自动压缩路径一致（keep=10 ≈ 5 轮、target=窗口一半），用户不改参数直接保存也能执行
+    // 默认值与自动压缩路径一致（保留预算 = 目标 1/4 = 窗口 1/8、target=窗口一半），
+    // 用户不改参数直接保存也能执行。保留窗口按 token 预算自适应（Codex 式），
+    // 替代旧的固定条数：agent 会话单条消息可能打包整轮工具结果，条数无法约束占用。
     var selectedTokens by remember { mutableIntStateOf((contextLimit / 2).coerceAtLeast(1)) }
-    var keepRecentMessages by remember { mutableIntStateOf(DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES) }
+    var keepRecentTokens by remember { mutableIntStateOf((contextLimit / 8).coerceAtLeast(1024)) }
     val hapticController = rememberHaptic()
     var currentJob by remember { mutableStateOf<Job?>(null) }
     val isLoading = currentJob?.isActive == true
@@ -145,10 +146,10 @@ fun CompressContextDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
 
-                    // Keep recent messages input
+                    // 保留窗口 token 预算（从尾部自适应累计，至少保留最后一条）
                     OutlinedNumberInput(
-                        value = keepRecentMessages,
-                        onValueChange = { keepRecentMessages = it },
+                        value = keepRecentTokens,
+                        onValueChange = { keepRecentTokens = it },
                         label = stringResource(R.string.chat_page_compress_keep_recent),
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -199,9 +200,9 @@ fun CompressContextDialog(
                     // 兜底：删除或非法时恢复默认 128k
                     val effectiveLimit = contextLimit.takeIf { it > 0 } ?: DEFAULT_MODEL_CONTEXT_LENGTH
                     onSaveContextTokenLimit(effectiveLimit)
-                    // 只有目标 Token 和保留消息数都大于 0 时才执行压缩
-                    if (selectedTokens > 0 && keepRecentMessages > 0) {
-                        currentJob = onCompress(additionalPrompt, selectedTokens, keepRecentMessages)
+                    // 只有目标 Token 和保留预算都大于 0 时才执行压缩
+                    if (selectedTokens > 0 && keepRecentTokens > 0) {
+                        currentJob = onCompress(additionalPrompt, selectedTokens, keepRecentTokens)
                     } else {
                         onDismiss()
                     }

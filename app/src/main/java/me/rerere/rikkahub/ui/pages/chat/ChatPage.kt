@@ -150,6 +150,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.ai.ContextCompositionStore
 import me.rerere.rikkahub.data.ai.estimateFallbackComposition
 import me.rerere.rikkahub.data.ai.hasRealMessages
+import me.rerere.rikkahub.data.ai.hasStaleCalibrationAnchor
 import me.rerere.rikkahub.data.ai.lastRealPromptTokens
 import me.rerere.rikkahub.data.ai.tools.TodoItem
 import me.rerere.rikkahub.data.ai.tools.TodoList
@@ -167,7 +168,6 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.service.ChatError
-import me.rerere.rikkahub.service.DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ContextStatusPopover
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
@@ -723,7 +723,6 @@ private fun ChatPageContent(
             vm.handleCompressContext(
                 additionalPrompt = "",
                 targetTokens = (effectiveContextTokenLimit / 2).coerceAtLeast(1),
-                keepRecentMessages = DEFAULT_COMPRESS_KEEP_RECENT_MESSAGES,
             )
         }
         if (usagePercent * 100f < autoCompressResetThreshold(setting.autoCompressThreshold)) {
@@ -1153,8 +1152,8 @@ private fun ChatPageContent(
                     )
                 },
                 onDismiss = { showCompressDialog = false },
-                onCompress = { additionalPrompt, targetTokens, keepRecentMessages ->
-                    vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
+                onCompress = { additionalPrompt, targetTokens, keepRecentTokens ->
+                    vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentTokens)
                 }
             )
         }
@@ -1362,8 +1361,8 @@ private fun ChatFilesPickerSheet(
             conversation = conversation,
             state = inputState,
             assistant = assistant,
-            onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
-                vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
+            onCompressContext = { additionalPrompt, targetTokens, keepRecentTokens ->
+                vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentTokens)
             },
             enableSearch = enableSearch,
             onUpdateSearchMode = onUpdateSearchMode,
@@ -2008,8 +2007,17 @@ private fun computeTokenStats(
     // 预设剔除/兜底必须用会话绑定的助手（getCurrentAssistant 是全局当前助手，切换后与旧会话不一致）
     val assistantForPreset = settings.getAssistantById(conversation.assistantId)
         ?: settings.getCurrentAssistant()
+    // 压缩后到下一次真实生成之间的快照已是压缩后估算，且当前 usage 锚点来自压缩前的旧请求
+    // （hasStaleCalibrationAnchor），此时跳过校准——否则旧实测会把压缩后的占用重新拉回虚高；
+    // 压缩点之后出现新生成（新 usage 锚点）即恢复 provider 实测校准
     val totalTokens = snapshot
-        ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+        ?.let { s ->
+            if (conversation.hasStaleCalibrationAnchor()) {
+                s
+            } else {
+                s.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+            }
+        }
         ?.totalTokens
         // 未开始的会话（无消息或仅预设开场展示）尚未发生过请求，占用为 0；
         // 已开始的会话才用兜底估算（历史消息下次发送时确实占用窗口）

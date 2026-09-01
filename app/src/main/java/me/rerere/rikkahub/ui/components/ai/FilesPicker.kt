@@ -100,7 +100,7 @@ internal fun FilesPicker(
     conversation: Conversation,
     assistant: Assistant,
     state: ChatInputState,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
+    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentTokens: Int) -> Job,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
     /** 网络搜索状态/服务更新：与输入栏搜索按钮共用同一组回调 */

@@ -8,6 +8,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.ai.hasRealMessages
@@ -291,5 +292,108 @@ class ContextCompositionTest {
     fun `estimate schema tokens ignores nullable schema`() {
         val noSchema = tool("skill_admin_list", "List skills", schema = false)
         assertTrue(noSchema.estimateSchemaTokens() > 0)
+    }
+
+    // ---- hasStaleCalibrationAnchor ----
+
+    private fun usageMessage(
+        role: MessageRole,
+        text: String,
+        promptTokens: Int = 0,
+    ): UIMessage = UIMessage(
+        role = role,
+        parts = listOf(UIMessagePart.Text(text)),
+        usage = TokenUsage(
+            promptTokens = promptTokens,
+            completionTokens = 0,
+            cachedTokens = 0,
+            cacheWriteTokens = 0,
+        ),
+    )
+
+    @Test
+    fun `anchor before compression point is stale`() {
+        val oldUser = usageMessage(MessageRole.USER, "旧的", promptTokens = 100)
+        val oldReply = usageMessage(MessageRole.ASSISTANT, "旧的回复")
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(oldUser, oldReply).map { MessageNode.of(it) },
+            compressedHistory = CompressedHistory(
+                messages = listOf(
+                    usageMessage(MessageRole.USER, "[Summary]"),
+                    oldUser,
+                    oldReply,
+                ),
+                lastOriginalMessageId = oldReply.id,
+            ),
+        )
+
+        // 最后一条 usage（压缩前的旧请求）仍在压缩点（含）之前 → 校准锚点过时
+        assertTrue(conversation.hasStaleCalibrationAnchor())
+    }
+
+    @Test
+    fun `anchor on compression point message is stale`() {
+        val oldUser = usageMessage(MessageRole.USER, "旧的")
+        // 压缩点的最后一条原消息正是携带旧请求 usage 的助手回复
+        val oldReply = usageMessage(MessageRole.ASSISTANT, "旧的回复", promptTokens = 100)
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(oldUser, oldReply).map { MessageNode.of(it) },
+            compressedHistory = CompressedHistory(
+                messages = listOf(
+                    usageMessage(MessageRole.USER, "[Summary]"),
+                    oldUser,
+                    oldReply,
+                ),
+                lastOriginalMessageId = oldReply.id,
+            ),
+        )
+
+        assertTrue(conversation.hasStaleCalibrationAnchor())
+    }
+
+    @Test
+    fun `post compression anchor is fresh`() {
+        val oldUser = usageMessage(MessageRole.USER, "旧的", promptTokens = 200)
+        val oldReply = usageMessage(MessageRole.ASSISTANT, "旧的回复")
+        // 压缩后又发生了一次生成：新消息携带压缩后请求的实测 usage
+        val newUser = usageMessage(MessageRole.USER, "新的")
+        val newReply = usageMessage(MessageRole.ASSISTANT, "新的回复", promptTokens = 30)
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(oldUser, oldReply, newUser, newReply).map { MessageNode.of(it) },
+            compressedHistory = CompressedHistory(
+                messages = listOf(
+                    usageMessage(MessageRole.USER, "[Summary]"),
+                    oldUser,
+                    oldReply,
+                ),
+                lastOriginalMessageId = oldReply.id,
+            ),
+        )
+
+        assertFalse(conversation.hasStaleCalibrationAnchor())
+    }
+
+    @Test
+    fun `no compression or no anchor is always calibratable`() {
+        val plain = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(usageMessage(MessageRole.USER, "普通会话", promptTokens = 50))),
+        )
+        // 无压缩快照 → 不视为过时
+        assertFalse(plain.hasStaleCalibrationAnchor())
+
+        // 有压缩但没有任何带 usage 的消息 → 无可定位锚点，保持可校准（fallback 路径自行兜底）
+        val noAnchor = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(MessageNode.of(usageMessage(MessageRole.USER, "无 usage"))),
+            compressedHistory = CompressedHistory(
+                messages = listOf(usageMessage(MessageRole.USER, "[Summary]")),
+                lastOriginalMessageId = Uuid.random(),
+            ),
+        )
+        assertFalse(noAnchor.hasStaleCalibrationAnchor())
     }
 }

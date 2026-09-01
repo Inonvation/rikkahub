@@ -353,14 +353,14 @@
   <string name="chat_page_compress_additional_prompt_hint">指定要保留或关注的内容</string>
   <string name="chat_page_model_context">%1$s / Context %2$s</string>
   <string name="chat_page_compress_context">压缩历史</string>
-  <string name="chat_page_compress_context_desc">将对话压缩为摘要以节省令牌</string>
+  <string name="chat_page_compress_context_desc">将历史消息压缩为交接摘要；保留窗口按 Token 预算自适应，压缩后占用约等于目标值</string>
   <string name="chat_page_compress_context_title">压缩对话历史</string>
   <string name="chat_page_compress_auto_enable">自动压缩</string>
   <string name="chat_page_compress_auto_threshold">自动压缩阈值 (%)</string>
   <string name="chat_page_compress_summary_title">Compressed history</string>
   <string name="chat_page_compress_summary_expand">Expand summary</string>
   <string name="chat_page_compress_summary_collapse">Collapse summary</string>
-  <string name="chat_page_compress_keep_recent">保留最近的消息</string>
+  <string name="chat_page_compress_keep_recent">保留窗口 Token 预算</string>
   <string name="chat_page_compress_not_enough_messages">消息数量不足，无法压缩。请减少保留的消息数量或添加更多消息。</string>
   <string name="chat_page_compress_target_tokens">目标Token大小</string>
   <string name="chat_page_compress_warning">⚠️ 压缩上下文将重置当前对话中的所有消息</string>

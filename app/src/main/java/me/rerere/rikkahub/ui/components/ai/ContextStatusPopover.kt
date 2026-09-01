@@ -77,6 +77,7 @@ import me.rerere.rikkahub.data.ai.ContextComposition
 import me.rerere.rikkahub.data.ai.ContextCompositionStore
 import me.rerere.rikkahub.data.ai.estimateFallbackComposition
 import me.rerere.rikkahub.data.ai.hasRealMessages
+import me.rerere.rikkahub.data.ai.hasStaleCalibrationAnchor
 import me.rerere.rikkahub.data.ai.lastRealPromptTokens
 import me.rerere.rikkahub.data.ai.cost.CostCalculator
 import me.rerere.rikkahub.data.ai.cost.CostCurrency
@@ -299,7 +300,14 @@ private fun ContextStatusPanel(
         trustedSettings.projects.find { it.id == pid }
     }
     val composition = storeSnapshot
-        ?.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+        ?.let { s ->
+            // 与顶栏同口径：压缩后且 usage 锚点仍为压缩前旧请求时跳过实测校准（见 hasStaleCalibrationAnchor）
+            if (conversation.hasStaleCalibrationAnchor()) {
+                s
+            } else {
+                s.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+            }
+        }
         ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages)) {
             estimateFallbackComposition(conversation, settings)
         } else {
