@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.DEFAULT_MODEL_CONTEXT_LENGTH
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.defaultKeepRecentTokens
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -70,7 +71,7 @@ fun CompressContextDialog(
     // 用户不改参数直接保存也能执行。保留窗口按 token 预算自适应（Codex 式），
     // 替代旧的固定条数：agent 会话单条消息可能打包整轮工具结果，条数无法约束占用。
     var selectedTokens by remember { mutableIntStateOf((contextLimit / 2).coerceAtLeast(1)) }
-    var keepRecentTokens by remember { mutableIntStateOf((contextLimit / 8).coerceAtLeast(1024)) }
+    var keepRecentTokens by remember { mutableIntStateOf(defaultKeepRecentTokens(selectedTokens)) }
     val hapticController = rememberHaptic()
     var currentJob by remember { mutableStateOf<Job?>(null) }
     val isLoading = currentJob?.isActive == true

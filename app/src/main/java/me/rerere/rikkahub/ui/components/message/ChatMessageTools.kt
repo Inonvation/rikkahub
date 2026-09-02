@@ -249,7 +249,7 @@ private fun ToolDurationText(tool: UIMessagePart.Tool) {
     LaunchedEffect(baseMs, baseWall, finishedAtMs, finishedAt) {
         if (finishedAtMs == null && finishedAt == null) {
             while (true) {
-                delay(200)
+                delay(1000)
                 durationMs = if (baseMs != null) {
                     SystemClock.elapsedRealtime() - baseMs
                 } else {

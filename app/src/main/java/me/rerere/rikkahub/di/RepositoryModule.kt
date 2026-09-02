@@ -7,6 +7,8 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.config.AgentConfigPaths
 import me.rerere.rikkahub.data.config.AgentConfigRepository
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -92,11 +94,15 @@ val repositoryModule = module {
     }
 
     // 后台 shell 任务执行器：输出目录与截断恢复目录（/tool_outputs）同源，由 RikkaHubApp 按 24h 保留制清理
+    // 终态回调转发到 AppEventBus：通知等外部副作用不轮询，而是靠事件立刻感知任务结束
     single {
+        val eventBus = get<AppEventBus>()
         WorkspaceAsyncTaskRunner(
             manager = get(),
             outputDir = File(get<Context>().filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
-        )
+        ) { taskId ->
+            eventBus.tryEmit(AppEvent.AsyncTaskTerminal(taskId = taskId))
+        }
     }
 
     single {

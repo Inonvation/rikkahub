@@ -111,10 +111,10 @@ class ChatGenerationForegroundService : Service() {
 
     private fun release(intent: Intent) {
         intent.getStringExtra(EXTRA_GENERATION_ID)?.let(activeGenerations::remove)
+        // 还有其他生成在跑时不再重发兜底通知：同一通知 ID 会被 ChatNotificationManager
+        // 的实时状态覆盖，这里重发会把它打回“正在生成回复”。
         if (activeGenerations.isEmpty()) {
             stopService()
-        } else {
-            updateForegroundNotification(activeGenerations.values.last())
         }
     }
 

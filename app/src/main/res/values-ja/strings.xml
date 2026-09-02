@@ -455,6 +455,7 @@
   <string name="notification_live_update_thinking">考え中…</string>
   <string name="notification_live_update_title">応答を生成中…</string>
   <string name="notification_live_update_tool">ツール実行中: %s</string>
+  <string name="notification_live_update_tool_elapsed">ツール実行中: %1$s · 経過 %2$s</string>
   <string name="notification_live_update_writing">応答を書いています…</string>
   <string name="notification_web_server_running">Webサーバーが実行中</string>
   <string name="notification_web_server_starting">起動中…</string>

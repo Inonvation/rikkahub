@@ -299,6 +299,7 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.ChatGenerationStarted -> Unit // 由 ChatPage 消费
                     is AppEvent.ChatGenerationUpdate -> Unit // 由 ChatNotificationManager 消费
                     is AppEvent.ChatGenerationEnded -> Unit // 由 ChatNotificationManager 消费
+                    is AppEvent.AsyncTaskTerminal -> Unit // 由 ChatNotificationManager 消费
                 }
             }
         }

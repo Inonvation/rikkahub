@@ -455,6 +455,7 @@
   <string name="notification_live_update_thinking">Думаю…</string>
   <string name="notification_live_update_title">Генерируется ответ…</string>
   <string name="notification_live_update_tool">Запущен инструмент: %s</string>
+  <string name="notification_live_update_tool_elapsed">Запущен инструмент: %1$s · прошло %2$s</string>
   <string name="notification_live_update_writing">Пишем ответ…</string>
   <string name="notification_web_server_running">Веб-сервер запущен</string>
   <string name="notification_web_server_starting">Запуск…</string>

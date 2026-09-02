@@ -455,6 +455,7 @@
   <string name="notification_live_update_thinking">생각 중...</string>
   <string name="notification_live_update_title">응답 생성 중…</string>
   <string name="notification_live_update_tool">도구 실행 중: %s</string>
+  <string name="notification_live_update_tool_elapsed">도구 실행 중: %1$s · 경과 %2$s</string>
   <string name="notification_live_update_writing">응답 작성 중...</string>
   <string name="notification_web_server_running">웹 서버 실행 중</string>
   <string name="notification_web_server_starting">시작 중...</string>

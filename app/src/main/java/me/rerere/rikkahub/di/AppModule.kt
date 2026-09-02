@@ -155,6 +155,7 @@ val appModule = module {
             appScope = get(),
             eventBus = get(),
             settingsStore = get(),
+            workspaceRepository = get(),
         )
     }
 

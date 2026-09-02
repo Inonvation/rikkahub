@@ -34,10 +34,16 @@ data class AsyncTaskStatus(
  * workspace_shell_async 的后端：独立 daemon 线程池执行 proot 命令（分钟级任务不阻塞对话），
  * 完成时把完整输出写入 [outputDir]/<taskId>.txt（根路径 /tool_outputs，随应用 24h 保留制清理）。
  * 任务记录仅存活于进程内，条目数超限时优先淘汰最早的已完成任务。
+ *
+ * 任务状态机只活在进程内、且到达终态时除写 map 外不产生任何信号——依赖轮询的展示层
+ * （Live Update 通知）会一直把任务当 RUNNING，直到模型下一次流式更新才纠正。因此每次到达
+ * 终态（成功/失败/超时）都会回调 [onTaskTerminal]，由 DI 接到 AppEventBus 广播。
  */
 class WorkspaceAsyncTaskRunner(
     private val manager: WorkspaceManager,
     private val outputDir: File,
+    /** 任务到达终态时回调（在工作线程执行，须快速返回；默认空实现） */
+    private val onTaskTerminal: (taskId: String) -> Unit = {},
 ) {
     private val tasks = ConcurrentHashMap<String, AsyncTaskStatus>()
     private val executor = Executors.newCachedThreadPool { runnable ->
@@ -93,6 +99,11 @@ class WorkspaceAsyncTaskRunner(
                 )
             }
             tasks[taskId] = status
+            // 终态才通知：RUNNING 是任务创建时的初始状态，不在这里发生。
+            // 回调只负责广播，异常不影响任务收尾（任务状态已落 map）
+            if (status.state != AsyncTaskState.RUNNING) {
+                runCatching { onTaskTerminal(taskId) }
+            }
         }
         return taskId
     }

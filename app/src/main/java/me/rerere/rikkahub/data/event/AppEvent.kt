@@ -28,4 +28,14 @@ sealed class AppEvent {
         val senderName: String,
         val contentPreview: String?,
     ) : AppEvent()
+
+    /**
+     * workspace_shell_async 后台任务到达终态（成功/失败/超时），由 WorkspaceAsyncTaskRunner
+     * 在工作线程发出（tryEmit，允许丢失）。
+     * ChatNotificationManager 据此立即重算 Live Update 状态——否则通知会停留在"正在运行工具"，
+     * 直到模型下一次流式更新（可能很久）才纠正。
+     */
+    data class AsyncTaskTerminal(
+        val taskId: String,
+    ) : AppEvent()
 }

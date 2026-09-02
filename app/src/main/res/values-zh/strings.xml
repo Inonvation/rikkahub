@@ -315,7 +315,7 @@
   <string name="chat_page_compress_summary_title">历史已压缩</string>
   <string name="chat_page_compress_summary_expand">展开摘要</string>
   <string name="chat_page_compress_summary_collapse">收起摘要</string>
-  <string name="chat_page_compress_keep_recent">保留最近的消息</string>
+  <string name="chat_page_compress_keep_recent">保留窗口 Token 预算</string>
   <string name="chat_page_compress_not_enough_messages">消息数量不足，无法压缩。请减少保留的消息数量或添加更多消息。</string>
   <string name="chat_page_compress_target_tokens">目标Token大小</string>
   <string name="chat_page_compress_warning">⚠️ 压缩上下文将重置当前对话中的所有消息</string>
@@ -591,6 +591,7 @@
   <string name="notification_live_update_thinking">思考中…</string>
   <string name="notification_live_update_title">正在生成回复…</string>
   <string name="notification_live_update_tool">正在运行工具：%s</string>
+  <string name="notification_live_update_tool_elapsed">正在运行工具：%1$s · 已运行 %2$s</string>
   <string name="notification_live_update_writing">正在编写回复…</string>
   <string name="notification_web_server_running">Web服务器运行中</string>
   <string name="notification_web_server_starting">正在启动...</string>
