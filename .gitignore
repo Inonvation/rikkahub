@@ -19,3 +19,6 @@ keystore.jks
 build-release.log
 debug.log
 .zcode/
+
+# WorkBuddy 工作区数据（会话记忆/索引，非项目产物）
+.workbuddy/
