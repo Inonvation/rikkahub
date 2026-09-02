@@ -33,6 +33,15 @@ internal const val THINKING_PHRASE_EARLY_MS = 10_000L
 /** 思考文案第二阶段（摸鱼组）的结束毫秒 */
 internal const val THINKING_PHRASE_MID_MS = 30_000L
 
+/** 正经组的轮换间隔：文案庄重，不需要频繁换句 */
+internal const val THINKING_PHRASE_INTERVAL_EARLY_MS = 5_000L
+
+/** 摸鱼组的轮换间隔 */
+internal const val THINKING_PHRASE_INTERVAL_MID_MS = 4_000L
+
+/** 夸张组的轮换间隔：思考越久，越需要"还在动"的视觉反馈，间隔收窄 */
+internal const val THINKING_PHRASE_INTERVAL_LATE_MS = 3_000L
+
 /**
  * 根据已思考的时长返回文案组下标：0=正经（0~10s）、1=摸鱼（10~30s）、2=夸张（30s+）。
  */
@@ -40,6 +49,16 @@ internal fun phraseGroupIndexFor(elapsedMs: Long): Int = when {
     elapsedMs < THINKING_PHRASE_EARLY_MS -> 0
     elapsedMs < THINKING_PHRASE_MID_MS -> 1
     else -> 2
+}
+
+/**
+ * 根据已思考的时长返回轮换间隔：随思考推进逐渐收窄（5s → 4s → 3s）。
+ * 与 [phraseGroupIndexFor] 共用同一组边界，保证"换组"与"节奏加快"同步发生。
+ */
+internal fun phraseIntervalFor(elapsedMs: Long): Long = when {
+    elapsedMs < THINKING_PHRASE_EARLY_MS -> THINKING_PHRASE_INTERVAL_EARLY_MS
+    elapsedMs < THINKING_PHRASE_MID_MS -> THINKING_PHRASE_INTERVAL_MID_MS
+    else -> THINKING_PHRASE_INTERVAL_LATE_MS
 }
 
 /**
@@ -73,9 +92,11 @@ internal fun shuffledPhraseOrder(size: Int, avoidFirst: Int? = null): List<Int> 
  *
  * 文案按思考时长分三组递进：0~10s 正经组 → 10~30s 摸鱼组 → 30s+ 夸张组，
  * 每组内部洗牌后循环、走完一轮重洗且不与上一条重复，配合 [Crossfade] 淡入淡出切换。
+ * 轮换间隔也随时长收窄（5s → 4s → 3s，见 [phraseIntervalFor]）：思考越久换句越快，
+ * 避免画面静止让用户误以为卡死。
  *
  * - 默认英文（及其他语言）从三个分级字符串数组读取文案池，仅首次组合时读取一次；
- * - [enabled] 为 true 时，每隔 [intervalMs] 切换一条，并带 shimmer 闪烁；
+ * - [enabled] 为 true 时按阶段间隔切换一条，并带 shimmer 闪烁；
  * - [enabled] 变为 false（生成结束）时停止轮换，停留在当前文案且不再闪烁。
  *
  * 当模型写了自定义思考标题（[primaryTitle]）时，标题以次级色小字显示在主文案旁边，
@@ -87,7 +108,6 @@ internal fun RotatingThinkingLabel(
     primaryTitle: String?,
     chatFontFamily: FontFamily,
     modifier: Modifier = Modifier,
-    intervalMs: Long = 5000L,
 ) {
     // 三个文案组只读一次并缓存，避免流式期间每次重组重复解析资源
     val earlyPhrases = stringArrayResource(R.array.thinking_rotation_phrases_early)
@@ -109,7 +129,9 @@ internal fun RotatingThinkingLabel(
     LaunchedEffect(enabled) {
         if (!enabled) return@LaunchedEffect
         while (isActive) {
-            delay(intervalMs)
+            // 间隔按"醒来前的时长"选取，与换组判定同源：走到边界附近时先按旧档位等待，
+            // 醒来后以最新 elapsed 换组，组切换与节奏加快在同一轮生效
+            delay(phraseIntervalFor(Clock.System.now().toEpochMilliseconds() - startMillis))
             val elapsed = Clock.System.now().toEpochMilliseconds() - startMillis
             val group = phraseGroupIndexFor(elapsed)
             if (group != groupIndex) {

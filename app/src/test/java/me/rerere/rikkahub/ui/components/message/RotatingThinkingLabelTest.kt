@@ -26,6 +26,18 @@ class RotatingThinkingLabelTest {
         assertEquals(2, phraseGroupIndexFor(120_000L))
     }
 
+    // ---- phraseIntervalFor：间隔随时长收窄，与分组边界一致 ----
+
+    @Test
+    fun `interval narrows as thinking gets longer`() {
+        assertEquals(THINKING_PHRASE_INTERVAL_EARLY_MS, phraseIntervalFor(0L))
+        assertEquals(THINKING_PHRASE_INTERVAL_EARLY_MS, phraseIntervalFor(9_999L))
+        assertEquals(THINKING_PHRASE_INTERVAL_MID_MS, phraseIntervalFor(10_000L))
+        assertEquals(THINKING_PHRASE_INTERVAL_MID_MS, phraseIntervalFor(29_999L))
+        assertEquals(THINKING_PHRASE_INTERVAL_LATE_MS, phraseIntervalFor(30_000L))
+        assertEquals(THINKING_PHRASE_INTERVAL_LATE_MS, phraseIntervalFor(120_000L))
+    }
+
     // ---- shuffledPhraseOrder：洗牌后的下标序列 ----
 
     @Test

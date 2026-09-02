@@ -76,6 +76,32 @@ internal fun ReasoningHeaderLabel(
     }
 }
 
+/**
+ * 已思考时长标签（"3.4s"）。
+ *
+ * 仅在生成中（[loading]）显示：此时主文案是轮换趣味文案，秒数无处展示，
+ * 单独放在折叠箭头左侧；生成结束后主文案本身就是"思考了 n 秒"（标题不再保留），
+ * 不再重复显示。真实思考头部与悬浮吸顶条共用，保证两处一致。
+ */
+@Composable
+internal fun ReasoningElapsedLabel(
+    loading: Boolean,
+    duration: Duration,
+    chatFontFamily: FontFamily,
+) {
+    if (!loading || duration <= Duration.ZERO) return
+    Text(
+        text = duration.toString(DurationUnit.SECONDS, 1),
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontFamily = chatFontFamily,
+            // 等宽数字：秒数递增时文本宽度恒定，避免挤压主文案造成抖动
+            fontFeatureSettings = "tnum",
+        ),
+        color = MaterialTheme.colorScheme.secondary,
+        maxLines = 1,
+    )
+}
+
 /** 折叠/展开箭头：内容可见且未滚动折叠 → 收起箭头；否则 → 展开箭头 */
 @Composable
 internal fun ReasoningFoldArrow(
@@ -97,7 +123,7 @@ internal fun ReasoningFoldArrow(
 }
 
 /**
- * 整行可点的推理头部行：图标 + 主文案 + (可选 extra) + 折叠/展开箭头。
+ * 整行可点的推理头部行：图标 + 主文案 + (可选 extra) + 已思考时长（仅生成中）+ 折叠/展开箭头。
  * 悬浮吸顶条整体用它渲染；真实思考头部由 [ChainOfThoughtScope] 提供行布局，
  * 仅复用 [ReasoningHeaderLabel] 与 [ReasoningFoldArrow] 保持视觉/交互一致。
  */
@@ -121,6 +147,8 @@ internal fun ReasoningHeaderRow(
     modifier: Modifier = Modifier,
 ) {
     val hapticController = rememberHaptic()
+    val chatFontFamily = LocalChatFontFamily.current
+        ?: rememberChatFontFamily(LocalSettings.current.displaySetting)
     Row(
         modifier = modifier
             .clip(MaterialTheme.shapes.small)
@@ -143,13 +171,17 @@ internal fun ReasoningHeaderRow(
                 title = title,
                 duration = duration,
                 loading = loading,
-                chatFontFamily = LocalChatFontFamily.current
-                    ?: rememberChatFontFamily(LocalSettings.current.displaySetting),
+                chatFontFamily = chatFontFamily,
             )
         }
         if (extra != null) {
             extra()
         }
+        ReasoningElapsedLabel(
+            loading = loading,
+            duration = duration,
+            chatFontFamily = chatFontFamily,
+        )
         ReasoningFoldArrow(
             contentVisible = contentVisible,
             folded = folded,

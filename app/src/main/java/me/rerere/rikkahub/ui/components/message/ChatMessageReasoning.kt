@@ -15,7 +15,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -57,8 +56,6 @@ import me.rerere.rikkahub.utils.extractThinkingTitle
 import kotlin.math.abs
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.DurationUnit
 
 enum class ReasoningCardState(val expanded: Boolean) {
     Collapsed(false),
@@ -158,7 +155,7 @@ private fun rememberReasoningState(
 
     LaunchedEffect(loading) {
         if (loading) {
-            // 时长标签只显示到秒（1 位小数），200ms 刷新足够，
+            // 生成中要实时显示已思考秒数（1 位小数），200ms 刷新足够，
             // 比 50ms 轮询减少 4 倍重组频率，降低推理流式期间的消息重组开销。
             while (isActive) {
                 state.duration = (reasoning.finishedAt ?: Clock.System.now()) - reasoning.createdAt
@@ -266,7 +263,14 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         // （"生成完后下滑查看上方消息回弹抽搐"根因）。
         atBottom = { isChatListAtBottom?.invoke() == true && isUserControlled?.invoke() != true },
     )
-    val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
+    // 标题提取是对整段思考文本的 O(行数) 扫描，必须按文本本身缓存：
+    // 下面同步吸顶条数据时读的是 state.duration，step 主体因此订阅了计时，
+    // 生成期间每 200ms 就会重组一次——不缓存的话长思考文本会被每 200ms 全量扫一遍正则。
+    // 按 reasoning 文本做 key：文本随流式 chunk 变时才重算，计时刷新命中缓存。
+    val thinkingTitle = remember(reasoning.reasoning) {
+        reasoning.reasoning.extractThinkingTitle()
+    }
+    // 标题只在生成中显示：生成结束后主文案换成"思考了 n 秒"，标题不再保留
     val showThinkingTitle = loading && thinkingTitle != null
     val chatFontFamily = LocalTextStyle.current.fontFamily
 
@@ -309,13 +313,18 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         Modifier
     }
 
-    // 实时同步吸顶条展示所需数据
-    section.duration.value = state.duration
-    section.streaming.value = loading
-    section.title.value = if (loading && thinkingTitle != null) thinkingTitle else null
-    section.cardColor.value = LocalCardColor.current
-    section.contentVisible.value = state.expandState != ReasoningCardState.Collapsed
-    section.collapsed.value = state.expandState == ReasoningCardState.Collapsed
+    // 实时同步吸顶条展示所需数据：仅吸顶冻结启用时执行。
+    // 否则这些写入（尤其 section.duration = state.duration）会让 step 主体订阅计时状态，
+    // 生成中每 200ms 重组整个头部步骤；而未启用冻结条时这些字段无人消费，纯属浪费。
+    // 启用后各字段在首次进入时同步一次，后续由计时/状态变化驱动增量同步。
+    if (freezeEnabled) {
+        section.duration.value = state.duration
+        section.streaming.value = loading
+        section.title.value = if (showThinkingTitle) thinkingTitle else null
+        section.cardColor.value = LocalCardColor.current
+        section.contentVisible.value = state.expandState != ReasoningCardState.Collapsed
+        section.collapsed.value = state.expandState == ReasoningCardState.Collapsed
+    }
 
     // 吸顶条点击：
     // - 生成中（loading）：与真实头部一致，同样在 Preview↔Expanded 之间切换内容状态
@@ -481,13 +490,11 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             )
         },
         extra = {
-            if (showThinkingTitle && state.duration > 0.seconds) {
-                Text(
-                    text = state.duration.toString(DurationUnit.SECONDS, 1),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = chatFontFamily),
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-            }
+            ReasoningElapsedLabel(
+                loading = loading,
+                duration = state.duration,
+                chatFontFamily = chatFontFamily ?: FontFamily.Default,
+            )
         },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         modifier = stepModifier,
