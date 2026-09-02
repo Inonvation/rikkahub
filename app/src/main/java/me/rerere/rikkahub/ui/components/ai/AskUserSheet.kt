@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -128,13 +130,13 @@ fun AskUserSheet(
         return
     }
 
-    // Start on the first unanswered question
+    // Start on the first question still needing input (answered or explicitly skipped ones are skipped over)
     var selectedIndex by remember(questions) {
-        mutableIntStateOf(questions.indexOfFirst { !isQuestionAnswered(it, answers, multiAnswers) }.coerceAtLeast(0))
+        mutableIntStateOf(questions.indexOfFirst { isQuestionUnresolved(it, answers, multiAnswers) }.coerceAtLeast(0))
     }
 
     /**
-     * 回答完一个问题后自动跳到其后的第一个未回答问题。
+     * 回答完一个问题后自动跳到其后的第一个仍需处理的题（未作答且未显式跳过）。
      * 仅在「该问题确实已答」时前进；点击 tab 切换不会触发，保证用户可随时点任意问题修改。
      * 仅单选/确认题调用：多选逐项勾选、文本输入都是连续操作，中途自动跳转会打断
      * （文本题首字符跳转还会连焦点一起切到下一题，后续输入全部落错），由用户自行切换或提交。
@@ -142,7 +144,19 @@ fun AskUserSheet(
     fun advanceFrom(answeredIndex: Int) {
         if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers)) return
         val nextUnanswered = ((answeredIndex + 1) until questions.size)
-            .firstOrNull { i -> !isQuestionAnswered(questions[i], answers, multiAnswers) }
+            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
+        if (nextUnanswered != null) {
+            selectedIndex = nextUnanswered
+        }
+    }
+
+    /**
+     * 显式跳过当前题后前移到其后的第一个仍需处理的题，避免停留在原地反复切换跳过状态。
+     * 只向后找，不做环回；找不到了就留在当前题（通常是最后一题）。
+     */
+    fun advanceToNextUnresolved(fromIndex: Int) {
+        val nextUnanswered = ((fromIndex + 1) until questions.size)
+            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
         if (nextUnanswered != null) {
             selectedIndex = nextUnanswered
         }
@@ -298,7 +312,7 @@ fun AskUserSheet(
 
                 // ── Skip — 必答题不想答的显式出口；已答或选填题不出现（选填留空即可） ──
                 val skipped = isQuestionSkipped(q, answers)
-                if (q.required && (skipped || !isQuestionAnswered(q, answers, multiAnswers))) {
+                if (q.required && !isQuestionAnswered(q, answers, multiAnswers)) {
                     TextButton(
                         onClick = {
                             hapticController.lightTap()
@@ -307,6 +321,8 @@ fun AskUserSheet(
                                 answers.remove(key)
                             } else {
                                 answers[key] = "1"
+                                // 跳过即视为已解决：前移到下一题，防止停留在原地和自动跳题互相拉扯
+                                advanceToNextUnresolved(selectedIndex)
                             }
                         },
                         modifier = Modifier.align(Alignment.End),
@@ -321,17 +337,23 @@ fun AskUserSheet(
 
             // ── Footer ──
             // 兑现工具 schema 的 required 承诺：必答问题作答或显式跳过后才能提交，选填留空不算未填
-            val requiredUnanswered = questions.count {
-                it.required && !isQuestionAnswered(it, answers, multiAnswers) && !isQuestionSkipped(it, answers)
-            }
+            val requiredUnanswered = questions.count { isQuestionUnresolved(it, answers, multiAnswers) }
 
-            if (requiredUnanswered > 0) {
-                Text(
-                    text = "还有 ${requiredUnanswered} 个必答问题未填",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                )
+            // 提示行固定占位高度：必答未填提示出现/消失不再改变弹窗整体高度，
+            // 否则「跳过本题/取消跳过」切换时弹窗内容会上下跳动
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 20.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (requiredUnanswered > 0) {
+                    Text(
+                        text = "还有 ${requiredUnanswered} 个必答问题未填",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             Row(
@@ -561,3 +583,15 @@ private fun isQuestionAnswered(
 /** 是否已把该题显式标记为跳过（必答题不想答时的出口，与「已作答」互相独立） */
 private fun isQuestionSkipped(q: AskUserQuestion, answers: Map<String, String>): Boolean =
     answers[q.id + SKIPPED_SUFFIX] == "1"
+
+/**
+ * 该题在导航语义上是否仍需用户处理：必答、未作答、未显式跳过。
+ * 跳过的题视为已解决，自动前进与初始定位都跳过它，避免「跳过本题/取消跳过」
+ * 和自动跳题互相拉扯导致弹窗内容反复跳动。
+ */
+private fun isQuestionUnresolved(
+    q: AskUserQuestion,
+    answers: Map<String, String>,
+    multiAnswers: Map<String, Set<String>>,
+): Boolean =
+    q.required && !isQuestionAnswered(q, answers, multiAnswers) && !isQuestionSkipped(q, answers)
