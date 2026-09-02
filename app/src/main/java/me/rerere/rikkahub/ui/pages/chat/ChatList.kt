@@ -639,10 +639,27 @@ private fun ChatListNormal(
                 // 在流式加载中把用户视为主动离开底部，取消自动跟随。展开/收起会改变 item 高度，
                 // 若不暂停跟随，自动跟随会把列表硬拽到内容底部（"展开后突然跳到底部"根因）。
                 // 仅在加载中抑制；生成结束后自动跟随本就停止，避免无谓地置位 userScrolledUp。
+                //
+                // 根因（对齐上游）：无条件武装闩锁会把"正钉在底部看生成时手动展开折叠思考"
+                // 误判成用户离开——展开的内容在流式增长，却因闩锁停摆不再把窗口带到内容底部，
+                // 与上游"展开思考后窗口跟随内容滚到底部"的行为背离。
+                // 方案：武装前先看当前是否贴底——不在底部（读历史/上翻）才武装防拽回；
+                // 贴底时保持跟随不武装，让展开的思考/链随流式内容持续贴底。
                 LocalOnManualContentToggle provides {
                     if (loadingState) {
-                        userScrolledUp = true
-                        lastUserScrollAt = SystemClock.elapsedRealtime()
+                        val info = state.layoutInfo
+                        val last = info.visibleItemsInfo.lastOrNull()
+                        val atBottom = last != null && isChatListPinnedToBottom(
+                            totalItemsCount = info.totalItemsCount,
+                            lastVisibleIndex = last.index,
+                            lastItemEnd = last.offset + last.size,
+                            viewportEnd = info.viewportEndOffset,
+                            afterContentPadding = info.afterContentPadding,
+                        )
+                        if (!atBottom) {
+                            userScrolledUp = true
+                            lastUserScrollAt = SystemClock.elapsedRealtime()
+                        }
                     }
                 },
             ) {
