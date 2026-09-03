@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +49,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.MinusSign
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tick02
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -135,6 +138,23 @@ fun AskUserSheet(
         mutableIntStateOf(questions.indexOfFirst { isQuestionUnresolved(it, answers, multiAnswers) }.coerceAtLeast(0))
     }
 
+    // 文本题自动聚焦触发器：仅在主动到达某题（tab 点击/自动前进/跳过前进）时更新为目标题，
+    // 初始定位保持 -1 不聚焦，避免弹窗展开动画未完成键盘就弹出、把题面顶出视口。
+    var focusTargetIndex by remember(questions) { mutableIntStateOf(-1) }
+
+    // 统一导航入口：切换题目并标记"主动到达"，驱动文本题自动聚焦
+    fun navigateTo(index: Int) {
+        selectedIndex = index
+        focusTargetIndex = index
+    }
+
+    // 题目内容列的滚动状态为整弹窗共享，切题后复位到顶部：
+    // 否则上一题长内容滚到底后自动前进，下一题会直接落在中间/底部。
+    val questionScrollState = rememberScrollState()
+    LaunchedEffect(selectedIndex) {
+        questionScrollState.scrollTo(0)
+    }
+
     /**
      * 回答完一个问题后自动跳到其后的第一个仍需处理的题（未作答且未显式跳过）。
      * 仅在「该问题确实已答」时前进；点击 tab 切换不会触发，保证用户可随时点任意问题修改。
@@ -146,7 +166,7 @@ fun AskUserSheet(
         val nextUnanswered = ((answeredIndex + 1) until questions.size)
             .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
         if (nextUnanswered != null) {
-            selectedIndex = nextUnanswered
+            navigateTo(nextUnanswered)
         }
     }
 
@@ -158,7 +178,7 @@ fun AskUserSheet(
         val nextUnanswered = ((fromIndex + 1) until questions.size)
             .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
         if (nextUnanswered != null) {
-            selectedIndex = nextUnanswered
+            navigateTo(nextUnanswered)
         }
     }
 
@@ -192,23 +212,31 @@ fun AskUserSheet(
                 ) {
                     questions.forEachIndexed { index, q ->
                         val isAnswered = isQuestionAnswered(q, answers, multiAnswers)
+                        val isSkipped = isQuestionSkipped(q, answers)
                         Tab(
                             selected = index == selectedIndex,
                             onClick = {
                                 hapticController.lightTap()
-                                selectedIndex = index
+                                navigateTo(index)
                             },
                             text = {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                                 ) {
-                                    if (isAnswered) {
-                                        Icon(
+                                    // 已答 ✓ / 已跳过 −：跳过态在 tab 上可见，多题回看不靠记性
+                                    when {
+                                        isAnswered -> Icon(
                                             HugeIcons.Tick02,
                                             contentDescription = null,
                                             modifier = Modifier.size(12.dp),
                                             tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                        isSkipped -> Icon(
+                                            HugeIcons.MinusSign,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                     Text(
@@ -229,7 +257,7 @@ fun AskUserSheet(
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(questionScrollState)
                     .animateContentSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -286,28 +314,38 @@ fun AskUserSheet(
                         question = q,
                         answer = answers[q.id] ?: "",
                         // 文本题不自动跳转：首字符跳转会连焦点一起切到下一题，后续输入全部落错地方
+                        focusTrigger = focusTargetIndex,
                         onAnswerChange = { answers[q.id] = it },
                     )
                 }
 
                 // ── "Other" free-text input for non-text types ──
+                // 低频动态入口：默认只给一枚「其他…」chip，点击才展开输入框，未用到时不再
+                // 常驻吃掉弹窗高度；有草稿则直接展开，避免已填内容被藏起来。
                 if (q.selectionType != "text") {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "其他 / 自定义输入",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = getCustomAnswer(q, answers, multiAnswers),
-                        onValueChange = { setCustomAnswer(q, it, answers, multiAnswers) },
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = MaterialTheme.typography.bodySmall,
-                        singleLine = false,
-                        minLines = 1,
-                        maxLines = 2,
-                        placeholder = { Text("填写以上未列出的内容…") },
-                    )
+                    val hasCustom = getCustomAnswer(q, answers, multiAnswers).isNotBlank()
+                    var customExpanded by remember(q.id) { mutableStateOf(hasCustom) }
+                    if (customExpanded) {
+                        OutlinedTextField(
+                            value = getCustomAnswer(q, answers, multiAnswers),
+                            onValueChange = { setCustomAnswer(q, it, answers, multiAnswers) },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            singleLine = false,
+                            minLines = 1,
+                            maxLines = 2,
+                            placeholder = { Text("填写以上未列出的内容…") },
+                        )
+                    } else {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                hapticController.lightTap()
+                                customExpanded = true
+                            },
+                            label = { Text("其他…", style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
                 }
 
                 // ── Skip — 必答题不想答的显式出口；已答或选填题不出现（选填留空即可） ──
@@ -338,8 +376,12 @@ fun AskUserSheet(
             // ── Footer ──
             // 兑现工具 schema 的 required 承诺：必答问题作答或显式跳过后才能提交，选填留空不算未填
             val requiredUnanswered = questions.count { isQuestionUnresolved(it, answers, multiAnswers) }
+            // 中性进度（作答/跳过都算完成）：必答全就绪后占住固定高度行，切换不引起跳动
+            val resolvedCount = questions.count {
+                isQuestionAnswered(it, answers, multiAnswers) || isQuestionSkipped(it, answers)
+            }
 
-            // 提示行固定占位高度：必答未填提示出现/消失不再改变弹窗整体高度，
+            // 提示行固定占位高度：必答未填提示与中性进度互切不再改变弹窗整体高度，
             // 否则「跳过本题/取消跳过」切换时弹窗内容会上下跳动
             Box(
                 modifier = Modifier
@@ -347,11 +389,16 @@ fun AskUserSheet(
                     .heightIn(min = 20.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                if (requiredUnanswered > 0) {
-                    Text(
+                when {
+                    requiredUnanswered > 0 -> Text(
                         text = "还有 ${requiredUnanswered} 个必答问题未填",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
+                    )
+                    resolvedCount > 0 -> Text(
+                        text = "已完成 ${resolvedCount}/${questions.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -366,9 +413,11 @@ fun AskUserSheet(
                 ) {
                     Icon(HugeIcons.Cancel01, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("取消")
+                    // 实际语义是"稍后再答"：工具保持 pending、生成暂停等待，可从卡片「回答」重开
+                    Text("稍后再答")
                 }
-                TextButton(
+                // 唯一主行动用 tonal 按钮突出主次；未就绪时默认灰置（不弹 toast）
+                FilledTonalButton(
                     onClick = {
                         val payload = buildJsonObject {
                             put("answers", buildJsonObject {
@@ -395,7 +444,12 @@ fun AskUserSheet(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TextQuestionInput(question: AskUserQuestion, answer: String, onAnswerChange: (String) -> Unit) {
+private fun TextQuestionInput(
+    question: AskUserQuestion,
+    answer: String,
+    focusTrigger: Int,
+    onAnswerChange: (String) -> Unit,
+) {
     val hapticController = rememberHaptic()
 
     if (question.options.isNotEmpty()) {
@@ -429,9 +483,10 @@ private fun TextQuestionInput(question: AskUserQuestion, answer: String, onAnswe
         minLines = 1,
         maxLines = 3,
     )
-    // 切到该问题时自动聚焦文本框（仅聚焦，不强制跳转/切换问题）
-    LaunchedEffect(question.id) {
-        focusRequester.requestFocus()
+    // 仅在主动到达该题（tab 点击/自动前进/跳过前进，focusTrigger >= 0）时自动聚焦；
+    // 弹窗首次展开/初始定位不聚焦，避免键盘在展开动画期间弹出、把题面顶出视口。
+    LaunchedEffect(focusTrigger) {
+        if (focusTrigger >= 0) focusRequester.requestFocus()
     }
 }
 
