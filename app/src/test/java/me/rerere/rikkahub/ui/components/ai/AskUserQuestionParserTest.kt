@@ -100,6 +100,65 @@ class AskUserQuestionParserTest {
         assertEquals(emptyList<AskUserQuestion>(), parseAskUserQuestions(json.parseToJsonElement("""[1,2,3]""")))
     }
 
+    // ---- required 双型解析：boolean 与字符串都按语义解析，显式 false=选填 ----
+    // 根因：schema 声明 required 为 boolean，模型既会传 true/false 也会传 "true"/"false"，
+    // 只认字符串会让 boolean false（选填）被误判为必答，用户被强制作答/跳过本可留空的题。
+
+    @Test
+    fun `required accepts boolean and string forms`() {
+        val args = json.parseToJsonElement("""
+            {"questions":[
+                {"id":"a","question":"1","required":false},
+                {"id":"b","question":"2","required":true},
+                {"id":"c","question":"3","required":"false"},
+                {"id":"d","question":"4","required":"true"},
+                {"id":"e","question":"5","required":"no"},
+                {"id":"f","question":"6","required":"0"},
+                {"id":"g","question":"7","required":"yes"},
+                {"id":"h","question":"8","required":""},
+                {"id":"i","question":"9"}
+            ]}
+        """.trimIndent())
+        val questions = parseAskUserQuestions(args)
+        assertEquals(
+            listOf(false, true, false, true, false, false, true, true, true),
+            questions.map { it.required },
+        )
+    }
+
+    // ---- 重复 id 兜底：给后续冲突项追加序号，避免同一 answers 键互相覆盖 ----
+    // 根因：id 唯一性此前无保障，重复 id 会让后一题的答案/跳过标记覆盖前一题，
+    // 弹窗里表现为「题被自动跳过/答案串题」。
+
+    @Test
+    fun `duplicate explicit ids get numbered suffixes`() {
+        val args = json.parseToJsonElement("""
+            {"questions":[
+                {"id":"dup","question":"A"},
+                {"id":"dup","question":"B"},
+                {"id":"c","question":"C"},
+                {"id":"dup","question":"D"},
+                {"id":"","question":"E"}
+            ]}
+        """.trimIndent())
+        val questions = parseAskUserQuestions(args)
+        assertEquals(listOf("dup", "dup_2", "c", "dup_3", "q5"), questions.map { it.id })
+    }
+
+    // ---- 空白/畸形 id 与重复兜底互不干扰 ----
+
+    @Test
+    fun `blank id fallback never collides with existing ids`() {
+        val args = json.parseToJsonElement("""
+            {"questions":[
+                {"id":"q2","question":"explicit q2"},
+                {"id":"","question":"falls back"}
+            ]}
+        """.trimIndent())
+        val questions = parseAskUserQuestions(args)
+        assertEquals(listOf("q2", "q2_2"), questions.map { it.id })
+    }
+
     // ---- JsonNull 字段降级而非抛异常 ----
 
     @Test

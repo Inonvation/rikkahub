@@ -60,6 +60,11 @@ private fun AskUserQuestion.tabTitle(index: Int): String = "Q${index + 1}"
 /**
  * Half-screen question sheet.  Horizontal tabs across the top, one question at a time.
  * Every question type also shows a free-text "other" field below the primary input.
+ *
+ * 作答草稿按字段域分成 4 个独立 map（answers/multiAnswers/customAnswers/skippedIds），
+ * 而不是塞进一个 answers 用 "::custom"/"::skipped" 魔法后缀拼键：模型输出的问题 id 不可信，
+ * 若某个 id 恰好带这类后缀，会与另一道题的补充答案/跳过标记互相污染，
+ * 弹窗表现就是「某道题无操作却被跳过/答案串题」。键空间按语义隔离后从根上消除该可能。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -68,6 +73,8 @@ fun AskUserSheet(
     questions: List<AskUserQuestion>,
     answers: MutableMap<String, String>,
     multiAnswers: MutableMap<String, Set<String>>,
+    customAnswers: MutableMap<String, String>,
+    skippedIds: MutableMap<String, Boolean>,
     onSubmit: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -133,9 +140,22 @@ fun AskUserSheet(
         return
     }
 
-    // Start on the first question still needing input (answered or explicitly skipped ones are skipped over)
+    // 起点语义：正常首次弹出从第一题开始。首题即使是选填也会显示——若按「只定位到第一个
+    // 必答未解题」来算，首题选填会被视为已解决直接挤到后面的题，观感就是
+    // 「弹窗一弹出就自动跳过了前面的题」。仅当第一题已答/已跳过（续答恢复、进度保留）
+    // 才跳到其后第一个仍需处理的题；全部完成则停在 0 供回看。
     var selectedIndex by remember(questions) {
-        mutableIntStateOf(questions.indexOfFirst { isQuestionUnresolved(it, answers, multiAnswers) }.coerceAtLeast(0))
+        mutableIntStateOf(
+            if (questions.isNotEmpty() &&
+                isQuestionResolved(questions[0], answers, multiAnswers, customAnswers, skippedIds)
+            ) {
+                questions.indexOfFirst {
+                    isQuestionUnresolved(it, answers, multiAnswers, customAnswers, skippedIds)
+                }.coerceAtLeast(0)
+            } else {
+                0
+            }
+        )
     }
 
     // 文本题自动聚焦触发器：仅在主动到达某题（tab 点击/自动前进/跳过前进）时更新为目标题，
@@ -162,9 +182,9 @@ fun AskUserSheet(
      * （文本题首字符跳转还会连焦点一起切到下一题，后续输入全部落错），由用户自行切换或提交。
      */
     fun advanceFrom(answeredIndex: Int) {
-        if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers)) return
+        if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers, customAnswers)) return
         val nextUnanswered = ((answeredIndex + 1) until questions.size)
-            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
+            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers, customAnswers, skippedIds) }
         if (nextUnanswered != null) {
             navigateTo(nextUnanswered)
         }
@@ -176,7 +196,7 @@ fun AskUserSheet(
      */
     fun advanceToNextUnresolved(fromIndex: Int) {
         val nextUnanswered = ((fromIndex + 1) until questions.size)
-            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers) }
+            .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers, customAnswers, skippedIds) }
         if (nextUnanswered != null) {
             navigateTo(nextUnanswered)
         }
@@ -211,8 +231,8 @@ fun AskUserSheet(
                     containerColor = Color.Transparent,
                 ) {
                     questions.forEachIndexed { index, q ->
-                        val isAnswered = isQuestionAnswered(q, answers, multiAnswers)
-                        val isSkipped = isQuestionSkipped(q, answers)
+                        val isAnswered = isQuestionAnswered(q, answers, multiAnswers, customAnswers)
+                        val isSkipped = isQuestionSkipped(q, skippedIds)
                         Tab(
                             selected = index == selectedIndex,
                             onClick = {
@@ -323,12 +343,12 @@ fun AskUserSheet(
                 // 低频动态入口：默认只给一枚「其他…」chip，点击才展开输入框，未用到时不再
                 // 常驻吃掉弹窗高度；有草稿则直接展开，避免已填内容被藏起来。
                 if (q.selectionType != "text") {
-                    val hasCustom = getCustomAnswer(q, answers, multiAnswers).isNotBlank()
+                    val hasCustom = getCustomAnswer(q, customAnswers).isNotBlank()
                     var customExpanded by remember(q.id) { mutableStateOf(hasCustom) }
                     if (customExpanded) {
                         OutlinedTextField(
-                            value = getCustomAnswer(q, answers, multiAnswers),
-                            onValueChange = { setCustomAnswer(q, it, answers, multiAnswers) },
+                            value = getCustomAnswer(q, customAnswers),
+                            onValueChange = { setCustomAnswer(q, it, customAnswers) },
                             modifier = Modifier.fillMaxWidth(),
                             textStyle = MaterialTheme.typography.bodySmall,
                             singleLine = false,
@@ -349,16 +369,15 @@ fun AskUserSheet(
                 }
 
                 // ── Skip — 必答题不想答的显式出口；已答或选填题不出现（选填留空即可） ──
-                val skipped = isQuestionSkipped(q, answers)
-                if (q.required && !isQuestionAnswered(q, answers, multiAnswers)) {
+                val skipped = isQuestionSkipped(q, skippedIds)
+                if (q.required && !isQuestionAnswered(q, answers, multiAnswers, customAnswers)) {
                     TextButton(
                         onClick = {
                             hapticController.lightTap()
-                            val key = q.id + SKIPPED_SUFFIX
                             if (skipped) {
-                                answers.remove(key)
+                                skippedIds.remove(q.id)
                             } else {
-                                answers[key] = "1"
+                                skippedIds[q.id] = true
                                 // 跳过即视为已解决：前移到下一题，防止停留在原地和自动跳题互相拉扯
                                 advanceToNextUnresolved(selectedIndex)
                             }
@@ -375,10 +394,12 @@ fun AskUserSheet(
 
             // ── Footer ──
             // 兑现工具 schema 的 required 承诺：必答问题作答或显式跳过后才能提交，选填留空不算未填
-            val requiredUnanswered = questions.count { isQuestionUnresolved(it, answers, multiAnswers) }
+            val requiredUnanswered = questions.count {
+                isQuestionUnresolved(it, answers, multiAnswers, customAnswers, skippedIds)
+            }
             // 中性进度（作答/跳过都算完成）：必答全就绪后占住固定高度行，切换不引起跳动
             val resolvedCount = questions.count {
-                isQuestionAnswered(it, answers, multiAnswers) || isQuestionSkipped(it, answers)
+                isQuestionAnswered(it, answers, multiAnswers, customAnswers) || isQuestionSkipped(it, skippedIds)
             }
 
             // 提示行固定占位高度：必答未填提示与中性进度互切不再改变弹窗整体高度，
@@ -422,7 +443,7 @@ fun AskUserSheet(
                         val payload = buildJsonObject {
                             put("answers", buildJsonObject {
                                 questions.forEach { q ->
-                                    put(q.id, JsonPrimitive(getFinalAnswer(q, answers, multiAnswers)))
+                                    put(q.id, JsonPrimitive(getFinalAnswer(q, answers, multiAnswers, customAnswers, skippedIds)))
                                 }
                             })
                         }
@@ -580,27 +601,15 @@ private fun QuestionTag(text: String) {
 
 // ── "Other" custom-answer helpers ──────────────────────────────────────────────
 
-private val CUSTOM_SUFFIX = "::custom"
-
-/** 跳过标记存储键后缀：复用 answers 草稿持久化（切页/重组后跳过状态不丢），不参与提交 payload */
-private const val SKIPPED_SUFFIX = "::skipped"
-
-private fun getCustomAnswer(
-    q: AskUserQuestion,
-    answers: Map<String, String>,
-    multiAnswers: Map<String, Set<String>>,
-): String {
-    val key = q.id + CUSTOM_SUFFIX
-    return answers[key] ?: ""
-}
+private fun getCustomAnswer(q: AskUserQuestion, customAnswers: Map<String, String>): String =
+    customAnswers[q.id] ?: ""
 
 private fun setCustomAnswer(
     q: AskUserQuestion,
     value: String,
-    answers: MutableMap<String, String>,
-    multiAnswers: MutableMap<String, Set<String>>,
+    customAnswers: MutableMap<String, String>,
 ) {
-    answers[q.id + CUSTOM_SUFFIX] = value
+    customAnswers[q.id] = value
 }
 
 /** Build the final answer string: primary answer + optional custom text. */
@@ -608,12 +617,14 @@ private fun getFinalAnswer(
     q: AskUserQuestion,
     answers: Map<String, String>,
     multiAnswers: Map<String, Set<String>>,
+    customAnswers: Map<String, String>,
+    skippedIds: Map<String, Boolean>,
 ): String {
     val primary = when (q.selectionType) {
         "multi" -> (multiAnswers[q.id] ?: emptySet()).joinToString(", ")
         else -> answers[q.id] ?: ""
     }
-    val custom = getCustomAnswer(q, answers, multiAnswers)
+    val custom = getCustomAnswer(q, customAnswers)
     val direct = if (custom.isNotBlank()) {
         if (primary.isNotBlank()) "$primary\n(补充: $custom)" else custom
     } else {
@@ -621,7 +632,7 @@ private fun getFinalAnswer(
     }
     if (direct.isNotBlank()) return direct
     // 必答题被显式跳过时回传明确语义，让模型知道用户拒绝作答而非漏答
-    return if (isQuestionSkipped(q, answers)) "(已跳过)" else ""
+    return if (isQuestionSkipped(q, skippedIds)) "(已跳过)" else ""
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -630,23 +641,38 @@ private fun isQuestionAnswered(
     q: AskUserQuestion,
     answers: Map<String, String>,
     multiAnswers: Map<String, Set<String>>,
+    customAnswers: Map<String, String>,
 ): Boolean = when (q.selectionType) {
-    "multi" -> (!multiAnswers[q.id].isNullOrEmpty() || getCustomAnswer(q, answers, multiAnswers).isNotBlank())
-    else -> (!answers[q.id].isNullOrBlank() || getCustomAnswer(q, answers, multiAnswers).isNotBlank())
+    "multi" -> (!multiAnswers[q.id].isNullOrEmpty() || getCustomAnswer(q, customAnswers).isNotBlank())
+    else -> (!answers[q.id].isNullOrBlank() || getCustomAnswer(q, customAnswers).isNotBlank())
 }
 
 /** 是否已把该题显式标记为跳过（必答题不想答时的出口，与「已作答」互相独立） */
-private fun isQuestionSkipped(q: AskUserQuestion, answers: Map<String, String>): Boolean =
-    answers[q.id + SKIPPED_SUFFIX] == "1"
+private fun isQuestionSkipped(q: AskUserQuestion, skippedIds: Map<String, Boolean>): Boolean =
+    skippedIds[q.id] == true
+
+/** 该题是否已处理完（已作答或已显式跳过），供初始定位判断首题是否还需用户停留 */
+private fun isQuestionResolved(
+    q: AskUserQuestion,
+    answers: Map<String, String>,
+    multiAnswers: Map<String, Set<String>>,
+    customAnswers: Map<String, String>,
+    skippedIds: Map<String, Boolean>,
+): Boolean =
+    isQuestionAnswered(q, answers, multiAnswers, customAnswers) || isQuestionSkipped(q, skippedIds)
 
 /**
  * 该题在导航语义上是否仍需用户处理：必答、未作答、未显式跳过。
- * 跳过的题视为已解决，自动前进与初始定位都跳过它，避免「跳过本题/取消跳过」
- * 和自动跳题互相拉扯导致弹窗内容反复跳动。
+ * 跳过的题视为已解决，自动前进与提交就绪都跳过它，避免「跳过本题/取消跳过」
+ * 和自动跳题互相拉扯导致弹窗内容反复跳动。注意：选填（required=false）题不在此列——
+ * 留空即完成，不拦提交；但其「是否需要停留」由初始定位单独处理（见 selectedIndex）。
  */
 private fun isQuestionUnresolved(
     q: AskUserQuestion,
     answers: Map<String, String>,
     multiAnswers: Map<String, Set<String>>,
+    customAnswers: Map<String, String>,
+    skippedIds: Map<String, Boolean>,
 ): Boolean =
-    q.required && !isQuestionAnswered(q, answers, multiAnswers) && !isQuestionSkipped(q, answers)
+    q.required && !isQuestionAnswered(q, answers, multiAnswers, customAnswers) &&
+        !isQuestionSkipped(q, skippedIds)

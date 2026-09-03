@@ -139,10 +139,22 @@ internal val askUserAnswerDrafts = mutableStateMapOf<String, AskUserAnswerDraft>
 /** askUserAnswerDrafts 容量上限：草稿体量比展开状态大，取 toolBubbleExpanded 的一半 */
 internal const val MAX_ASK_USER_DRAFT_ENTRIES = 300
 
-/** 单个 ask_user 工具调用的作答草稿；字段用 SnapshotStateMap 驱动 AskUserSheet 重组 */
+/**
+ * 单个 ask_user 工具调用的作答草稿；字段用 SnapshotStateMap 驱动 AskUserSheet 重组。
+ *
+ * 四个 map 按字段域隔离（而非用 "::custom"/"::skipped" 后缀拼进一个 answers）：
+ * 模型输出的问题 id 不可信，id 若与后缀形式撞车会让补充答案/跳过标记落到别的题上，
+ * 弹窗表现就是「某题无操作却被跳过/答案串题」。独立 map 从键空间上消除该污染。
+ */
 internal class AskUserAnswerDraft {
+    // 主答案：q.id -> 文本/单选/确认题作答
     val answers: MutableMap<String, String> = mutableStateMapOf()
+    // 多选勾选：q.id -> 已选项集合
     val multiAnswers: MutableMap<String, Set<String>> = mutableStateMapOf()
+    // 「其他…」补充文本：q.id -> 自定义内容
+    val customAnswers: MutableMap<String, String> = mutableStateMapOf()
+    // 显式跳过标记：q.id -> true（必答题不想答的出口）
+    val skippedIds: MutableMap<String, Boolean> = mutableStateMapOf()
 }
 
 /** 取或创建 toolCallId 的作答草稿；超过容量上限时先按插入序淘汰最早的记录 */
@@ -167,8 +179,16 @@ internal fun getOrCreateAskUserAnswerDraft(toolCallId: String): AskUserAnswerDra
  * 闩锁保证同一 toolCallId 每进程至多自动弹一次：槽位重建后不再重弹，用户可经卡片上的
  * 「回答」按钮手动重开；进程冷启动闩锁为空，恢复到 pending 工具仍正常自动弹。
  * 读写只发生在主线程（组合 + LaunchedEffect），无需并发保护。
+ *
+ * 容量治理：toolCallId 全局唯一且无会话维度，集合只增不减；超过上限后整体清空重记。
+ * 正常使用量级很小（进程内 ask_user 总调用数），超限只会让较早的一条提问在槽位重建后
+ * 多自动弹一次，比无限膨胀可接受——与同文件 toolBubbleExpanded/askUserAnswerDrafts 的
+ * 上限淘汰是同一治理思路。
  */
 internal val askUserAutoOpenedSheets = mutableSetOf<String>()
+
+/** askUserAutoOpenedSheets 容量上限：超过即整体清空重记（见 askUserAutoOpenedSheets 注释） */
+internal const val MAX_ASK_USER_AUTO_OPEN_ENTRIES = 1000
 
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
@@ -683,14 +703,23 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     val draft = remember(tool.toolCallId) { getOrCreateAskUserAnswerDraft(tool.toolCallId) }
     val answers = draft.answers
     val multiAnswers = draft.multiAnswers
+    val customAnswers = draft.customAnswers
+    val skippedIds = draft.skippedIds
 
     // Auto-open the sheet when the tool becomes pending
     // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃。
+    // 无 onToolAnswer 回调（子代理详情/群聊讨论等只读回放页）不自动弹：弹出来用户作答后
+    // 无人消费答案，工具永远 pending、作答丢失，白打扰用户——这些页面本就不该出现 HITL 弹窗。
     // 自动弹出按 askUserAutoOpenedSheets 一次性闩锁：同一工具调用每进程只自动弹一次，
     // 否则槽位销毁重建/审批状态闪变后 effect 重跑，会把弹窗反复拉起再弹回
     // （"反复弹跳过本题/取消跳过"根因）。
-    LaunchedEffect(isPending, questions.isEmpty()) {
-        if (isPending && questions.isNotEmpty() && tool.toolCallId !in askUserAutoOpenedSheets) {
+    LaunchedEffect(isPending, questions.isEmpty(), onToolAnswer == null) {
+        if (isPending && questions.isNotEmpty() && onToolAnswer != null &&
+            tool.toolCallId !in askUserAutoOpenedSheets
+        ) {
+            if (askUserAutoOpenedSheets.size >= MAX_ASK_USER_AUTO_OPEN_ENTRIES) {
+                askUserAutoOpenedSheets.clear()
+            }
             askUserAutoOpenedSheets.add(tool.toolCallId)
             showSheet = true
         }
@@ -785,15 +814,19 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         } else null,
     )
 
-    if (showSheet) {
+    // onToolAnswer == null 时不渲染弹窗：只读回放页（子代理/群聊）没有答案消费回调，
+    // 弹出来作答后提交无果、工具永远 pending。auto-open 已拦，这里兜住手动入口。
+    if (showSheet && onToolAnswer != null) {
         AskUserSheet(
             title = title,
             questions = questions,
             answers = answers,
             multiAnswers = multiAnswers,
+            customAnswers = customAnswers,
+            skippedIds = skippedIds,
             onSubmit = { answer ->
                 showSheet = false
-                onToolAnswer?.invoke(tool.toolCallId, answer)
+                onToolAnswer(tool.toolCallId, answer)
             },
             onDismiss = { showSheet = false },
         )

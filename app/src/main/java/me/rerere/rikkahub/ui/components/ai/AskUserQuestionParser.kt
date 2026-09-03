@@ -32,10 +32,13 @@ data class AskUserQuestion(
 internal fun parseAskUserQuestions(arguments: JsonElement): List<AskUserQuestion> {
     val questionsArray = runCatching { arguments.jsonObject["questions"] }.getOrNull() as? JsonArray
         ?: return emptyList()
+    // 已用 id 集合：模型可能给重复 id（幻觉/模板复用），不兜底会让后面的题覆盖前面的
+    // 答案/跳过标记（answers 以 id 为键），弹窗里表现为「题被自动跳过/答案串题」。
+    val usedIds = mutableSetOf<String>()
     return questionsArray.mapIndexedNotNull { index, element ->
         val obj = element as? JsonObject ?: return@mapIndexedNotNull null
         AskUserQuestion(
-            id = obj.stringOrNull("id")?.takeIf { it.isNotBlank() } ?: "q${index + 1}",
+            id = ensureUniqueQuestionId(obj.stringOrNull("id"), index, usedIds),
             question = obj.stringOrNull("question") ?: "",
             rationale = obj.stringOrNull("rationale") ?: "",
             options = (obj["options"] as? JsonArray)
@@ -43,8 +46,40 @@ internal fun parseAskUserQuestions(arguments: JsonElement): List<AskUserQuestion
                 ?: emptyList(),
             selectionType = normalizeSelectionType(obj.stringOrNull("selection_type")),
             placeholder = obj.stringOrNull("placeholder") ?: "",
-            required = obj.stringOrNull("required")?.let { it != "false" } ?: true,
+            required = obj.requiredAsBoolean(),
         )
+    }
+}
+
+/**
+ * 生成全局唯一的问题 id：
+ * - id 缺失/空白时按数组下标兜底为 q1/q2/…；
+ * - 显式 id 与先前问题重复时追加 _2/_3 后缀，保住每道题的独立作答键。
+ * 注：加后缀后模型按原 id 找答案会漏掉冲突题，但好过两个答案互相覆盖全丢。
+ */
+private fun ensureUniqueQuestionId(raw: String?, index: Int, usedIds: MutableSet<String>): String {
+    val fallback = "q${index + 1}"
+    val base = raw?.trim().takeIf { !it.isNullOrBlank() } ?: fallback
+    var candidate = base
+    var suffix = 2
+    while (!usedIds.add(candidate)) {
+        candidate = "${base}_$suffix"
+        suffix++
+    }
+    return candidate
+}
+
+/**
+ * required 双型容错：schema 声明 boolean，但模型既会输出 true/false 也会输出字符串
+ * "true"/"false"（乃至 "no"/"0"）。只认字符串会让 boolean false（选填）被误判为必答，
+ * 用户被强制作答或跳过本可留空的题。显式 false 一律按选填，缺失/畸形值保守按必答。
+ */
+private fun JsonObject.requiredAsBoolean(): Boolean {
+    val primitive = this["required"] as? JsonPrimitive ?: return true
+    return when {
+        primitive.isString -> primitive.content.trim().lowercase() !in setOf("false", "no", "0")
+        // boolean JsonPrimitive 的 content 为 "true"/"false"；非字符串原值按布尔语义解析
+        else -> primitive.content != "false"
     }
 }
 
