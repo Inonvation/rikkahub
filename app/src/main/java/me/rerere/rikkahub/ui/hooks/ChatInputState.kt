@@ -122,6 +122,36 @@ class ChatInputState {
     }
 
     /**
+     * 将附件从 fromIndex 移到 toIndex（0-based，toIndex 为移动后的最终位置）。
+     * messageContent 的附件顺序即发送给模型的消息附件顺序，重排用于修正系统相册
+     * 返回顺序与用户点选顺序不一致的问题。
+     * 编辑态需同步 editingParts：getContents() 以 editingParts（含文本）为骨架重建
+     * 消息，不同步会把重排结果还原成历史消息的原始顺序。
+     */
+    fun moveAttachment(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val list = messageContent
+        if (fromIndex !in list.indices || toIndex !in list.indices) return
+        val newList = list.toMutableList()
+        val moved = newList.removeAt(fromIndex)
+        newList.add(toIndex, moved)
+        messageContent = newList
+
+        val parts = editingParts
+        if (parts != null && isEditing()) {
+            // 按 messageContent 的新顺序重排 editingParts 中的附件槽位（文本槽位不动）
+            val attachmentSlots = parts.mapIndexedNotNull { i, p -> if (p is UIMessagePart.Text) null else i }
+            if (attachmentSlots.size == newList.size) {
+                val rebuilt = parts.toMutableList()
+                attachmentSlots.forEachIndexed { slot, index ->
+                    rebuilt[index] = newList[slot]
+                }
+                editingParts = rebuilt
+            }
+        }
+    }
+
+    /**
      * 仅删除当前输入组件临时新增的本地文件。
      * 编辑历史消息时，原有附件不在这里删除，由会话层统一做差异清理。
      */
