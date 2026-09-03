@@ -670,7 +670,12 @@ private fun ChatListNormal(
                             viewportEnd = info.viewportEndOffset,
                             afterContentPadding = info.afterContentPadding,
                         )
-                        if (atBottom && !state.isScrollInProgress && (isUserInteracting?.value != true)) {
+                        // 不判 isUserInteracting / isScrollInProgress：click 回调与触点追踪器
+                        // 同处一个抬起事件的 Main pass，子节点（点击目标）先于父节点（追踪器）
+                        // 处理，点击此刻 interact 必然仍为 true——判它会让贴底分支永不可达、
+                        // 反倒武装闩锁锁死跟随（视口冻结在展开起点）。真正的拖拽接管由
+                        // 跟随循环的闩锁收集器处理，不受这里影响。
+                        if (atBottom) {
                             userScrolledUp = false
                             lastContentToggleAt = SystemClock.elapsedRealtime()
                         } else {
