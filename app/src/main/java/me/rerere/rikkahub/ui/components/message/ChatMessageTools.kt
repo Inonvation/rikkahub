@@ -157,6 +157,19 @@ internal fun getOrCreateAskUserAnswerDraft(toolCallId: String): AskUserAnswerDra
     return askUserAnswerDrafts.getOrPut(toolCallId) { AskUserAnswerDraft() }
 }
 
+/**
+ * 已自动弹出过 ask_user 弹窗的 toolCallId 集合（进程级一次性闩锁）。
+ *
+ * AskUserToolStep 的 showSheet 是普通 remember：组合槽位一旦销毁重建（列表回收、导航返回、
+ * 审批状态闪变重组），它连同弹窗一起消失，自动弹出 effect 会在重建后再次把弹窗拉起；
+ * 审批状态在保存/续答竞态下还可能 Pending/Answered 闪变，触发源反复出现即形成
+ * 「关闭→再弹」死循环，表现为弹窗反复弹「跳过本题/取消跳过」。
+ * 闩锁保证同一 toolCallId 每进程至多自动弹一次：槽位重建后不再重弹，用户可经卡片上的
+ * 「回答」按钮手动重开；进程冷启动闩锁为空，恢复到 pending 工具仍正常自动弹。
+ * 读写只发生在主线程（组合 + LaunchedEffect），无需并发保护。
+ */
+internal val askUserAutoOpenedSheets = mutableSetOf<String>()
+
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
     val loading = !tool.isFinished
@@ -663,20 +676,24 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     var expanded by remember { mutableStateOf(true) }
 
     // Hoisted answer state — persists across sheet open/close.
-    // 草稿按 toolCallId 存进程级单例（见 askUserAnswerDrafts）：切页返回/组合槽位重建后作答进度不丢
+    // 草稿按 toolCallId 存进程级单例（见 askUserAnswerDrafts）：切页返回/组合槽位重建后作答进度不丢。
+    // 提交后不主动删除：审批状态存在 Pending/Answered 闪变窗口（保存/续答竞态），
+    // 挂在 isAnswered 上删除会在闪变瞬间清空用户已填的作答/跳过标记；
+    // 草稿体量小，清理交给 askUserAnswerDrafts 的容量上限按插入序淘汰。
     val draft = remember(tool.toolCallId) { getOrCreateAskUserAnswerDraft(tool.toolCallId) }
     val answers = draft.answers
     val multiAnswers = draft.multiAnswers
 
-    // 提交（Answered）后草稿完成使命，移除释放
-    LaunchedEffect(isAnswered) {
-        if (isAnswered) askUserAnswerDrafts.remove(tool.toolCallId)
-    }
-
     // Auto-open the sheet when the tool becomes pending
-    // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃
+    // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃。
+    // 自动弹出按 askUserAutoOpenedSheets 一次性闩锁：同一工具调用每进程只自动弹一次，
+    // 否则槽位销毁重建/审批状态闪变后 effect 重跑，会把弹窗反复拉起再弹回
+    // （"反复弹跳过本题/取消跳过"根因）。
     LaunchedEffect(isPending, questions.isEmpty()) {
-        if (isPending && questions.isNotEmpty()) showSheet = true
+        if (isPending && questions.isNotEmpty() && tool.toolCallId !in askUserAutoOpenedSheets) {
+            askUserAutoOpenedSheets.add(tool.toolCallId)
+            showSheet = true
+        }
     }
 
     ControlledChainOfThoughtStep(
