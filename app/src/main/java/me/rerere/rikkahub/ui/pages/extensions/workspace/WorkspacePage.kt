@@ -43,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +53,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Drag02
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MoreVertical
@@ -67,6 +70,8 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import androidx.compose.foundation.lazy.rememberLazyListState
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
@@ -88,6 +93,10 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
 
     val lazyListState = rememberLazyListState()
     val hapticController = rememberHaptic()
+    // 拖拽排序: 拖动中同步本地顺序(VM.reorderWorkspaces 即时生效), 松手落库
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        vm.reorderWorkspaces(from.index, to.index)
+    }
 
     Scaffold(
         topBar = {
@@ -167,20 +176,51 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                             onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
                         )
                     } else {
-                        WorkspaceCard(
-                            workspace = workspace,
-                            onRename = { editTarget = workspace },
-                            onDelete = { deleteTarget = workspace },
-                            onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
-                            // 长按卡片进入多选并选中该项
-                            onLongPressSelect = {
-                                hapticController.lightTap()
-                                selecting = true
-                                if (!selectedItems.contains(workspace.id)) {
-                                    selectedItems.add(workspace.id)
-                                }
-                            },
-                        )
+                        // 拖拽排序仅非多选态可用; 卡片长按已被占用(进入多选), 故用独立手柄拖动
+                        ReorderableItem(
+                            state = reorderableState,
+                            key = workspace.id,
+                        ) { isDragging ->
+                            WorkspaceCard(
+                                workspace = workspace,
+                                onRename = { editTarget = workspace },
+                                onDelete = { deleteTarget = workspace },
+                                onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
+                                // 长按卡片进入多选并选中该项
+                                onLongPressSelect = {
+                                    hapticController.lightTap()
+                                    selecting = true
+                                    if (!selectedItems.contains(workspace.id)) {
+                                        selectedItems.add(workspace.id)
+                                    }
+                                },
+                                modifier = Modifier.graphicsLayer {
+                                    if (isDragging) {
+                                        scaleX = 1.03f
+                                        scaleY = 1.03f
+                                    }
+                                },
+                                trailing = {
+                                    // 拖拽手柄: 起拖/松手触感 + 松手落库; 独立图标不与卡片长按冲突
+                                    Icon(
+                                        imageVector = HugeIcons.Drag02,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .padding(end = 4.dp)
+                                            .draggableHandle(
+                                                onDragStarted = {
+                                                    hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
+                                                },
+                                                onDragStopped = {
+                                                    hapticController.perform(HapticFeedbackType.GestureEnd)
+                                                    vm.persistOrder()
+                                                },
+                                            ),
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -341,6 +381,8 @@ private fun WorkspaceCard(
     onOpen: () -> Unit,
     onLongPressSelect: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 行尾附加内容(拖拽手柄等); 由调用方在 ReorderableItem 作用域内构造 */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -417,6 +459,7 @@ private fun WorkspaceCard(
                     )
                 }
             }
+            trailing?.invoke()
         }
     }
 }
