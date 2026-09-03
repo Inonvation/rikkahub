@@ -424,7 +424,7 @@ private fun AttachmentChip(
                     Surface(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .size(18.dp),
+                            .size(14.dp),
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         shadowElevation = 1.dp,
@@ -436,7 +436,7 @@ private fun AttachmentChip(
                             Text(
                                 text = "$badgeNumber",
                                 color = MaterialTheme.colorScheme.onPrimary,
-                                fontSize = 9.sp,
+                                fontSize = 8.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                             )
