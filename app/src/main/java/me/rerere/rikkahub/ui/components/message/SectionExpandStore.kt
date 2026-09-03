@@ -19,9 +19,11 @@ val LocalConversationId = staticCompositionLocalOf<String?> { null }
  * - 各 key 彼此独立、互不联动（不会出现"点开一条其他全展开"）；
  * - 写入时机：用户手动 toggle（onExpandedChange / 点卡），外加"loading 由 true 翻转为
  *   false 的完成定稿"——思考卡把系统自动折叠/保留的最终形态落库（`reasoning:` 前缀，
- *   见 ChatMessageReasoningStep effect），过程区整体折叠只在守卫放行（=折叠）时落库
- *   （`process:` 前缀，暂缓=保持展开不写、重建按开关推导收敛）。统一保证消息回收重建后
- *   与"离开时所见"一致。
+ *   见 ChatMessageReasoningStep effect）；过程区整体折叠（`process:` 前缀）完成定稿
+ *   时守卫放行折叠即写 false、过程区仍可见则固化展开写 true（防切走切回/重建塌缩），
+ *   消息整体滚出视口上方（布局回调检测，完全不可见帧）再写 false 收卡——自动折叠
+ *   只对用户不可见的高度变化生效，可见区形态恒等于用户所见。统一保证消息回收重建
+ *   后与"离开时所见"一致。
  * App 进程存活期间有效。
  */
 internal val sectionExpanded = mutableStateMapOf<String, Boolean>()
