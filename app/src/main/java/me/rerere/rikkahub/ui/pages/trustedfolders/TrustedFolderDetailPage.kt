@@ -604,11 +604,12 @@ private fun FileEntryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                // 文件 = 时间｜占用；文件夹 = 时间丨n项（不统计占用，避免进目录卡顿）
+                // 文件 = 时间|占用；文件夹 = 时间|n项（不统计占用，避免进目录卡顿）。
+                // 分隔统一用半角 |（旧版目录/文件行各用不同码位的全角竖线 丨U+4E28 / ｜U+FF5C，字体 fallback 下宽度不一致）
                 text = if (entry.isDirectory) {
-                    "${entry.updatedAt.formatFileTime()} 丨 ${entry.childCount}项"
+                    "${entry.updatedAt.formatFileTime()} | ${entry.childCount}项"
                 } else {
-                    "${entry.updatedAt.formatFileTime()} ｜ ${entry.sizeBytes.fileSizeToString()}"
+                    "${entry.updatedAt.formatFileTime()} | ${entry.sizeBytes.fileSizeToString()}"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
