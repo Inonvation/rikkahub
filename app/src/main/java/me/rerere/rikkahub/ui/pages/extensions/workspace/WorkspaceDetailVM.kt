@@ -7,7 +7,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -18,7 +17,6 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
 import me.rerere.workspace.WorkspaceFileEntry
-import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceStorageArea
 
 class WorkspaceDetailVM(
@@ -34,9 +32,6 @@ class WorkspaceDetailVM(
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
-
-    private val _terminalState = MutableStateFlow(WorkspaceTerminalState())
-    val terminalState = _terminalState.asStateFlow()
 
     private val _installProgress = MutableStateFlow<RootfsInstallProgress?>(null)
     val installProgress = _installProgress.asStateFlow()
@@ -455,51 +450,6 @@ class WorkspaceDetailVM(
         }
     }
 
-    fun executeTerminalCommand(command: String) {
-        val trimmed = command.trim()
-        if (trimmed.isBlank()) return
-        // 原子地完成「检查 running」与「置 running=true」, 避免两次快速提交并发启动两条命令
-        val previous = _terminalState.getAndUpdate { state ->
-            if (state.running) {
-                state
-            } else {
-                state.copy(
-                    running = true,
-                    input = "",
-                    history = state.history + WorkspaceTerminalEntry.Command(trimmed),
-                )
-            }
-        }
-        if (previous.running) return
-        viewModelScope.launch {
-            runCatching {
-                repository.executeCommand(id, trimmed)
-            }.onSuccess { result ->
-                _terminalState.update {
-                    it.copy(
-                        running = false,
-                        history = it.history + WorkspaceTerminalEntry.Result(result),
-                    )
-                }
-            }.onFailure { error ->
-                _terminalState.update {
-                    it.copy(
-                        running = false,
-                        history = it.history + WorkspaceTerminalEntry.Error(error.message ?: "命令执行失败"),
-                    )
-                }
-            }
-        }
-    }
-
-    fun updateTerminalInput(input: String) {
-        _terminalState.update { it.copy(input = input) }
-    }
-
-    fun clearTerminal() {
-        _terminalState.update { it.copy(history = emptyList()) }
-    }
-
     private fun loadWorkspace() {
         viewModelScope.launch {
             val workspace = repository.getById(id)
@@ -526,15 +476,3 @@ data class InstallToolsState(
     val running: Boolean = false,
     val error: String? = null,
 )
-
-data class WorkspaceTerminalState(
-    val input: String = "",
-    val running: Boolean = false,
-    val history: List<WorkspaceTerminalEntry> = emptyList(),
-)
-
-sealed interface WorkspaceTerminalEntry {
-    data class Command(val command: String) : WorkspaceTerminalEntry
-    data class Result(val result: WorkspaceCommandResult) : WorkspaceTerminalEntry
-    data class Error(val message: String) : WorkspaceTerminalEntry
-}
