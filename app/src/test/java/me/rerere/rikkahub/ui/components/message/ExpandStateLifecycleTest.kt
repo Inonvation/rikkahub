@@ -141,4 +141,57 @@ class ExpandStateLifecycleTest {
         assertEquals(2, trimToolBubbleExpanded(maxEntries = 0))
         assertTrue(toolBubbleExpanded.isEmpty())
     }
+
+    // ---------- pruneToolBubbleExpanded（会话维度回收 tool: 前缀记录） ----------
+
+    @Test
+    fun `tool prune keeps only listed conversations, bare keys untouched`() {
+        toolBubbleExpanded["tool:c1:call-a"] = true
+        toolBubbleExpanded["tool:c1:call-b"] = false
+        toolBubbleExpanded["tool:c2:call-c"] = true
+        toolBubbleExpanded["tool:c3:call-d"] = true
+        // 无会话上下文写入的裸 key（LocalConversationId 为 null 的预览导出等）不属任何会话，
+        // 只交 trimToolBubbleExpanded 容量淘汰——按会话回收不能误清正在展示的预览页记忆。
+        toolBubbleExpanded["bare-call"] = true
+
+        val removed = pruneToolBubbleExpanded(setOf("c1", "c2"))
+
+        assertEquals(1, removed) // 仅 c3 的一条 tool: 前缀记录
+        assertTrue(toolBubbleExpanded.containsKey("tool:c1:call-a"))
+        assertTrue(toolBubbleExpanded.containsKey("tool:c1:call-b"))
+        assertTrue(toolBubbleExpanded.containsKey("tool:c2:call-c"))
+        assertNull(toolBubbleExpanded["tool:c3:call-d"])
+        assertTrue(toolBubbleExpanded.containsKey("bare-call"))
+    }
+
+    @Test
+    fun `tool prune with empty keep clears prefixed entries only`() {
+        toolBubbleExpanded["tool:c1:call-a"] = true
+        toolBubbleExpanded["bare-call"] = true
+
+        assertEquals(1, pruneToolBubbleExpanded(emptySet()))
+        assertNull(toolBubbleExpanded["tool:c1:call-a"])
+        assertTrue(toolBubbleExpanded.containsKey("bare-call"))
+    }
+
+    @Test
+    fun `tool prune with all conversations keeps everything`() {
+        toolBubbleExpanded["tool:c1:call-a"] = true
+        toolBubbleExpanded["tool:c2:call-b"] = true
+
+        assertEquals(0, pruneToolBubbleExpanded(setOf("c1", "c2")))
+        assertEquals(2, toolBubbleExpanded.size)
+    }
+
+    // ---------- recentConversationIds()（供 ChatPage 对齐滚动存档 prune 的保留集合快照） ----------
+
+    @Test
+    fun `recent ids getter mirrors recency queue after capacity drop`() {
+        trackRecentConversation("c1", keepRecentCount = 2)
+        trackRecentConversation("c2", keepRecentCount = 2)
+        trackRecentConversation("c3", keepRecentCount = 2)
+
+        // 队列只保留最近 2 个（c3 最新、c2 次之）；getter 返回的就是滚动 prune 用的保留集合
+        assertEquals(setOf("c2", "c3"), recentConversationIds())
+    }
 }

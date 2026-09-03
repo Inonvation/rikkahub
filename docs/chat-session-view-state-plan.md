@@ -24,8 +24,13 @@
   管辖），改由 **ChatPage 治理 effect**（ChatPageContent 内 LaunchedEffect）在
   `trackRecentConversation` 之后借 `recentConversationIds()` 对齐回收；toolBubbleExpanded
   会话维度化（`tool:<conv>:<toolCallId>`，LocalConversationId 为 null 退化为裸 id）按方案执行。
-- **单测**：本次未补（方案 Phase 2 备注为"若抽出"）。prune 为纯 retainAll 一行、
-  换算函数极简且被 ChatPage/ChatList 双端编译期约束，暂缓；如需可后补。
+- **单测**（2026-09-03 补）：三类 33 用例全绿（`testDebugUnitTest` EXIT=0，0 失败 0 跳过）。
+  `ChatScrollStoreTest`（8，新增，ui/hooks）覆盖 save/load/remove/prune 与负值防御；
+  `ChatScrollUtilsTest` 增补 7 用例覆盖 `matchPresetMessageCount`（对齐前缀 / 断链 / 多消息
+  分支节点不算匹配 / 列表耗尽 / 空边 / 首条即不匹配）与 `chatMessageItemIndex`（intro
+  占位换算的 5 组口径）；`ExpandStateLifecycleTest` 增补 4 用例覆盖
+  `pruneToolBubbleExpanded`（会话维度回收、裸 key 不受会话 prune 影响、空/全保留集）
+  与 `recentConversationIds()` 快照契约。
 
 各文件改动明细见上方正文的逐条描述。
 
