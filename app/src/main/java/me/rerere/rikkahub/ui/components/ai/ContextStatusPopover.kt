@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -48,17 +50,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlin.math.roundToInt
@@ -103,12 +101,18 @@ import kotlin.uuid.Uuid
  * 展示上下文占用（含「构成详情」：系统提示/系统工具/MCP/技能/消息 token 占比，默认全部展示）、
  * 可勾选的会话指标（平均缓存/余额/费用等），并提供「压缩历史」与「管理控制台」入口。
  *
- * 动画采用 CompletionPopup 同款非持久 MutableTransitionState 模式（而非常驻
- * Popup + scale 动画），规避 MIUI 上常驻动画 Popup 导致键盘僵死的问题。
+ * 实现为「页内覆盖层」而非独立 Popup 窗口，核心原因是消抖：
+ * Popup 模式下点击锚点圆圈会同时触发 Popup dismiss 与图标 toggle（点击在浮窗边界外），
+ * 旧实现靠协程延迟写回错位，快速连点时延迟写回会落在「重新打开」之后把浮窗又关掉 → 闪烁。
+ * 页内覆盖层只有一个 toggle 入口（图标）+ 全窗点击拦截层，toggle 由 300ms 消抖门闩拦截连点，
+ * 从根上消除闪烁。
+ *
+ * 面板背景沿用实色 surfaceContainerHigh（毛玻璃方案曾在 blur 分支加 hazeBlur，观感不佳已回退）；
+ * 动画仍走非持久 MutableTransitionState 模式（同 CompletionPopup），无常驻动画窗口。
  */
 @Composable
-fun ContextStatusPopover(
-    expanded: Boolean,
+fun ContextStatusOverlay(
+    transition: MutableTransitionState<Boolean>,
     onDismiss: () -> Unit,
     settings: Settings,
     conversation: Conversation,
@@ -117,64 +121,64 @@ fun ContextStatusPopover(
     contextLimitLabel: String,
     onCompressClick: () -> Unit,
     onOpenConsole: () -> Unit,
+    /** 锚点圆圈底边在窗口坐标系的 y（px）：面板顶部对齐图标底边 */
+    anchorBottomPx: Int,
     modifier: Modifier = Modifier,
-    anchor: @Composable () -> Unit,
 ) {
-    var anchorHeight by remember { mutableIntStateOf(0) }
-    // 锚点右缘在窗口坐标系中的 x 坐标：浮窗右缘固定对齐窗口右缘（留边距），
-    // 避免不同顶栏内边距/设备圆角 inset 下浮窗与右侧「错位」
-    var anchorRight by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
-    val view = LocalView.current
-    val edgeMarginPx = with(density) { 8.dp.toPx() }.toInt()
-    val transition = remember { MutableTransitionState(expanded) }
-    transition.targetState = expanded
+    // 展开期间不可交互：targetState 为 false（退出动画中）时点击穿透，不拦截
+    val dismissEnabled = transition.targetState
+    // 覆盖层自身（=页面根 Box）顶边在窗口坐标系的 y：面板偏移 = 锚点底边 - 覆盖层顶边，
+    // 用窗口绝对坐标求差，避免外层容器 inset/padding 差异导致面板落点偏移
+    var overlayTopPx by remember { mutableIntStateOf(0) }
 
+    // 全窗点击拦截层：浮窗打开时任意外部点击 → 收起（原 Popup(focusable=true) 的模态语义）
     Box(
-        modifier
-            .onSizeChanged { anchorHeight = it.height }
-            .onGloballyPositioned { coords ->
-                anchorRight = (coords.positionInWindow().x + coords.size.width).toInt()
-            }
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { overlayTopPx = it.positionInWindow().y.roundToInt() }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = dismissEnabled,
+            ) { onDismiss() },
     ) {
-        anchor()
-        if (transition.currentState || transition.targetState) {
-            Popup(
-                alignment = Alignment.TopEnd,
-                offset = IntOffset(
-                    // 让浮窗右缘 = 窗口右缘 - 边距：x 偏移 = 目标右缘 - 锚点右缘（可为负，即向左让位）
-                    x = (view.width - edgeMarginPx) - anchorRight,
-                    y = anchorHeight,
+        // 面板：锚定在图标正下方、右缘贴窗口右缘（8dp 边距，与既有 Popup 版对齐口径一致）
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(
+                    top = with(density) { (anchorBottomPx - overlayTopPx).coerceAtLeast(0).toDp() },
+                    end = 8.dp,
                 ),
-                onDismissRequest = onDismiss,
-                properties = PopupProperties(focusable = true),
+        ) {
+            AnimatedVisibility(
+                visibleState = transition,
+                enter = scaleIn(
+                    animationSpec = tween(200, easing = FastOutSlowInEasing),
+                    // 从图标（右上）方向缩放展开
+                    transformOrigin = TransformOrigin(1f, 0f),
+                    initialScale = 0.85f,
+                ) + fadeIn(animationSpec = tween(150)),
+                exit = scaleOut(
+                    animationSpec = tween(150),
+                    transformOrigin = TransformOrigin(1f, 0f),
+                ) + fadeOut(animationSpec = tween(100)),
             ) {
-                AnimatedVisibility(
-                    visibleState = transition,
-                    enter = scaleIn(
-                        animationSpec = tween(200, easing = FastOutSlowInEasing),
-                        // 从图标（右上）方向缩放展开
-                        transformOrigin = TransformOrigin(1f, 0f),
-                        initialScale = 0.85f,
-                    ) + fadeIn(animationSpec = tween(150)),
-                    exit = scaleOut(
-                        animationSpec = tween(150),
-                        transformOrigin = TransformOrigin(1f, 0f),
-                    ) + fadeOut(animationSpec = tween(100)),
-                ) {
-                    ContextStatusPanel(
-                        settings = settings,
-                        conversation = conversation,
-                        contextTotalTokens = contextTotalTokens,
-                        contextUsagePercent = contextUsagePercent,
-                        contextLimitLabel = contextLimitLabel,
-                        onCompressClick = onCompressClick,
-                        onOpenConsole = onOpenConsole,
-                    )
-                }
+                ContextStatusPanel(
+                    settings = settings,
+                    conversation = conversation,
+                    contextTotalTokens = contextTotalTokens,
+                    contextUsagePercent = contextUsagePercent,
+                    contextLimitLabel = contextLimitLabel,
+                    onCompressClick = onCompressClick,
+                    onOpenConsole = onOpenConsole,
+                )
             }
         }
     }
+    // 返回键收起
+    BackHandler(enabled = dismissEnabled, onBack = onDismiss)
 }
 
 @Composable
@@ -313,6 +317,11 @@ private fun ContextStatusPanel(
         } else {
             null
         }
+    // 实测口径（与顶栏 computeTokenStats 同源）：快照存在 + 校准锚未过期 + 有 provider 实测
+    // 输入量。有实测锚时总量=实测值，标注「实测」；否则（新会话首轮/锚过期）标注「估算」。
+    val measured = storeSnapshot != null &&
+        !conversation.hasStaleCalibrationAnchor() &&
+        conversation.effectiveMessages().lastRealPromptTokens() != null
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -321,7 +330,12 @@ private fun ContextStatusPanel(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier
             .width(300.dp)
-            .heightIn(max = 480.dp),
+            .heightIn(max = 480.dp)
+            // 消费面板空白处的点击：否则会穿透到全窗拦截层，点内部留白也会收起浮窗
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {},
     ) {
         Column(
             modifier = Modifier
@@ -341,8 +355,13 @@ private fun ContextStatusPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.width(6.dp))
-                    // 上下文占用为字符估算口径（无本地 tokenizer），明示估算避免误解
-                    EstimateTag()
+                    // 口径标注：总量已被 provider 实测校准（usage 锚有效）时标「实测」，
+                    // 否则标「估算」（无本地 tokenizer，字符估算口径明示避免误解）
+                    if (measured) {
+                        MeasuredTag()
+                    } else {
+                        EstimateTag()
+                    }
                     Spacer(Modifier.weight(1f))
                     TextButton(
                         onClick = onCompressClick,
@@ -411,9 +430,9 @@ private fun ContextStatusPanel(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             }
 
-            // 指标区（行式）：模型历史 / 输入输出 / 平均缓存各占一行，由管理控制台
-            // 「上下文浮窗显示」勾选项驱动；全部关闭时给一行轻提示，避免浮窗只剩
-            // 进度条与控制台入口时被误认为异常
+            // 指标区（行式）：模型历史一行；输入输出与平均缓存（默认最常见两项）合并为一行，
+            // 减少浮窗纵向高度，由管理控制台「上下文浮窗显示」勾选项驱动；全部关闭时给一行
+            // 轻提示，避免浮窗只剩进度条与控制台入口时被误认为异常
             val visibleIndicators = settings.displaySetting.footerIndicators
                 .distinct()
                 .filterNot { it == FooterIndicator.GLOBAL_USAGE }
@@ -531,6 +550,23 @@ private fun EstimateTag() {
     ) {
         Text(
             text = stringResource(R.string.chat_page_context_estimated),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            maxLines = 1,
+        )
+    }
+}
+
+/** 「实测」轻量标签：总量已被最近一次 provider 实测输入量校准（usage 锚点有效）。 */
+@Composable
+private fun MeasuredTag() {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+    ) {
+        Text(
+            text = stringResource(R.string.chat_page_context_measured),
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
             maxLines = 1,
@@ -662,8 +698,9 @@ private fun CompositionCategory.labelRes(): Int = when (this) {
 }
 
 /**
- * 指标区（行式）：模型历史 / 输入输出 / 平均缓存各占一行，由管理控制台
- * 「上下文浮窗显示」勾选项驱动。行式布局保证各指标纵向对齐、一目了然。
+ * 指标区（行式）：模型历史占一行；输入输出与平均缓存合并为一行（默认最常见两项，
+ * 同行展示减少浮窗纵向高度），只勾选其一或其余项时保持独立行。全部由管理控制台
+ * 「上下文浮窗显示」勾选项驱动。
  */
 @Composable
 private fun SessionIndicators(
@@ -688,33 +725,59 @@ private fun SessionIndicators(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (FooterIndicator.TOKENS in indicators) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                TokensItem(
-                    icon = HugeIcons.Upload02,
-                    text = formatK(promptTokens) +
-                        if (cachedTokens > 0) " (${formatK(cachedTokens)} cached)" else "",
+        val showTokens = FooterIndicator.TOKENS in indicators
+        val showCache = FooterIndicator.CACHE_HIT_RATE in indicators
+        if (showTokens && showCache) {
+            // 输入输出 + 平均缓存同一行：缓存居右
+            TokensCacheRow(
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                cachedTokens = cachedTokens,
+                cacheHitRate = cacheHitRate,
+                compact = true,
+            )
+        } else {
+            if (showTokens) {
+                TokensCacheRow(
+                    promptTokens = promptTokens,
+                    completionTokens = completionTokens,
+                    cachedTokens = cachedTokens,
+                    cacheHitRate = null,
+                    compact = false,
                 )
-                TokensItem(
-                    icon = HugeIcons.Download04,
-                    text = formatK(completionTokens),
-                )
+            }
+            if (showCache) {
+                CacheHitRateText(cacheHitRate = cacheHitRate, rightAlign = false)
             }
         }
-        if (FooterIndicator.CACHE_HIT_RATE in indicators) {
-            val cacheStr = if (cacheHitRate != null) {
-                "平均缓存 " + "%05.2f".format(cacheHitRate * 100) + "%"
-            } else {
-                "平均缓存 -"
-            }
-            Text(
-                text = cacheStr,
-                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    }
+}
+
+/** 输入/输出行（缓存以括号形式挂在输入项内，与消息下方 NerdLine 同款）；[compact] 时末尾并入平均缓存。 */
+@Composable
+private fun TokensCacheRow(
+    promptTokens: Long,
+    completionTokens: Long,
+    cachedTokens: Long,
+    cacheHitRate: Double?,
+    compact: Boolean,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        TokensItem(
+            icon = HugeIcons.Upload02,
+            text = formatK(promptTokens) +
+                if (cachedTokens > 0) " (${formatK(cachedTokens)} cached)" else "",
+        )
+        TokensItem(
+            icon = HugeIcons.Download04,
+            text = formatK(completionTokens),
+        )
+        if (compact) {
+            Spacer(Modifier.weight(1f))
+            CacheHitRateText(cacheHitRate = cacheHitRate, rightAlign = true)
         }
     }
 }
@@ -782,6 +845,27 @@ private fun TokensItem(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** 平均缓存单项：单独成行（[rightAlign] = false）或并入输入输出行居右（true）。 */
+@Composable
+private fun CacheHitRateText(
+    cacheHitRate: Double?,
+    rightAlign: Boolean,
+) {
+    val cacheStr = if (cacheHitRate != null) {
+        "平均缓存 " + "%05.2f".format(cacheHitRate * 100) + "%"
+    } else {
+        "平均缓存 -"
+    }
+    Text(
+        text = cacheStr,
+        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = if (rightAlign) TextOverflow.Ellipsis else TextOverflow.Clip,
+        textAlign = if (rightAlign) TextAlign.End else TextAlign.Start,
+    )
 }
 
 private fun formatK(value: Long): String = when {

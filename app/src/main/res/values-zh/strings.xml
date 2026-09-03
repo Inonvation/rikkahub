@@ -1571,6 +1571,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_terminal_close">关闭</string>
   <string name="chat_page_context_usage_title">上下文占用</string>
   <string name="chat_page_context_estimated">估算</string>
+  <string name="chat_page_context_measured">实测</string>
   <string name="chat_page_context_composition_title">构成详情</string>
   <string name="chat_page_context_composition_system">系统提示词</string>
   <string name="chat_page_context_composition_builtin_tools">系统工具</string>

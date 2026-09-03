@@ -562,9 +562,8 @@ private fun ChatPageContent(
     var showContextPopover by remember { mutableStateOf(false) }
     var lastContextPopoverToggleAt by remember { mutableLongStateOf(0L) }
     val contextPopoverTransition = remember { MutableTransitionState(false) }
-    // 锚点圆圈的实际高度：面板顶部对齐图标底边（图标在顶栏 actions 中垂直居中，
-    // 其底边 = 顶栏底部向上偏移半个高度差，直接用图标实测高度最稳）
-    var contextAnchorHeightPx by remember { mutableIntStateOf(0) }
+    // 锚点圆圈底边在窗口坐标系的 y：面板顶部对齐图标底边（与 Popup 版 y = anchorHeight 同口径）
+    var contextAnchorBottomPx by remember { mutableIntStateOf(0) }
     fun toggleContextPopover() {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastContextPopoverToggleAt < 300L) return
@@ -1020,7 +1019,7 @@ private fun ChatPageContent(
                         showCompressDialog = true
                     },
                     onToggleContextPopover = { toggleContextPopover() },
-                    onContextAnchorHeight = { contextAnchorHeightPx = it },
+                    onContextAnchorBottom = { contextAnchorBottomPx = it },
                     hazeState = hazeState,
                     modifier = Modifier
                         .onSizeChanged { topBarHeightPx = it.height }
@@ -1257,9 +1256,7 @@ private fun ChatPageContent(
                     dismissContextPopover()
                     navController.navigate(Screen.ManagementDashboard)
                 },
-                hazeState = hazeState,
-                blurEnabled = setting.displaySetting.enableBlurEffect,
-                anchorHeight = contextAnchorHeightPx,
+                anchorBottomPx = contextAnchorBottomPx,
             )
         }
     }
@@ -1495,7 +1492,7 @@ private fun TopBar(
     onUpdateTitle: (String) -> Unit,
     onCompressClick: () -> Unit,
     onToggleContextPopover: () -> Unit,
-    onContextAnchorHeight: (Int) -> Unit,
+    onContextAnchorBottom: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val toaster = LocalToaster.current
@@ -1581,7 +1578,7 @@ private fun TopBar(
         actions = {
             // 上下文用量圆圈：点击从图标位置展开状态浮窗（上下文占用/指标/全会话用量/管理控制台）。
             // toggle 唯一入口收敛在 ChatPageContent（消抖门闩防连点闪烁）；
-            // 高度上报给覆盖层做锚定（面板顶部 = 图标底边）。
+            // 图标底边（窗口坐标系）上报给覆盖层做锚定（面板顶部 = 图标底边）。
             // 浮窗打开时本图标被全窗点击拦截层罩住：点击会先落到拦截层收起浮窗，
             // 不会触发这里的 toggle（只有关闭态点击才会走到这里）。
             IconButton(
@@ -1591,7 +1588,11 @@ private fun TopBar(
                 },
                 modifier = Modifier
                     .size(44.dp)
-                    .onSizeChanged { onContextAnchorHeight(it.height) },
+                    .onGloballyPositioned { coords ->
+                        onContextAnchorBottom(
+                            (coords.positionInWindow().y + coords.size.height).roundToInt()
+                        )
+                    },
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
                     CircularProgressIndicator(
