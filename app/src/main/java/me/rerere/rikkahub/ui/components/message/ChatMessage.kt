@@ -480,6 +480,11 @@ private fun MessagePartsBlock(
     // 2) 过程区可见（短答案/用户上拉中）：保持展开，折叠推迟到本消息滚出视口销毁后的
     //    重建——上方 init 按开关推导折叠，item 以折叠尺寸首次组合（无初次高度动画、
     //    无锚点修正），零跳动。
+    //    注意此路径**不落库**：可见区保持展开是"当前组合内"的形态，重建按开关推导折叠
+    //    即"推迟折叠"的产品语义（用户开自动折叠=接受步骤事后收卡，切走切回同理收敛）。
+    //    勿改成"完成即写 store=true"——那会让过程区可见期间的重建永远塌不了，
+    //    也会把"滚出视口才折叠"的守卫语义架空（回归可见区瞬时塌缩/跳底，见
+    //    docs/chat-session-view-state-plan.md 4.1-2）。
     var prevChainLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, autoCollapseAll) {
         if (autoCollapseAll) {

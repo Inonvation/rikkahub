@@ -10,15 +10,18 @@ import androidx.compose.runtime.staticCompositionLocalOf
 val LocalConversationId = staticCompositionLocalOf<String?> { null }
 
 /**
- * 会话内各 UI 区块（思维链卡片、思考链"显示 N 步"容器、todolist）展开折叠状态的进程级存储。
+ * 会话内各 UI 区块（思维链卡片、思考链"显示 N 步"容器、todolist、思考卡）展开折叠状态的
+ * 进程级存储。
  *
  * key 由会话 id + 条目标识拼出（见各组件），实现"单会话、逐条独立"：
  * - 切换窗口/页面后仍保持用户手动展开/折叠的状态（Navigation 3 对非栈顶 entry 组合重建，
  *   remember/rememberSaveable 恢复不可靠，故存进程级单例，与 toolBubbleExpanded 同款方案）；
  * - 各 key 彼此独立、互不联动（不会出现"点开一条其他全展开"）；
- * - 主要记录用户手动操作；`process:` 前缀（过程区整体折叠）额外固化"生成完成时刻的
- *   最终形态"（守卫放行=折叠、暂缓=展开），保证消息回收重建后与用户所见一致
- *   （见 ChatMessage 完成折叠 effect 的落库说明）。
+ * - 写入时机：用户手动 toggle（onExpandedChange / 点卡），外加"loading 由 true 翻转为
+ *   false 的完成定稿"——思考卡把系统自动折叠/保留的最终形态落库（`reasoning:` 前缀，
+ *   见 ChatMessageReasoningStep effect），过程区整体折叠只在守卫放行（=折叠）时落库
+ *   （`process:` 前缀，暂缓=保持展开不写、重建按开关推导收敛）。统一保证消息回收重建后
+ *   与"离开时所见"一致。
  * App 进程存活期间有效。
  */
 internal val sectionExpanded = mutableStateMapOf<String, Boolean>()
@@ -64,8 +67,11 @@ internal val recentConversationIds = ArrayDeque<String>()
 /**
  * 把 [conversationId] 记为最近访问并执行展开折叠记忆的生命周期治理：
  * 进程级最近记录只保留最近 [keepRecentCount] 个会话（含本次访问），其余会话的
- * section 记忆（process:/chain:/reasoning:/todo:）被回收；顺带对齐
+ * section 记忆（process:/chain:/reasoning:/todo:）与工具气泡会话维度记录
+ * （tool: 前缀，见 pruneToolBubbleExpanded）被回收；顺带对齐
  * toolBubbleExpanded 的容量上限。返回本次回收的 section 记录数。
+ * 滚动位置（ChatScrollStore）不在此文件管辖，调用方（ChatPage）按
+ * [recentConversationIds] 自行对齐回收（见 ChatScrollStore.prune）。
  */
 fun trackRecentConversation(conversationId: String, keepRecentCount: Int): Int {
     recentConversationIds.remove(conversationId)
@@ -74,6 +80,13 @@ fun trackRecentConversation(conversationId: String, keepRecentCount: Int): Int {
         recentConversationIds.removeLast()
     }
     val removed = pruneSectionExpanded(recentConversationIds.toSet())
+    pruneToolBubbleExpanded(recentConversationIds.toSet())
     trimToolBubbleExpanded()
     return removed
 }
+
+/**
+ * 当前"最近 N 会话"保留集合的快照（trackRecentConversation 维护）。供 ChatPage
+ * 在治理入口对齐 ChatScrollStore 等无法直接进本文件的生命周期（见 ChatPage 治理 effect）。
+ */
+fun recentConversationIds(): Set<String> = recentConversationIds.toSet()

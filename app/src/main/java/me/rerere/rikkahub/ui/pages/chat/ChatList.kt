@@ -207,6 +207,10 @@ fun ChatList(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
+    // 滚动位置上报：ChatList 已知"LazyColumn item ↔ 真实消息"的换算（intro 偏移），
+    // 由它把当前视口锚点消息 + item index + offset 一并上报给 ChatPage 存入 ChatScrollStore。
+    // 空实现/未传时不收集（预览等只读列表不产生存档）。
+    onScrollSnapshot: ((anchorMessageId: Uuid?, index: Int, offset: Int) -> Unit)? = null,
 ) {
     AnimatedContent(
         targetState = previewMode,
@@ -252,6 +256,7 @@ fun ChatList(
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
                 onAssistantNameClick = onAssistantNameClick,
+                onScrollSnapshot = onScrollSnapshot,
             )
         }
     }
@@ -286,6 +291,7 @@ private fun ChatListNormal(
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onAssistantNameClick: (() -> Unit)? = null,
+    onScrollSnapshot: ((anchorMessageId: Uuid?, index: Int, offset: Int) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
@@ -377,12 +383,10 @@ private fun ChatListNormal(
     // 不依赖 @Transient 的 newConversation 字段：该字段不入库，会话从 Room 重建后
     // 会丢失（恢复为 false），导致已开始的会话把预设消息误当成普通消息再次展示。
     val presetMessages = assistant?.presetMessages.orEmpty()
+    // 换算与 ChatPage 滚动位置恢复共用 matchPresetMessageCount（见 ChatScrollUtils），
+    // 避免"预设开场占一个 LazyColumn item"的口径两处分叉。
     val presetMessageCount = remember(conversation.messageNodes, presetMessages) {
-        presetMessages.indices.takeWhile { index ->
-            conversation.messageNodes.getOrNull(index)?.let { node ->
-                node.messages.size == 1 && node.messages.firstOrNull()?.id == presetMessages[index].id
-            } == true
-        }.size
+        matchPresetMessageCount(conversation.messageNodes, presetMessages)
     }
     val hasPresetIntroItem = presetMessageCount > 0 && assistant != null
     val hasStartedConversation = conversation.messageNodes.size > presetMessageCount
@@ -658,6 +662,41 @@ private fun ChatListNormal(
                             }
                         }
                     }
+                }
+        }
+
+        // 滚动位置上报（锚点消息 id + LazyColumn item index + offset）：会话切换由
+        // ChatPage 存进程级 ChatScrollStore、重进时恢复。原来在 ChatPage 侧用裸
+        // firstVisibleItemIndex 订阅，拿不到"视口首条真实消息是哪条"——会话离开期间
+        // 列表头增删（压缩/远端同步）后，恢复只能按同序号 index 落点、会漂到另一条消息。
+        // 换算（预设开场 intro item 占一位）在本函数内唯一可知，故由这里上报锚点，
+        // ChatPage 恢复时"锚点优先、index 兜底"。index/offset 保持 LazyColumn 原始
+        // item 空间，恢复侧 scrollToItem 同空间直用。
+        val currentScrollMapping by rememberUpdatedState(presetMessageCount to hasPresetIntroItem)
+        LaunchedEffect(state, onScrollSnapshot) {
+            val report = onScrollSnapshot ?: return@LaunchedEffect
+            snapshotFlow {
+                val info = state.layoutInfo
+                val nodes = conversationUpdated.messageNodes
+                val (presetCount, hasIntro) = currentScrollMapping
+                val introOffset = if (hasIntro) 1 else 0
+                var anchor: Uuid? = null
+                if (nodes.isNotEmpty()) {
+                    // visibleItemsInfo 取首个"真实消息"item 作为锚点（intro/摘要/系统提示/
+                    // 底部占位等不对应消息的 item 跳过，映射公式见 chatMessageItemIndex）。
+                    for (item in info.visibleItemsInfo.sortedBy { it.index }) {
+                        val messageIndex = presetCount + (item.index - introOffset)
+                        if (item.index >= introOffset && messageIndex in presetCount until nodes.size) {
+                            anchor = nodes[messageIndex].id
+                            break
+                        }
+                    }
+                }
+                Triple(anchor, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
+            }
+                .distinctUntilChanged()
+                .collect { (anchor, index, offset) ->
+                    report(anchor, index, offset)
                 }
         }
 

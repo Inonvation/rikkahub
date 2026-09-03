@@ -96,7 +96,9 @@ private fun rememberReasoningState(
             initialDuration = reasoning.finishedAt?.let { it - reasoning.createdAt }
                 ?: (Clock.System.now() - reasoning.createdAt)
         ).also { s ->
-            // 恢复用户手动记忆的展开/折叠（仅用户操作过才记录，生成中自动预览不干扰）
+            // 恢复记忆的展开/折叠：来源有两类——用户手动 toggle（onExpandedChange 写），
+            // 以及"本组合内生成完成定稿"的自动折叠结果（下方 effect 写）。两者写后
+            // 都以显式记录优先；无记录才落到下方开关推导的默认分支。
             if (stateKey != null) {
                 val remembered = getSectionExpanded(stateKey)
                 if (remembered != null) {
@@ -134,19 +136,34 @@ private fun rememberReasoningState(
             // （"思考预览概率性不跟随输出滚动"根因）。上翻预览被拽回是上游既有行为。
             state.scrollState.scrollTo(state.scrollState.maxValue)
         } else {
-            if (prevReasoningLoading && state.expandState.expanded) {
-                // 生成结束先让位一帧，再折叠，避免高度动画与 LazyColumn 锚点调整抢同一帧
-                withFrameNanos {}
-                // 对齐上游：思考内容自身的折叠只受"自动折叠思考"控制；
-                // "自动折叠所有步骤"负责过程内容（思考链/工具链）整体折叠，不掺进这里。
-                // 只有列表贴底时才自动折叠：贴底时折叠后由 scrollBack/贴底逻辑保持底部；
-                // 用户在看历史时保持展开，避免 item 高度骤减触发 LazyColumn scrollBack
-                // 把列表吸回底部（"生成完自动滚到底 + 下拉跳动"根因）。
-                val autoClose = settings.displaySetting.autoCloseThinking
-                state.expandState = when {
-                    autoClose && atBottom() -> ReasoningCardState.Collapsed
-                    !autoClose -> ReasoningCardState.Expanded
-                    else -> state.expandState
+            if (prevReasoningLoading) {
+                if (state.expandState.expanded) {
+                    // 生成结束先让位一帧，再折叠，避免高度动画与 LazyColumn 锚点调整抢同一帧
+                    withFrameNanos {}
+                    // 对齐上游：思考内容自身的折叠只受"自动折叠思考"控制；
+                    // "自动折叠所有步骤"负责过程内容（思考链/工具链）整体折叠，不掺进这里。
+                    // 只有列表贴底时才自动折叠：贴底时折叠后由 scrollBack/贴底逻辑保持底部；
+                    // 用户在看历史时保持展开，避免 item 高度骤减触发 LazyColumn scrollBack
+                    // 把列表吸回底部（"生成完自动滚到底 + 下拉跳动"根因）。
+                    val autoClose = settings.displaySetting.autoCloseThinking
+                    state.expandState = when {
+                        autoClose && atBottom() -> ReasoningCardState.Collapsed
+                        !autoClose -> ReasoningCardState.Expanded
+                        else -> state.expandState
+                    }
+                }
+                // 根因：完成瞬间系统自动折叠的最终形态只落在组件内存、不进 store，
+                // 而重建（切走切回/滚出视口回收）只信 store / 开关推导，两套语义在
+                // 特定分支分裂——autoClose=ON 时"完成贴底折叠但生成中曾手动展开"
+                // 会在 store 残留 true 使切回又被展开；非贴底保留展开/Preview 的思考
+                // 无记录时切回被开关推导成 Collapsed（思考内容消失）。
+                // 方案：凡"本组合内生成完成定稿"（无论系统折叠还是保留态）都落库，
+                // store 值 = 该条目最终展开态（true=展开）；加载中（loading 分支）不写，
+                // 用户后续手动 toggle 会覆盖本值。Preview 属加载态枚举、store 只有布尔，
+                // 非贴底保留 Preview 时写 true，重建落 Expanded（全展开）作为已知近似，
+                // 观感优于按开关塌成 Collapsed。手动 toggle（onExpandedChange）仍各自写。
+                if (stateKey != null) {
+                    setSectionExpanded(stateKey, state.expandState.expanded)
                 }
             }
         }

@@ -192,6 +192,7 @@ import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.message.getSectionExpanded
 import me.rerere.rikkahub.ui.components.message.setSectionExpanded
 import me.rerere.rikkahub.ui.components.message.trackRecentConversation
+import me.rerere.rikkahub.ui.components.message.recentConversationIds
 import me.rerere.rikkahub.ui.components.message.LocalThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListAtBottom
 import me.rerere.rikkahub.ui.components.message.LocalIsChatListUserControlled
@@ -368,22 +369,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     // 否则会话数据加载前（首帧空列表）snapshotFlow 会把 (0,0) 写成假存档，
     // 恢复逻辑读到它就把会话钉在开头（"刚打开软件切历史会话落到最前"bug 根因）。
     var chatPositionReady by remember(conversation.id) { mutableStateOf(false) }
-    // 页面存活期间持续保存当前会话的滚动位置（切换会话/页面销毁后重新进入时恢复）。
-    // 先等 chatPositionReady（首次定位完成）再收集：确保记下的都是"真实停留位置"，
-    // 而非加载前的初始 (0,0)。chatListState 随 conversation.id 重建，effect 随会话
-    // 自动重启，不会把其他会话的位置串写进来。程序滚动（定位/自动跟随）产生的
-    // 中间位置也会被记录，语义上等同于"离开时停留在哪就回到哪"。
-    LaunchedEffect(chatListState, conversation.id) {
-        if (!chatPositionReady) {
-            snapshotFlow { chatPositionReady }.first { it }
-        }
-        snapshotFlow {
-            chatListState.firstVisibleItemIndex to chatListState.firstVisibleItemScrollOffset
-        }
-            .distinctUntilChanged()
-            .collect { (index, offset) ->
-                scrollStore.save(conversation.id, index, offset)
+    // 滚动位置存档改由 ChatList 上报（见 ChatList onScrollSnapshot / ChatScrollStore
+    // 锚点注释）：只有列表内部知道"LazyColumn item ↔ 真实消息"的换算（预设开场 intro
+    // item 占一位），裸 firstVisibleItemIndex 拿不到视口锚点消息 id——会话离开期间列表
+    // 头部若增删（上下文压缩/远端同步），恢复按同序号 index 会漂到另一条消息上。
+    // 门控保持原语义：chatPositionReady（首次定位完成）前丢弃上报，防止首帧空列表把
+    // (0,0) 写成假存档覆盖真实位置；回调按 conversation.id remember，切会话重建后
+    // 不会把其他会话的位置串写进来。程序滚动（定位/自动跟随）产生的中间位置同样
+    // 上报，语义 = "离开时停留在哪就回到哪"。
+    val onScrollSnapshot: (Uuid?, Int, Int) -> Unit = remember(conversation.id) {
+        { anchor, index, offset ->
+            if (chatPositionReady) {
+                scrollStore.save(conversation.id, index, offset, anchor)
             }
+        }
     }
     // 用户手指是否正按在消息列表区域（由 ChatList 列表盒的 pointerInput 实时维护）。
     // 所有"被动/后台"程序滚动（打开定位、自动跟随、发送贴底）在用户触碰列表期间一律不发起，
@@ -411,11 +410,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             // 用户已触碰列表或滚动进行中 → 放弃定位。scrollToItem 是挂起调用，若在这里排队
             // 会在用户松手后立即执行把列表拽回（忽略即可，绝不发未判定的滚动请求）。
             val canScroll = !listInteracting.value && !chatListState.isScrollInProgress
+            // 预设开场 intro item 偏移换算（与 ChatList 同源，见 ChatScrollUtils）：消息下标
+            // ≠ LazyColumn item index（intro 占一位），定位/恢复/兜底统一落到 item 空间，
+            // 否则带预设开场的会话所有滚动目标都偏一位。
+            val nodes = conversation.messageNodes
+            val lastMessageIndex = nodes.lastIndex.coerceAtLeast(0)
+            val presetAssistant = setting.getAssistantById(conversation.assistantId)
+            val presetMessages = presetAssistant?.presetMessages.orEmpty()
+            val presetCount = matchPresetMessageCount(nodes, presetMessages)
+            val hasPresetIntroItem = presetCount > 0 && presetAssistant != null
+            fun itemIndexOf(messageIndex: Int) =
+                chatMessageItemIndex(messageIndex, presetCount, hasPresetIntroItem)
             if (nodeId != null) {
                 // 指定消息跳转（收藏/搜索）：对齐该消息开头
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0 && canScroll) {
-                    chatListState.scrollToItem(index)
+                    chatListState.scrollToItem(itemIndexOf(index))
                 }
             } else {
                 // 历史会话打开：有存档位置则恢复（短暂记忆），否则定位到最后一条消息的开头
@@ -428,15 +438,29 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                 // 把锚点条目放到视口顶部，不依赖总高，机制上无此问题；恢复存档位置同理
                 // （index + offset 是视口锚点描述，不依赖内容总高）。
                 if (canScroll) {
-                    val lastIndex = conversation.messageNodes.lastIndex.coerceAtLeast(0)
                     val saved = scrollStore.load(conversation.id)
-                    if (saved != null && saved.firstVisibleItemIndex in 0..lastIndex) {
+                    // 锚点优先：离开时的视口首条真实消息仍在列表（头部未被压缩/删除）
+                    // → 精确钉回该消息当前位置；锚点失效（消息已被删/压缩合并）→ 回落
+                    // 旧逻辑按存档 index 恢复（item 空间直用）；都不可用 → 定位最后一条。
+                    val anchorTarget = saved?.anchorMessageId?.let { anchorId ->
+                        nodes.indexOfFirst { it.id == anchorId }
+                            .takeIf { it in presetCount..lastMessageIndex }
+                            ?.let(::itemIndexOf)
+                    }
+                    if (anchorTarget != null) {
+                        chatListState.scrollToItem(
+                            anchorTarget,
+                            saved.firstVisibleItemScrollOffset.coerceAtLeast(0),
+                        )
+                    } else if (saved != null && saved.firstVisibleItemIndex in 0..lastMessageIndex) {
                         chatListState.scrollToItem(
                             saved.firstVisibleItemIndex,
                             saved.firstVisibleItemScrollOffset,
                         )
                     } else {
-                        chatListState.scrollToItem(lastIndex)
+                        chatListState.scrollToItem(
+                            if (nodes.size > presetCount) itemIndexOf(lastMessageIndex) else 0
+                        )
                     }
                 }
             }
@@ -484,6 +508,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             errors = errors,
             onDismissError = { vm.dismissError(it) },
             onClearAllErrors = { vm.clearAllErrors() },
+            onScrollSnapshot = onScrollSnapshot,
         )
     }
 }
@@ -506,6 +531,7 @@ private fun ChatPageContent(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
+    onScrollSnapshot: ((Uuid?, Int, Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -584,10 +610,24 @@ private fun ChatPageContent(
     // 当前会话，会把其它会话的记忆清空（"切走再切回折叠态重置"根因），故不放这里。
     // GroupDiscussion/SubAgent 详情页等使用独立会话 id 的页面，其记忆会在主聊天
     // 再切换数轮后被回收（回落默认展开态），可接受。
+    // 滚动存档治理的 store 引用：ChatScrollStore 是 koin single（AppModule.kt:89），
+    // 此注入与顶层 ChatPage 的 scrollStore 同实例。koinInject 是 @Composable 函数，
+    // 只能在组合作用域调用、不能进 LaunchedEffect 协程体，故提到这里取值、effect 内引用。
+    val scrollPruneStore = koinInject<ChatScrollStore>()
     LaunchedEffect(conversation.id) {
         trackRecentConversation(
             conversation.id.toString(),
             KEEP_RECENT_CONVERSATIONS_FOR_EXPAND_STATE,
+        )
+        // 滚动存档与展开折叠记忆同口径治理：只保留最近 N 会话（含当前）的滚动位置。
+        // 展开折叠记忆在 trackRecentConversation 内回收（pruneSectionExpanded /
+        // pruneToolBubbleExpanded），滚动存档属 ChatScrollStore 管辖、不在此文件，
+        // 故由调用方借进程级最近访问队列对齐回收——否则切换超过 N 个会话后，较早会话的
+        // 折叠态已回落默认、滚动位置却仍残留，形成两套记忆不同步的慢性累积。
+        scrollPruneStore.prune(
+            recentConversationIds()
+                .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
+                .toSet()
         )
     }
 
@@ -954,6 +994,7 @@ private fun ChatPageContent(
                             onAssistantNameClick = {
                                 showAssistantPicker = true
                             },
+                            onScrollSnapshot = onScrollSnapshot,
                         )
                     }
 

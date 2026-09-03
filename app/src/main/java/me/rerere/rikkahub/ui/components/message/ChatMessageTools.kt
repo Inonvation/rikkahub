@@ -97,12 +97,15 @@ private fun isCollapsedByDefaultTool(toolName: String): Boolean =
     toolName in COLLAPSED_BY_DEFAULT_TOOLS
 
 /**
- * 工具气泡展开状态的进程级存储（key = toolCallId，UUID 全局唯一）。
+ * 工具气泡展开状态的进程级存储。key 格式：`tool:<conversationId>:<toolCallId>`；
+ * 无会话上下文（导出预览等 LocalConversationId 为 null）时退化为裸 toolCallId。
  *
  * 导航到子代理详情/面板等页面返回时，Chat 重新组合，remember/rememberSaveable 都不可靠
  * （Navigation 3 对非栈顶 entry 的组合槽位重建，saveable 恢复不稳定）。存进程级单例，
  * 只要 App 进程存活，任何导航路径都能保持用户对工具气泡的展开/折叠意图。
- * toolCallId 全局唯一（UUID），天然隔离不同会话/消息，不串状态。
+ * key 带会话前缀：toolCallId 本身是 UUID 全局唯一，本不会跨会话串状态，加会话维度
+ * 是为了让生命周期治理（pruneToolBubbleExpanded）能随"最近 N 会话"与 section/滚动
+ * 记忆同口径回收，而不是只能靠插入序容量粗淘汰。
  */
 internal val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
 
@@ -110,10 +113,10 @@ internal val toolBubbleExpanded = mutableStateMapOf<String, Boolean>()
 internal const val MAX_TOOL_BUBBLE_ENTRIES = 600
 
 /**
- * 生命周期治理：toolBubbleExpanded 按 toolCallId 存储、不含会话 id，无法随会话切换精准清理，
- * 采用插入序容量上限淘汰（SnapshotStateMap 保插入序）。超限时从最早的记录开始丢弃，
- * 返回删除条数。最早的多是最久未触达的消息，其气泡回默认展开态影响可忽略；
- * 上限 600 远超单会话正常工具量，常态使用不会触发淘汰。
+ * 生命周期治理：toolBubbleExpanded 按插入序容量上限淘汰（SnapshotStateMap 保插入序），
+ * 超限时从最早的记录开始丢弃，返回删除条数。最早的多是最久未触达的消息，其气泡回默认
+ * 展开态影响可忽略；上限 600 远超单会话正常工具量，常态使用不会触发淘汰。
+ * 会话维度的精准回收走 pruneToolBubbleExpanded（随最近 N 会话 prune 调用）。
  */
 fun trimToolBubbleExpanded(maxEntries: Int = MAX_TOOL_BUBBLE_ENTRIES): Int {
     var removed = 0
@@ -123,6 +126,27 @@ fun trimToolBubbleExpanded(maxEntries: Int = MAX_TOOL_BUBBLE_ENTRIES): Int {
         if (removed >= excess) break
         toolBubbleExpanded.remove(key)
         removed++
+    }
+    return removed
+}
+
+/**
+ * 生命周期治理：删除所有不属于 [keepConversationIds] 会话的工具气泡记录（key 形如
+ * `tool:<conversationId>:<toolCallId>`，会话 id 固定位于第二段），返回删除条数。
+ * 与 pruneSectionExpanded 同口径；**调用方必须把当前会话 id 放进保留集合**。
+ * 无会话前缀的裸 key（LocalConversationId 为 null 的预览导出等写入）不做会话匹配，
+ * 交由 trimToolBubbleExpanded 容量淘汰，避免误清正在展示的预览页记忆。
+ */
+fun pruneToolBubbleExpanded(keepConversationIds: Set<String>): Int {
+    var removed = 0
+    for (key in toolBubbleExpanded.keys.toList()) {
+        if (key.startsWith("tool:")) {
+            val conversation = key.removePrefix("tool:").substringBefore(':')
+            if (conversation !in keepConversationIds) {
+                toolBubbleExpanded.remove(key)
+                removed++
+            }
+        }
     }
     return removed
 }
@@ -324,17 +348,28 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 流式中外层 animateContentSize 又不生效 → 高度骤减），用户在翻历史/拖拽中触发会引发
     // LazyColumn 锚点修正把列表吸回底部（"生成中调用工具后下拉回弹"根因）。
     // 仅列表贴底且用户未控制列表时才折叠；否则保持展开，回底后由生成结束兜底折叠。
+    // 为何"保持展开"分支不写 store：默认展开工具 / 折叠类默认工具的推导初值与保持态一致，
+    // 无记录重建即还原"离开时所见"，写了反而是噪音；用户手动展开过折叠类工具已有记录。
+    // （折叠保真只对"最终形态≠推导默认"的 reasoning 卡需要显式落库，见
+    // docs/chat-session-view-state-plan.md 4.1-3）
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val isUserControlled = LocalIsChatListUserControlled.current
     // 用户手动展开/收起工具气泡时通知列表取消自动跟随（主聊天列表加载中生效）
     val onManualContentToggle = LocalOnManualContentToggle.current
     val settings = LocalSettings.current
+    // 展开状态 key 带会话前缀（见 toolBubbleExpanded 注释）：toolCallId 会话内唯一，
+    // 跨会话不串状态；前缀让生命周期治理能随"最近 N 会话"精准回收。无会话上下文
+    // （导出预览等）退化为裸 toolCallId，只受容量上限淘汰。
+    val conversationId = LocalConversationId.current
+    val bubbleKey = remember(tool.toolCallId, conversationId) {
+        conversationId?.let { "tool:$it:${tool.toolCallId}" } ?: tool.toolCallId
+    }
     var wasExecuted by remember(tool.toolCallId) { mutableStateOf(tool.isExecuted) }
     LaunchedEffect(tool.isExecuted) {
         if (tool.isExecuted && !wasExecuted && settings.displaySetting.autoCollapseAllSteps &&
             (isChatListAtBottom?.invoke() != false) && (isUserControlled?.invoke() != true)
         ) {
-            toolBubbleExpanded[tool.toolCallId] = false
+            toolBubbleExpanded[bubbleKey] = false
         }
         wasExecuted = tool.isExecuted
     }
@@ -347,7 +382,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 单例 map 只要进程存活就稳定保留。
     // 默认折叠工作区文件类工具（读取/写入/编辑/shell，输入输出内容大、标题本身已表达意图），
     // 其余工具保持展开（map 无记录 → 按 isCollapsedByDefault 决定初始值）。
-    val expanded = toolBubbleExpanded[tool.toolCallId] ?: !collapsedByDefault
+    val expanded = toolBubbleExpanded[bubbleKey] ?: !collapsedByDefault
     // 折叠类重工具（shell/write/edit/read_file）：折叠态不解析 output（输出大、折叠时用不到），
     // 展开才解析；非折叠类工具（默认展开、渲染器读 content 决定摘要）始终解析。
     val needContent = tool.isExecuted && (!collapsedByDefault || expanded)
@@ -370,7 +405,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val onExpandedChange: (Boolean) -> Unit = { value ->
         // 始终写入显式值：初始默认按工具类型推导，用户一旦操作就记录真实意图。
         // 不能 remove 后回落默认——折叠类工具默认 false，remove 会让"展开"操作丢失。
-        toolBubbleExpanded[tool.toolCallId] = value
+        toolBubbleExpanded[bubbleKey] = value
         // 用户手动展开/收起工具气泡：通知列表取消自动跟随，避免高度骤增被拽到底部
         onManualContentToggle?.invoke()
     }
