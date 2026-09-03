@@ -494,6 +494,7 @@ fun createProviderAdminTools(
                         put("enabled", buildJsonObject { put("type", "boolean") })
                         put("models", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "Optional model id list")
                         })
                         put("useResponseApi", buildJsonObject {
@@ -590,14 +591,17 @@ fun createProviderAdminTools(
                         put("enabled", buildJsonObject { put("type", "boolean") })
                         put("models", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "Full replacement model id list")
                         })
                         put("addModels", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "Model ids to add")
                         })
                         put("removeModels", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "Model ids to remove")
                         })
                         put("useResponseApi", buildJsonObject {
@@ -804,22 +808,33 @@ fun createProviderAdminTools(
                         })
                         put("abilities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"tool\", \"reasoning\"]")
                         })
                         put("inputModalities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"text\", \"image\"]")
                         })
                         put("outputModalities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"text\"]")
                         })
                         put("builtInTools", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"search\"]")
                         })
                         put("customHeaders", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("name", buildJsonObject { put("type", "string") })
+                                    put("value", buildJsonObject { put("type", "string") })
+                                })
+                            })
                             put("description", "Optional list of {\"name\": ..., \"value\": ...} objects")
                         })
                     },
@@ -886,22 +901,33 @@ fun createProviderAdminTools(
                         })
                         put("abilities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"tool\", \"reasoning\"]")
                         })
                         put("inputModalities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"text\", \"image\"]")
                         })
                         put("outputModalities", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"text\"]")
                         })
                         put("builtInTools", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
                             put("description", "e.g. [\"search\"]")
                         })
                         put("customHeaders", buildJsonObject {
                             put("type", "array")
+                            put("items", buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("name", buildJsonObject { put("type", "string") })
+                                    put("value", buildJsonObject { put("type", "string") })
+                                })
+                            })
                             put("description", "Optional list of {\"name\": ..., \"value\": ...} objects")
                         })
                     },
@@ -1070,8 +1096,8 @@ fun createAssistantAdminTools(
                         put("useGlobalMemory", buildJsonObject { put("type", "boolean") })
                         put("enableRecentChatsReference", buildJsonObject { put("type", "boolean") })
                         put("enableWebSearch", buildJsonObject { put("type", "boolean") })
-                        put("knowledgeBaseIds", buildJsonObject { put("type", "array") })
-                        put("enabledStudyTools", buildJsonObject { put("type", "array") })
+                        put("knowledgeBaseIds", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }) })
+                        put("enabledStudyTools", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }) })
                         put("defaultMode", buildJsonObject { put("type", "string") })
                     }
                 )

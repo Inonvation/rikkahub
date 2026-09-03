@@ -54,7 +54,32 @@ fun JsonElement.trimDescriptionRecursively(limit: Int): JsonElement = when (this
 }
 
 /**
- * 把 [InputSchema] 裁到 wire 预算。参数描述统一截断到 [paramDescLimit]。
+ * 为 `type: array` 但缺少 `items` 的属性补上一个空 schema（任意元素）。
+ *
+ * Gemini 服务端校验强制要求 array 必须有 `items`，缺失直接报 `items: missing field`
+ * （OpenAI/Anthropic/Claude 容忍缺失，所以症状只在 Gemini 模型出现）。本地工具声明应显式
+ * 写全 `items`，这里是针对 MCP server 透传 schema（McpSessionRegistry 原样转发，无法改远端）
+ * 与漏写声明的兜底：空 schema 不臆断元素类型，只让请求通过校验。
+ */
+internal fun JsonElement.fillMissingArrayItems(): JsonElement = when (this) {
+    is JsonObject -> buildJsonObject {
+        for ((key, value) in this@fillMissingArrayItems) {
+            if (key == "type" && value is JsonPrimitive && value.contentOrNull == "array" &&
+                this@fillMissingArrayItems["items"] == null
+            ) {
+                put("items", JsonObject(emptyMap()))
+            }
+            put(key, value.fillMissingArrayItems())
+        }
+    }
+
+    is JsonArray -> JsonArray(map { it.fillMissingArrayItems() })
+    else -> this
+}
+
+/**
+ * 把 [InputSchema] 裁到 wire 预算。参数描述统一截断到 [paramDescLimit]，
+ * 并兜底补齐 array 缺 `items` 的问题（见 [fillMissingArrayItems]）。
  * 返回 null 表示没有 schema（与入参一致），供 provider 直接 encode。
  */
 fun InputSchema?.trimmed(
@@ -64,7 +89,7 @@ fun InputSchema?.trimmed(
     is InputSchema.Obj -> InputSchema.Obj(
         properties = JsonObject(
             this.properties.mapValues { (_, propertySchema) ->
-                propertySchema.trimDescriptionRecursively(paramDescLimit)
+                propertySchema.trimDescriptionRecursively(paramDescLimit).fillMissingArrayItems()
             }
         ),
         required = this.required,

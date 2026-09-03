@@ -162,6 +162,7 @@ fun createCreativeTools(
                         })
                         put("models", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Optional model id strings, e.g. [\"gpt-4o\"]"))
                         })
                     },
@@ -280,6 +281,7 @@ fun createCreativeTools(
                         })
                         put("capabilities", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Full capability list, e.g. [\"WORKSPACE\", \"MCP_USE\"]. Mutually exclusive with base."))
                         })
                         put("base", buildJsonObject {
@@ -288,10 +290,12 @@ fun createCreativeTools(
                         })
                         put("add", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Capability names to add on top of base"))
                         })
                         put("remove", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Capability names to remove from base"))
                         })
                         put("behavior", buildJsonObject {
@@ -412,14 +416,17 @@ fun createCreativeTools(
                         })
                         put("capabilities", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Full replacement capability list. Mutually exclusive with add/remove."))
                         })
                         put("add", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Capability names to add on top of the current list"))
                         })
                         put("remove", buildJsonObject {
                             put("type", JsonPrimitive("array"))
+                            put("items", buildJsonObject { put("type", JsonPrimitive("string")) })
                             put("description", JsonPrimitive("Capability names to remove from the current list"))
                         })
                         put("behavior", buildJsonObject {

@@ -234,8 +234,28 @@ fun createUpdateVocabularyTool(
                 put("search_hint", buildJsonObject { put("type", "string"); put("description", "Word or keyword to search for") })
                 put("word", buildJsonObject { put("type", "string"); put("description", "New word") })
                 put("pronunciation", buildJsonObject { put("type", "string"); put("description", "IPA pronunciation") })
-                put("translations", buildJsonObject { put("type", "array"); put("description", "List of translation objects with pos and definition") })
-                put("examples", buildJsonObject { put("type", "array"); put("description", "List of example objects with en and zh") })
+                put("translations", buildJsonObject {
+                    put("type", "array")
+                    put("description", "List of translation objects with pos and definition")
+                    put("items", buildJsonObject {
+                        put("type", "object")
+                        put("properties", buildJsonObject {
+                            put("pos", buildJsonObject { put("type", "string"); put("description", "Part of speech (n., v., adj., adv.)") })
+                            put("definition", buildJsonObject { put("type", "string"); put("description", "The translated definition in Chinese") })
+                        })
+                    })
+                })
+                put("examples", buildJsonObject {
+                    put("type", "array")
+                    put("description", "List of example objects with en and zh")
+                    put("items", buildJsonObject {
+                        put("type", "object")
+                        put("properties", buildJsonObject {
+                            put("en", buildJsonObject { put("type", "string"); put("description", "English example sentence") })
+                            put("zh", buildJsonObject { put("type", "string"); put("description", "Chinese translation of the example") })
+                        })
+                    })
+                })
                 put("mnemonic", buildJsonObject { put("type", "string"); put("description", "Memory aid") })
                 put("tags", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", "Tags") })
             },

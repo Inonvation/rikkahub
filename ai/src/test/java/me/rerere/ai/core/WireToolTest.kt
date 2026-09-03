@@ -60,4 +60,43 @@ class WireToolTest {
         assertTrue(innerDesc.length <= 11)
         assertTrue(innerDesc.endsWith("…"))
     }
+
+    @Test
+    fun `trimmed fills missing array items at any nesting depth`() {
+        val schema = InputSchema.Obj(
+            properties = buildJsonObject {
+                put("translations", buildJsonObject {
+                    put("type", "array")
+                    put("description", "List of translation objects")
+                })
+                put("tags", buildJsonObject {
+                    put("type", "array")
+                    put("items", buildJsonObject { put("type", "string") })
+                })
+                put("nested", buildJsonObject {
+                    put("type", "object")
+                    put("properties", buildJsonObject {
+                        put("innerArray", buildJsonObject { put("type", "array") })
+                    })
+                })
+            },
+            required = emptyList(),
+        )
+
+        val trimmed = schema.trimmed() as InputSchema.Obj
+
+        val translations = trimmed.properties["translations"]!!.jsonObject
+        assertEquals("array", translations["type"]!!.jsonPrimitive.content)
+        assertTrue(translations.containsKey("items"))
+        assertEquals(0, translations["items"]!!.jsonObject.size)
+
+        // 已有 items 的保持原样
+        val tags = trimmed.properties["tags"]!!.jsonObject
+        assertEquals("string", tags["items"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+
+        // 嵌套对象里的 array 同样补齐
+        val innerArray = trimmed.properties["nested"]!!.jsonObject
+            .getValue("properties").jsonObject["innerArray"]!!.jsonObject
+        assertTrue(innerArray.containsKey("items"))
+    }
 }
