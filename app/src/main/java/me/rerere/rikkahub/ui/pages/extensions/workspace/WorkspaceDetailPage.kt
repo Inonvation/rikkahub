@@ -7,8 +7,12 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,13 +22,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -33,8 +41,11 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -44,7 +55,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,7 +69,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -71,8 +83,11 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CheckmarkSquare02
 import me.rerere.hugeicons.stroke.ComputerTerminal01
+import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.File02
@@ -83,6 +98,7 @@ import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share08
 import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
@@ -91,6 +107,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAppLifecycleState
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -145,6 +162,32 @@ fun WorkspaceDetailPage(
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+
+    /**
+     * 用系统"其他应用打开": 导出到 cache → FileProvider → ACTION_VIEW 选择器。
+     * 任意类型文件均可走此路径(文本/图片默认有自己的内建打开, 菜单里仍提供外部打开兜底);
+     * 与 onOpen 的 OTHER 分支共用同一流程, 抽出来避免三处重复。
+     */
+    fun openInSystemApp(entry: WorkspaceFileEntry) {
+        if (entry.isDirectory) return
+        vm.exportToCacheFile(entry, context.cacheDir) { file ->
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
+                file.extension.lowercase()
+            ) ?: "*/*"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(intent, null))
+            }
+        }
+    }
 
     fun exitSelect() {
         selecting = false
@@ -218,6 +261,11 @@ fun WorkspaceDetailPage(
     LaunchedEffect(state.area, state.path) {
         exitSelect()
     }
+    // 滑动/切换到"设置"页时退出多选: 浮动操作条与"完成"按钮都只在文件页有意义,
+    // 防止多选态泄漏到设置页后无退出入口
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != 0) exitSelect()
+    }
 
     // 从编辑器等覆盖页面返回时自动刷新文件列表(保存后大小/时间变化即时可见)。
     // 首次组合也会触发一次 refresh, 与 VM.init 幂等, 无副作用。
@@ -244,8 +292,12 @@ fun WorkspaceDetailPage(
                                 Text("完成")
                             }
                         } else {
-                            TextButton(onClick = { selecting = true }) {
-                                Text("多选")
+                            // 多选入口 icon 化(长按卡片同样可进入), 少占标题宽度
+                            IconButton(onClick = { selecting = true }) {
+                                Icon(
+                                    HugeIcons.CheckmarkSquare02,
+                                    contentDescription = "多选",
+                                )
                             }
                             Box {
                                 IconButton(onClick = { showCreateMenu = true }) {
@@ -280,6 +332,17 @@ fun WorkspaceDetailPage(
                                             showCreateDialog = true
                                         },
                                     )
+                                    // 刷新移入新建菜单: 顶栏常驻 icon 减少(刷新低频), 保留功能入口
+                                    DropdownMenuItem(
+                                        text = { Text("刷新当前目录") },
+                                        leadingIcon = {
+                                            Icon(HugeIcons.Refresh01, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showCreateMenu = false
+                                            vm.refresh()
+                                        },
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("导入手机文件") },
                                         leadingIcon = {
@@ -294,9 +357,6 @@ fun WorkspaceDetailPage(
                             }
                         }
                     }
-                    IconButton(onClick = { vm.refresh() }) {
-                        Icon(HugeIcons.Refresh01, contentDescription = null)
-                    }
                     if (state.workspace?.shellStatus != WorkspaceShellStatus.DISABLED.name) {
                         IconButton(onClick = { navController.navigate(Screen.WorkspaceTerminal(id)) }) {
                             Icon(HugeIcons.ComputerTerminal01, contentDescription = null)
@@ -307,38 +367,32 @@ fun WorkspaceDetailPage(
             )
         },
         bottomBar = {
-            if (selecting) {
-                SelectActionBar(
-                    selectedCount = selectedPaths.size,
-                    totalCount = state.entries.size,
-                    onSelectAll = { toggleSelectAll() },
-                    onMove = {
-                        moveSources = selectedEntries
-                        showMoveTargetPicker = true
+            // bottomBar 恒为 NavigationBar: 多选操作条改为浮动层(见 content 内 AnimatedVisibility),
+            // innerPadding 不再随多选状态突变 → 列表 viewport 稳定, 进出多选不跳动
+            NavigationBar {
+                NavigationBarItem(
+                    selected = pagerState.currentPage == 0,
+                    label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
+                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                    onClick = {
+                        if (selecting) exitSelect()
+                        scope.launch { pagerState.animateScrollToPage(0) }
                     },
-                    onTrash = { batchTrashTargets = selectedEntries },
-                    onDelete = { batchDeleteTargets = selectedEntries },
-                    onDismiss = { exitSelect() },
                 )
-            } else {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = pagerState.currentPage == 0,
-                        label = { Text(stringResource(R.string.workspace_detail_tab_files)) },
-                        icon = { Icon(HugeIcons.File02, contentDescription = null) },
-                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                    )
-                    NavigationBarItem(
-                        selected = pagerState.currentPage == 1,
-                        label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
-                        icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
-                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                    )
-                }
+                NavigationBarItem(
+                    selected = pagerState.currentPage == 1,
+                    label = { Text(stringResource(R.string.workspace_detail_tab_basic)) },
+                    icon = { Icon(HugeIcons.Settings03, contentDescription = null) },
+                    onClick = {
+                        if (selecting) exitSelect()
+                        scope.launch { pagerState.animateScrollToPage(1) }
+                    },
+                )
             }
         },
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
@@ -351,6 +405,7 @@ fun WorkspaceDetailPage(
                     contentPadding = PaddingValues(),
                     onSelectArea = vm::selectArea,
                     onGoUp = vm::goUp,
+                    onNavigatePath = { vm.navigate(it) },
                     selecting = selecting,
                     selectedPaths = selectedPaths,
                     onToggleSelect = { toggleSelect(it.path) },
@@ -377,25 +432,12 @@ fun WorkspaceDetailPage(
                                     previewImageUri = file.absolutePath
                                 }
 
-                                WorkspaceFileType.OTHER -> vm.exportToCacheFile(entry, context.cacheDir) { file ->
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        file,
-                                    )
-                                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-                                        file.extension.lowercase()
-                                    ) ?: "*/*"
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(uri, mime)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    runCatching {
-                                        context.startActivity(Intent.createChooser(intent, null))
-                                    }
-                                }
+                                WorkspaceFileType.OTHER -> openInSystemApp(entry)
                             }
                         }
+                    },
+                    onOpenWithSystemApp = { entry ->
+                        if (!entry.isDirectory) openInSystemApp(entry)
                     },
                     onDelete = { deleteTarget = it },
                     onDeletePermanently = { deletePermanentTarget = it },
@@ -428,7 +470,31 @@ fun WorkspaceDetailPage(
                     onInstallTools = vm::installCommonTools,
                     onBackup = { backupLauncher.launch("${state.workspace?.name ?: "workspace"}_backup.zip") },
                     onRestore = { restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+                    onOpenTrash = { navController.navigate(Screen.WorkspaceTrash(id)) },
                     onToolApprovalChange = vm::setToolApproval,
+                )
+            }
+        }
+
+            // 多选浮动操作条: 悬浮于 NavigationBar 之上, 不参与布局 → 进出多选 viewport 稳定
+            AnimatedVisibility(
+                visible = selecting,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 20.dp),
+                enter = slideInVertically(initialOffsetY = { it * 2 }),
+                exit = slideOutVertically(targetOffsetY = { it * 2 }),
+            ) {
+                SelectActionBar(
+                    selectedCount = selectedPaths.size,
+                    totalCount = state.entries.size,
+                    onSelectAll = { toggleSelectAll() },
+                    onMove = {
+                        moveSources = selectedEntries
+                        showMoveTargetPicker = true
+                    },
+                    onTrash = { batchTrashTargets = selectedEntries },
+                    onDelete = { batchDeleteTargets = selectedEntries },
                 )
             }
         }
@@ -598,6 +664,7 @@ private fun WorkspaceBasicPage(
     onInstallTools: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
+    onOpenTrash: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
@@ -736,6 +803,37 @@ private fun WorkspaceBasicPage(
                             Icon(HugeIcons.ArrowTurnBackward, contentDescription = null)
                             Text("恢复", modifier = Modifier.padding(start = 6.dp))
                         }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CustomColors.cardColorsOnSurfaceContainer,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "回收站",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "移入回收站的文件/目录保存在本工作区 .trash 内，可恢复或彻底删除。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    FilledTonalButton(
+                        onClick = onOpenTrash,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(HugeIcons.Delete01, contentDescription = null)
+                        Text("管理回收站", modifier = Modifier.padding(start = 6.dp))
                     }
                 }
             }
@@ -936,12 +1034,14 @@ private fun WorkspaceFilesPage(
     contentPadding: PaddingValues,
     onSelectArea: (WorkspaceStorageArea) -> Unit,
     onGoUp: () -> Unit,
+    onNavigatePath: (String) -> Unit,
     selecting: Boolean,
     selectedPaths: Set<String>,
     onToggleSelect: (WorkspaceFileEntry) -> Unit,
     onLongPressSelect: (WorkspaceFileEntry) -> Unit,
     onMove: (WorkspaceFileEntry) -> Unit,
     onOpen: (WorkspaceFileEntry) -> Unit,
+    onOpenWithSystemApp: (WorkspaceFileEntry) -> Unit,
     onRename: ((WorkspaceFileEntry) -> Unit)? = null,
     onDelete: (WorkspaceFileEntry) -> Unit,
     onDeletePermanently: (WorkspaceFileEntry) -> Unit,
@@ -957,30 +1057,39 @@ private fun WorkspaceFilesPage(
         if (index >= 0) listState.animateScrollToItem(index + 2)
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding + PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            WorkspaceAreaSelector(
-                selected = state.area,
-                onSelected = onSelectArea,
-            )
-        }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                WorkspaceAreaSelector(
+                    selected = state.area,
+                    onSelected = onSelectArea,
+                )
+            }
 
         item {
             WorkspacePathBar(
                 path = state.path,
                 canGoUp = state.path.isNotBlank(),
                 onGoUp = onGoUp,
+                onNavigate = onNavigatePath,
             )
         }
 
         state.error?.let { error ->
             item {
                 ErrorCard(error)
+            }
+        }
+
+        // 目录加载中且无旧数据(首进/切换未命中缓存): 骨架占位, 替代空白闪烁
+        if (state.loading && state.entries.isEmpty() && state.error == null) {
+            items(count = SKELETON_ROW_COUNT) {
+                SkeletonFileRow()
             }
         }
 
@@ -999,6 +1108,7 @@ private fun WorkspaceFilesPage(
                 onToggleSelect = { onToggleSelect(entry) },
                 onLongPressSelect = { onLongPressSelect(entry) },
                 onOpen = { onOpen(entry) },
+                onOpenWithSystemApp = { onOpenWithSystemApp(entry) },
                 onRename = onRename?.let { callback -> { callback(entry) } },
                 onDelete = { onDelete(entry) },
                 onDeletePermanently = { onDeletePermanently(entry) },
@@ -1006,6 +1116,62 @@ private fun WorkspaceFilesPage(
                 onShare = { onShare(entry) },
                 onMove = { onMove(entry) },
             )
+        }
+        }
+        // 已有旧列表时的刷新指示: overlay 顶部细条, 不参与布局 → 列表零位移
+        if (state.loading && state.entries.isNotEmpty() && state.error == null) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter),
+            )
+        }
+    }
+}
+
+/** 目录加载骨架行数: 约一屏可见量即可 */
+private const val SKELETON_ROW_COUNT = 6
+
+@Composable
+private fun SkeletonFileRow() {
+    // 静态灰块骨架(不做 shimmer 动画, 避免加载中的频闪观感)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.55f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.35f)
+                        .height(11.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)),
+                )
+            }
         }
     }
 }
@@ -1037,7 +1203,16 @@ private fun WorkspacePathBar(
     path: String,
     canGoUp: Boolean,
     onGoUp: () -> Unit,
+    onNavigate: (String) -> Unit,
 ) {
+    val segments = path.split('/').filter { it.isNotEmpty() }
+    val listState = rememberLazyListState()
+
+    // 目录变化时滚到最右(当前目录), 深目录下保证当前路径可见而不是停在开头
+    LaunchedEffect(path) {
+        listState.animateScrollToItem(segments.size * 2)
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -1049,15 +1224,66 @@ private fun WorkspacePathBar(
         ) {
             Icon(HugeIcons.ArrowTurnBackward, contentDescription = null)
         }
-        Text(
-            text = path.ifBlank { "/" },
+        LazyRow(
+            state = listState,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            // 根目录 crumb: 非当前路径时点击回根
+            item(key = "root") {
+                PathCrumb(
+                    text = "根目录",
+                    active = segments.isEmpty(),
+                    onClick = { onNavigate("") },
+                )
+            }
+            segments.forEachIndexed { index, seg ->
+                // 祖先段可直接跳转; 当前段(最后一段)高亮且不可点
+                val prefix = segments.take(index + 1).joinToString("/")
+                val isLast = index == segments.lastIndex
+                item(key = "sep-$index") {
+                    Text(
+                        text = "/",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+                item(key = prefix) {
+                    PathCrumb(
+                        text = seg,
+                        active = isLast,
+                        onClick = { onNavigate(prefix) },
+                    )
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun PathCrumb(
+    text: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = text,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (active) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = !active, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .widthIn(max = 160.dp),
+    )
 }
 
 @Composable
@@ -1146,6 +1372,7 @@ private fun WorkspaceFileCard(
     onToggleSelect: () -> Unit,
     onLongPressSelect: () -> Unit,
     onOpen: () -> Unit,
+    onOpenWithSystemApp: () -> Unit,
     onRename: (() -> Unit)? = null,
     onDelete: () -> Unit,
     onDeletePermanently: () -> Unit,
@@ -1221,11 +1448,12 @@ private fun WorkspaceFileCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    // 文件 = 时间｜占用；文件夹 = 时间丨n项（不统计占用，避免进目录卡顿）
+                    // 文件 = 时间|占用；文件夹 = 时间|n项（不统计占用，避免进目录卡顿）。
+                    // 分隔统一用半角 |（旧版目录/文件行各用不同码位的全角竖线 丨U+4E28 / ｜U+FF5C，字体 fallback 下宽度不一致）
                     text = if (entry.isDirectory) {
-                        "${entry.updatedAt.formatFileTime()} 丨 ${entry.childCount}项"
+                        "${entry.updatedAt.formatFileTime()} | ${entry.childCount}项"
                     } else {
-                        "${entry.updatedAt.formatFileTime()} ｜ ${entry.sizeBytes.fileSizeToString()}"
+                        "${entry.updatedAt.formatFileTime()} | ${entry.sizeBytes.fileSizeToString()}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1242,6 +1470,19 @@ private fun WorkspaceFileCard(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     if (!entry.isDirectory) {
+                        DropdownMenuItem(
+                            text = { Text("用其他应用打开") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = HugeIcons.Upload02,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenWithSystemApp()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.common_export)) },
                             leadingIcon = {
@@ -1339,59 +1580,51 @@ private fun SelectActionBar(
     onMove: () -> Unit,
     onTrash: () -> Unit,
     onDelete: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    // 浮动单行操作条(悬浮于 NavigationBar 上方, 不占 Scaffold innerPadding):
+    // 移动保持中性色; 回收站(可恢复的软删)与彻底删除用 error 容器色提示危险;
+    // "完成/退出"由顶栏承担, 这里不再重复退出按钮。
+    HorizontalFloatingToolbar(expanded = true) {
+        Text(
+            text = "已选 $selectedCount 项",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        Tooltip(
+            tooltip = { Text(if (selectedCount == totalCount) "取消全选" else "全选") },
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "已选 $selectedCount 项",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onSelectAll) {
-                    Text(if (selectedCount == totalCount) "取消全选" else "全选")
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(HugeIcons.Cancel01, contentDescription = "退出选择")
-                }
+            IconButton(onClick = onSelectAll) {
+                Icon(HugeIcons.CursorPointer01, contentDescription = null)
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        }
+        Tooltip(tooltip = { Text("移动") }) {
+            IconButton(onClick = onMove, enabled = selectedCount > 0) {
+                Icon(HugeIcons.Folder01, contentDescription = null)
+            }
+        }
+        Tooltip(tooltip = { Text("移入回收站") }) {
+            FilledTonalIconButton(
+                onClick = onTrash,
+                enabled = selectedCount > 0,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
             ) {
-                FilledTonalButton(
-                    onClick = onMove,
-                    enabled = selectedCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(HugeIcons.Folder01, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("移动", modifier = Modifier.padding(start = 6.dp))
-                }
-                FilledTonalButton(
-                    onClick = onTrash,
-                    enabled = selectedCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(HugeIcons.Delete01, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("回收站", modifier = Modifier.padding(start = 6.dp))
-                }
-                FilledTonalButton(
-                    onClick = onDelete,
-                    enabled = selectedCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(HugeIcons.Cancel01, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("彻底删除", modifier = Modifier.padding(start = 6.dp))
-                }
+                Icon(HugeIcons.Delete01, contentDescription = null)
+            }
+        }
+        Tooltip(tooltip = { Text("彻底删除") }) {
+            FilledTonalIconButton(
+                onClick = onDelete,
+                enabled = selectedCount > 0,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(HugeIcons.Delete02, contentDescription = null)
             }
         }
     }
