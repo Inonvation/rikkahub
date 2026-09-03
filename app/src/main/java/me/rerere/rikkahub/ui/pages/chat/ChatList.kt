@@ -24,6 +24,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -63,6 +64,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +80,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -100,7 +103,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.roundToInt
+import kotlin.time.Clock
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -159,6 +165,16 @@ private const val USER_SCROLL_COOLDOWN_MS = 400L
 // 必须 >= USER_SCROLL_COOLDOWN_MS：点按本身会刷新触点冷却（抬起刷新晚 click 回调约一帧），
 // 窗口短于冷却会在"窗口已到期、冷却未结束"之间留下无跟随盲区，漂移重新累积成小硬跳。
 private const val CONTENT_TOGGLE_FOLLOW_UNLOCK_MS = 600L
+
+// 贴底接管平滑化：重新武装跟随（用户滑回真正底部）后的第一发滚动改为动画滑贴，
+// 消除"松手/停留期间流式累积的高度差"被一次性 scrollToItem 硬跳的"到阈值突然吸到底部"感。
+// pending 标记待消费的平滑第一发；job 记录在途平滑滚动协程。
+// 状态须存活于跟随 effect 因 loadingState 变化重启之后，故用普通类 + remember（非 effect 局部），
+// 也不用 MutableState 包装——Job/pending 的读写不需要触发重组。
+private class ReengageGlideState {
+    var pending = false
+    var job: Job? = null
+}
 
 @Composable
 fun ChatList(
@@ -290,6 +306,18 @@ private fun ChatListNormal(
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     // 思考悬浮冻结条状态：折叠/展开的程序滚动与高度动画期间置 scrollingByProgram，抑制自动跟随抢滚
     val thinkingFreezeState = LocalThinkingFreezeState.current
+    // 贴底接管平滑化状态（见 ReengageGlideState）：跟随 effect 会因 loadingState 变化重启，
+    // 故放在函数级 remember，不放进 effect 局部。
+    val glideState = remember { ReengageGlideState() }
+    // 新消息入场动画锚点：晚于本页打开时刻创建的消息（用户发送 / AI 首条回复）才播放入场动画，
+    // 更早的历史消息（含打开页面时仍在流的消息）滚动回看零动画。键 conversation.id，切会话重新锚定。
+    // 不用"打开瞬间抓 id 快照"判定：历史消息在页面打开后仍可能异步加载，createdAt 早于开页时刻，
+    // 永不误播，比快照集合更稳。
+    val pageOpenedAt = remember(conversation.id) {
+        Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    }
+    // 已播放入场的节点锁存：LazyColumn 滚动回收重建后不重播（父级持有，随会话切换整体重置）
+    val entrancePlayed = remember(conversation.id) { mutableStateMapOf<Uuid, Boolean>() }
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -485,6 +513,10 @@ private fun ChatListNormal(
                         SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
                     if (!inProgress && !liveScrolling && pinned && settledAfterInteraction) {
                         userScrolledUp = false
+                        // 标记"下一发跟随要平滑"：本帧起列表回到底部、跟随将恢复，
+                        // 其间的流式内容已累积在下方，第一发即时 scrollToItem 会硬跳该差量
+                        // （"到阈值突然吸到底部"根因），改为动画滑贴过渡。
+                        glideState.pending = true
                     }
                     // 2b) 用户驱动的滚动手势刚结束且正停在底部 → 立即恢复跟随（不等冷却窗）。
                     //     冷却窗本是为防"内容突变恰好贴底"的误复位；这里用"用户亲手滚回底部"
@@ -494,6 +526,8 @@ private fun ChatListNormal(
                     if (scrollEnded && scrollWasUserDriven && !liveScrolling && pinned) {
                         userScrolledUp = false
                         lastUserScrollAt = SystemClock.elapsedRealtime()
+                        // 同上：用户亲手滑回底部恢复跟随，下一发跟随改动画滑贴（见路径 2 注释）
+                        glideState.pending = true
                     }
                     // 滚动停止后清空用户驱动标记，避免上一个手势的标记串到下一次程序滚动；
                     // 放在任何挂起点之前，保证即使后续被 cancel 也已清空。
@@ -526,11 +560,31 @@ private fun ChatListNormal(
                         // 跟随滚动期间置 scrollingByProgram：闩锁收集器据此不把程序滚动记作
                         // 用户交互（不置闩锁、不刷新 lastUserScrollAt），保证生成结束的自动折叠
                         // 不被"刚跟随过"误杀；collectLatest 取消在途滚动时 finally 复位。
-                        thinkingFreezeState?.scrollingByProgram = true
-                        try {
-                            state.scrollToItem(info.totalItemsCount - 1)
-                        } finally {
-                            thinkingFreezeState?.scrollingByProgram = false
+                        // 分流：重新武装后的第一发（glideState.pending）改动画滑贴——差量是停留
+                        // 期间流式累积的高度，即时 scrollToItem 会硬跳（"吸底"）；glide 挂在函数级
+                        // scope，不随 collectLatest 重启/取消，动画中途用户起手拖拽时由 foundation
+                        // 取消在途滚动、finally 复位标志；之后按 chunk 的即时小增量恢复原样不拖沓。
+                        val gliding = glideState.job?.isActive == true
+                        if (glideState.pending && !gliding) {
+                            glideState.pending = false
+                            glideState.job = scope.launch {
+                                thinkingFreezeState?.scrollingByProgram = true
+                                try {
+                                    // 目标取当前末项（底部占位 Spacer），动画距离自适应；
+                                    // 动画期间流式新内容若继续追加，收尾由后续即时跟随补上，差量极小。
+                                    state.animateScrollToItem(state.layoutInfo.totalItemsCount - 1)
+                                } finally {
+                                    thinkingFreezeState?.scrollingByProgram = false
+                                    glideState.job = null
+                                }
+                            }
+                        } else {
+                            thinkingFreezeState?.scrollingByProgram = true
+                            try {
+                                state.scrollToItem(info.totalItemsCount - 1)
+                            } finally {
+                                thinkingFreezeState?.scrollingByProgram = false
+                            }
                         }
                     }
                 }
@@ -736,6 +790,36 @@ private fun ChatListNormal(
                 },
             ) { visibleIndex, node ->
                 val index = visibleIndex + presetMessageCount
+                // 新消息入场动画：晚于页面打开时刻创建的消息（用户发送 / AI 首条回复）
+                // 播一次淡入+轻微上移；历史消息滚动回看零动画（createdAt 早于开页时刻）。
+                // 根因：用户/AI 新消息行首帧即完整渲染，突然出现无过渡；AI 首条回复从首个
+                // token 起组合，淡入与正文流式天然叠加（"气泡浮现→文字流出"）。
+                // 形态取舍：graphicsLayer 只改绘制不改测量尺寸，不触发 LazyColumn 锚点/间距
+                // 重排（避免滚动抖动）；Modifier 用 remember(node.id) 稳定化，不击穿 ChatMessage
+                // 子树的 Compose 跳过链（滚动性能约束见上方 remember(node) 注释）。
+                val isArrival = node.currentMessage.createdAt > pageOpenedAt
+                val entranceAlpha = remember(node.id) {
+                    Animatable(if (isArrival && entrancePlayed[node.id] != true) 0f else 1f)
+                }
+                LaunchedEffect(node.id) {
+                    if (isArrival && entranceAlpha.value < 1f) {
+                        // 先锁存再播放：滚动回收重建不重播
+                        entrancePlayed[node.id] = true
+                        entranceAlpha.animateTo(1f, tween(200))
+                    }
+                }
+                val entranceModifier = remember(node.id, isArrival) {
+                    if (isArrival) {
+                        Modifier.graphicsLayer {
+                            // alpha 在绘制期读取 Animatable，逐帧更新只重绘该层，不触发重组
+                            val a = entranceAlpha.value
+                            alpha = a
+                            translationY = (1f - a) * 6.dp.toPx()
+                        }
+                    } else {
+                        Modifier
+                    }
+                }
                 ListSelectableItem(
                         key = node.id,
                         onSelectChange = {
@@ -784,6 +868,7 @@ private fun ChatListNormal(
                         }
                         ChatMessage(
                             node = node,
+                            modifier = entranceModifier,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
                             loading = loading && index == conversation.messageNodes.lastIndex,
