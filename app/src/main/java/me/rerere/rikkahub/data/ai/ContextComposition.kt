@@ -207,17 +207,21 @@ fun estimateFallbackComposition(
  * @param systemText 最终 system 文本（含用户资料/工具 prompt/行为层等全部堆叠）
  * @param tools 装配完成的工具列表（GenerationHandler 规范化排序后的全量工具）
  * @param messages transforms 后最终发送列表；合成 system 消息自动剔除，避免与 [systemText] 重复计
+ * @param schemaTokensByName 调用方预计算好的工具 schema token 估算（key = 工具名）：
+ *   传入时跳过 [Tool.estimateSchemaTokens]（避免再次序列化完整 schema JSON），
+ *   供 GenerationHandler 在后台线程统一序列化/估算一次后复用；null 走原自算路径（单测兼容）。
  */
 fun buildContextComposition(
     systemText: String,
     tools: List<Tool>,
     messages: List<UIMessage>,
+    schemaTokensByName: Map<String, Int>? = null,
 ): ContextComposition {
     var builtin = 0
     var mcp = 0
     var skill = 0
     for (tool in tools) {
-        val tokens = tool.estimateSchemaTokens()
+        val tokens = schemaTokensByName?.get(tool.name) ?: tool.estimateSchemaTokens()
         when {
             tool.name.startsWith("mcp__") -> mcp += tokens
             tool.name.startsWith("use_skill") || tool.name.startsWith("skill_admin_") -> skill += tokens

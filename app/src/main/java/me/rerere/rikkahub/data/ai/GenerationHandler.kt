@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -57,6 +58,7 @@ import me.rerere.ai.util.retryBackoffDelay
 import me.rerere.ai.util.retryWithPolicy
 import me.rerere.rikkahub.data.repository.ContextCompositionRepository
 import me.rerere.rikkahub.data.ai.buildContextComposition
+import me.rerere.rikkahub.data.ai.estimateTokensByChars
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
 import me.rerere.rikkahub.data.ai.subagent.boundToolOutput
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -595,6 +597,22 @@ class GenerationHandler(
     ) {
         // 捕获最终 system 文本，供下方构成快照使用（buildList lambda 内不可见）
         var builtSystem: String? = null
+        // 工具 schema 的 JSON 序列化与 token/字符统计统一在后台线程做一次：
+        // Tool.parameters() 每次调用都会重新序列化完整 schema JSON，单请求内
+        // PromptMetrics 与上下文构成估算若各自序列化一遍，工具多、schema 大
+        // （MCP/管理模式）时是主线程上实打实的重复开销。统计结果两处复用。
+        val toolSchemaStats: Map<String, ToolSchemaStats> = withContext(Dispatchers.Default) {
+            tools.associate { tool ->
+                val schemaJson =
+                    runCatching { tool.parameters()?.toString().orEmpty() }.getOrDefault("")
+                tool.name to ToolSchemaStats(
+                    schemaChars = tool.name.length + tool.description.length + schemaJson.length,
+                    tokens = estimateTokensByChars(tool.name) +
+                        estimateTokensByChars(tool.description) +
+                        estimateTokensByChars(schemaJson),
+                )
+            }
+        }
         val internalMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
@@ -650,11 +668,7 @@ class GenerationHandler(
             PromptMetrics.lastSystemPromptChars = system.length
             PromptMetrics.lastApproxTokens = system.length / 4
             PromptMetrics.lastToolCount = tools.size
-            PromptMetrics.lastToolSchemaChars = runCatching {
-                tools.sumOf { tool ->
-                    tool.name.length + tool.description.length + (tool.parameters()?.toString()?.length ?: 0)
-                }
-            }.getOrDefault(0)
+            PromptMetrics.lastToolSchemaChars = toolSchemaStats.values.sumOf { it.schemaChars }
             PromptMetrics.lastToolFamilies = buildMap {
                 tools.groupBy { toolFamilyForMetrics(it.name) }.forEach { (family, familyTools) ->
                     put(family, familyTools.size)
@@ -709,15 +723,18 @@ class GenerationHandler(
         // 上下文构成快照：以本请求实际发送内容为准（system 全文 + 工具 schema 按
         // 系统/MCP/技能拆分 + transforms 后消息），供顶栏圆圈 / 浮窗构成详情 / 自动压缩
         // 共用一个数据源；同写入落库，app 重启后按会话恢复（见 ContextCompositionRepository）。
+        // 纯估算（schema 复用上方的单次序列化结果 + 全量文本字符统计）放到后台线程，
+        // 避免主线程在工具多/消息长时出现可感知的停顿；快照写回仍在调用协程（主线程）执行。
         if (conversationId != null) {
-            contextCompositionRepository.save(
-                conversationId.toString(),
+            val composition = withContext(Dispatchers.Default) {
                 buildContextComposition(
                     systemText = builtSystem.orEmpty(),
                     tools = tools,
                     messages = messagesToSend,
-                ),
-            )
+                    schemaTokensByName = toolSchemaStats.mapValues { it.value.tokens },
+                )
+            }
+            contextCompositionRepository.save(conversationId.toString(), composition)
         }
 
         var messages: List<UIMessage> = messages
@@ -1168,3 +1185,9 @@ private fun List<UIMessage>.markLastAssistantFinished(finished: Boolean): List<U
         }
     )
 }
+
+/** 单次请求内复用的工具 schema 统计：chars 供 PromptMetrics，tokens 供上下文构成快照。 */
+private data class ToolSchemaStats(
+    val schemaChars: Int,
+    val tokens: Int,
+)
