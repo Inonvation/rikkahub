@@ -185,7 +185,7 @@ class WorkspaceDetailVM(
         viewModelScope.launch {
             val area = state.value.area
             val errors = mutableListOf<String>()
-            entries.forEach { entry ->
+            dedupeNestedEntries(entries).forEach { entry ->
                 runCatching {
                     repository.trashFile(
                         id = id,
@@ -205,7 +205,7 @@ class WorkspaceDetailVM(
         viewModelScope.launch {
             val area = state.value.area
             val errors = mutableListOf<String>()
-            entries.forEach { entry ->
+            dedupeNestedEntries(entries).forEach { entry ->
                 runCatching {
                     repository.deleteFile(
                         id = id,
@@ -228,7 +228,7 @@ class WorkspaceDetailVM(
         viewModelScope.launch {
             val area = state.value.area
             val errors = mutableListOf<String>()
-            entries.forEach { entry ->
+            dedupeNestedEntries(entries).forEach { entry ->
                 val target = if (targetDir.isBlank()) entry.name else "$targetDir/${entry.name}"
                 // no-op：源已在目标目录
                 if (target == entry.path) return@forEach

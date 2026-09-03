@@ -1,14 +1,17 @@
 package me.rerere.workspace
 
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileSystems
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.Collections
 import java.util.concurrent.Executors
@@ -21,6 +24,9 @@ class WorkspaceFileSystem(
     private val config: WorkspaceConfig = WorkspaceConfig(),
 ) {
     private val trashJson = Json { ignoreUnknownKeys = true }
+
+    /** 回收站 manifest 读改写互斥锁：manifest 的「读→改→写」必须串行，否则并发删除会互相覆盖或写坏 JSON */
+    private val trashLock = Any()
 
     /** 快照 walk 的并行池：按顶层子目录并行；daemon 线程不阻止 JVM 退出 */
     private val walkPool = Executors.newFixedThreadPool(4) { runnable ->
@@ -139,8 +145,11 @@ class WorkspaceFileSystem(
     }
 
     private fun resolveConflict(file: File): File {
-        val stem = file.nameWithoutExtension
-        val ext = file.extension.let { if (it.isNotEmpty()) ".$it" else "" }
+        val name = file.name
+        // dot <= 0 视为无扩展名(隐藏文件 .gitignore 或纯名 README), 避免把名字切成空(与 uniqueManifestKey 约定一致)
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
         var n = 1
         var candidate: File
         do { candidate = File(file.parentFile, "$stem ($n)$ext"); n++ } while (candidate.exists())
@@ -182,7 +191,8 @@ class WorkspaceFileSystem(
     /**
      * 把文件/目录移入 workspace 根下的 `.trash`, 并写入 manifest 记录原路径与垃圾箱内名.
      *
-     * 目录需 [recursive] = true. 垃圾箱内重名时加时间戳前缀, manifest 原子写入, 避免恢复错乱.
+     * 目录需 [recursive] = true. 垃圾箱内重名时加时间戳前缀; 同路径被再次删除时用 "(n)" 后缀
+     * 区分 key, 避免覆盖旧记录使旧文件沦为孤儿。manifest 的读改写与文件移动在同一把锁内串行执行。
      */
     fun moveToTrash(root: File, path: String, recursive: Boolean = false): Boolean {
         require(path.isNotBlank() && path != ".") { "Refusing to trash workspace root" }
@@ -193,12 +203,22 @@ class WorkspaceFileSystem(
             require(recursive) { "Directory trash requires recursive = true" }
         }
         val trashDir = File(root, TRASH_DIR).apply { mkdirs() }
-        val manifest = readTrashManifest(trashDir)
-        val trashName = uniqueTrashName(trashDir, file.name)
-        val target = File(trashDir, trashName)
-        require(file.renameTo(target)) { "Failed to move $path into trash" }
-        writeTrashManifest(trashDir, manifest + (path to trashName))
-        return true
+        synchronized(trashLock) {
+            val manifest = readTrashManifest(trashDir)
+            val key = uniqueManifestKey(manifest, path)
+            val trashName = uniqueTrashName(trashDir, file.name)
+            val target = File(trashDir, trashName)
+            // 先落 manifest 再移动文件: 中途崩溃最多留下"幽灵条目"(list 时按磁盘校验自动剔除);
+            // 反过来先移动后写, 崩溃会留下既不可见也不可恢复的孤儿文件。
+            writeTrashManifest(trashDir, manifest + (key to trashName))
+            val moved = file.renameTo(target)
+            if (!moved) {
+                // 移动失败回滚 manifest, 保持文件在原位
+                writeTrashManifest(trashDir, manifest)
+            }
+            require(moved) { "Failed to move $path into trash" }
+            return true
+        }
     }
 
     /**
@@ -210,37 +230,47 @@ class WorkspaceFileSystem(
         require(trashRelativePath.isNotBlank() && trashRelativePath != ".") { "Invalid trash path: $trashRelativePath" }
         val trashDir = File(root, TRASH_DIR)
         if (!trashDir.exists()) return false
-        val manifest = readTrashManifest(trashDir)
-        val trashName = manifest[trashRelativePath] ?: return false
-        val trashFile = File(trashDir, trashName)
-        if (!trashFile.exists()) return false
-        val original = resolvePath(root, trashRelativePath)
-        original.parentFile?.mkdirs()
-        val restored = if (!original.exists()) original else resolveConflict(original)
-        require(trashFile.renameTo(restored)) { "Failed to restore $trashRelativePath" }
-        writeTrashManifest(trashDir, manifest - trashRelativePath)
-        return true
+        synchronized(trashLock) {
+            val manifest = readTrashManifest(trashDir)
+            val trashName = manifest[trashRelativePath] ?: return false
+            val trashFile = File(trashDir, trashName)
+            if (!trashFile.exists()) {
+                // 幽灵条目(文件已不在): 顺手清理, 避免一直占着 key
+                writeTrashManifest(trashDir, manifest - trashRelativePath)
+                return false
+            }
+            val original = resolvePath(root, trashRelativePath)
+            original.parentFile?.mkdirs()
+            val restored = if (!original.exists()) original else resolveConflict(original)
+            if (!trashFile.renameTo(restored)) return false
+            writeTrashManifest(trashDir, manifest - trashRelativePath)
+            return true
+        }
     }
 
-    /** 列出垃圾箱内文件, 展示原路径与名称(结合 manifest 与磁盘实际校验). */
+    /** 列出垃圾箱内文件, 展示原路径与名称(结合 manifest 与磁盘实际校验, 并收养孤儿文件). */
     fun listTrash(root: File): List<WorkspaceFileEntry> {
         val trashDir = File(root, TRASH_DIR)
         if (!trashDir.exists()) return emptyList()
-        val manifest = readTrashManifest(trashDir)
-        return manifest.entries
-            .mapNotNull { (originalPath, trashName) ->
-                val file = File(trashDir, trashName)
-                if (!file.exists()) {
-                    null
-                } else {
-                    file.toEntry(root).copy(
-                        path = originalPath,
-                        name = originalPath.substringAfterLast('/'),
-                    )
+        synchronized(trashLock) {
+            val manifest = readTrashManifest(trashDir)
+            // 收养孤儿: 磁盘上有但 manifest 未登记的文件(旧版并发丢更新/崩溃遗留), 补录使其可见可恢复
+            val reconciled = adoptOrphanFiles(trashDir, manifest)
+            return reconciled.entries
+                .mapNotNull { (originalPath, trashName) ->
+                    val file = File(trashDir, trashName)
+                    if (!file.exists()) {
+                        null
+                    } else {
+                        file.toEntry(root).copy(
+                            path = originalPath,
+                            name = originalPath.substringAfterLast('/'),
+                        )
+                    }
                 }
-            }
-            .sortedBy { it.path }
-            .take(config.maxListEntries)
+                .sortedBy { it.path }
+                .take(config.maxListEntries)
+        }
     }
 
     /** 永久删除垃圾箱内文件(从磁盘与 manifest 移除). 返回是否成功. */
@@ -248,17 +278,19 @@ class WorkspaceFileSystem(
         require(trashRelativePath.isNotBlank() && trashRelativePath != ".") { "Invalid trash path: $trashRelativePath" }
         val trashDir = File(root, TRASH_DIR)
         if (!trashDir.exists()) return false
-        val manifest = readTrashManifest(trashDir)
-        val trashName = manifest[trashRelativePath] ?: return false
-        val trashFile = File(trashDir, trashName)
-        val deleted = if (trashFile.isDirectory) {
-            trashFile.deleteRecursively()
-        } else {
-            trashFile.delete()
+        synchronized(trashLock) {
+            val manifest = readTrashManifest(trashDir)
+            val trashName = manifest[trashRelativePath] ?: return false
+            val trashFile = File(trashDir, trashName)
+            val deleted = if (trashFile.isDirectory) {
+                trashFile.deleteRecursively()
+            } else {
+                trashFile.delete()
+            }
+            if (!deleted) return false
+            writeTrashManifest(trashDir, manifest - trashRelativePath)
+            return true
         }
-        if (!deleted) return false
-        writeTrashManifest(trashDir, manifest - trashRelativePath)
-        return true
     }
 
     fun glob(root: File, pattern: String, path: String = ""): List<WorkspaceFileEntry> {
@@ -411,7 +443,59 @@ class WorkspaceFileSystem(
     }
 
     /**
-     * 读取垃圾箱 manifest. 文件不存在视为空; 存在但损坏时抛错, 避免静默覆盖造成数据丢失.
+     * 生成 manifest 中不冲突的 key(原相对路径)。同路径被再次删除时用 " (n)" 后缀区分
+     * (与 [resolveConflict] 一致, 后缀加在扩展名前), 例如 `sub/a.txt` 已存在则返回 `sub/a (1).txt`,
+     * 避免旧条目被覆盖、旧文件沦为孤儿。
+     */
+    private fun uniqueManifestKey(manifest: Map<String, String>, path: String): String {
+        if (!manifest.containsKey(path)) return path
+        val lastSlash = path.lastIndexOf('/')
+        val dir = if (lastSlash >= 0) path.substring(0, lastSlash + 1) else ""
+        val name = path.substring(lastSlash + 1)
+        // dot == 0 视为隐藏文件(如 .gitignore)无扩展名, 避免把名字切空
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var n = 1
+        var candidate: String
+        do {
+            candidate = "$dir$stem ($n)$ext"
+            n++
+        } while (manifest.containsKey(candidate))
+        return candidate
+    }
+
+    /** 是否为 manifest 及其衍生物(临时文件、损坏备份), 用于扫描垃圾箱时排除 */
+    private fun isManifestArtifact(name: String): Boolean =
+        name == TRASH_MANIFEST || name.startsWith("$TRASH_MANIFEST.")
+
+    /** 从垃圾箱内名尽力还原原文件名: 剥掉 "<毫秒时间戳>_" 前缀 */
+    private fun recoverOriginalName(trashName: String): String =
+        trashName.replaceFirst(Regex("^\\d{13,}_"), "")
+
+    /**
+     * 收养孤儿文件: 磁盘上存在、manifest 未登记的文件(旧版并发丢更新 / 崩溃遗留 / manifest 损坏隔离后)
+     * 补录进 manifest, 使其在回收站可见、可恢复。原路径已丢失, 只能用文件名尽力还原(丢失目录层级)。
+     * 有新增时持久化, 保证后续 restore/delete 能按 key 命中。
+     */
+    private fun adoptOrphanFiles(trashDir: File, manifest: Map<String, String>): Map<String, String> {
+        val knownNames = manifest.values.toSet()
+        val orphans = trashDir.listFiles().orEmpty()
+            .filter { !isManifestArtifact(it.name) }
+            .filter { (it.isFile || it.isDirectory) && it.name !in knownNames }
+        if (orphans.isEmpty()) return manifest
+        var result = manifest
+        for (orphan in orphans) {
+            val key = uniqueManifestKey(result, recoverOriginalName(orphan.name))
+            result = result + (key to orphan.name)
+        }
+        writeTrashManifest(trashDir, result)
+        return result
+    }
+
+    /**
+     * 读取垃圾箱 manifest. 文件不存在视为空; 损坏时不再抛错阻断回收站, 而是隔离原文件
+     * (重命名为 .corrupt-<ts> 保留现场) 后按空处理, 孤儿文件由 [adoptOrphanFiles] 兜底收养。
      */
     private fun readTrashManifest(trashDir: File): Map<String, String> {
         val manifestFile = File(trashDir, TRASH_MANIFEST)
@@ -419,19 +503,37 @@ class WorkspaceFileSystem(
         return try {
             trashJson.decodeFromString(manifestFile.readText())
         } catch (e: Exception) {
-            throw IllegalStateException("Trash manifest corrupted: ${manifestFile.path}", e)
+            manifestFile.renameTo(File(trashDir, "$TRASH_MANIFEST.corrupt-${System.currentTimeMillis()}"))
+            emptyMap()
         }
     }
 
-    /** 原子写 manifest: 先写临时文件再 rename, 避免中途崩溃留下半截 JSON */
+    /** 原子写 manifest: 写唯一临时文件并 fsync 后原子替换, 避免并发/崩溃留下半截 JSON */
     private fun writeTrashManifest(trashDir: File, manifest: Map<String, String>) {
         val manifestFile = File(trashDir, TRASH_MANIFEST)
-        val tmp = File(trashDir, "$TRASH_MANIFEST.tmp")
         val content = trashJson.encodeToString(manifest)
-        tmp.writeText(content)
-        if (!tmp.renameTo(manifestFile)) {
-            manifestFile.writeText(content)
-            tmp.delete()
+        val tmp = File(trashDir, "$TRASH_MANIFEST.${System.currentTimeMillis()}.tmp")
+        try {
+            FileOutputStream(tmp).use { out ->
+                out.write(content.toByteArray(StandardCharsets.UTF_8))
+                try {
+                    out.fd.sync()
+                } catch (ignored: Exception) {
+                    // fsync 失败(个别文件系统不支持)不阻断写入, 仅损失崩溃后的持久性保证
+                }
+            }
+            try {
+                Files.move(
+                    tmp.toPath(),
+                    manifestFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (e: AtomicMoveNotSupportedException) {
+                Files.move(tmp.toPath(), manifestFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
         }
     }
 
