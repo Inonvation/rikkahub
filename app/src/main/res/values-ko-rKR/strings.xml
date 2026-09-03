@@ -609,6 +609,8 @@
   <string name="search_page_sort_oldest">오래된순</string>
   <string name="search_page_sort_relevance">관련성</string>
   <string name="search_page_title">메시지 검색</string>
+  <string name="search_page_scope_current_assistant">현재 어시스턴트</string>
+  <string name="search_page_scope_all_assistants">모든 어시스턴트</string>
   <string name="search_page_untitled">제목 없음</string>
   <string name="search_picker_title">검색 설정</string>
   <string name="select_and_copy">선택 및 복사</string>

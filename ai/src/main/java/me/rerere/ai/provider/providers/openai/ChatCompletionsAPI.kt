@@ -101,6 +101,11 @@ class ChatCompletionsAPI(
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .configureReferHeaders(providerSetting.baseUrl)
+            .apply {
+                if (providerSetting.baseUrl.toHttpUrl().host == "opencode.ai") {
+                    params.sessionId?.let { header("x-opencode-session", it) }
+                }
+            }
         val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
@@ -156,6 +161,11 @@ class ChatCompletionsAPI(
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
+            .apply {
+                if (providerSetting.baseUrl.toHttpUrl().host == "opencode.ai") {
+                    params.sessionId?.let { header("x-opencode-session", it) }
+                }
+            }
         val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
         Log.d(TAG, "streamText: ${json.encodeToString(requestBody)}")

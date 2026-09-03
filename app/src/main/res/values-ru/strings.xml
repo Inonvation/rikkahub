@@ -609,6 +609,8 @@
   <string name="search_page_sort_oldest">Сначала старые</string>
   <string name="search_page_sort_relevance">По релевантности</string>
   <string name="search_page_title">Поиск сообщений</string>
+  <string name="search_page_scope_current_assistant">Текущий ассистент</string>
+  <string name="search_page_scope_all_assistants">Все ассистенты</string>
   <string name="search_page_untitled">Без названия</string>
   <string name="search_picker_title">Поиск настроек</string>
   <string name="select_and_copy">Выделить и скопировать</string>

@@ -2,6 +2,8 @@
 
 本日志记录每次上游同步的分类清单与落地结果。同步流程见 `AGENTS.md`「上游同步流程（禁止直接 merge）」：不直接 merge，按「无需合并 / 可放心合并 / 需本地化手动同步」三分类逐条落地。
 
+> **关于 `git rev-list HEAD..upstream/master` 计数的说明（2026-09-03 复核）**：本 fork 一律手工移植、不 cherry-pick 上游原 commit，故本地 `master` 与 `upstream/master` 永不共享祖先。即使某批提交的功能已全部落地，`git rev-list HEAD..upstream/master` 仍会数出这些上游 commit 为「待同步」。判断「是否真有待合并」要看**功能代码是否已在本地 HEAD**（见下方各次同步的分类与落地方式），而不是看这个计数。另注意：本地 `master` 非 `upstream/master` 祖先，且 `oauth/`、`knowledge/` 是本 fork 私有模块（上游从未有），切勿 `git merge/reset --hard upstream/master`，否则会误删这两模块。
+
 ## 2026-08-31 — 第四次同步（16 个新提交，2.4.16 批次，上游待同步清零）
 
 ### A. 无需合并（2 个）
@@ -141,3 +143,26 @@
 ### 验证
 
 `:app:compileDebugKotlin` BUILD SUCCESSFUL（唯一警告为既有 navigation3 opt-in 提示）。
+
+## 2026-09-03 — 第五次同步（最近两天 09-02~09-03，4 个提交；上游自 08-26 后推进）
+
+> 本次巡检发现：本工作树的 `upstream/master` 远程跟踪 ref 因沙箱限制未随 `git fetch` 推进，一度停留在 `170a612e`（2.4.13）。09-03 重新 fetch 后上游实际 tip 为 `5cdab947`（快进后代），新增 21 个提交（08-27~09-03）。其中 08-27~08-31 的提交已在历次同步中按功能落地（见上文）；真正待处理的是最近两天的 4 个。注：`upstream/master` ref 仍显示陈旧值，但提交对象已就位，分析以 hash 为准。
+
+### A. 已同步（3 个，验证通过）
+
+| 提交 | 内容 | 落地方式 | 验证 |
+|---|---|---|---|
+| `5cdab947` | opencode 端点附加 `x-opencode-session` 头 | `ai/ChatCompletionsAPI.kt` 的 `generateText`/`streamText` 两处在 `.configureReferHeaders().build()` 前加 `.apply{}`（`opencode.ai` 时附带 `params.sessionId`）；本地 `params.sessionId`/`toHttpUrl()` 已具备，`authenticate()` 保留既有 header | `:ai:compileDebugKotlin` BUILD SUCCESSFUL |
+| `0f2c495b` | 搜索支持当前/全部助手范围切换 | `SearchVM.kt` 整体重写为 `Channel<SearchRequest>` + `SettingsStore.settingsFlow` 监听当前助手（`getCurrentAssistant().id` 变更即刷新）、`MessageSearchScope` 枚举 + 分段按钮；`ConversationRepository.searchMessages` 加 `assistantId: Uuid?`、`MessageFtsManager.search` 加 `assistantId: String?` 与 FTS SQL `assistant_id` 过滤；`SearchPage.kt` 插 `SingleChoiceSegmentedButtonRow` UI；6 语言补 `search_page_scope_*` 两 key | `:app:compileDebugKotlin` BUILD SUCCESSFUL |
+| `4b36640a` | 恢复图片选择器文件浏览入口（撤回 `d3a53e0a`） | 本地等价点撤回 PickVisualMedia：`UIAvatar`/`BackgroundPicker` 单图 `PickVisualMedia()`→`GetContent()`；`ImgGenPage`/`ChatPage`/`GroupDiscussionPage` 多图 `PickMultipleVisualMedia()`→`GetMultipleContents()`；`launch(PickVisualMediaRequest(ImageOnly))`→`launch("image/*")`；删除因此闲置的 `PickVisualMediaRequest` import。`SettingProviderPage` 上游未动，保持 `PickVisualMedia` | `:app:compileDebugKotlin` BUILD SUCCESSFUL |
+
+### B. 暂缓（1 个，架构冲突，待拍板）
+
+| 提交 | 内容 | 暂缓原因 |
+|---|---|---|
+| `540b9dfa` | 备份一致性快照 + 启动安全恢复 | **本地备份/DB 架构与上游不兼容，禁止直接移植**：① 本地 DB schema 为 v47（`Migration_46_47`），上游新增 `AppDatabaseFactory` 仅列 `Migration_6_7..15_16`（v16）；照搬会丢失 v17~v47 全部迁移，Room 启动即崩溃。② 本地 `data/sync/` 是自研复杂备份体系（`BackupSplitter`/`BackupPreview`/`importer/`/`s3/`/`webdav/`/`SyncManager` 等），上游新增的 `BackupManager`/`DatabaseBackup`/`PendingRestore` 是另一套 zip 归档设计，会与本地重复冲突。③ `S3Sync`/`WebDavSync` 本地目录结构（含 `s3/` `webdav/` 子包）与上游扁平重写（-297/-318 行）不对齐。该提交 interdependent（RikkaHubApp 启动调用 `BackupManager.applyPendingRestore`），需专项深移植或整体跳过，不在本次执行。 |
+
+### 备注
+
+- 本次 3 条均为手动移植（未 cherry-pick 上游原 commit），符合 fork 工作流；`upstream/master` 祖先关系仍不包含这些，属预期。
+- `540b9dfa` 如需同步，建议单独立项：先确认本地备份体系是否要吸收上游的"一致性快照 + 启动恢复"能力，再按本地 schema（补齐全部迁移）重写 `AppDatabaseFactory`/`SQLiteConfiguration`，并对接本地 `BackupSplitter`/`importer` 而非引入上游独立 `BackupManager`。

@@ -609,6 +609,8 @@
   <string name="search_page_sort_oldest">古い順</string>
   <string name="search_page_sort_relevance">関連度</string>
   <string name="search_page_title">メッセージを検索</string>
+  <string name="search_page_scope_current_assistant">現在のアシスタント</string>
+  <string name="search_page_scope_all_assistants">すべてのアシスタント</string>
   <string name="search_page_untitled">無題</string>
   <string name="search_picker_title">検索設定</string>
   <string name="select_and_copy">選択コピー</string>

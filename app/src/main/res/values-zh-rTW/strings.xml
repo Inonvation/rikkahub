@@ -615,6 +615,8 @@
   <string name="search_page_sort_oldest">最舊優先</string>
   <string name="search_page_sort_relevance">相關性</string>
   <string name="search_page_title">搜尋訊息</string>
+  <string name="search_page_scope_current_assistant">目前助手</string>
+  <string name="search_page_scope_all_assistants">全部助手</string>
   <string name="search_page_untitled">無標題</string>
   <string name="search_picker_title">搜尋設定</string>
   <string name="select_and_copy">選擇複製</string>

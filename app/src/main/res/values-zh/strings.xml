@@ -745,6 +745,8 @@
   <string name="search_page_sort_oldest">最旧优先</string>
   <string name="search_page_sort_relevance">相关性</string>
   <string name="search_page_title">搜索消息</string>
+  <string name="search_page_scope_current_assistant">当前助手</string>
+  <string name="search_page_scope_all_assistants">所有助手</string>
   <string name="search_page_untitled">无标题</string>
   <string name="search_picker_title">搜索设置</string>
   <string name="search_picker_primary">主服务商</string>
