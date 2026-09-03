@@ -111,6 +111,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.input.pointer.pointerInput
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlin.math.roundToInt
@@ -169,7 +175,7 @@ import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderSettings
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
-import me.rerere.rikkahub.ui.components.ai.ContextStatusPopover
+import me.rerere.rikkahub.ui.components.ai.ContextStatusOverlay
 import me.rerere.rikkahub.ui.components.ai.AssistantPickerSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.ui.components.ai.autoCompressResetThreshold
@@ -194,6 +200,7 @@ import me.rerere.rikkahub.ui.components.message.LocalScrollChatToBottom
 import me.rerere.rikkahub.ui.components.message.LocalScrollThinkingHeaderToPin
 import me.rerere.rikkahub.ui.components.message.ThinkingFreezeState
 import me.rerere.rikkahub.ui.components.message.ThinkingFrozenBar
+import me.rerere.rikkahub.ui.components.ui.barHazeBlurStyle
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -546,6 +553,29 @@ private fun ChatPageContent(
     // 点击助手名称弹出助手选择器（切换助手后新开聊天窗口）
     var showAssistantPicker by remember { mutableStateOf(false) }
     val hazeState = rememberHazeState()
+
+    // 上下文状态浮窗（页内覆盖层，见 ContextStatusOverlay）：
+    // 状态与唯一 toggle 入口都收敛在这里，配合消抖门闩杜绝连点闪烁——
+    // 旧 Popup 实现里锚点点击会同时触发 Popup dismiss 与图标 toggle 两路写回，
+    // 快速连点时延迟 dismiss 会落在重新打开之后把浮窗关掉（闪烁根因）；
+    // 页内覆盖层由全窗点击拦截层 + 图标 toggle 单一驱动，300ms 内连点只响应第一次。
+    var showContextPopover by remember { mutableStateOf(false) }
+    var lastContextPopoverToggleAt by remember { mutableLongStateOf(0L) }
+    val contextPopoverTransition = remember { MutableTransitionState(false) }
+    // 锚点圆圈的实际高度：面板顶部对齐图标底边（图标在顶栏 actions 中垂直居中，
+    // 其底边 = 顶栏底部向上偏移半个高度差，直接用图标实测高度最稳）
+    var contextAnchorHeightPx by remember { mutableIntStateOf(0) }
+    fun toggleContextPopover() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastContextPopoverToggleAt < 300L) return
+        lastContextPopoverToggleAt = now
+        showContextPopover = !showContextPopover
+    }
+    fun dismissContextPopover() {
+        if (!showContextPopover) return
+        lastContextPopoverToggleAt = android.os.SystemClock.elapsedRealtime()
+        showContextPopover = false
+    }
     // 思考冻结栏：折叠按钮被顶栏遮住时，在顶栏下方悬浮显示便于折叠
     val thinkingFreezeState = remember { ThinkingFreezeState() }
 
@@ -601,7 +631,7 @@ private fun ChatPageContent(
         }
     }
     val assistant = setting.getCurrentAssistant()
-    val tokenStats = computeTokenStats(conversation, setting)
+    val tokenStats = computeTokenStats(conversation, setting, generating = loadingJob != null)
     val effectiveContextTokenLimit = tokenStats.contextTokenLimit
     val totalTokens = tokenStats.totalTokens
     val usagePercent = tokenStats.usagePercent
@@ -741,48 +771,30 @@ private fun ChatPageContent(
             )
         }
 
-        // 消息列表保持全高，输入栏悬浮在上层：消息可以滚到输入栏背后参与背景模糊；
+        // 消息列表保持全高，顶栏/输入栏悬浮在上层：消息可以滚到两栏背后参与背景模糊；
         // 列表底部保留输入栏高度 + 间距的 content padding，最后一条消息仍能完整滚动到输入栏上方，
         // 加载指示器 / 建议条 / 知识库徽章也不会紧贴输入栏边缘。
         var inputBarHeightPx by remember { mutableIntStateOf(0) }
         val density = LocalDensity.current
+        // 顶栏高度是确定值（状态栏 inset + TopAppBar 固定 64dp）：预置初值让首帧就让区到位，
+        // 消除内容先贴到状态栏再跳下来的闪帧；onSizeChanged 实测值随后覆盖（数值相同则无感）
+        // 注意 statusBars 属性是 @Composable，只能在组合期读取，不能放进 remember 计算块
+        val statusBarTopPx = WindowInsets.statusBars.getTop(density)
+        var topBarHeightPx by remember {
+            mutableIntStateOf(
+                statusBarTopPx + with(density) { 64.dp.toPx() }.roundToInt()
+            )
+        }
         val inputBarHeight = with(density) { inputBarHeightPx.toDp() }
+        val topBarHeight = with(density) { topBarHeightPx.toDp() }
 
-        Column(
+        // 顶栏模糊（对齐输入栏）：消息列表全高铺底，顶栏悬浮其上做毛玻璃，
+        // 消息滚动到顶栏后方即参与背景模糊；覆盖层容器不拦截触摸，列表手势照常穿透
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding(),
         ) {
-            TopBar(
-                settings = setting,
-                conversation = conversation,
-                // 上下文用量统计在 ChatPageContent 已算好，直接传入（口径单源，见 computeTokenStats）
-                tokenStats = tokenStats,
-                previewMode = previewMode,
-                // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。
-                // 不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
-                modeSwitchEnabled = !(loadingJob?.isActive == true) &&
-                    conversation.currentMessages.none { it.role == MessageRole.USER },
-                onSwitchMode = { ref ->
-                    vm.updateConversation(conversation.copy(mode = ref))
-                    vm.saveConversationAsync()
-                },
-                onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
-                onNewChat = {
-                    navigateToChatPage(navController)
-                },
-                onClickMenu = {
-                    previewMode = !previewMode
-                },
-                onUpdateTitle = {
-                    vm.updateTitle(it)
-                },
-                navController = navController,
-                onCompressClick = {
-                    showCompressDialog = true
-                },
-            )
-
             CompositionLocalProvider(
                 LocalThinkingFreezeState provides thinkingFreezeState,
                 // 提供滚动折叠：吸顶条点击时按像素量平滑滚动列表（上滚收起思考 / 下滚解除吸顶）。
@@ -853,13 +865,8 @@ private fun ChatPageContent(
                     }
                 },
             ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .onGloballyPositioned { coords ->
-                            thinkingFreezeState.topBarBottomY = coords.positionInWindow().y.roundToInt()
-                        }
-                ) {
+                // 底层：消息列表占满全高（顶栏悬浮其上），顶部让区走列表 contentPadding
+                Box(modifier = Modifier.fillMaxSize()) {
                     AnimatedContent(
                         targetState = conversation.id,
                         transitionSpec = {
@@ -868,7 +875,7 @@ private fun ChatPageContent(
                         label = "ChatContent",
                     ) {
                         ChatList(
-                            innerPadding = PaddingValues(top = 0.dp, bottom = inputBarHeight + 16.dp),
+                            innerPadding = PaddingValues(top = topBarHeight, bottom = inputBarHeight + 16.dp),
                             conversation = conversation,
                             state = chatListState,
                             isUserInteracting = listInteracting,
@@ -957,7 +964,12 @@ private fun ChatPageContent(
                     ChatFontProvider(displaySetting = setting.displaySetting) {
                         ThinkingFrozenBar(
                             state = thinkingFreezeState,
-                            modifier = Modifier.align(Alignment.TopCenter),
+                            hazeState = hazeState,
+                            blurEnabled = setting.displaySetting.enableBlurEffect,
+                            // 列表容器已全高（顶边在窗口顶部）：吸顶条下移到顶栏正下方
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = topBarHeight),
                         )
                     }
 
@@ -977,6 +989,46 @@ private fun ChatPageContent(
                         )
                     }
                 }
+
+                // 顶层：悬浮顶栏（毛玻璃背景，同输入栏）。
+                // 高度上报给列表做顶部让区；底边即思考吸顶的冻结线（与旧布局的列表容器顶边一致）
+                TopBar(
+                    settings = setting,
+                    conversation = conversation,
+                    // 上下文用量统计在 ChatPageContent 已算好，直接传入（口径单源，见 computeTokenStats）
+                    tokenStats = tokenStats,
+                    previewMode = previewMode,
+                    // 模式在用户发送第一条 USER 消息前可切换，发送后锁定仅展示。
+                    // 不以 messageNodes 是否为空判断，避免助手初始消息（presetMessages）被当成已发送
+                    modeSwitchEnabled = !(loadingJob?.isActive == true) &&
+                        conversation.currentMessages.none { it.role == MessageRole.USER },
+                    onSwitchMode = { ref ->
+                        vm.updateConversation(conversation.copy(mode = ref))
+                        vm.saveConversationAsync()
+                    },
+                    onOpenLeftDrawer = { onLeftDrawerOpenChange(true) },
+                    onNewChat = {
+                        navigateToChatPage(navController)
+                    },
+                    onClickMenu = {
+                        previewMode = !previewMode
+                    },
+                    onUpdateTitle = {
+                        vm.updateTitle(it)
+                    },
+                    onCompressClick = {
+                        showCompressDialog = true
+                    },
+                    onToggleContextPopover = { toggleContextPopover() },
+                    onContextAnchorHeight = { contextAnchorHeightPx = it },
+                    hazeState = hazeState,
+                    modifier = Modifier
+                        .onSizeChanged { topBarHeightPx = it.height }
+                        .onGloballyPositioned { coords ->
+                            thinkingFreezeState.topBarBottomY =
+                                (coords.positionInWindow().y + coords.size.height).roundToInt()
+                        },
+                )
             }
         }
 
@@ -1182,6 +1234,32 @@ private fun ChatPageContent(
                     showPromptOptimizeSheet = false
                 },
                 onDismiss = { showPromptOptimizeSheet = false },
+            )
+        }
+
+        // 上下文状态浮窗（页内覆盖层）：置于根 Box 末尾 → 绘制在最上层（含输入栏之上）。
+        // 展开状态由上层 toggle 门闩驱动；退出动画期间保留组成，播完由 currentState 归位移除
+        contextPopoverTransition.targetState = showContextPopover
+        if (contextPopoverTransition.currentState || contextPopoverTransition.targetState) {
+            ContextStatusOverlay(
+                transition = contextPopoverTransition,
+                onDismiss = { dismissContextPopover() },
+                settings = setting,
+                conversation = conversation,
+                contextTotalTokens = tokenStats.totalTokens,
+                contextUsagePercent = tokenStats.usagePercent,
+                contextLimitLabel = formatContextLength(tokenStats.contextTokenLimit),
+                onCompressClick = {
+                    dismissContextPopover()
+                    showCompressDialog = true
+                },
+                onOpenConsole = {
+                    dismissContextPopover()
+                    navController.navigate(Screen.ManagementDashboard)
+                },
+                hazeState = hazeState,
+                blurEnabled = setting.displaySetting.enableBlurEffect,
+                anchorHeight = contextAnchorHeightPx,
             )
         }
     }
@@ -1409,32 +1487,56 @@ private fun TopBar(
     tokenStats: TokenStats,
     previewMode: Boolean,
     modeSwitchEnabled: Boolean,
+    hazeState: HazeState,
     onSwitchMode: (String?) -> Unit,
     onOpenLeftDrawer: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onUpdateTitle: (String) -> Unit,
-    navController: Navigator,
     onCompressClick: () -> Unit,
+    onToggleContextPopover: () -> Unit,
+    onContextAnchorHeight: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val titleState = useEditState<String> {
         onUpdateTitle(it)
     }
     val hapticController = rememberHaptic()
-    var showContextPopover by remember { mutableStateOf(false) }
 
     // 上下文用量：由 ChatPageContent 计算一次传入，顶栏圆圈与浮窗共用同一份统计，避免两处口径不一致
     val totalTokens = tokenStats.totalTokens
     val usagePercent = tokenStats.usagePercent
-    val tokenText = when {
+    // 无 provider 实测校准锚时加 "~" 前缀明示估算（输出首块后校准为实测，前缀消失，
+    // 见 computeTokenStats.measured）；"~0" 不会出现（空会话不显示数字）
+    val tokenText = (if (tokenStats.measured) "" else "~") + when {
         totalTokens >= 1000 -> "%.1fk".format(totalTokens / 1000f)
         else -> totalTokens.toString()
     }
 
+    // 顶栏毛玻璃：与输入栏共用同一套样式（Material3 tint + 12dp 半径，见 barHazeBlurStyle）。
+    // 不加底边渐隐：冻结条玻璃带与顶栏同强度相接，钉住时连成一张连续的玻璃面，
+    // 若顶栏底边渐隐到透明，交界处会出现"清晰细缝"（详见 ThinkingFrozenBar 的注释）
+    val topBarHazeStyle = barHazeBlurStyle()
+
     TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+        modifier = modifier
+            // 消费点击/长按，防止穿透到顶栏后方被模糊的消息；拖动不消费，仍可透过顶栏滚动列表
+            .pointerInput(Unit) { detectTapGestures { } }
+            .then(
+                if (settings.displaySetting.enableBlurEffect) Modifier.hazeBlur(
+                    input = HazeInput.Sources(hazeState),
+                    style = topBarHazeStyle,
+                )
+                else Modifier
+            ),
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = if (settings.displaySetting.enableBlurEffect) {
+                Color.Transparent
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
         navigationIcon = {
             IconButton(
                 onClick = {
@@ -1477,58 +1579,42 @@ private fun TopBar(
             }
         },
         actions = {
-            // 上下文用量圆圈：点击从图标位置展开状态浮窗（上下文占用/指标/全会话用量/管理控制台）
-            ContextStatusPopover(
-                expanded = showContextPopover,
-                // 点击锚点圆圈时 Popup 的 dismiss 会与 IconButton 的 onClick 竞争：
-                // dismiss 先设 expanded=false，onClick 再 toggle 会误判成 true（浮窗关不掉）。
-                // 用协程延迟 dismiss，让 onClick 先基于原始状态完成切换（同 StudyDetailActions 的处理）。
-                onDismiss = { scope.launch { showContextPopover = false } },
-                settings = settings,
-                conversation = conversation,
-                contextTotalTokens = totalTokens,
-                contextUsagePercent = usagePercent,
-                contextLimitLabel = formatContextLength(tokenStats.contextTokenLimit),
-                onCompressClick = {
-                    showContextPopover = false
-                    onCompressClick()
+            // 上下文用量圆圈：点击从图标位置展开状态浮窗（上下文占用/指标/全会话用量/管理控制台）。
+            // toggle 唯一入口收敛在 ChatPageContent（消抖门闩防连点闪烁）；
+            // 高度上报给覆盖层做锚定（面板顶部 = 图标底边）。
+            // 浮窗打开时本图标被全窗点击拦截层罩住：点击会先落到拦截层收起浮窗，
+            // 不会触发这里的 toggle（只有关闭态点击才会走到这里）。
+            IconButton(
+                onClick = {
+                    hapticController.lightTap()
+                    onToggleContextPopover()
                 },
-                onOpenConsole = {
-                    showContextPopover = false
-                    navController.navigate(Screen.ManagementDashboard)
-                },
-                anchor = {
-                    IconButton(
-                        onClick = {
-                            hapticController.lightTap()
-                            showContextPopover = !showContextPopover
+                modifier = Modifier
+                    .size(44.dp)
+                    .onSizeChanged { onContextAnchorHeight(it.height) },
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
+                    CircularProgressIndicator(
+                        progress = { usagePercent },
+                        modifier = Modifier.fillMaxSize(),
+                        strokeWidth = 3.dp,
+                        color = when {
+                            usagePercent > 0.9f -> MaterialTheme.colorScheme.error
+                            usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.primary
                         },
-                        modifier = Modifier.size(44.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(28.dp)) {
-                            CircularProgressIndicator(
-                                progress = { usagePercent },
-                                modifier = Modifier.fillMaxSize(),
-                                strokeWidth = 3.dp,
-                                color = when {
-                                    usagePercent > 0.9f -> MaterialTheme.colorScheme.error
-                                    usagePercent > 0.7f -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.primary
-                                },
-                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                            )
-                            // 空会话不显示数字，只留圆环（0 无信息量）
-                            if (totalTokens > 0) {
-                                Text(
-                                    text = tokenText,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    // 空会话不显示数字，只留圆环（0 无信息量）
+                    if (totalTokens > 0) {
+                        Text(
+                            text = tokenText,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                },
-            )
+                }
+            }
 
             IconButton(
                 onClick = {
@@ -1986,11 +2072,16 @@ private data class TokenStats(
     val totalTokens: Int,
     val contextTokenLimit: Int,
     val usagePercent: Float,
+    /** 总量是否已被最近一次 provider 实测输入量校准（无校准锚或锚已过期时为 false） */
+    val measured: Boolean,
 )
 
 private fun computeTokenStats(
     conversation: Conversation,
     settings: Settings,
+    /** 本会话是否有生成任务在跑：生成中且无快照时（新会话首轮）不显示兜底估算，
+     *  避免「发送瞬间的伪低占用」——快照在请求构造时写入，随后显示真实构成 */
+    generating: Boolean,
 ): TokenStats {
     val assistant = settings.getCurrentAssistant()
     val modelContextTokenLimit = settings.getCurrentChatModel()?.contextLengthOrDefault()
@@ -2010,18 +2101,25 @@ private fun computeTokenStats(
     // 压缩后到下一次真实生成之间的快照已是压缩后估算，且当前 usage 锚点来自压缩前的旧请求
     // （hasStaleCalibrationAnchor），此时跳过校准——否则旧实测会把压缩后的占用重新拉回虚高；
     // 压缩点之后出现新生成（新 usage 锚点）即恢复 provider 实测校准
+    val realPromptTokens = conversation.effectiveMessages().lastRealPromptTokens()
+    // 实测口径：快照存在 + 校准锚未过期 + 确实有 provider 实测输入量；
+    // 无锚（本会话还没生成过）或锚过期时的数字是估算，UI 标「估算」而非「实测」
+    val measured = snapshot != null &&
+        !conversation.hasStaleCalibrationAnchor() &&
+        realPromptTokens != null
     val totalTokens = snapshot
         ?.let { s ->
             if (conversation.hasStaleCalibrationAnchor()) {
                 s
             } else {
-                s.calibratedWith(conversation.effectiveMessages().lastRealPromptTokens())
+                s.calibratedWith(realPromptTokens)
             }
         }
         ?.totalTokens
         // 未开始的会话（无消息或仅预设开场展示）尚未发生过请求，占用为 0；
-        // 已开始的会话才用兜底估算（历史消息下次发送时确实占用窗口）
-        ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages)) {
+        // 已开始的会话且不在生成中才用兜底估算（历史消息下次发送时确实占用窗口）——
+        // 生成中快照即将写入，兜底值（不含工具）短暂显示会误导（如新会话首轮闪「60」）
+        ?: if (conversation.hasRealMessages(assistantForPreset.presetMessages) && !generating) {
             estimateFallbackComposition(conversation, settings).totalTokens
         } else {
             0
@@ -2031,5 +2129,5 @@ private fun computeTokenStats(
     } else {
         0f
     }
-    return TokenStats(totalTokens, contextTokenLimit, usagePercent)
+    return TokenStats(totalTokens, contextTokenLimit, usagePercent, measured)
 }

@@ -687,13 +687,17 @@ private fun ChatListNormal(
             ) {
             LazyColumn(
                 state = state,
-                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+                // 顶部让区走 contentPadding 而非视口裁剪：视口保持全高，
+                // 消息可滚到顶栏后方参与背景模糊（与输入栏同款悬浮效果）
+                contentPadding = PaddingValues(16.dp) + PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = 32.dp + innerPadding.calculateBottomPadding(),
+                ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .hazeSource(state = hazeState)
-                    .padding(top = innerPadding.calculateTopPadding()),
+                    .hazeSource(state = hazeState),
             ) {
             val showPresetMessages = !presetIntroDismissed &&
                 presetMessageCount > 0 &&

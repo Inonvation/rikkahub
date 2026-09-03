@@ -143,7 +143,8 @@ internal fun ReasoningHeaderRow(
     extra: (@Composable () -> Unit)? = null,
     contentVisible: Boolean,
     folded: Boolean,
-    onClick: () -> Unit,
+    /** null = 不挂 clickable（悬浮吸顶条骑行期穿透到真实头部用） */
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val hapticController = rememberHaptic()
@@ -152,10 +153,16 @@ internal fun ReasoningHeaderRow(
     Row(
         modifier = modifier
             .clip(MaterialTheme.shapes.small)
-            .clickable {
-                hapticController.lightTap()
-                onClick()
-            }
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable {
+                        hapticController.lightTap()
+                        onClick()
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
