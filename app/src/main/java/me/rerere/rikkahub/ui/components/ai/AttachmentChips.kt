@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -34,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,12 +50,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Video01
@@ -206,7 +208,8 @@ internal fun MediaFileInputRow(
 
 /**
  * 待发送附件全屏预览器（黑底 pager）。
- * 用于：核对附件顺序、左右滑动查看、点击"前移/后移"调整顺序、删除。
+ * 交互：左右滑动或底部 ←/→ 浏览各附件；顶栏「排序」开关激活后，同一组 ←/→ 变为
+ * 把当前图片前移/后移（调整顺序，顺序即发送顺序）；底部删除移除当前附件。
  * 数据源是调用方传入的 parts（与 messageContent 同引用），删除/调序后由调用方更新列表，
  * 本组件通过引用跟踪当前预览项，列表变化后自动定位到该项的新位置；若当前项被删除则顺延到相邻项。
  */
@@ -219,6 +222,10 @@ private fun AttachmentPreviewDialog(
     onDismiss: () -> Unit,
 ) {
     var tracked by remember { mutableStateOf(parts[initialIndex]) }
+    // 默认 ←/→ 是"浏览上一张/下一张"；reorderMode 打开后同一组箭头变成
+    // "把当前图片前移/后移"（调序）。两个语义用同一个箭头组，靠顶栏开关切换。
+    var reorderMode by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = initialIndex) { parts.size }
 
     // 列表变化（外部删除/调序）后：当前预览项仍存在则跟随其新位置；被删除则顺延到当前页相邻项
@@ -233,6 +240,13 @@ private fun AttachmentPreviewDialog(
         }
         if (target != pagerState.currentPage) {
             pagerState.animateScrollToPage(target)
+        }
+    }
+
+    // 浏览/滑动切页后同步跟踪对象：确保打开排序模式时，移动的是"当前正在看的那张图"
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage in parts.indices) {
+            tracked = parts[pagerState.settledPage]
         }
     }
 
@@ -275,16 +289,30 @@ private fun AttachmentPreviewDialog(
                 if (parts.size > 1) {
                     Text(
                         text = "${currentPage + 1} / ${parts.size}",
-                        color = Color.White,
+                        color = if (reorderMode) MaterialTheme.colorScheme.primary else Color.White,
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                // 右侧占位与关闭按钮视觉对称，避免序号整体偏左
                 Spacer(Modifier.weight(1f))
-                Spacer(Modifier.width(48.dp))
+                // 排序模式开关：激活后底部 ←/→ 由"浏览"变为"移动当前图片调整顺序"
+                IconButton(
+                    onClick = { reorderMode = !reorderMode },
+                    enabled = parts.size > 1,
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.DragDropHorizontal,
+                        contentDescription = null,
+                        tint = when {
+                            reorderMode -> MaterialTheme.colorScheme.primary
+                            parts.size > 1 -> Color.White.copy(alpha = 0.9f)
+                            else -> Color.White.copy(alpha = 0.3f)
+                        },
+                    )
+                }
             }
 
-            // 底部操作排：前移 / 删除 / 后移（顺序即发送顺序）
+            // 底部操作排：默认 ←/→ 浏览上一张/下一张（此时移动顺序不生效），删除居中；
+            // 排序模式激活后 ←/→ 变为前移/后移，移动结果即最终发送顺序。
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -296,17 +324,28 @@ private fun AttachmentPreviewDialog(
                 PreviewActionButton(
                     enabled = currentPage > 0,
                     icon = HugeIcons.ArrowLeft01,
-                    onClick = { onMove(currentPage, currentPage - 1) },
+                    highlighted = reorderMode,
+                    onClick = {
+                        val page = pagerState.currentPage
+                        if (reorderMode) onMove(page, page - 1)
+                        else scope.launch { pagerState.animateScrollToPage(page - 1) }
+                    },
                 )
                 PreviewActionButton(
                     enabled = true,
                     icon = HugeIcons.Delete01,
-                    onClick = { onRemove(currentPage) },
+                    highlighted = false,
+                    onClick = { onRemove(pagerState.currentPage) },
                 )
                 PreviewActionButton(
                     enabled = currentPage < parts.lastIndex,
                     icon = HugeIcons.ArrowRight01,
-                    onClick = { onMove(currentPage, currentPage + 1) },
+                    highlighted = reorderMode,
+                    onClick = {
+                        val page = pagerState.currentPage
+                        if (reorderMode) onMove(page, page + 1)
+                        else scope.launch { pagerState.animateScrollToPage(page + 1) }
+                    },
                 )
             }
         }
@@ -366,10 +405,13 @@ private fun PreviewActionButton(
     enabled: Boolean,
     icon: ImageVector,
     onClick: () -> Unit,
+    highlighted: Boolean = false,
 ) {
     Surface(
         shape = CircleShape,
-        color = Color.White.copy(alpha = 0.14f),
+        // highlighted = 排序模式激活：箭头提示其语义已变为"移动"，而不是默认的浏览
+        color = if (highlighted) MaterialTheme.colorScheme.primary
+        else Color.White.copy(alpha = 0.14f),
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
@@ -382,7 +424,11 @@ private fun PreviewActionButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f),
+                tint = when {
+                    !enabled -> Color.White.copy(alpha = 0.3f)
+                    highlighted -> MaterialTheme.colorScheme.onPrimary
+                    else -> Color.White
+                },
                 modifier = Modifier.size(22.dp),
             )
         }
@@ -436,7 +482,13 @@ private fun AttachmentChip(
                             Text(
                                 text = "$badgeNumber",
                                 color = MaterialTheme.colorScheme.onPrimary,
-                                fontSize = 8.sp,
+                                // 必须显式覆盖 lineHeight：Text 未指定 style 时继承 bodyLarge 的
+                                // 约 24sp 行高，仅调 fontSize 会保留该行高，数字按基线排布在行框
+                                // 下半部，在小圆内视觉偏下。行高压到与字号一致后字形才真正居中。
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 8.sp,
+                                    lineHeight = 8.sp,
+                                ),
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                             )
