@@ -14,13 +14,17 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.theme.CustomColors
 
 @Composable
-fun BackButton(modifier: Modifier = Modifier) {
+fun BackButton(
+    modifier: Modifier = Modifier,
+    /** 自定义返回行为(如脏状态拦截确认); 传 null 时执行默认 popBackStack */
+    onClick: (() -> Unit)? = null,
+) {
     val navController = LocalNavController.current
     val hapticController = rememberHaptic()
     FilledTonalIconButton(
         onClick = {
             hapticController.lightTap()
-            navController.popBackStack()
+            if (onClick != null) onClick() else navController.popBackStack()
         },
         modifier = modifier,
         shapes = IconButtonDefaults.shapes(),

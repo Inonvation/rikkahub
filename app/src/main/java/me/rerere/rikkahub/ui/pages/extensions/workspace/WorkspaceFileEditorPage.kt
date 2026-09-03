@@ -1,11 +1,14 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -28,6 +31,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.richtext.MarkdownPreviewSwitcher
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.workspace.WorkspaceStorageArea
@@ -37,6 +41,11 @@ import org.koin.compose.koinInject
  * 工作区文本文件编辑/预览页.
  *
  * FILES 区文件可编辑并保存; LINUX (rootfs) 区文件仅只读预览 (readOnly), 避免误改系统文件.
+ *
+ * 未保存保护: [baseline] 记录"磁盘上的最后内容"(加载完成或保存成功后更新), 当前文本与其不一致
+ * 即视为脏; 脏状态下系统返回键先弹三选对话框(保存并退出/放弃/留下), 防止误触返回静默丢失修改。
+ * 文本状态由 rememberTextFieldState 内部以 rememberSaveable + TextFieldState.Saver 兜底,
+ * 旋转/进程重建由系统负责恢复, 这里不需要重复做 Saver。
  */
 @Composable
 fun WorkspaceFileEditorPage(
@@ -47,6 +56,7 @@ fun WorkspaceFileEditorPage(
     val repository = koinInject<WorkspaceRepository>()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
+    val navController = LocalNavController.current
     val editable = area == WorkspaceStorageArea.FILES
     val fileName = path.substringAfterLast('/').ifBlank { path }
     // JSON 文件启用「结构」树状预览模式
@@ -60,6 +70,10 @@ fun WorkspaceFileEditorPage(
     var loading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    // 磁盘内容基准: 加载完成 / 保存成功后更新; null = 尚未就绪(不可判定脏)
+    var baseline by remember { mutableStateOf<String?>(null) }
+    val dirty = editable && baseline != null && textState.text.toString() != baseline
+    var showExitConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(id, area, path) {
         loading = true
@@ -73,11 +87,40 @@ fun WorkspaceFileEditorPage(
             repository.readTextForPreview(id, area, path)
         }.onSuccess { content ->
             textState.setTextAndPlaceCursorAtEnd(content)
+            baseline = content
             loading = false
         }.onFailure {
             loadError = it.message ?: "读取文件失败"
             loading = false
         }
+    }
+
+    /** 统一保存入口: 成功写盘后同步 [baseline] 并回调 [onSaved] (供"保存并退出"链路复用) */
+    fun requestSave(onSaved: () -> Unit) {
+        if (saving) return
+        saving = true
+        scope.launch {
+            runCatching {
+                repository.writeText(
+                    id = id,
+                    path = path,
+                    text = textState.text.toString(),
+                    overwrite = true,
+                )
+            }.onSuccess {
+                baseline = textState.text.toString()
+                toaster.show("已保存", type = ToastType.Success)
+                onSaved()
+            }.onFailure {
+                toaster.show(it.message ?: "保存失败", type = ToastType.Error)
+            }
+            saving = false
+        }
+    }
+
+    // 返回保护: 仅在 FILES 可编辑文件且内容被改动时拦截
+    BackHandler(enabled = dirty) {
+        showExitConfirm = true
     }
 
     Scaffold(
@@ -90,30 +133,19 @@ fun WorkspaceFileEditorPage(
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                navigationIcon = { BackButton() },
+                navigationIcon = {
+                    // 脏状态下返回箭头同样先弹确认, 与系统返回键(BackHandler)行为一致
+                    BackButton(
+                        onClick = {
+                            if (dirty) showExitConfirm = true else navController.popBackStack()
+                        },
+                    )
+                },
                 actions = {
                     if (editable && !loading && loadError == null) {
                         TextButton(
-                            onClick = {
-                                if (saving) return@TextButton
-                                saving = true
-                                scope.launch {
-                                    runCatching {
-                                        repository.writeText(
-                                            id = id,
-                                            path = path,
-                                            text = textState.text.toString(),
-                                            overwrite = true,
-                                        )
-                                    }.onSuccess {
-                                        toaster.show("已保存", type = ToastType.Success)
-                                    }.onFailure {
-                                        toaster.show(it.message ?: "保存失败", type = ToastType.Error)
-                                    }
-                                    saving = false
-                                }
-                            },
-                            enabled = !saving,
+                            onClick = { requestSave {} },
+                            enabled = !saving && dirty,
                         ) {
                             Text("Save")
                         }
@@ -158,5 +190,52 @@ fun WorkspaceFileEditorPage(
                 htmlBaseUrl = htmlBaseUrl,
             )
         }
+    }
+
+    if (showExitConfirm) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirm = false },
+            title = { Text("未保存的更改") },
+            text = {
+                Column {
+                    Text("是否保存对 ${fileName} 的修改？")
+                    Text(
+                        text = "点击对话框外或返回键可回到编辑器继续修改。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (saving) {
+                        Text(
+                            text = "正在保存…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirm = false
+                        requestSave { navController.popBackStack() }
+                    },
+                    enabled = !saving,
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirm = false
+                        navController.popBackStack()
+                    },
+                ) {
+                    Text("放弃", color = MaterialTheme.colorScheme.error)
+                }
+            },
+        )
     }
 }
