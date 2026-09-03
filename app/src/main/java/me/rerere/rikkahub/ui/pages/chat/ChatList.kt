@@ -155,6 +155,11 @@ const val PREFETCH_BEHIND = 8
 // 排队中的 scrollToItem 才执行（松手窗口）——"生成完后下滑查看上方消息被拽回/回弹"根因。
 private const val USER_SCROLL_COOLDOWN_MS = 400L
 
+// 手动展开/折叠内容后的跟随解锁窗：窗口内点按冷却不再拦跟随，主跟随逐帧重锚贴底。
+// 必须 >= USER_SCROLL_COOLDOWN_MS：点按本身会刷新触点冷却（抬起刷新晚 click 回调约一帧），
+// 窗口短于冷却会在"窗口已到期、冷却未结束"之间留下无跟随盲区，漂移重新累积成小硬跳。
+private const val CONTENT_TOGGLE_FOLLOW_UNLOCK_MS = 600L
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -277,6 +282,9 @@ private fun ChatListNormal(
     // 用户最近一次触碰/滚动列表的时刻（elapsedRealtime）：跟随冷却与松手窗口共用。
     // 持久 remember：effect 因 loadingState 变化重启时不丢，避免冷却窗口被重启冲掉。
     var lastUserScrollAt by remember { mutableLongStateOf(0L) }
+    // 手动展开/折叠内容（思考/过程链/工具气泡）的时刻：跟随门控据此在解锁窗内
+    // 绕过点按冷却（见 CONTENT_TOGGLE_FOLLOW_UNLOCK_MS）。持久 remember 同上。
+    var lastContentToggleAt by remember { mutableLongStateOf(0L) }
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
@@ -503,8 +511,14 @@ private fun ChatListNormal(
                     // 会在用户开始翻历史时执行把列表拽回（"生成完后下滑回弹抽搐"根因）。
                     val followCooledDown =
                         SystemClock.elapsedRealtime() - lastUserScrollAt >= USER_SCROLL_COOLDOWN_MS
+                    // 解锁窗：手动展开/折叠内容后的短时间内绕过点按冷却，让主跟随从展开
+                    // 首帧起逐帧重锚贴底（对齐上游）。用 OR 项而非改写 lastUserScrollAt：
+                    // 触点抬起时 LaunchedEffect(isUserInteracting) 会在下一帧刷新该时间戳，
+                    // 直接改写会被覆盖回去；时间窗自过期，不改写任何现有状态。
+                    val toggleUnlocked =
+                        SystemClock.elapsedRealtime() - lastContentToggleAt < CONTENT_TOGGLE_FOLLOW_UNLOCK_MS
                     val requestNow = !inProgress && !liveScrolling && !folding && shouldFollow &&
-                        followCooledDown && (isUserInteracting?.value != true)
+                        (followCooledDown || toggleUnlocked) && (isUserInteracting?.value != true)
                     // 3) 跟随：仅当"生成中、用户未上滑、列表已离开底部"时发请求。
                     //    已钉底/正在滚动/思考折叠动画/用户触碰中都不发。发请求前用实时
                     //    isScrollInProgress 二次校验，挡住 snapshotFlow 的陈旧快照。
@@ -636,15 +650,15 @@ private fun ChatListNormal(
                 LocalOpenWorkspaceImagePreview provides openWsPreview,
                 LocalOpenWorkspaceFile provides openWorkspaceFile,
                 // 用户手动展开/收起消息内可折叠内容（思考步骤/过程链/工具气泡等）时，
-                // 在流式加载中把用户视为主动离开底部，取消自动跟随。展开/收起会改变 item 高度，
-                // 若不暂停跟随，自动跟随会把列表硬拽到内容底部（"展开后突然跳到底部"根因）。
-                // 仅在加载中抑制；生成结束后自动跟随本就停止，避免无谓地置位 userScrolledUp。
-                //
-                // 根因（对齐上游）：无条件武装闩锁会把"正钉在底部看生成时手动展开折叠思考"
-                // 误判成用户离开——展开的内容在流式增长，却因闩锁停摆不再把窗口带到内容底部，
-                // 与上游"展开思考后窗口跟随内容滚到底部"的行为背离。
-                // 方案：武装前先看当前是否贴底——不在底部（读历史/上翻）才武装防拽回；
-                // 贴底时保持跟随不武装，让展开的思考/链随流式内容持续贴底。
+                // 在流式加载中处理列表滚动跟随。历版演进与场景推演见
+                // docs/chat-reasoning-expand-follow-plan.md。
+                // - 贴底观看：点按展开/折叠是明确的跟随意图信号——清跟随闩锁（防"回底后
+                //   闩锁尚未稳定复位"边缘态卡住跟随）并记 lastContentToggleAt 开解锁窗，
+                //   主跟随从高度动画首帧起逐帧重锚贴底（对齐上游"每帧重锚"机制），
+                //   无"先展开动画再蹦到底部"、无"先展开再跳下来"；
+                // - 不在底部（读历史/上翻）：武装闩锁，防 item 高度突变被自动跟随拽回
+                //   （"展开后突然跳到底部"原根因）。
+                // 仅在加载中处理；生成结束后自动跟随本就停止，避免无谓地置位 userScrolledUp。
                 LocalOnManualContentToggle provides {
                     if (loadingState) {
                         val info = state.layoutInfo
@@ -656,7 +670,10 @@ private fun ChatListNormal(
                             viewportEnd = info.viewportEndOffset,
                             afterContentPadding = info.afterContentPadding,
                         )
-                        if (!atBottom) {
+                        if (atBottom && !state.isScrollInProgress && (isUserInteracting?.value != true)) {
+                            userScrolledUp = false
+                            lastContentToggleAt = SystemClock.elapsedRealtime()
+                        } else {
                             userScrolledUp = true
                             lastUserScrollAt = SystemClock.elapsedRealtime()
                         }
