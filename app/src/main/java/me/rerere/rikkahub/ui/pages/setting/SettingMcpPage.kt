@@ -126,13 +126,13 @@ import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.writeClipboardText
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
@@ -172,12 +172,14 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
     // 拖拽排序
     val lazyListState = rememberLazyListState()
     val hapticController = rememberHaptic()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newConfigs = mcpConfigs.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        vm.updateSettings(settings.copy(mcpServers = newConfigs))
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = mcpConfigs,
+        persist = { newConfigs ->
+            vm.updateSettings(settings.copy(mcpServers = newConfigs))
+        },
+    )
 
     val mcpManager = koinInject<McpManager>()
     val status by mcpManager.syncingStatus.collectAsStateWithLifecycle()
@@ -303,7 +305,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
 
-                items(mcpConfigs, key = { it.id }) { mcpConfig ->
+                items(reorderableState.items, key = { it.id }) { mcpConfig ->
                     if (selecting) {
                         McpServerSelectableCard(
                             item = mcpConfig,
@@ -320,7 +322,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                         )
                     } else {
                         ReorderableItem(
-                            state = reorderableState,
+                            state = reorderableState.reorderableState,
                             key = mcpConfig.id,
                         ) { isDragging ->
                             McpServerCard(
@@ -333,6 +335,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                                         },
                                         onDragStopped = {
                                             hapticController.perform(HapticFeedbackType.GestureEnd)
+                                            reorderableState.persistNow()
                                         }
                                     )
                                     .graphicsLayer {

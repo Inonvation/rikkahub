@@ -85,12 +85,12 @@ import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.heroAnimation
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantImporter
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 import androidx.compose.foundation.lazy.items as lazyItems
 
@@ -165,14 +165,16 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
         ) {
             val lazyListState = rememberLazyListState()
             val isFiltering = selectedCategory != null || searchQuery.isNotBlank()
-            val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-                if (!isFiltering) {
-                    val newAssistants = settings.assistants.toMutableList().apply {
-                        add(to.index, removeAt(from.index))
+            // 拖动排序：本地同步更新顺序，松手后一次性落盘，避免快速拖动时读旧快照打乱顺序
+            val reorderableState = rememberReorderUiState(
+                lazyListState = lazyListState,
+                items = filteredAssistants,
+                persist = { newAssistants ->
+                    if (!isFiltering) {
+                        vm.updateSettings(settings.copy(assistants = newAssistants))
                     }
-                    vm.updateSettings(settings.copy(assistants = newAssistants))
-                }
-            }
+                },
+            )
             val hapticController = rememberHaptic()
 
             // 搜索框
@@ -225,9 +227,9 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 state = lazyListState,
             ) {
-                lazyItems(filteredAssistants, key = { assistant -> assistant.id }) { assistant ->
+                lazyItems(reorderableState.items, key = { assistant -> assistant.id }) { assistant ->
                     ReorderableItem(
-                        state = reorderableState,
+                        state = reorderableState.reorderableState,
                         key = assistant.id,
                     ) { isDragging ->
                         val memories by vm.getMemories(assistant).collectAsStateWithLifecycle(
@@ -254,6 +256,7 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                                             },
                                             onDragStopped = {
                                                 hapticController.perform(HapticFeedbackType.GestureEnd)
+                                                reorderableState.persistNow()
                                             }
                                         )
                                     } else {

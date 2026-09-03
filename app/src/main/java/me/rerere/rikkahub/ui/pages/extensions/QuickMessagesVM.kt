@@ -57,6 +57,11 @@ class QuickMessagesVM(
         updateQuickMessages(reordered)
     }
 
+    /** 拖拽排序结束后用最终顺序整段落盘 */
+    fun updateQuickMessagesOrder(quickMessages: List<QuickMessage>) {
+        updateQuickMessages(quickMessages)
+    }
+
     private fun updateQuickMessages(quickMessages: List<QuickMessage>) {
         val validIds = quickMessages.map { it.id }.toSet()
         viewModelScope.launch {

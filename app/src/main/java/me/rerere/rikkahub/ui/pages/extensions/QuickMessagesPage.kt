@@ -63,11 +63,11 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
@@ -89,9 +89,12 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
     // 拖拽排序
     val lazyListState = rememberLazyListState()
     val hapticController = rememberHaptic()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        vm.reorderQuickMessages(from.index, to.index)
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = settings.quickMessages,
+        persist = { newList -> vm.updateQuickMessagesOrder(newList) },
+    )
 
     Scaffold(
         topBar = {
@@ -178,7 +181,7 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                     }
                 }
 
-                items(settings.quickMessages, key = { it.id.toString() }) { quickMessage ->
+                items(reorderableState.items, key = { it.id.toString() }) { quickMessage ->
                     if (selecting) {
                         QuickMessageSelectableCard(
                             quickMessage = quickMessage,
@@ -194,7 +197,7 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                         )
                     } else {
                         ReorderableItem(
-                            state = reorderableState,
+                            state = reorderableState.reorderableState,
                             key = quickMessage.id.toString(),
                         ) { isDragging ->
                             QuickMessageCard(
@@ -214,6 +217,7 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
                                     },
                                     onDragStopped = {
                                         hapticController.perform(HapticFeedbackType.GestureEnd)
+                                        reorderableState.persistNow()
                                     },
                                 ),
                             )

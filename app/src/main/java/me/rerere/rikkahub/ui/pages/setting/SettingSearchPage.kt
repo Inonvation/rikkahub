@@ -53,6 +53,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.search.SearchCommonOptions
@@ -60,7 +61,6 @@ import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.reflect.full.primaryConstructor
 
 @Composable
@@ -87,19 +87,14 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             }
         },
     ) {
-        val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-            val fromIndex = from.index
-            val toIndex = to.index
-
-            if (fromIndex >= 0 && toIndex >= 0 && fromIndex < settings.searchServices.size && toIndex < settings.searchServices.size) {
-                val newServices = settings.searchServices.toMutableList().apply {
-                    add(toIndex, removeAt(fromIndex))
-                }
-                vm.updateSettings(
-                    settings.copy(searchServices = newServices)
-                )
-            }
-        }
+        // 拖动排序：本地同步更新顺序，松手后一次性落盘
+        val reorderableState = rememberReorderUiState(
+            lazyListState = lazyListState,
+            items = settings.searchServices,
+            persist = { newServices ->
+                vm.updateSettings(settings.copy(searchServices = newServices))
+            },
+        )
         val hapticController = rememberHaptic()
 
         LazyColumn(
@@ -110,9 +105,9 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
             state = lazyListState
         ) {
-            items(settings.searchServices, key = { it.id }) { service ->
+            items(reorderableState.items, key = { it.id }) { service ->
                 ReorderableItem(
-                    state = reorderableState,
+                    state = reorderableState.reorderableState,
                     key = service.id
                 ) { isDragging ->
                     SearchProviderCard(
@@ -155,6 +150,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                                 },
                                 onDragStopped = {
                                     hapticController.perform(HapticFeedbackType.GestureEnd)
+                                    reorderableState.persistNow()
                                 }
                             )
                     )

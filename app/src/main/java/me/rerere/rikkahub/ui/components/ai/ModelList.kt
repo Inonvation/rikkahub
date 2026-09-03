@@ -90,11 +90,11 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.toDp
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
 class ModelListState internal constructor(
@@ -368,11 +368,13 @@ private fun ColumnScope.ModelList(
     val settings = settingsStore.settingsFlow
         .collectAsStateWithLifecycle()
 
-    val favoriteModels = settings.value.favoriteModels.mapNotNull { modelId ->
-        val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
-        if (model.type != modelType) return@mapNotNull null
-        val provider = model.findProvider(providers = settings.value.providers, checkOverwrite = false) ?: return@mapNotNull null
-        model to provider
+    val favoriteModels = remember(settings.value.favoriteModels, settings.value.providers, modelType) {
+        settings.value.favoriteModels.mapNotNull { modelId ->
+            val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
+            if (model.type != modelType) return@mapNotNull null
+            val provider = model.findProvider(providers = settings.value.providers, checkOverwrite = false) ?: return@mapNotNull null
+            model to provider
+        }
     }
 
     var searchKeywords by remember { mutableStateOf("") }
@@ -436,33 +438,28 @@ private fun ColumnScope.ModelList(
     val lazyListState = rememberLazyListState(
         initialFirstVisibleItemIndex = selectedModelPosition
     )
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // 计算favorite models在列表中的位置偏移
-        var favoriteStartIndex = 0
-        if (providers.isEmpty()) {
-            favoriteStartIndex = 1 // no providers item
-        }
-        if (favoriteModels.isNotEmpty()) {
-            favoriteStartIndex += 1 // favorite header
-        }
+    // favorite models 段在 LazyColumn 里的起始偏移（无供应商占位 + 收藏 header）
+    val favoriteStartIndex = remember(providers, favoriteModels) {
+        var start = 0
+        if (providers.isEmpty()) start = 1 // no providers item
+        if (favoriteModels.isNotEmpty()) start += 1 // favorite header
+        start
+    }
 
-        val fromIndex = from.index - favoriteStartIndex
-        val toIndex = to.index - favoriteStartIndex
-
-        // 只处理favorite models范围内的拖拽
-        if (fromIndex >= 0 && toIndex >= 0 &&
-            fromIndex < favoriteModels.size && toIndex < favoriteModels.size
-        ) {
-            val newFavoriteModels = settings.value.favoriteModels.toMutableList().apply {
-                add(toIndex, removeAt(fromIndex))
-            }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘，避免快速拖动时读旧快照打乱顺序
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = favoriteModels,
+        toLocalIndex = { index -> index - favoriteStartIndex },
+        persist = { finalFavorites ->
+            val ids = finalFavorites.map { it.first.id }
             coroutineScope.launch {
                 settingsStore.update { oldSettings ->
-                    oldSettings.copy(favoriteModels = newFavoriteModels)
+                    oldSettings.copy(favoriteModels = ids)
                 }
             }
-        }
-    }
+        },
+    )
     val hapticController = rememberHaptic()
 
     val providerPositions = remember(providers, favoriteModels, searchFilteredModelsByProvider) {
@@ -543,11 +540,11 @@ private fun ColumnScope.ModelList(
             }
 
             items(
-                items = favoriteModels,
+                items = reorderableState.items,
                 key = { "favorite:" + it.first.id.toString() }
             ) { (model, provider) ->
                 ReorderableItem(
-                    state = reorderableState,
+                    state = reorderableState.reorderableState,
                     key = "favorite:" + model.id.toString()
                 ) { isDragging ->
                     ModelItem(
@@ -585,12 +582,13 @@ private fun ColumnScope.ModelList(
                             Icon(
                                 imageVector = HugeIcons.DragDropHorizontal,
                                 contentDescription = null,
-                                modifier = Modifier.longPressDraggableHandle(
+                                modifier = Modifier.draggableHandle(
                                     onDragStarted = {
                                         hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
                                         hapticController.perform(HapticFeedbackType.GestureEnd)
+                                        reorderableState.persistNow()
                                     }
                                 )
                             )

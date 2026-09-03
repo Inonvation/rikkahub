@@ -38,8 +38,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
 /**
@@ -62,11 +62,12 @@ fun CategoryManageSheet(
 
     val hapticController = rememberHaptic()
     val listState = rememberLazyListState()
-    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
-        onReorder(categories.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        })
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = listState,
+        items = categories,
+        persist = onReorder,
+    )
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -94,8 +95,8 @@ fun CategoryManageSheet(
                 state = listState,
                 modifier = Modifier.weight(1f, fill = false),
             ) {
-                items(categories, key = { it.id }) { tag ->
-                    ReorderableItem(state = reorderableState, key = tag.id) { isDragging ->
+                items(reorderableState.items, key = { it.id }) { tag ->
+                    ReorderableItem(state = reorderableState.reorderableState, key = tag.id) { isDragging ->
                         ListItem(
                             headlineContent = { Text(tag.name) },
                             supportingContent = {
@@ -113,12 +114,13 @@ fun CategoryManageSheet(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier
                                         .scale(if (isDragging) 0.95f else 1f)
-                                        .longPressDraggableHandle(
+                                        .draggableHandle(
                                             onDragStarted = {
                                                 hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                             },
                                             onDragStopped = {
                                                 hapticController.perform(HapticFeedbackType.GestureEnd)
+                                                reorderableState.persistNow()
                                             },
                                         ),
                                 )

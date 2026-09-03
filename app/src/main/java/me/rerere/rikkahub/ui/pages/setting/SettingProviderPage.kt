@@ -75,6 +75,7 @@ import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.defaultProviderName
@@ -85,7 +86,6 @@ import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
 @Composable
@@ -95,12 +95,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     var searchQuery by remember { mutableStateOf("") }
     val lazyListState = rememberLazyListState()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newProviders = settings.providers.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        vm.updateSettings(settings.copy(providers = newProviders))
-    }
 
     val filteredProviders = remember(settings.providers, searchQuery) {
         if (searchQuery.isBlank()) {
@@ -111,6 +105,15 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             }
         }
     }
+
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘，避免快速拖动时读旧快照打乱顺序
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = filteredProviders,
+        persist = { newProviders ->
+            vm.updateSettings(settings.copy(providers = newProviders))
+        },
+    )
 
     SettingScaffold(
         title = stringResource(R.string.setting_provider_page_title),
@@ -177,9 +180,9 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 state = lazyListState,
             ) {
-                items(filteredProviders, key = { it.id }) { provider ->
+                items(reorderableState.items, key = { it.id }) { provider ->
                     ReorderableItem(
-                        state = reorderableState,
+                        state = reorderableState.reorderableState,
                         key = provider.id
                     ) { isDragging ->
                         val hapticController = rememberHaptic()
@@ -191,11 +194,15 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 .fillMaxWidth(),
                             provider = provider,
                             dragModifier = Modifier.longPressDraggableHandle(
+                                // 搜索过滤时列表索引与完整列表不对应，禁用拖动
+                                enabled = searchQuery.isBlank(),
                                 onDragStarted = {
                                     hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                 },
                                 onDragStopped = {
                                     hapticController.perform(HapticFeedbackType.GestureEnd)
+                                    // 松手一次性落盘
+                                    reorderableState.persistNow()
                                 }
                             ),
                             onCopy = {

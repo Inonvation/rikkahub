@@ -71,6 +71,7 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.pages.setting.components.ASRProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.TTSProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -78,7 +79,6 @@ import me.rerere.rikkahub.utils.plus
 import me.rerere.tts.provider.TTSProviderSetting
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
@@ -305,12 +305,14 @@ private fun TTSProviderList(
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newProviders = settings.ttsProviders.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        onUpdateSettings(settings.copy(ttsProviders = newProviders))
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = settings.ttsProviders,
+        persist = { newProviders ->
+            onUpdateSettings(settings.copy(ttsProviders = newProviders))
+        },
+    )
 
     LazyColumn(
         modifier = modifier
@@ -320,9 +322,9 @@ private fun TTSProviderList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
-        items(settings.ttsProviders, key = { it.id }) { provider ->
+        items(reorderableState.items, key = { it.id }) { provider ->
             ReorderableItem(
-                state = reorderableState,
+                state = reorderableState.reorderableState,
                 key = provider.id
             ) { isDragging ->
                 TTSProviderItem(
@@ -335,12 +337,13 @@ private fun TTSProviderList(
                         IconButton(
                             onClick = {},
                             modifier = Modifier
-                                .longPressDraggableHandle(
+                                .draggableHandle(
                                     onDragStarted = {
                                         hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
                                         hapticController.perform(HapticFeedbackType.GestureEnd)
+                                        reorderableState.persistNow()
                                     }
                                 )
                         ) {
@@ -382,12 +385,14 @@ private fun ASRProviderList(
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newProviders = settings.asrProviders.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        onUpdateSettings(settings.copy(asrProviders = newProviders))
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = settings.asrProviders,
+        persist = { newProviders ->
+            onUpdateSettings(settings.copy(asrProviders = newProviders))
+        },
+    )
 
     LazyColumn(
         modifier = modifier
@@ -397,9 +402,9 @@ private fun ASRProviderList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
-        items(settings.asrProviders, key = { it.id }) { provider ->
+        items(reorderableState.items, key = { it.id }) { provider ->
             ReorderableItem(
-                state = reorderableState,
+                state = reorderableState.reorderableState,
                 key = provider.id
             ) { isDragging ->
                 ASRProviderItem(
@@ -412,12 +417,13 @@ private fun ASRProviderList(
                         IconButton(
                             onClick = {},
                             modifier = Modifier
-                                .longPressDraggableHandle(
+                                .draggableHandle(
                                     onDragStarted = {
                                         hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
                                     },
                                     onDragStopped = {
                                         hapticController.perform(HapticFeedbackType.GestureEnd)
+                                        reorderableState.persistNow()
                                     }
                                 )
                         ) {

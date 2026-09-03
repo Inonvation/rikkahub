@@ -121,6 +121,7 @@ import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
@@ -133,7 +134,6 @@ import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
 
 @Composable
@@ -396,9 +396,14 @@ private fun ModelList(
     }
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
-    val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        onUpdateProvider(providerSetting.moveMove(from.index, to.index))
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableLazyListState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = providerSetting.models,
+        persist = { newModels ->
+            onUpdateProvider(providerSetting.copyProvider(models = newModels))
+        },
+    )
     val hapticController = rememberHaptic()
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -438,9 +443,9 @@ private fun ModelList(
                     }
                 }
             } else {
-                items(providerSetting.models, key = { it.id }) { item ->
+                items(reorderableLazyListState.items, key = { it.id }) { item ->
                     ReorderableItem(
-                        state = reorderableLazyListState,
+                        state = reorderableLazyListState.reorderableState,
                         key = item.id
                     ) { isDragging ->
                         ModelCard(
@@ -458,6 +463,7 @@ private fun ModelList(
                                 },
                                 onDragStopped = {
                                     hapticController.perform(HapticFeedbackType.GestureEnd)
+                                    reorderableLazyListState.persistNow()
                                 },
                             ),
                             modifier = Modifier

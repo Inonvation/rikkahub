@@ -104,12 +104,12 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.explainErrorText
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun PromptPage(vm: PromptVM = koinViewModel()) {
@@ -268,12 +268,12 @@ private fun ModeInjectionTab(
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentModeInjections by rememberUpdatedState(modeInjections)
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newList = modeInjections.toMutableList()
-        val item = newList.removeAt(from.index)
-        newList.add(to.index, item)
-        onUpdate(newList)
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = modeInjections,
+        persist = onUpdate,
+    )
     val editState = useEditState<PromptInjection.ModeInjection> { edited ->
         val index = modeInjections.indexOfFirst { it.id == edited.id }
         if (index >= 0) {
@@ -334,7 +334,7 @@ private fun ModeInjectionTab(
                     }
                 }
             } else {
-                items(modeInjections, key = { it.id }) { injection ->
+                items(reorderableState.items, key = { it.id }) { injection ->
                     if (selecting) {
                         ModeInjectionSelectableCard(
                             injection = injection,
@@ -350,13 +350,13 @@ private fun ModeInjectionTab(
                         )
                     } else {
                         ReorderableItem(
-                            state = reorderableState,
+                            state = reorderableState.reorderableState,
                             key = injection.id
                         ) { isDragging ->
                             ModeInjectionCard(
                                 injection = injection,
                                 modifier = Modifier
-                                    .longPressDraggableHandle()
+                                    .longPressDraggableHandle(onDragStopped = { reorderableState.persistNow() })
                                     .graphicsLayer {
                                         if (isDragging) {
                                             scaleX = 1.05f
@@ -807,12 +807,12 @@ private fun LorebookTab(
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentLorebooks by rememberUpdatedState(lorebooks)
-    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newList = lorebooks.toMutableList()
-        val item = newList.removeAt(from.index)
-        newList.add(to.index, item)
-        onUpdate(newList)
-    }
+    // 拖动排序：本地同步更新顺序，松手后一次性落盘
+    val reorderableState = rememberReorderUiState(
+        lazyListState = lazyListState,
+        items = lorebooks,
+        persist = onUpdate,
+    )
     val editState = useEditState<Lorebook> { edited ->
         val index = lorebooks.indexOfFirst { it.id == edited.id }
         if (index >= 0) {
@@ -873,7 +873,7 @@ private fun LorebookTab(
                     }
                 }
             } else {
-                items(lorebooks, key = { it.id }) { book ->
+                items(reorderableState.items, key = { it.id }) { book ->
                     if (selecting) {
                         LorebookSelectableCard(
                             book = book,
@@ -889,13 +889,13 @@ private fun LorebookTab(
                         )
                     } else {
                         ReorderableItem(
-                            state = reorderableState,
+                            state = reorderableState.reorderableState,
                             key = book.id
                         ) { isDragging ->
                             LorebookCard(
                                 book = book,
                                 modifier = Modifier
-                                    .longPressDraggableHandle()
+                                    .longPressDraggableHandle(onDragStopped = { reorderableState.persistNow() })
                                     .graphicsLayer {
                                         if (isDragging) {
                                             scaleX = 1.05f
