@@ -103,6 +103,7 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspacePage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
+import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTrashPage
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
@@ -669,6 +670,10 @@ class RouteActivity : ComponentActivity() {
                                 WorkspaceTerminalPage(key.id)
                             }
 
+                            entry<Screen.WorkspaceTrash> { key ->
+                                WorkspaceTrashPage(key.id)
+                            }
+
                             entry<Screen.WorkspaceFileEditor> { key ->
                                 WorkspaceFileEditorPage(
                                     id = key.id,
@@ -1023,6 +1028,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class WorkspaceTerminal(val id: String) : Screen
+
+    @Serializable
+    data class WorkspaceTrash(val id: String) : Screen
 
     @Serializable
     data class WorkspaceFileEditor(val id: String, val area: String, val path: String) : Screen
