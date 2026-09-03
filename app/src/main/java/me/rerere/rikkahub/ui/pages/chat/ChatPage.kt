@@ -358,12 +358,35 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     // LaunchedEffect 补滚到目标位置（避免"先渲染顶部再滚动"的闪动）。
     val scrollStore = koinInject<ChatScrollStore>()
     val savedScroll = remember(conversation.id) { scrollStore.load(conversation.id) }
+    // 预设开场 intro item 偏移换算（与 ChatList 同源，见 ChatScrollUtils）：消息下标
+    // ≠ LazyColumn item index（intro 占一位）。放组合级供 remember 初值与下方恢复
+    // effect 共用——两处若各按自己口径算，一处漏换算就整体偏一位。
+    val presetAssistant = setting.getAssistantById(conversation.assistantId)
+    val presetMessages = presetAssistant?.presetMessages.orEmpty()
+    val presetCount = matchPresetMessageCount(conversation.messageNodes, presetMessages)
+    val hasPresetIntroItem = presetCount > 0 && presetAssistant != null
+    fun itemIndexOf(messageIndex: Int) =
+        chatMessageItemIndex(messageIndex, presetCount, hasPresetIntroItem)
     val chatListState = remember(conversation.id) {
-        LazyListState(
-            firstVisibleItemIndex = (savedScroll?.firstVisibleItemIndex
-                ?: conversation.messageNodes.lastIndex).coerceIn(0, conversation.messageNodes.lastIndex.coerceAtLeast(0)),
-            firstVisibleItemScrollOffset = savedScroll?.firstVisibleItemScrollOffset ?: 0,
-        )
+        val nodes = conversation.messageNodes
+        val lastMessageIndex = nodes.lastIndex.coerceAtLeast(0)
+        if (loadingJob?.isActive == true && nodes.isNotEmpty()) {
+            // 生成中返回：存档是"离开时视口"快照，而离开期间生成持续、底部内容继续
+            // 增长，快照必过期。以它为初值会先落"旧底部"，随后被恢复/自动跟随拽到
+            // 当前底部——用户看到一次跳动（生成中离开→设置→返回即复现）。直接落
+            // 当前最后一条消息（与跟随逻辑去向一致），首帧即贴当前底，无可感中间帧。
+            LazyListState(
+                firstVisibleItemIndex = itemIndexOf(lastMessageIndex),
+                firstVisibleItemScrollOffset = 0,
+            )
+        } else {
+            LazyListState(
+                firstVisibleItemIndex = (savedScroll?.firstVisibleItemIndex
+                    ?: itemIndexOf(lastMessageIndex))
+                    .coerceIn(0, itemIndexOf(lastMessageIndex).coerceAtLeast(0)),
+                firstVisibleItemScrollOffset = savedScroll?.firstVisibleItemScrollOffset ?: 0,
+            )
+        }
     }
     // 首次定位完成标记：保存 effect 等待它再开始记录滚动位置。
     // 否则会话数据加载前（首帧空列表）snapshotFlow 会把 (0,0) 写成假存档，
@@ -409,18 +432,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             }
             // 用户已触碰列表或滚动进行中 → 放弃定位。scrollToItem 是挂起调用，若在这里排队
             // 会在用户松手后立即执行把列表拽回（忽略即可，绝不发未判定的滚动请求）。
+            // itemIndexOf / presetCount 换算来自组合级定义（见 chatListState 初始化处），
+            // effect 内只按重启时最新的 messageNodes 重取 nodes / lastMessageIndex。
             val canScroll = !listInteracting.value && !chatListState.isScrollInProgress
-            // 预设开场 intro item 偏移换算（与 ChatList 同源，见 ChatScrollUtils）：消息下标
-            // ≠ LazyColumn item index（intro 占一位），定位/恢复/兜底统一落到 item 空间，
-            // 否则带预设开场的会话所有滚动目标都偏一位。
             val nodes = conversation.messageNodes
             val lastMessageIndex = nodes.lastIndex.coerceAtLeast(0)
-            val presetAssistant = setting.getAssistantById(conversation.assistantId)
-            val presetMessages = presetAssistant?.presetMessages.orEmpty()
-            val presetCount = matchPresetMessageCount(nodes, presetMessages)
-            val hasPresetIntroItem = presetCount > 0 && presetAssistant != null
-            fun itemIndexOf(messageIndex: Int) =
-                chatMessageItemIndex(messageIndex, presetCount, hasPresetIntroItem)
             if (nodeId != null) {
                 // 指定消息跳转（收藏/搜索）：对齐该消息开头
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
@@ -438,29 +454,41 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                 // 把锚点条目放到视口顶部，不依赖总高，机制上无此问题；恢复存档位置同理
                 // （index + offset 是视口锚点描述，不依赖内容总高）。
                 if (canScroll) {
-                    val saved = scrollStore.load(conversation.id)
-                    // 锚点优先：离开时的视口首条真实消息仍在列表（头部未被压缩/删除）
-                    // → 精确钉回该消息当前位置；锚点失效（消息已被删/压缩合并）→ 回落
-                    // 旧逻辑按存档 index 恢复（item 空间直用）；都不可用 → 定位最后一条。
-                    val anchorTarget = saved?.anchorMessageId?.let { anchorId ->
-                        nodes.indexOfFirst { it.id == anchorId }
-                            .takeIf { it in presetCount..lastMessageIndex }
-                            ?.let(::itemIndexOf)
-                    }
-                    if (anchorTarget != null) {
-                        chatListState.scrollToItem(
-                            anchorTarget,
-                            saved.firstVisibleItemScrollOffset.coerceAtLeast(0),
-                        )
-                    } else if (saved != null && saved.firstVisibleItemIndex in 0..lastMessageIndex) {
-                        chatListState.scrollToItem(
-                            saved.firstVisibleItemIndex,
-                            saved.firstVisibleItemScrollOffset,
-                        )
+                    if (loadingJob?.isActive == true) {
+                        // 生成中返回：跳过存档恢复。存档是"离开时视口"快照，离开期间生成
+                        // 持续、底部内容继续增长，快照相对当前底部必过期——若恢复它，列表
+                        // 先停"旧底部"，随后被自动跟随（userScrolledUp 重建后复位武装）拽
+                        // 到当前底部，产生一次可见跳动。生成中一律直接落当前最后一条，
+                        // 与跟随去向同点，首帧即贴当前底、零中间帧；生成结束（isActive
+                        // 翻转）后走下方正常恢复分支，产品语义不变。
+                        chatListState.scrollToItem(itemIndexOf(lastMessageIndex))
                     } else {
-                        chatListState.scrollToItem(
-                            if (nodes.size > presetCount) itemIndexOf(lastMessageIndex) else 0
-                        )
+                        val saved = scrollStore.load(conversation.id)
+                        // 锚点优先：离开时的视口首条真实消息仍在列表（头部未被压缩/删除）
+                        // → 精确钉回该消息当前位置；锚点失效（消息已被删/压缩合并）→ 回落
+                        // 旧逻辑按存档 index 恢复（item 空间直用）；都不可用 → 定位最后一条。
+                        val anchorTarget = saved?.anchorMessageId?.let { anchorId ->
+                            nodes.indexOfFirst { it.id == anchorId }
+                                .takeIf { it in presetCount..lastMessageIndex }
+                                ?.let(::itemIndexOf)
+                        }
+                        if (anchorTarget != null) {
+                            chatListState.scrollToItem(
+                                anchorTarget,
+                                saved.firstVisibleItemScrollOffset.coerceAtLeast(0),
+                            )
+                        } else if (saved != null &&
+                            saved.firstVisibleItemIndex in 0..itemIndexOf(lastMessageIndex)
+                        ) {
+                            chatListState.scrollToItem(
+                                saved.firstVisibleItemIndex,
+                                saved.firstVisibleItemScrollOffset,
+                            )
+                        } else {
+                            chatListState.scrollToItem(
+                                if (nodes.size > presetCount) itemIndexOf(lastMessageIndex) else 0
+                            )
+                        }
                     }
                 }
             }
