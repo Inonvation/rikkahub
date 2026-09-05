@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.os.SystemClock
+import android.util.Log
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -47,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
@@ -199,7 +201,7 @@ internal fun getOrCreateAskUserAnswerDraft(toolCallId: String): AskUserAnswerDra
  * AskUserToolStep 的 showSheet 是普通 remember：组合槽位一旦销毁重建（列表回收、导航返回、
  * 审批状态闪变重组），它连同弹窗一起消失，自动弹出 effect 会在重建后再次把弹窗拉起；
  * 审批状态在保存/续答竞态下还可能 Pending/Answered 闪变，触发源反复出现即形成
- * 「关闭→再弹」死循环，表现为弹窗反复弹「跳过本题/取消跳过」。
+ * 「关闭→再弹」死循环，表现为弹窗反复弹、跳过标记反复翻转。
  * 闩锁保证同一 toolCallId 每进程至多自动弹一次：槽位重建后不再重弹，用户可经卡片上的
  * 「回答」按钮手动重开；进程冷启动闩锁为空，恢复到 pending 工具仍正常自动弹。
  * 读写只发生在主线程（组合 + LaunchedEffect），无需并发保护。
@@ -213,6 +215,28 @@ internal val askUserAutoOpenedSheets = mutableSetOf<String>()
 
 /** askUserAutoOpenedSheets 容量上限：超过即整体清空重记（见 askUserAutoOpenedSheets 注释） */
 internal const val MAX_ASK_USER_AUTO_OPEN_ENTRIES = 1000
+
+/**
+ * ask_user 弹窗可见状态的进程级存储（key = toolCallId，与作答草稿同级）。
+ *
+ * 历史根因：AskUserToolStep 的 showSheet 是普通 remember，组合槽位一旦销毁重建
+ * （列表回收、导航返回、审批状态闪变重组），弹窗随之消失；auto-open effect 重建后
+ * 会再次尝试拉起，于是反复「消失→重弹」。上一版（askUserAutoOpenedSheets 闩锁）
+ * 只禁止了重弹，弹窗「因槽位重建而消失」这个病灶仍在——表现为提问弹窗刚弹出就
+ * 闪没/内容错位，用户必须手动点「回答」才能再看。
+ *
+ * 方案：把「弹窗是否开着」这一事实与草稿一样持久到进程级。槽位重建后本地状态
+ * 从该表恢复，弹窗不再因重建而消失，也就不再需要重弹，闩锁退化为纯兜底。
+ * 提交/关闭/工具 Answered 时移除该项，避免历史 pending 工具在会话间复活弹窗。
+ * 读写只发生在主线程（组合 + LaunchedEffect + onClick），无需并发保护。
+ */
+internal val askUserSheetVisible = mutableStateMapOf<String, Boolean>()
+
+/** 诊断日志 tag：真机复现 ask_user 弹窗自动跳题/跳过按钮自动触发问题时过滤用 */
+private const val ASK_USER_DIAG_TAG = "AskUserDiag"
+
+/** 诊断用组合槽位序号（日志关联 AskUserToolStep 与 AskUserSheet 事件来源） */
+private val askUserDiagSlot = AtomicInteger()
 
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
@@ -719,6 +743,10 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     // 用户手动展开/收起问答气泡时通知列表取消自动跟随（主聊天列表加载中生效）
     val onManualContentToggle = LocalOnManualContentToggle.current
 
+    // 诊断槽位号：同一 toolCallId 的组合槽位每次重建都会重新分配，
+    // 日志里据此区分「弹窗一直开着」与「槽位重建后又弹了一次」。
+    val diagSlot = remember(tool.toolCallId) { askUserDiagSlot.incrementAndGet() }
+
     val title = remember(arguments) {
         // title 类型漂移（对象/数组）时不至于在组合期抛异常
         runCatching { arguments.jsonObject["title"]?.jsonPrimitive?.contentOrNull }.getOrNull()
@@ -727,8 +755,28 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         parseAskUserQuestions(arguments)
     }
 
-    var showSheet by remember { mutableStateOf(false) }
+    // 弹窗可见状态与作答草稿同级存进程级单例（见 askUserSheetVisible）：
+    // 槽位销毁重建（列表回收/导航/审批状态闪变重组）后从进程级恢复，弹窗不因重建
+    // 而消失，auto-open 也不必在重建后重拉——「反复弹/刚弹出就消失」的根因在
+    // 状态持久化层级，而不在触发频率（历史闩锁方案只压了后者，病灶未除）。
+    var showSheet by remember(tool.toolCallId) {
+        mutableStateOf(askUserSheetVisible[tool.toolCallId] ?: false)
+    }
     var expanded by remember { mutableStateOf(true) }
+
+    fun updateSheetVisibility(open: Boolean, reason: String) {
+        if (showSheet == open) return
+        showSheet = open
+        if (open) {
+            askUserSheetVisible[tool.toolCallId] = true
+        } else {
+            askUserSheetVisible.remove(tool.toolCallId)
+        }
+        Log.d(
+            ASK_USER_DIAG_TAG,
+            "slot#$diagSlot tool=${tool.toolCallId} sheet ${if (open) "open" else "close"} reason=$reason"
+        )
+    }
 
     // Hoisted answer state — persists across sheet open/close.
     // 草稿按 toolCallId 存进程级单例（见 askUserAnswerDrafts）：切页返回/组合槽位重建后作答进度不丢。
@@ -745,9 +793,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     // 模型未返回有效问题时（questions 为空）不自动弹出，避免空列表崩溃。
     // 无 onToolAnswer 回调（子代理详情/群聊讨论等只读回放页）不自动弹：弹出来用户作答后
     // 无人消费答案，工具永远 pending、作答丢失，白打扰用户——这些页面本就不该出现 HITL 弹窗。
-    // 自动弹出按 askUserAutoOpenedSheets 一次性闩锁：同一工具调用每进程只自动弹一次，
-    // 否则槽位销毁重建/审批状态闪变后 effect 重跑，会把弹窗反复拉起再弹回
-    // （"反复弹跳过本题/取消跳过"根因）。
+    // 进程级可见状态已保证槽位重建不丢弹窗，闩锁仅作最后的重复弹出兜底。
     LaunchedEffect(isPending, questions.isEmpty(), onToolAnswer == null) {
         if (isPending && questions.isNotEmpty() && onToolAnswer != null &&
             tool.toolCallId !in askUserAutoOpenedSheets
@@ -756,7 +802,16 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                 askUserAutoOpenedSheets.clear()
             }
             askUserAutoOpenedSheets.add(tool.toolCallId)
-            showSheet = true
+            Log.d(ASK_USER_DIAG_TAG, "slot#$diagSlot tool=${tool.toolCallId} autoOpen q=${questions.size}")
+            updateSheetVisibility(true, "auto-open")
+        }
+    }
+
+    // 工具已标记 Answered（提交成功/外部状态写回）：弹窗无继续存在的意义，
+    // 关闭并清理进程级可见态，防止泄漏到下次会话恢复把历史弹窗又拉起。
+    LaunchedEffect(isAnswered) {
+        if (isAnswered && showSheet) {
+            updateSheetVisibility(false, "answered")
         }
     }
 
@@ -803,7 +858,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         extra = if (isPending && onToolAnswer != null) {
             {
                 FilledTonalIconButton(
-                    onClick = { showSheet = true },
+                    onClick = { updateSheetVisibility(true, "extra-button") },
                     modifier = Modifier.size(28.dp),
                 ) {
                     Icon(
@@ -845,7 +900,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
             }
         } else null,
         onClick = if (isPending && onToolAnswer != null) {
-            { showSheet = true }
+            { updateSheetVisibility(true, "card-click") }
         } else null,
     )
 
@@ -860,10 +915,11 @@ private fun ChainOfThoughtScope.AskUserToolStep(
             customAnswers = customAnswers,
             skippedIds = skippedIds,
             onSubmit = { answer ->
-                showSheet = false
+                updateSheetVisibility(false, "submit")
                 onToolAnswer(tool.toolCallId, answer)
             },
-            onDismiss = { showSheet = false },
+            onDismiss = { updateSheetVisibility(false, "dismiss") },
+            diagSlot = diagSlot,
         )
     }
 }
