@@ -1396,5 +1396,6 @@
   <string name="assistant_add_to_category_empty">Все ассистенты уже в этой категории</string>
   <string name="setting_tts_page_default_playback_speed">Скорость воспроизведения по умолчанию</string>
   <string name="setting_tts_page_default_playback_speed_description">Применяется локально к каждому TTS-провайдеру без изменения его настроек синтеза.</string>
+  <string name="notification_live_update_thinking_elapsed">Думаю… · прошло %1$s</string>
 </resources>
 

@@ -38,10 +38,11 @@ import kotlin.uuid.Uuid
 // Live Update 通知节流间隔：流式输出每个chunk都会触发一次更新，
 // notify() 是 binder IPC 且系统本身会对高频更新限流，必须在应用侧节流
 private const val LIVE_UPDATE_NOTIFICATION_THROTTLE_MS = 1000L
-// 工具状态心跳间隔：模型在长工具执行/后台任务等待期间不产生流式更新，
+// 工具/思考状态心跳间隔：模型在长工具执行、长思考或后台任务等待期间不产生流式更新，
 // 通知只有靠定时刷新才能推进"已运行时长"，并让用户区分"在跑"与"卡死"
 private const val LIVE_UPDATE_NOTIFICATION_HEARTBEAT_MS = 1000L
 private const val TOOL_STATUS_KEY_PREFIX = "tool:"
+private const val THINKING_STATUS_KEY = "thinking"
 
 private val notificationJson = Json { ignoreUnknownKeys = true }
 
@@ -60,24 +61,28 @@ internal data class LiveUpdateStatusData(
     val toolStartedAtMs: Long? = null,
     /** 墙钟开始时间（毫秒），单调时钟不可用时兜底（如旧数据只有 Instant 时间戳） */
     val toolStartedEpochMs: Long? = null,
+    /** 思考开始时间（墙钟毫秒），来自 Reasoning part 的 createdAt */
+    val thinkingStartedEpochMs: Long? = null,
 ) {
     /** 同一状态流式刷新时继续节流；状态切换（如文本 -> 工具）必须立即刷新。 */
     val statusKey: String
         get() = when (kind) {
             LiveUpdateKind.TOOL -> "tool:$toolCallId"
-            LiveUpdateKind.THINKING -> "thinking"
+            LiveUpdateKind.THINKING -> THINKING_STATUS_KEY
             LiveUpdateKind.WRITING,
             LiveUpdateKind.DEFAULT,
                 -> "writing"
         }
 
-    /** 工具已运行时长(ms)：优先单调时钟差（跨休眠稳定），无单调锚点回退墙钟差 */
+    /** 当前状态已运行时长(ms)：工具优先单调时钟差（跨休眠稳定），无锚点回退墙钟差；思考用 createdAt 墙钟差 */
     val runningElapsedMs: Long?
         get() {
             val monotonic = toolStartedAtMs
             if (monotonic != null) return SystemClock.elapsedRealtime() - monotonic
             val epoch = toolStartedEpochMs
             if (epoch != null) return System.currentTimeMillis() - epoch
+            val thinkingEpoch = thinkingStartedEpochMs
+            if (thinkingEpoch != null) return System.currentTimeMillis() - thinkingEpoch
             return null
         }
 }
@@ -122,6 +127,7 @@ internal fun determineLiveUpdateStatus(
             return LiveUpdateStatusData(
                 kind = LiveUpdateKind.THINKING,
                 contentText = reasoning.reasoning.takeLast(200),
+                thinkingStartedEpochMs = reasoning.createdAt.toEpochMilliseconds(),
             )
         }
 
@@ -175,6 +181,14 @@ internal fun formatElapsed(ms: Long): String {
     }
     return "$minutes:$ss"
 }
+
+/**
+ * 胶囊（shortCriticalText）文本附带裸时长："工具 0:42"。
+ * 收起状态下系统只渲染胶囊，时长必须直接进胶囊才能被看到；
+ * 时长是纯数字（见 [formatElapsed]），直接拼在标签后无需新文案。
+ */
+internal fun chipWithElapsed(label: String, elapsedMs: Long?): String =
+    if (elapsedMs != null) "$label ${formatElapsed(elapsedMs)}" else label
 
 /**
  * 单个会话的 Live Update 状态。事件流与心跳协程分属不同线程，
@@ -375,20 +389,20 @@ class ChatNotificationManager(
     }
 
     /**
-     * 为工具状态维持 1s 心跳。只有"当前通知归属会话"才启动——
+     * 为工具/思考状态维持 1s 心跳。只有"当前通知归属会话"才启动——
      * 否则多会话各自的心跳会互相覆盖同一个通知 id 造成闪烁。
      * job 在 compute 临界区内创建并登记，避免并发路径重复启动心跳。
      */
     private fun manageHeartbeat(conversationId: Uuid) {
         val current = liveUpdateStates[conversationId] ?: return
         if (current.heartbeat?.isActive == true) return
-        if (current.lastPostedKey?.startsWith(TOOL_STATUS_KEY_PREFIX) != true) return
+        if (!hasTickingDuration(current.lastPostedKey)) return
 
         liveUpdateStates.computeIfPresent(conversationId) { _, s ->
             // 双检：map 内的最新条目为准，防并发创建两个心跳
             if (s.heartbeat?.isActive == true) return@computeIfPresent s
             val isOwner = activeConversationId() == conversationId
-            if (!isOwner || s.lastPostedKey?.startsWith(TOOL_STATUS_KEY_PREFIX) != true) {
+            if (!isOwner || !hasTickingDuration(s.lastPostedKey)) {
                 return@computeIfPresent s
             }
             // 先声明再赋值，让协程体可捕获自身 Job 用于退出时清理引用
@@ -407,11 +421,16 @@ class ChatNotificationManager(
         }
     }
 
+    /** 该状态 key 是否带可推进的"已运行时长"（工具/思考），决定是否需要心跳 */
+    private fun hasTickingDuration(statusKey: String?): Boolean =
+        statusKey != null &&
+            (statusKey.startsWith(TOOL_STATUS_KEY_PREFIX) || statusKey == THINKING_STATUS_KEY)
+
     /**
      * 单次心跳：返回是否继续。
-     * - 同工具：刷新通知推进已运行时长；
+     * - 同状态：带时长锚点（工具/思考）就刷新通知推进已运行时长；
      * - 状态已切换（如异步任务终态）：立即发送新状态（兜底，正常由 AsyncTaskTerminal 事件驱动）；
-     * - 新状态不再是工具：停止心跳。
+     * - 新状态不再带时长锚点：停止心跳。
      */
     private fun heartbeatTick(conversationId: Uuid): Boolean {
         val state = liveUpdateStates[conversationId] ?: return false
@@ -427,10 +446,10 @@ class ChatNotificationManager(
         if (derived.statusKey != state.lastPostedKey) {
             sendLiveUpdateNotification(conversationId, state.snapshotSender, derived)
             markPosted(conversationId, derived.statusKey)
-            return derived.kind == LiveUpdateKind.TOOL
+            return derived.runningElapsedMs != null
         }
-        // 同状态：只有带开始时间的工具才需要刷新时长
-        if (derived.kind != LiveUpdateKind.TOOL || derived.runningElapsedMs == null) return false
+        // 同状态：只有带时长锚点的状态（工具/思考）才需要刷新推进时长
+        if (derived.runningElapsedMs == null) return false
 
         sendLiveUpdateNotification(conversationId, state.snapshotSender, derived)
         return true
@@ -463,8 +482,11 @@ class ChatNotificationManager(
         val statusText: String
         when (status.kind) {
             LiveUpdateKind.TOOL -> {
-                chipText = context.getString(R.string.notification_live_update_chip_tool)
                 val elapsed = status.runningElapsedMs
+                chipText = chipWithElapsed(
+                    context.getString(R.string.notification_live_update_chip_tool),
+                    elapsed,
+                )
                 statusText = if (elapsed != null) {
                     context.getString(
                         R.string.notification_live_update_tool_elapsed,
@@ -480,8 +502,19 @@ class ChatNotificationManager(
             }
 
             LiveUpdateKind.THINKING -> {
-                chipText = context.getString(R.string.notification_live_update_chip_thinking)
-                statusText = context.getString(R.string.notification_live_update_thinking)
+                val elapsed = status.runningElapsedMs
+                chipText = chipWithElapsed(
+                    context.getString(R.string.notification_live_update_chip_thinking),
+                    elapsed,
+                )
+                statusText = if (elapsed != null) {
+                    context.getString(
+                        R.string.notification_live_update_thinking_elapsed,
+                        formatElapsed(elapsed),
+                    )
+                } else {
+                    context.getString(R.string.notification_live_update_thinking)
+                }
             }
 
             LiveUpdateKind.WRITING -> {

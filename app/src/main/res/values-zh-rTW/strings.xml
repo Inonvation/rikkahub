@@ -1400,5 +1400,6 @@
   <string name="assistant_add_to_category_empty">該分類已包含全部助手</string>
   <string name="setting_tts_page_default_playback_speed">預設播放速度</string>
   <string name="setting_tts_page_default_playback_speed_description">在本機套用至每個 TTS 提供者，不變更其合成設定。</string>
+  <string name="notification_live_update_thinking_elapsed">思考中... · 已思考 %1$s</string>
 </resources>
 

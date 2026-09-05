@@ -1846,5 +1846,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="assistant_add_to_category_action">Add assistants to “%1$s”</string>
   <string name="assistant_add_to_category_empty">All assistants are already in this category</string>
   <string name="chat_page_context_measured">Measured</string>
+  <string name="notification_live_update_thinking_elapsed">Thinking... · %1$s elapsed</string>
 </resources>
 

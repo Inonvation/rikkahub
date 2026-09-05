@@ -4,8 +4,10 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.repository.AsyncTaskState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 class LiveUpdateStatusTest {
@@ -133,6 +135,46 @@ class LiveUpdateStatusTest {
     }
 
     @Test
+    fun `thinking records wall clock start anchor`() {
+        val createdAt = Instant.fromEpochMilliseconds(1_700_000_000_000)
+        val status = determineLiveUpdateStatus(
+            listOf(
+                UIMessagePart.Reasoning("deep thought", createdAt = createdAt, finishedAt = null),
+                UIMessagePart.Text("partial"),
+            )
+        )
+
+        assertEquals(LiveUpdateKind.THINKING, status.kind)
+        assertEquals(1_700_000_000_000L, status.thinkingStartedEpochMs)
+    }
+
+    @Test
+    fun `finished reasoning maps to writing without anchor`() {
+        val now = Clock.System.now()
+        val status = determineLiveUpdateStatus(
+            listOf(
+                UIMessagePart.Reasoning("done thinking", createdAt = now, finishedAt = now),
+                UIMessagePart.Text("hello"),
+            )
+        )
+
+        assertEquals(LiveUpdateKind.WRITING, status.kind)
+        assertNull(status.thinkingStartedEpochMs)
+    }
+
+    @Test
+    fun `running tool beats unfinished reasoning`() {
+        val status = determineLiveUpdateStatus(
+            listOf(
+                UIMessagePart.Reasoning("planning", finishedAt = null),
+                tool(started = true),
+            )
+        )
+
+        assertEquals(LiveUpdateKind.TOOL, status.kind)
+    }
+
+    @Test
     fun `text maps to writing`() {
         val status = determineLiveUpdateStatus(listOf(UIMessagePart.Text("hello")))
 
@@ -171,5 +213,16 @@ class LiveUpdateStatusTest {
         assertEquals("1:02:03", formatElapsed(3_723_000))
         // 负值（时钟异常）不应出现负数展示
         assertEquals("0:00", formatElapsed(-5_000))
+    }
+
+    @Test
+    fun `chip text carries bare elapsed when anchored`() {
+        assertEquals("Tool 0:42", chipWithElapsed("Tool", 42_000))
+        assertEquals("思考中 1:02:03", chipWithElapsed("思考中", 3_723_000))
+    }
+
+    @Test
+    fun `chip text stays bare label without anchor`() {
+        assertEquals("Tool", chipWithElapsed("Tool", null))
     }
 }
