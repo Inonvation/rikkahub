@@ -166,3 +166,30 @@
 
 - 本次 3 条均为手动移植（未 cherry-pick 上游原 commit），符合 fork 工作流；`upstream/master` 祖先关系仍不包含这些，属预期。
 - `540b9dfa` 如需同步，建议单独立项：先确认本地备份体系是否要吸收上游的"一致性快照 + 启动恢复"能力，再按本地 schema（补齐全部迁移）重写 `AppDatabaseFactory`/`SQLiteConfiguration`，并对接本地 `BackupSplitter`/`importer` 而非引入上游独立 `BackupManager`。
+## 2026-09-05 — 第六次同步（09-02~09-05 窗口巡检，8 个提交；真正待落地 3 个）
+
+### A. 无需合并（5 个）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `b153028d` | bump 2.4.17 | 版本号独立演进 |
+| `5cdab947` | opencode session 头 | 第五次同步已落地，本次确认在位 |
+| `0f2c495b` | search 助手范围切换 | 同上 |
+| `4b36640a` | 图片选择器回退 | 同上 |
+| — | — | 注：`git rev-list HEAD..upstream/master` 仍会数出上述三个（见文首说明） |
+
+### B. 已同步（3 个，验证通过）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `5736c05e` | 修复代码块覆盖导出残留旧内容 | `HighlightCodeBlock.kt` 本地与上游除该提交外完全一致（`git diff HEAD upstream/master -- <file>` 恰为该提交本身），照抄改动：`scope.launch(Dispatchers.IO)` + `openOutputStream(it, "wt")` 截断写 + `toByteArray(Charsets.UTF_8)` |
+| `c73f8972` | 新增 GPT-6 到注册表 | 本地 `ModelRegistry` 已瘦身分歧（无 DEEPSEEK_RESPONSES/QWEN_MT/embedding 等），手动两处：`GPT_5_6` 定义后加 `GPT_6`（tokens gpt/6 + visionInput + toolReasoningAbility），`ALL` 列表 `GPT_5_6` 后加条目 |
+| `aac5e43e` | 工作区文件管理图片缩略图 | 本地 `WorkspaceDetailPage` 为重构版（回收站/多选/定位高亮/骨架屏，比上游多 900+ 行），按锚点移植四处：① `WorkspaceManager.resolveFile`（`fileSize` 后，与上游同锚点）② `WorkspaceRepository.resolveFile`（含 `ensureWorkspace`）③ `WorkspaceDetailVM.resolveImageFile`（`exportToCacheFile` 前）④ `WorkspaceDetailPage`：`WorkspaceFilesPage`/`WorkspaceFileCard` 穿 `onResolveImage` 参数 + 卡片 `isImage`/`produceState`（key1=area, key2=path, key3=updatedAt:sizeBytes）+ 40dp 圆角底座 `AsyncImage(ContentScale.Crop)`（memoryCacheKey `workspace:<path>:<updatedAt>:<sizeBytes>`）；非图片行包 40dp Box 与上游对齐 |
+
+验证：`:app:compileDebugKotlin` BUILD SUCCESSFUL（两项编译验证：ModelRegistry/HighlightCodeBlock 落地后一次、缩略图移植完成后一次）。
+
+### C. 暂缓（1 个，延续第五次结论）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `540b9dfa` | 备份一致性快照 + 启动安全恢复 | 维持第五次论证：本地 schema v47 迁移链与上游 v16 工厂不兼容、本地自研 sync 体系（`SyncManager`/`BackupSplitter`/`importer` 等）与上游 `BackupManager`/`PendingRestore` 是两套设计。用户本轮拍板暂缓，如需吸收其能力（WAL 一致性快照、启动时安全恢复）建议单独立项 |

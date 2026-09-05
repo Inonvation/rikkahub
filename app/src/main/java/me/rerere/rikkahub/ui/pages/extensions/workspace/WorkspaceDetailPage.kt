@@ -63,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,6 +79,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -121,6 +126,7 @@ import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import java.io.File
 
 @Composable
 fun WorkspaceDetailPage(
@@ -406,6 +412,7 @@ fun WorkspaceDetailPage(
                     onSelectArea = vm::selectArea,
                     onGoUp = vm::goUp,
                     onNavigatePath = { vm.navigate(it) },
+                    onResolveImage = { entry, area -> vm.resolveImageFile(entry, area) },
                     selecting = selecting,
                     selectedPaths = selectedPaths,
                     onToggleSelect = { toggleSelect(it.path) },
@@ -1035,6 +1042,7 @@ private fun WorkspaceFilesPage(
     onSelectArea: (WorkspaceStorageArea) -> Unit,
     onGoUp: () -> Unit,
     onNavigatePath: (String) -> Unit,
+    onResolveImage: suspend (WorkspaceFileEntry, WorkspaceStorageArea) -> File?,
     selecting: Boolean,
     selectedPaths: Set<String>,
     onToggleSelect: (WorkspaceFileEntry) -> Unit,
@@ -1102,6 +1110,8 @@ private fun WorkspaceFilesPage(
         items(state.entries, key = { "${state.area.name}:${it.path}" }) { entry ->
             WorkspaceFileCard(
                 entry = entry,
+                area = state.area,
+                onResolveImage = { onResolveImage(entry, state.area) },
                 highlighted = entry.name == state.highlightPath || entry.path == state.highlightPath,
                 selecting = selecting,
                 selected = entry.path in selectedPaths,
@@ -1366,6 +1376,8 @@ private fun RenameDialog(
 @Composable
 private fun WorkspaceFileCard(
     entry: WorkspaceFileEntry,
+    area: WorkspaceStorageArea,
+    onResolveImage: suspend () -> File?,
     selecting: Boolean,
     selected: Boolean,
     highlighted: Boolean = false,
@@ -1381,6 +1393,24 @@ private fun WorkspaceFileCard(
     onMove: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+
+    val isImage = !entry.isDirectory && entry.detectFileType() == WorkspaceFileType.IMAGE
+    val imageFile by produceState<File?>(
+        initialValue = null,
+        key1 = if (isImage) area else null,
+        key2 = if (isImage) entry.path else null,
+        key3 = if (isImage) "${entry.updatedAt}:${entry.sizeBytes}" else null,
+    ) {
+        if (isImage) {
+            value = try {
+                onResolveImage()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 
     // 定位高亮：primaryContainer 底色渐入，超时清除后渐隐回默认色
     val containerColor by animateColorAsState(
@@ -1425,16 +1455,55 @@ private fun WorkspaceFileCard(
                     modifier = Modifier.padding(end = 4.dp),
                 )
             }
-            Icon(
-                imageVector = if (entry.isDirectory) HugeIcons.Folder01 else HugeIcons.File02,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = if (entry.isDirectory) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
+            if (isImage) {
+                val context = LocalContext.current
+                val imageRequest = remember(imageFile, entry.updatedAt, entry.sizeBytes) {
+                    imageFile?.let {
+                        ImageRequest.Builder(context)
+                            .data(it)
+                            .memoryCacheKey("workspace:${it.absolutePath}:${entry.updatedAt}:${entry.sizeBytes}")
+                            .build()
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.File02,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    imageRequest?.let {
+                        AsyncImage(
+                            model = it,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.size(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (entry.isDirectory) HugeIcons.Folder01 else HugeIcons.File02,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = if (entry.isDirectory) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
             Column(
                 modifier = Modifier
                     .weight(1f)
