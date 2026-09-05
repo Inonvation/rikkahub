@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import android.util.Log
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,9 +57,6 @@ import me.rerere.rikkahub.ui.hooks.rememberHaptic
 /** Short tab title: just the question index. */
 private fun AskUserQuestion.tabTitle(index: Int): String = "Q${index + 1}"
 
-/** 诊断日志 tag：与 ChatMessageTools.kt 的 ASK_USER_DIAG_TAG 同值，真机取证一键过滤 */
-private const val ASK_USER_DIAG_TAG = "AskUserDiag"
-
 /**
  * Half-screen question sheet.  Horizontal tabs across the top, one question at a time.
  * Every question type also shows a free-text "other" field below the primary input.
@@ -81,16 +77,8 @@ fun AskUserSheet(
     skippedIds: MutableMap<String, Boolean>,
     onSubmit: (String) -> Unit,
     onDismiss: () -> Unit,
-    // 诊断用：来自上层 AskUserToolStep 的组合槽位号，用于把本弹窗内事件与
-    // 「是否槽位重建/多实例并存」关联起来。release 下日志不输出，纯零成本。
-    diagSlot: Int = 0,
 ) {
     val hapticController = rememberHaptic()
-
-    // 空态分支也可能与正常分支重建交错（流式解析瞬时为空），此计数仅用于日志分辨实例
-    fun logDiag(msg: String) {
-        Log.d(ASK_USER_DIAG_TAG, "slot#$diagSlot $msg")
-    }
 
     // 模型未返回有效问题时渲染友好空态，避免 questions[0] 越界崩溃
     if (questions.isEmpty()) {
@@ -170,30 +158,12 @@ fun AskUserSheet(
         )
     }
 
-    // 诊断：每个组合槽位首次组合时输出初始定位的决策依据。若用户反馈「弹窗刚弹出就
-    // 跳到第二题」，此日志能区分是「初始定位计算就落在 1」（草稿里 Q0 被误判已答/已跳过）
-    // 还是「定位 0 之后又被某次点击/重建改到 1」。
-    var diagComposeLogged by remember(questions, answers, skippedIds) {
-        mutableStateOf(false)
-    }
-    if (!diagComposeLogged) {
-        diagComposeLogged = true
-        val q0 = questions.firstOrNull()
-        logDiag(
-            "compose q=${questions.size} q0=(id=${q0?.id} required=${q0?.required} " +
-                "answered=${q0?.let { isQuestionAnswered(it, answers, multiAnswers, customAnswers) }} " +
-                "skipped=${q0?.let { isQuestionSkipped(it, skippedIds) }}) initIndex=$selectedIndex " +
-                "draftAnswers=${answers.keys} skipped=${skippedIds.keys}"
-        )
-    }
-
     // 文本题自动聚焦触发器：仅在主动到达某题（tab 点击/自动前进/跳过前进）时更新为目标题，
     // 初始定位保持 -1 不聚焦，避免弹窗展开动画未完成键盘就弹出、把题面顶出视口。
     var focusTargetIndex by remember(questions) { mutableIntStateOf(-1) }
 
     // 统一导航入口：切换题目并标记"主动到达"，驱动文本题自动聚焦
     fun navigateTo(index: Int) {
-        logDiag("navigateTo $selectedIndex -> $index")
         selectedIndex = index
         focusTargetIndex = index
     }
@@ -215,10 +185,6 @@ fun AskUserSheet(
         if (!isQuestionAnswered(questions[answeredIndex], answers, multiAnswers, customAnswers)) return
         val nextUnanswered = ((answeredIndex + 1) until questions.size)
             .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers, customAnswers, skippedIds) }
-        logDiag(
-            "advanceFrom $answeredIndex nextUnanswered=$nextUnanswered " +
-                "answered=${questions[answeredIndex].id}"
-        )
         if (nextUnanswered != null) {
             navigateTo(nextUnanswered)
         }
@@ -231,7 +197,6 @@ fun AskUserSheet(
     fun advanceToNextUnresolved(fromIndex: Int) {
         val nextUnanswered = ((fromIndex + 1) until questions.size)
             .firstOrNull { i -> isQuestionUnresolved(questions[i], answers, multiAnswers, customAnswers, skippedIds) }
-        logDiag("advanceToNextUnresolved from=$fromIndex nextUnanswered=$nextUnanswered")
         if (nextUnanswered != null) {
             navigateTo(nextUnanswered)
         }
@@ -272,7 +237,6 @@ fun AskUserSheet(
                             selected = index == selectedIndex,
                             onClick = {
                                 hapticController.lightTap()
-                                logDiag("tabClick $index")
                                 navigateTo(index)
                             },
                             text = {
@@ -350,10 +314,7 @@ fun AskUserSheet(
                         question = q,
                         answer = answers[q.id] ?: "",
                         onAnswerChange = { answers[q.id] = it },
-                        onSelected = {
-                            logDiag("singleSelect q=${q.id} ans=${answers[q.id]}")
-                            advanceFrom(selectedIndex)
-                        },
+                        onSelected = { advanceFrom(selectedIndex) },
                     )
                     "multi" -> MultiSelectInput(
                         question = q,
@@ -362,16 +323,12 @@ fun AskUserSheet(
                             val cur = (multiAnswers[q.id] ?: emptySet()).toMutableSet()
                             if (cur.contains(option)) cur.remove(option) else cur.add(option)
                             multiAnswers[q.id] = cur
-                            logDiag("multiToggle q=${q.id} now=$cur")
                         },
                     )
                     "confirmation" -> ConfirmationInput(
                         answer = answers[q.id] ?: "",
                         onAnswerChange = { answers[q.id] = it },
-                        onSelected = {
-                            logDiag("confirmSelect q=${q.id} ans=${answers[q.id]}")
-                            advanceFrom(selectedIndex)
-                        },
+                        onSelected = { advanceFrom(selectedIndex) },
                     )
                     else -> TextQuestionInput(
                         question = q,
@@ -404,7 +361,6 @@ fun AskUserSheet(
                             selected = false,
                             onClick = {
                                 hapticController.lightTap()
-                                logDiag("expandOther q=${q.id}")
                                 customExpanded = true
                             },
                             label = { Text("其他…", style = MaterialTheme.typography.labelSmall) },
@@ -429,10 +385,6 @@ fun AskUserSheet(
                                 // 跳过即视为已解决：前移到下一题，防止停留在原地和自动跳题互相拉扯
                                 advanceToNextUnresolved(selectedIndex)
                             }
-                            logDiag(
-                                "skipClick q=${q.id} index=$selectedIndex before=$skipped " +
-                                    "after=${isQuestionSkipped(q, skippedIds)}"
-                            )
                         },
                         modifier = Modifier.align(Alignment.End),
                     ) {
@@ -481,10 +433,7 @@ fun AskUserSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 TextButton(
-                    onClick = {
-                        logDiag("dismiss")
-                        onDismiss()
-                    },
+                    onClick = { onDismiss() },
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(HugeIcons.Cancel01, null, Modifier.size(16.dp))
@@ -495,7 +444,6 @@ fun AskUserSheet(
                 // 唯一主行动用 tonal 按钮突出主次；未就绪时默认灰置（不弹 toast）
                 FilledTonalButton(
                     onClick = {
-                        logDiag("submit requiredUnanswered=$requiredUnanswered")
                         val payload = buildJsonObject {
                             put("answers", buildJsonObject {
                                 questions.forEach { q ->
