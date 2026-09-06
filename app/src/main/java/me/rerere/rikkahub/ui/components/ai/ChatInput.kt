@@ -75,6 +75,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -96,6 +97,7 @@ import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.hazeBlur
 import kotlinx.coroutines.CancellationException
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.collectLatest
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -271,7 +273,7 @@ fun ChatInput(
                 ) {
                     pendingGuidance.forEach { item ->
                         PendingGuidanceBubble(
-                            text = item.text,
+                            item = item,
                             onSendNow = { onSendPendingGuidance?.invoke(item) },
                             onCancel = { onCancelPendingGuidance?.invoke(item) },
                             onEdit = { onEditPendingGuidance?.invoke(item) },
@@ -457,15 +459,24 @@ fun ChatInput(
  * 「引导已排入」气泡：独立于输入框，显示在输入框上方、右对齐（对齐 Codex 样式）。
  * 默认等 AI 回合输出完成后由 ChatService 依次自动注入（气泡自动消失）；点发送按钮则
  * 打断当前生成并立即注入；点编辑按钮/文本可回填输入框编辑；点取消则丢弃这条排队引导。
+ * 带图片附件时在文本前渲染缩略图（最多 3 张）。
  */
 @Composable
 private fun PendingGuidanceBubble(
-    text: String,
+    item: PendingGuidanceItem,
     onSendNow: () -> Unit,
     onCancel: () -> Unit,
     onEdit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val text = item.parts.filterIsInstance<UIMessagePart.Text>()
+        .joinToString(" ") { it.text }.trim()
+    val attachmentCount = item.parts.count { it !is UIMessagePart.Text }
+    val displayText = when {
+        text.isNotBlank() -> stringResource(R.string.pending_guidance_queued, text)
+        attachmentCount > 0 -> "$attachmentCount 个附件"
+        else -> stringResource(R.string.pending_guidance_queued, "")
+    }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
@@ -477,8 +488,11 @@ private fun PendingGuidanceBubble(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            item.parts.filterIsInstance<UIMessagePart.Image>().take(3).forEach { image ->
+                PendingBubbleThumbnail(url = image.url)
+            }
             Text(
-                text = stringResource(R.string.pending_guidance_queued, text),
+                text = displayText,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 maxLines = 2,
@@ -545,12 +559,19 @@ private fun PendingSendBubble(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(
-                imageVector = HugeIcons.Files02,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.size(14.dp),
-            )
+            val images = item.content.filterIsInstance<UIMessagePart.Image>()
+            if (images.isEmpty()) {
+                Icon(
+                    imageVector = HugeIcons.Files02,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(14.dp),
+                )
+            } else {
+                images.take(3).forEach { image ->
+                    PendingBubbleThumbnail(url = image.url)
+                }
+            }
             Text(
                 text = item.previewText(),
                 style = MaterialTheme.typography.labelSmall,
@@ -586,6 +607,23 @@ private fun PendingSendItem.previewText(): String {
             append("$attachmentCount 个附件")
         }
         if (isBlank()) append("待发送消息")
+    }
+}
+
+/** 排队气泡内的图片缩略图（引导/待发送共用） */
+@Composable
+private fun PendingBubbleThumbnail(url: String) {
+    Surface(
+        modifier = Modifier.size(28.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

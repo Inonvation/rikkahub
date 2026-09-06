@@ -227,3 +227,25 @@
 ### 验证
 
 `:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:search:testDebugUnitTest`（含新增 `ExaSearchServiceTest` 9 例）与 `:app:testDebugUnitTest --tests SearchToolsTest(2 例)/ToolDescriptionConventionTest(1 例)` 全绿（test-results XML 确认）。
+
+## 2026-09-07 — 第八次同步（09-06 晚间上游新增 3 提交；部分吸收 1，跳过 2）
+
+### A. 等价功能 + 部分吸收（`66de8b306` 消息发送队列）
+
+本地已有等价的排队发送体系（`PendingSendItem`/`pendingSendQueue` + ChatService drain + steering 引导双通道），与上游独立 `MessageQueue` 类实现完全不同，不可 cherry-pick。经用户拍板**不整体合并**，只吸收增量修复本地缺口：
+
+1. **引导消息支持附件（bug 修复）**：本地引导通道原为纯文本（`PendingSteering(text)`），生成中带附件只能落入 `pendingSendQueue` 等回合结束（「无法立即发送」）。本次全链路改 `parts: List<UIMessagePart>`：`PendingSteering`/`PendingGuidanceItem` 模型 → GenerationHandler 注入点（`parts = pendingSteering.parts`）→ ChatService `sendGuidance`/`sendGuidanceInterrupt`/`interruptGuidanceAndSend`/`drainSteeringQueue`/`getPendingGuidanceFlow` → ChatVM → ChatPage `performSend` 路由去掉 `hasAttachment` 分流（生成中统一走引导通道，附件随真实用户消息注入）；守卫从 `text.isBlank()` 改 `isEmptyInputMessage()`（与 5902feab 图片-only 修复协同）。编辑回填改 `inputState.setContents(parts)`（附件一并回填）。
+2. **排队气泡图片缩略图（本地增强）**：上游 `MessageQueuePanel` 实测只有 `[图片]` 文本占位，无真缩略图；本次本地增强 `PendingGuidanceBubble`/`PendingSendBubble`——图片附件渲染 28dp 圆角缩略图（`PendingBubbleThumbnail`，coil AsyncImage Crop，最多 3 张），无图时保留 Files02 图标；引导气泡无文本时回退「N 个附件」文案。
+
+上游增量中**未吸收**：编辑排队消息（`beginEdit`/`finishEdit`）、暂停/恢复队列、附件清理闭环（`unreferencedQueuedAttachmentUrls`+`hasFileReference`）、`isInUse` 计入队列（本地靠 5s idle + drain 立即续发兜底）——本地气泡已支持编辑回填与取消，暂无对应缺口。
+
+### B. 跳过（2 个，用户拍板不同步）
+
+| 提交 | 内容 | 原因 |
+|---|---|---|
+| `580e05d60` | ASR 服务端 VAD + 火山双向流式 | 用户拍板跳过 |
+| `a621e2779` | 语音模式（依赖发送队列，+1146） | 用户拍板跳过；如需语音对话能力建议等上游稳定后单独立项 |
+
+### 验证
+
+`:app:compileDebugKotlin` BUILD SUCCESSFUL；测试源码无引用旧 `text` 字段的用例。真机行为验证（生成中带附件立即注入/气泡缩略图）由用户自行装机确认。

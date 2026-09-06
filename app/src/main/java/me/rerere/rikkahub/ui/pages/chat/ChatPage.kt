@@ -784,17 +784,13 @@ private fun ChatPageContent(
                 if (appendOnly) {
                     vm.sendMessageQueued(inputState.getContents(), answer = false)
                 } else {
+                    // 生成中发送统一走引导通道（文本+附件均支持，作为真实用户消息注入）；
+                    // 已有排队引导时打断并立即发送新引导
                     val contents = inputState.getContents()
-                    val hasAttachment = contents.any { it !is UIMessagePart.Text }
-                    if (hasAttachment) {
-                        vm.sendMessageQueued(contents)
+                    if (pendingGuidance.isNotEmpty()) {
+                        vm.sendGuidanceInterrupt(contents)
                     } else {
-                        val guidanceText = inputState.textContent.text.toString()
-                        if (pendingGuidance.isNotEmpty()) {
-                            vm.sendGuidanceInterrupt(guidanceText)
-                        } else {
-                            vm.sendGuidance(guidanceText)
-                        }
+                        vm.sendGuidance(contents)
                     }
                 }
                 scrollAfterSend()
@@ -1236,7 +1232,7 @@ private fun ChatPageContent(
                 pendingGuidance = pendingGuidance,
                 pendingSends = pendingSends,
                 onSendPendingGuidance = { item ->
-                    vm.sendGuidanceInterrupt(item.text)
+                    vm.sendGuidanceInterrupt(item.parts)
                 },
                 onCancelPendingGuidance = { item ->
                     vm.cancelPendingGuidance(item.id)
@@ -1245,7 +1241,7 @@ private fun ChatPageContent(
                     vm.cancelPendingSend(item.id)
                 },
                 onEditPendingGuidance = { item ->
-                    vm.editPendingGuidance(item.id, item.text)
+                    vm.editPendingGuidance(item.id, item.parts)
                 },
                 onOpenSubAgentPanel = {
                     navController.navigate(Screen.SubAgentPanel(conversation.id.toString()))

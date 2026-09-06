@@ -1366,9 +1366,9 @@ class ChatService(
     // ---- 引导消息 ----
 
     /**
-     * 向主 AI 发送引导消息：引导文本作为**普通用户消息**进入对话（对齐 Codex turn/steer：
-     * 一次、尾部、append-only——引导落地后就是历史的一部分，不再向后续每步重复下发
-     * 「请按引导续答」指令，避免模型每步都「重新收到」引导、思考内容反复提它）。
+     * 向主 AI 发送引导消息：引导内容（文本+附件）作为**普通用户消息**进入对话（对齐 Codex
+     * turn/steer：一次、尾部、append-only——引导落地后就是历史的一部分，不再向后续每步
+     * 重复下发「请按引导续答」指令，避免模型每步都「重新收到」引导、思考内容反复提它）。
      *
      * AI 正在生成时按 [immediate] 分两种模式：
      * - immediate=false（默认）：引导进入 steering 队列，等当前回合输出完成后由
@@ -1384,12 +1384,12 @@ class ChatService(
      */
     fun sendGuidance(
         conversationId: Uuid,
-        text: String,
+        parts: List<UIMessagePart>,
         /** true = 排队引导旁的「立即发送」，GenerationHandler 在下一轮边界立即注入；
          *  false = 默认排队，等当前回合输出完成后依次自动注入。 */
         immediate: Boolean = false,
     ) {
-        if (text.isBlank()) return
+        if (parts.isEmptyInputMessage()) return
         val session = getOrCreateSession(conversationId)
         if (session.state.value.isGroupDiscussion) return
 
@@ -1400,11 +1400,11 @@ class ChatService(
         if (runningJob != null && runningJob.isActive) {
             // 已有排队引导时再次发送：直接打断当前任务并立即注入新引导，避免排队越积越多。
             if (session.steeringQueue.value.isNotEmpty()) {
-                interruptGuidanceAndSend(session, conversationId, text)
+                interruptGuidanceAndSend(session, conversationId, parts)
                 return
             }
             session.steeringQueue.update { it + PendingSteering(
-                text = text,
+                parts = parts,
                 immediate = immediate,
             ) }
             ensureSteeringDrain(session, conversationId)
@@ -1414,29 +1414,29 @@ class ChatService(
         // drain 在途但当前没有生成 job（正在两条引导之间）：入队交给 drain 按序发送。
         // 直接 sendMessage 会与 drain 的 sendMessage 互相 setJob 取消对方刚启动的生成。
         if (session.steeringDrainJob?.isActive == true) {
-            session.steeringQueue.update { it + PendingSteering(text = text, immediate = false) }
+            session.steeringQueue.update { it + PendingSteering(parts = parts, immediate = false) }
             ensureSteeringDrain(session, conversationId)
             return
         }
 
         // AI 空闲：引导就是一条普通用户消息，直接发送（sendMessage 自带 job 管理，
         // 停止按钮 / 排队联动均生效）
-        sendMessage(conversationId, listOf(UIMessagePart.Text(text)), clearPendingQueue = false)
+        sendMessage(conversationId, parts, clearPendingQueue = false)
     }
 
     /** 排队引导卡片上的「打断并发送」：清空排队，中断当前生成，直接注入该引导 */
-    fun sendGuidanceInterrupt(conversationId: Uuid, text: String) {
+    fun sendGuidanceInterrupt(conversationId: Uuid, parts: List<UIMessagePart>) {
         val session = sessions[conversationId] ?: return
         if (session.state.value.isGroupDiscussion) return
-        interruptGuidanceAndSend(session, conversationId, text)
+        interruptGuidanceAndSend(session, conversationId, parts)
     }
 
     private fun interruptGuidanceAndSend(
         session: ConversationSession,
         conversationId: Uuid,
-        text: String,
+        parts: List<UIMessagePart>,
     ) {
-        if (text.isBlank()) return
+        if (parts.isEmptyInputMessage()) return
         // 旧的排队引导已被用户的最新指令取代，直接清空；同时停掉 drain，避免它把剩余项再捞回来。
         session.steeringQueue.value = emptyList()
         session.steeringDrainJob?.cancel()
@@ -1449,7 +1449,7 @@ class ChatService(
                     while (session.getJob() != null) delay(20)
                 }
                 // 引导作为普通用户消息发送（对齐 Codex；sendMessage 自带 job 管理）
-                sendMessage(conversationId, listOf(UIMessagePart.Text(text)), clearPendingQueue = false)
+                sendMessage(conversationId, parts, clearPendingQueue = false)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
@@ -1467,7 +1467,7 @@ class ChatService(
     fun getPendingGuidanceFlow(conversationId: Uuid): Flow<List<PendingGuidanceItem>> {
         val session = getOrCreateSession(conversationId)
         return session.steeringQueue.map { list ->
-            list.map { PendingGuidanceItem(id = it.id, text = it.text) }
+            list.map { PendingGuidanceItem(id = it.id, parts = it.parts) }
         }
     }
 
@@ -1498,7 +1498,7 @@ class ChatService(
                 // update 保证「取队首」与 UI 并发入队不互吞（CAS 重试）
                 session.steeringQueue.update { it.drop(1) }
                 // 引导作为普通用户消息发送（sendMessage 自带 job 管理与用户消息落库）
-                sendMessage(conversationId, listOf(UIMessagePart.Text(item.text)), clearPendingQueue = false)
+                sendMessage(conversationId, item.parts, clearPendingQueue = false)
                 val job = session.getJob()
                 job?.join()
                 if (job?.isCancelled == true) {
@@ -3155,10 +3155,10 @@ class ChatService(
     }
 }
 
-/** 排队中的引导消息（UI 气泡用）：id 用于定位「打断并发送 / 取消 / 编辑」，text 为引导内容 */
+/** 排队中的引导消息（UI 气泡用）：id 用于定位「打断并发送 / 取消 / 编辑」，parts 为引导内容 */
 data class PendingGuidanceItem(
     val id: Uuid,
-    val text: String,
+    val parts: List<UIMessagePart>,
 )
 
 /** 生成中排队的待发送消息（UI 卡片用）：answer=false 表示只追加消息不触发生成 */

@@ -269,16 +269,16 @@ class ChatVM(
     }
 
     /** 向主 AI 发送引导消息（生成中主输入框发送走此路径）：作为普通用户消息注入。
-     *  默认排队，等当前回合输出完成后自动发送。 */
-    fun sendGuidance(text: String) {
-        if (text.isBlank()) return
-        chatService.sendGuidance(_conversationId, text, immediate = false)
+     *  默认排队，等当前回合输出完成后自动发送。文本与附件均支持。 */
+    fun sendGuidance(content: List<UIMessagePart>) {
+        if (content.isEmptyInputMessage()) return
+        chatService.sendGuidance(_conversationId, content, immediate = false)
     }
 
     /** 排队引导旁的「打断并发送」：清空排队，中断当前生成，立即注入该引导 */
-    fun sendGuidanceInterrupt(text: String) {
-        if (text.isBlank()) return
-        chatService.sendGuidanceInterrupt(_conversationId, text)
+    fun sendGuidanceInterrupt(content: List<UIMessagePart>) {
+        if (content.isEmptyInputMessage()) return
+        chatService.sendGuidanceInterrupt(_conversationId, content)
     }
 
     /** 取消排队中的引导：从队列移除指定项 */
@@ -286,10 +286,10 @@ class ChatVM(
         chatService.cancelPendingGuidance(_conversationId, itemId)
     }
 
-    /** 点击气泡文本编辑：取消该条排队引导并把文本回填输入框，编辑后重新发送 */
-    fun editPendingGuidance(itemId: Uuid, text: String) {
+    /** 点击气泡编辑：取消该条排队引导并把内容（文本+附件）回填输入框，编辑后重新发送 */
+    fun editPendingGuidance(itemId: Uuid, parts: List<UIMessagePart>) {
         chatService.cancelPendingGuidance(_conversationId, itemId)
-        inputState.setMessageText(text)
+        inputState.setContents(parts)
     }
 
     /** 排队中的引导消息列表（订阅会话 steering 队列，逐条渲染气泡） */

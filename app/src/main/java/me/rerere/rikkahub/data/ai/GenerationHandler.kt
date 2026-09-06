@@ -299,7 +299,7 @@ class GenerationHandler(
                 queue!!.update { it.filterNot { item -> item.id == pendingSteering.id } }
                 messages = messages + UIMessage(
                     role = MessageRole.USER,
-                    parts = listOf(UIMessagePart.Text(pendingSteering.text)),
+                    parts = pendingSteering.parts,
                 )
                 emit(GenerationChunk.Messages(messages))
             }
