@@ -84,6 +84,7 @@ object SettingsSyncCodec {
         "quickMessages",
         "skillOrder",
         "skillAutoUpdateEnabled",
+        "githubAccount",
         // WebServer（访问密码除外）
         "webServerEnabled",
         "webServerPort",

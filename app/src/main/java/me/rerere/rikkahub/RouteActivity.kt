@@ -128,6 +128,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
+import me.rerere.rikkahub.ui.pages.setting.SettingGitHubPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.ManagementPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -597,6 +598,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingMcpPage()
                             }
 
+                            entry<Screen.SettingGitHub> {
+                                SettingGitHubPage()
+                            }
+
                             entry<Screen.SettingDonate> {
                                 SettingDonatePage()
                             }
@@ -913,6 +918,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingStudyTools : Screen
+
+    @Serializable
+    data object SettingGitHub : Screen
 
     @Serializable
     data object RecycleBin : Screen

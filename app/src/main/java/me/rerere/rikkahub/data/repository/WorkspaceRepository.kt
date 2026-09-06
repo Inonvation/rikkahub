@@ -10,6 +10,8 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.github.GitHubAuthManager
+import me.rerere.rikkahub.data.github.GitHubShellEnv
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstaller
@@ -32,6 +34,7 @@ class WorkspaceRepository(
     private val rootfsInstaller: RootfsInstaller,
     private val settingsStore: SettingsStore,
     private val asyncTaskRunner: WorkspaceAsyncTaskRunner,
+    private val githubAuthManager: GitHubAuthManager,
 ) {
     fun listFlow(): Flow<List<WorkspaceEntity>> = dao.listFlow()
 
@@ -386,9 +389,26 @@ class WorkspaceRepository(
         command: String,
         cwd: String,
         timeoutMillis: Long,
-    ): String = asyncTaskRunner.launch(id, command, cwd, timeoutMillis)
+    ): String = asyncTaskRunner.launch(
+        workspaceId = id,
+        command = command,
+        cwd = cwd,
+        timeoutMillis = timeoutMillis,
+        extraEnv = currentGithubShellEnv(),
+        maskSecrets = githubAuthManager.maskableSecrets(),
+    )
 
     fun asyncTaskStatus(taskId: String): AsyncTaskStatus? = asyncTaskRunner.status(taskId)
+
+    /** 总闸开启且已绑定账号时返回 GitHub 凭据注入环境，否则空表 */
+    fun isGithubShellTokenEnabled(): Boolean =
+        settingsStore.settingsFlow.value.workspaceGithubTokenEnabled && githubAuthManager.currentToken() != null
+
+    private fun currentGithubShellEnv(): Map<String, String> =
+        GitHubShellEnv.shellEnvIfEnabled(
+            enabled = settingsStore.settingsFlow.value.workspaceGithubTokenEnabled,
+            token = githubAuthManager.currentToken(),
+        )
 
     /**
      * 把环境变量持久化到 rootfs /etc/profile.d（每次登录 shell 自动加载）；value 为 null 时移除该变量。
@@ -493,10 +513,16 @@ class WorkspaceRepository(
         stdin: ByteArray? = null,
     ): WorkspaceCommandResult {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        // 凭据注入（总闸开 + 已绑定才生效）与输出脱敏统一收敛在此，覆盖同步/异步两条 shell 路径
+        val extraEnv = currentGithubShellEnv()
+        val secrets = githubAuthManager.maskableSecrets()
         // runInterruptible 让协程取消转化为线程中断，从而打断阻塞的 Process.waitFor 并杀掉进程
         return runInterruptible(Dispatchers.IO) {
             manager.ensureWorkspace(workspace.root)
-            manager.executeCommand(workspace.root, command, cwd, timeoutMillis, stdin)
+            GitHubShellEnv.maskResult(
+                manager.executeCommand(workspace.root, command, cwd, timeoutMillis, stdin, extraEnv),
+                secrets,
+            )
         }
     }
 

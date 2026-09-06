@@ -25,6 +25,14 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // GitHub OAuth Device Flow 的 client_id（github.com/settings/developers 注册并勾选
+        // Enable Device Flow）。client_id 本身是公开信息，为空时应用内隐藏绑定入口
+        val githubLocalProps = Properties()
+        rootProject.file("local.properties").takeIf { it.exists() }
+            ?.inputStream()?.use { githubLocalProps.load(it) }
+        val githubClientId = githubLocalProps.getProperty("GITHUB_CLIENT_ID") ?: ""
+        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
+
         ndk {
             // abi filtering is handled by splits, ndk abiFilters conflicts with splits
         }

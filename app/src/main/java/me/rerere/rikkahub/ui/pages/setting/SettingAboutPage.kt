@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.setting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.File02
+import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.SmartPhone01
 import androidx.compose.foundation.clickable
@@ -16,10 +17,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.data.github.GitHubReleaseChecker
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.easteregg.EmojiBurstHost
@@ -42,12 +47,20 @@ import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.SettingScaffold
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.openUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.koin.compose.koinInject
 import me.rerere.rikkahub.utils.plus
 
 @Composable
 fun SettingAboutPage() {
     val context = LocalContext.current
     val navController = LocalNavController.current
+    val releaseChecker: GitHubReleaseChecker = koinInject()
+    val scope = rememberCoroutineScope()
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<GitHubReleaseChecker.CheckResult?>(null) }
     val emojiOptions = remember {
         listOf(
             "🎉", "✨", "🌟", "💫", "🎊", "🥳", "🎈", "🎆", "🎇", "🧨",
@@ -129,6 +142,24 @@ fun SettingAboutPage() {
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_system)) },
                         )
+                        item(
+                            onClick = {
+                                if (checkingUpdate) return@item
+                                checkingUpdate = true
+                                scope.launch(Dispatchers.IO) {
+                                    val result = releaseChecker.check(BuildConfig.VERSION_NAME)
+                                    withContext(Dispatchers.Main) {
+                                        checkingUpdate = false
+                                        updateResult = result
+                                    }
+                                }
+                            },
+                            leadingContent = { Icon(HugeIcons.Download04, null) },
+                            supportingContent = {
+                                Text(if (checkingUpdate) "检查中…" else "通过 GitHub Releases 检查新版本")
+                            },
+                            headlineContent = { Text("检查更新") },
+                        )
                     }
                 }
 
@@ -152,5 +183,43 @@ fun SettingAboutPage() {
                 }
             }
         }
+    }
+
+    updateResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = { updateResult = null },
+            title = {
+                Text(
+                    when (result) {
+                        is GitHubReleaseChecker.CheckResult.Available -> "发现新版本"
+                        is GitHubReleaseChecker.CheckResult.UpToDate -> "已是最新版本"
+                        is GitHubReleaseChecker.CheckResult.Unavailable -> "检查失败"
+                    }
+                )
+            },
+            text = {
+                when (result) {
+                    is GitHubReleaseChecker.CheckResult.Available ->
+                        Text("最新版本 ${result.release.tagName}，当前 ${BuildConfig.VERSION_NAME}")
+                    is GitHubReleaseChecker.CheckResult.UpToDate -> Text(result.tagName)
+                    is GitHubReleaseChecker.CheckResult.Unavailable -> Text(result.reason)
+                }
+            },
+            confirmButton = {
+                if (result is GitHubReleaseChecker.CheckResult.Available) {
+                    TextButton(onClick = {
+                        context.openUrl(result.release.htmlUrl)
+                        updateResult = null
+                    }) { Text("打开下载页") }
+                } else {
+                    TextButton(onClick = { updateResult = null }) { Text("知道了") }
+                }
+            },
+            dismissButton = {
+                if (result is GitHubReleaseChecker.CheckResult.Available) {
+                    TextButton(onClick = { updateResult = null }) { Text("关闭") }
+                }
+            },
+        )
     }
 }

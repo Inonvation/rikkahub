@@ -20,6 +20,8 @@ data class WorkspaceShellContext(
     val timeoutMillis: Long,
     val stdin: ByteArray? = null,
     val bindMounts: List<WorkspaceBindMount> = emptyList(),
+    /** 额外注入的环境变量（如 GITHUB_TOKEN），由调用方按安全开关决定是否传入 */
+    val extraEnv: Map<String, String> = emptyMap(),
 )
 
 class HostShellRunner : WorkspaceShellRunner {
@@ -27,6 +29,9 @@ class HostShellRunner : WorkspaceShellRunner {
         val process = ProcessBuilder(defaultShell(), "-c", context.command)
             .directory(context.workingDir)
             .redirectErrorStream(false)
+            .apply {
+                environment().putAll(context.extraEnv)
+            }
             .start()
         return process.readResult(context.timeoutMillis, context.stdin)
     }

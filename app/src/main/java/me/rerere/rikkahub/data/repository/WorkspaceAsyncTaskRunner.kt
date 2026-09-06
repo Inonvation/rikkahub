@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.repository
 
 import android.util.Log
 import me.rerere.rikkahub.data.ai.tools.boundShellStream
+import me.rerere.rikkahub.data.github.GitHubShellEnv
 import me.rerere.workspace.WorkspaceManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -55,13 +56,18 @@ class WorkspaceAsyncTaskRunner(
         command: String,
         cwd: String,
         timeoutMillis: Long,
+        extraEnv: Map<String, String> = emptyMap(),
+        maskSecrets: Set<String> = emptySet(),
     ): String {
         trimFinishedTasks()
         val taskId = Uuid.random().toString()
         tasks[taskId] = AsyncTaskStatus(taskId = taskId, state = AsyncTaskState.RUNNING)
         executor.execute {
             val status = try {
-                val result = manager.executeCommand(workspaceId, command, cwd, timeoutMillis)
+                val result = GitHubShellEnv.maskResult(
+                    manager.executeCommand(workspaceId, command, cwd, timeoutMillis, extraEnv = extraEnv),
+                    maskSecrets,
+                )
                 outputDir.mkdirs()
                 File(outputDir, "$taskId.txt").writeText(
                     buildString {

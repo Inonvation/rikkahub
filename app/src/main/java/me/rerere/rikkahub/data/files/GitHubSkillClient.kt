@@ -1,16 +1,24 @@
 package me.rerere.rikkahub.data.files
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.rikkahub.utils.JsonInstant
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * GitHub 技能来源的网络客户端：仓库 URL 解析、列树、文件下载、路径最新 commit 查询。
@@ -24,13 +32,22 @@ import java.util.Base64
  * 目录的最新 commit」，配合 ETag 条件请求（304 不消耗未认证 API 配额，GitHub 官方
  * 推荐的轮询方式）。
  *
- * 请求策略（针对未认证 API 配额 60 次/小时/IP 与 raw.githubusercontent.com 连通性）：
+ * 请求策略（未认证 API 配额 60 次/小时/IP，认证后 5000 次/小时/用户；raw.githubusercontent.com 不占配额）：
+ * - 已绑定 GitHub 账号时全部请求自动带 Bearer 头（[GitHubAuthManager] 提供 token），
+ *   同时解锁私有仓库；raw 请求也带（公共仓库无害，私仓 raw 多数可用，失败仍有 contents API 回退）；
  * - 列目录用 git trees API 一次性取全树（1 个 API 请求），替代按子目录递归的 N 请求；
  * - 文件内容优先走 raw.githubusercontent.com（无配额），失败回退 contents API 的
  *   base64（占配额但在 raw 被墙/受干扰时可用），两条路互补；
  * - 全程按字节读写（ByteArray），二进制资源（图标等）不再被 UTF-8 解码损坏。
  */
-class GitHubSkillClient {
+class GitHubSkillClient(
+    /** 当前 GitHub token（绑定账号后非空）；同步读取，内部有内存缓存 */
+    private val tokenProvider: () -> String? = { null },
+    /** API 返回 401（token 被 GitHub 拒绝）时回调，管理器据此置失效态引导重绑 */
+    private val onAuthInvalid: () -> Unit = {},
+    /** 每次响应的 X-RateLimit-* 快照，供设置页展示配额余量 */
+    private val onRateLimitHeaders: (remaining: Int, limit: Int, resetEpochSec: Long) -> Unit = { _, _, _ -> },
+) {
     companion object {
         private const val TAG = "GitHubSkillClient"
         private const val API_BASE = "https://api.github.com"
@@ -38,7 +55,23 @@ class GitHubSkillClient {
         private const val CONNECT_TIMEOUT = 10_000
         private const val READ_TIMEOUT = 30_000
         private const val HTTP_NOT_MODIFIED = 304
+
+        /** 文件下载并发度：串行下载在 raw 不可达的网络下每文件都要先烧完连接超时才能回退 */
+        private const val DOWNLOAD_CONCURRENCY = 6
+
+        /** raw 网络级失败后的冷却时长：期间直接走 contents API，不再逐文件重试超时 */
+        private const val RAW_RETRY_COOLDOWN_MS = 2 * 60_000L
+
+        /**
+         * 单个技能目录的文件数上限。常规技能为几十到几百个文件；把巨型资源库
+         * （模板/字体/node_modules）整个塞进技能目录的仓库（万级文件）不应整体装入。
+         */
+        private const val MAX_BATCH_FILES = 2000
     }
+
+    /** raw 连通性冷却截止时间（epoch ms）；0 表示可用。仅网络级失败（超时/连不上）触发 */
+    @Volatile
+    private var rawUnavailableUntil = 0L
 
     /**
      * 解析后的仓库信息。[branch] 为空串表示「跟随默认分支」（URL 未带 /tree/branch 时），
@@ -142,22 +175,46 @@ class GitHubSkillClient {
         }
     }
 
-    /** 下载一批仓库内绝对路径文件；raw 优先，失败回退 contents API base64。 */
-    fun downloadFilesByAbsPath(info: GitHubRepoInfo, absPaths: List<String>): FetchResult {
-        val result = LinkedHashMap<String, ByteArray>()
-        val ref = if (info.branch.isBlank()) "HEAD" else info.branch
-        for (absPath in absPaths) {
-            val rawUrl = "$RAW_BASE/${info.owner}/${info.repo}/$ref/${encodePath(absPath)}"
-            val content = downloadBytes(rawUrl)
-                ?: fetchViaContentsApi(info, absPath)
-                ?: return FetchResult.Failed("下载失败：$absPath（raw 与 API 均不可达）")
-            result[absPath] = content
+    /**
+     * 并发下载一批仓库内绝对路径文件；raw 优先，失败回退 contents API base64。
+     * 文件级失败互不阻断，全部完成后统一报第一个失败项（保持 all-or-nothing 语义）。
+     * [onProgress] 在每个文件成功后回调（done/total），供 UI 显示实时进度。
+     */
+    suspend fun downloadFilesByAbsPath(
+        info: GitHubRepoInfo,
+        absPaths: List<String>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): FetchResult {
+        if (absPaths.isEmpty()) return FetchResult.Success(emptyMap())
+        if (absPaths.size > MAX_BATCH_FILES) {
+            return FetchResult.Failed(
+                "技能目录包含 ${absPaths.size} 个文件（上限 $MAX_BATCH_FILES），不像常规技能目录，已停止下载。" +
+                    "请确认链接指向具体技能子目录；若仓库本身把大量资源放进技能目录，无法整体导入"
+            )
         }
-        return FetchResult.Success(result)
+        val semaphore = Semaphore(DOWNLOAD_CONCURRENCY)
+        val done = AtomicInteger()
+        val results = coroutineScope {
+            absPaths.map { absPath ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        val content = fetchFile(info, absPath)
+                        if (content != null) onProgress(done.incrementAndGet(), absPaths.size)
+                        absPath to content
+                    }
+                }
+            }.awaitAll()
+        }
+        val files = LinkedHashMap<String, ByteArray>()
+        for ((absPath, content) in results) {
+            if (content == null) return FetchResult.Failed("下载失败：$absPath（raw 与 API 均不可达）")
+            files[absPath] = content
+        }
+        return FetchResult.Success(files)
     }
 
     /** 拉取 [info.path] 下全部文件（相对路径 key）。更新应用路径使用。 */
-    fun fetchSkillFiles(info: GitHubRepoInfo): FetchResult {
+    suspend fun fetchSkillFiles(info: GitHubRepoInfo): FetchResult {
         val listed = listTreeFiles(info)
         if (listed is ListResult.Failed) return FetchResult.Failed(listed.reason)
         val relPaths = (listed as ListResult.Success).paths
@@ -166,6 +223,18 @@ class GitHubSkillClient {
         return when (fetched) {
             is FetchResult.Failed -> fetched
             is FetchResult.Success -> FetchResult.Success(fetched.files.mapKeys { it.key.removePrefix(prefix) })
+        }
+    }
+
+    /** 单文件获取：raw 优先（冷却期内直接跳过），失败回退 contents API base64。 */
+    private fun fetchFile(info: GitHubRepoInfo, absPath: String): ByteArray? {
+        return try {
+            val ref = if (info.branch.isBlank()) "HEAD" else info.branch
+            val rawUrl = "$RAW_BASE/${info.owner}/${info.repo}/$ref/${encodePath(absPath)}"
+            fetchRaw(rawUrl) ?: fetchViaContentsApi(info, absPath)
+        } catch (e: IOException) {
+            Log.w(TAG, "fetchFile failed: $absPath", e)
+            null
         }
     }
 
@@ -239,8 +308,8 @@ class GitHubSkillClient {
     }
 
     private fun describeHttpError(code: Int): String = when (code) {
-        403 -> "GitHub API 限流或无权限（未认证配额 60 次/小时/IP，请稍后再试）"
-        404 -> "仓库、分支或路径不存在（私有仓库暂不支持）"
+        403 -> "GitHub API 限流或无权限（未认证 60 次/小时/IP；绑定 GitHub 账号可提升至 5000 次/小时，见 设置 → GitHub）"
+        404 -> "仓库、分支或路径不存在（若为私有仓库，可在 设置 → GitHub 登录后访问）"
         409 -> "仓库为空"
         else -> "HTTP $code"
     }
@@ -252,11 +321,16 @@ class GitHubSkillClient {
         connection.readTimeout = READ_TIMEOUT
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         connection.setRequestProperty("User-Agent", "RikkaHub")
+        tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
+            connection.setRequestProperty("Authorization", "Bearer $token")
+        }
         if (!etag.isNullOrBlank()) {
             connection.setRequestProperty("If-None-Match", etag)
         }
         return try {
             val code = connection.responseCode
+            reportRateLimit(connection)
+            if (code == 401) onAuthInvalid()
             val body = if (code == 200) connection.inputStream.use { it.readBytes() } else null
             val newEtag = connection.getHeaderField("ETag")
             Triple(code, body, newEtag)
@@ -265,15 +339,21 @@ class GitHubSkillClient {
         }
     }
 
-    fun downloadText(url: String): String? {
-        return downloadBytes(url)?.decodeToString()
+    private fun reportRateLimit(connection: HttpURLConnection) {
+        val remaining = connection.getHeaderField("X-RateLimit-Remaining")?.toIntOrNull() ?: return
+        val limit = connection.getHeaderField("X-RateLimit-Limit")?.toIntOrNull() ?: return
+        val reset = connection.getHeaderField("X-RateLimit-Reset")?.toLongOrNull() ?: return
+        onRateLimitHeaders(remaining, limit, reset)
     }
 
-    private fun downloadBytes(url: String): ByteArray? {
+    /** raw 下载：网络级失败（超时/连不上）时进入冷却期，冷却期内后续文件直接走 contents API */
+    private fun fetchRaw(url: String): ByteArray? {
+        if (System.currentTimeMillis() < rawUnavailableUntil) return null
         return try {
             request(url, etag = null).second
-        } catch (e: Exception) {
-            Log.w(TAG, "downloadBytes failed: $url", e)
+        } catch (e: IOException) {
+            Log.w(TAG, "fetchRaw unreachable, cooldown ${RAW_RETRY_COOLDOWN_MS}ms: $url", e)
+            rawUnavailableUntil = System.currentTimeMillis() + RAW_RETRY_COOLDOWN_MS
             null
         }
     }

@@ -123,11 +123,14 @@ suspend fun createWorkspaceTools(
         workspaceWriteNeedsApproval(rawPath, toolName, approvalOverrides, cwdAbsolute, forceNoApproval)
     }
 
+    // GitHub 凭据注入总闸状态（开 + 已绑定）→ shell 工具描述里告知 AI 可用 GITHUB_TOKEN
+    val githubTokenHint = workspaceRepository.isGithubShellTokenEnabled()
+
     return listOf(
         createReadFileTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createWriteFileTool(workspaceId, writeApproval("workspace_write_file"), cwdAbsolute, workspaceRepository),
         createEditFileTool(workspaceId, writeApproval("workspace_edit_file"), cwdAbsolute, workspaceRepository),
-        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
+        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd, githubTokenHint),
         createListFilesTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createGlobTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
         createGrepTool(workspaceId, ::needsApproval, cwdAbsolute, workspaceRepository),
@@ -356,6 +359,7 @@ private fun createShellTool(
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
     defaultCwd: String? = null,
+    githubTokenHint: Boolean = false,
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
@@ -367,7 +371,12 @@ private fun createShellTool(
         }
         append("Output capped: each of stdout/stderr keeps first ~7KB + last ~3KB; for large outputs use head/tail/grep to read specific parts. ")
         append("Optional stdin text (UTF-8, max ${STDIN_MAX_BYTES / 1024}KB) is piped to the command's stdin, then closed — e.g. {\"command\":\"cat > config.json\",\"stdin\":\"...\"}. ")
-        append("Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported.")
+        append("Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported. ")
+        if (githubTokenHint) {
+            append("GITHUB_TOKEN/GH_TOKEN env vars hold the bound GitHub account token (git HTTPS clones from github.com are authenticated via extraheader too). " +
+                "For api.github.com requests use the env var instead of a literal, e.g. curl -H \"Authorization: Bearer ${'$'}GITHUB_TOKEN\". " +
+                "Never print the token value; it is masked in outputs. ")
+        }
     },
     parameters = {
         InputSchema.Obj(

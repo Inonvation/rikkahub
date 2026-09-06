@@ -7,8 +7,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.ByteArrayInputStream
 import java.util.LinkedHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,9 @@ class SkillsVM(
 ) : ViewModel() {
     companion object {
         private const val TAG = "SkillsVM"
+
+        /** 下载进度发射节流间隔：并发完成回调很密，高频写入会引发对话框内容高频重组合 */
+        private const val PROGRESS_EMIT_INTERVAL_MS = 150L
     }
 
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
@@ -50,6 +56,17 @@ class SkillsVM(
     /** 正在检查/应用更新的技能名集合，UI 用于禁用重复操作 */
     private val _busySkills = MutableStateFlow<Set<String>>(emptySet())
     val busySkills = _busySkills.asStateFlow()
+
+    /** GitHub 导入进度文案（"正在下载 x/y"），null 表示无进行中的导入；对话框实时展示 */
+    private val _importProgress = MutableStateFlow<String?>(null)
+    val importProgress = _importProgress.asStateFlow()
+
+    /** 进行中的 GitHub 导入任务；用户取消对话框时终止（在途 HTTP 请求返回后生效，最迟约一个超时周期） */
+    private var importJob: Job? = null
+
+    /** 进度节流用的上次发射时间；多线程写仅为节流，精度无所谓 */
+    @Volatile
+    private var lastProgressEmit = 0L
 
     init {
         loadSkills()
@@ -202,9 +219,18 @@ class SkillsVM(
         }
     }
 
+    /** 取消进行中的 GitHub 导入/绑定（无进行中任务时为空操作） */
+    fun cancelImport() {
+        _importProgress.value = null
+        importJob?.cancel()
+        importJob = null
+    }
+
     fun importSkillFromGitHub(repoUrl: String, onResult: (Boolean, String) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        importJob?.cancel() // 防御：重复发起时终止上一次
+        importJob = viewModelScope.launch(Dispatchers.IO) {
             fun fail(reason: String) {
+                _importProgress.value = null
                 viewModelScope.launch(Dispatchers.Main) { onResult(false, reason) }
             }
             try {
@@ -229,17 +255,35 @@ class SkillsVM(
                     return@launch
                 }
 
-                val importedNames = mutableListOf<String>()
-                for (root in roots) {
+                // 预计算每个技能根的下载清单（纯本地计算），用于跨根统一进度计数
+                val batches = roots.map { root ->
                     val rootAbs = joinPath(info.path, root)
-                    // root 下的文件：相对 root 的路径 → 仓库绝对路径
                     val relToRoot = if (root.isBlank()) {
                         relPaths
                     } else {
                         relPaths.filter { it.startsWith("$root/") }.map { it.removePrefix("$root/") }
                     }
-                    val absPaths = relToRoot.map { joinPath(rootAbs, it) }
-                    val files = when (val fetched = gitHubSkillClient.downloadFilesByAbsPath(info, absPaths)) {
+                    Triple(root, rootAbs, relToRoot.map { joinPath(rootAbs, it) })
+                }
+                val totalFiles = batches.sumOf { it.third.size }
+                val downloaded = AtomicInteger()
+                if (totalFiles > 0) {
+                    lastProgressEmit = System.currentTimeMillis()
+                    _importProgress.value = "正在下载 0/$totalFiles"
+                }
+
+                val importedNames = mutableListOf<String>()
+                for ((root, rootAbs, absPaths) in batches) {
+                    val files = when (val fetched = gitHubSkillClient.downloadFilesByAbsPath(info, absPaths) { _, _ ->
+                            // 节流发射（末次必发）：并发完成回调可达每秒十几次，
+                            // 高频改对话框内容会在 measure 期间引发重组合风暴
+                            val done = downloaded.incrementAndGet()
+                            val now = System.currentTimeMillis()
+                            if (done == totalFiles || now - lastProgressEmit >= PROGRESS_EMIT_INTERVAL_MS) {
+                                lastProgressEmit = now
+                                _importProgress.value = "正在下载 $done/$totalFiles"
+                            }
+                        }) {
                         is GitHubSkillClient.FetchResult.Success -> fetched.files
                         is GitHubSkillClient.FetchResult.Failed -> {
                             fail(fetched.reason)
@@ -271,10 +315,15 @@ class SkillsVM(
                     importedNames += name
                 }
 
+                _importProgress.value = null
                 _skills.value = skillManager.listSkills()
                 withContext(Dispatchers.Main) {
                     onResult(true, importedNames.distinct().joinToString())
                 }
+            } catch (e: CancellationException) {
+                // 用户主动取消：清进度并按取消语义结束，不走失败回调
+                _importProgress.value = null
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "importSkillFromGitHub failed", e)
                 fail(e.message ?: "未知错误")

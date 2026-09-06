@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.WebDavConfig
+import me.rerere.rikkahub.data.github.GitHubAccount
 import me.rerere.rikkahub.data.model.Capability
 import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
@@ -248,5 +249,17 @@ class SettingsSyncCodecTest {
         )
 
         assertEquals(settings.builtinModeOverrides, restored.builtinModeOverrides)
+    }
+
+    @Test
+    fun githubAccountMetadataSynced() {
+        val settings = sampleSettings().copy(
+            githubAccount = GitHubAccount(login = "octocat", avatarUrl = "https://avatar", scopes = listOf("repo")),
+        )
+        val json = SettingsSyncCodec.toSyncableJson(settings)
+        assertTrue(json.contains("\"login\":\"octocat\""))
+        val restored = SettingsSyncCodec.fromSyncableJson(json, Settings())
+        assertEquals("octocat", restored.githubAccount?.login)
+        assertEquals(listOf("repo"), restored.githubAccount?.scopes)
     }
 }

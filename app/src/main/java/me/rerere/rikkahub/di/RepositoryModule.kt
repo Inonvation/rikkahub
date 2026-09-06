@@ -1,11 +1,17 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.GitHubSkillClient
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillUpdateManager
+import me.rerere.rikkahub.data.github.GitHubAuthManager
+import me.rerere.rikkahub.data.github.GitHubOAuthClient
+import me.rerere.rikkahub.data.github.GitHubReleaseChecker
+import me.rerere.rikkahub.data.secret.AndroidSecretStore
+import me.rerere.rikkahub.data.secret.SecretStore
 import me.rerere.rikkahub.data.config.AgentConfigPaths
 import me.rerere.rikkahub.data.config.AgentConfigRepository
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
@@ -108,7 +114,7 @@ val repositoryModule = module {
     }
 
     single {
-        WorkspaceRepository(get(), get(), get(), get(), get())
+        WorkspaceRepository(get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -135,8 +141,26 @@ val repositoryModule = module {
         SkillManager(get(), get())
     }
 
+    single<SecretStore> {
+        AndroidSecretStore()
+    }
+
     single {
-        GitHubSkillClient()
+        GitHubAuthManager(get(), get(), get(), GitHubOAuthClient(BuildConfig.GITHUB_CLIENT_ID))
+    }
+
+    single {
+        GitHubReleaseChecker(tokenProvider = { get<GitHubAuthManager>().currentToken() })
+    }
+
+    single {
+        GitHubSkillClient(
+            tokenProvider = { get<GitHubAuthManager>().currentToken() },
+            onAuthInvalid = { get<GitHubAuthManager>().onAuthInvalid() },
+            onRateLimitHeaders = { remaining, limit, reset ->
+                get<GitHubAuthManager>().onRateLimitHeaders(remaining, limit, reset)
+            },
+        )
     }
 
     single {

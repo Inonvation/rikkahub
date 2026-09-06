@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import me.rerere.rikkahub.R
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -89,7 +90,12 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
+import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Github
+import me.rerere.rikkahub.data.github.GitHubAuthManager
+import me.rerere.rikkahub.ui.components.ui.IosGroup
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -101,6 +107,7 @@ fun SkillsPage() {
     val skillSources by vm.skillSources.collectAsStateWithLifecycle()
     val busySkills by vm.busySkills.collectAsStateWithLifecycle()
     val autoUpdateGloballyEnabled by vm.autoUpdateGloballyEnabled.collectAsStateWithLifecycle()
+    val githubAccount by koinInject<GitHubAuthManager>().state.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -219,6 +226,23 @@ fun SkillsPage() {
             verticalArrangement = Arrangement.spacedBy(6.dp),
             state = lazyListState,
         ) {
+            // GitHub 绑定动态入口：未绑定时显示（技能导入/更新是本页主要 API 消耗方）
+            if (githubAccount.account == null) {
+                item(key = "github_bind_hint") {
+                    IosGroup {
+                        item(
+                            onClick = { navController.navigate(Screen.SettingGitHub) },
+                            leadingContent = { Icon(HugeIcons.Github, null) },
+                            headlineContent = { Text("绑定 GitHub") },
+                            supportingContent = { Text("解除 API 限流，支持私有仓库") },
+                            trailingContent = {
+                                Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                        )
+                    }
+                }
+            }
+
             if (skills.isEmpty()) {
                 item {
                     Column(
@@ -435,7 +459,9 @@ fun SkillsPage() {
             description = stringResource(
                 if (bindMode) R.string.skills_page_bind_description else R.string.skills_page_import_description
             ),
+            progressFlow = vm.importProgress,
             onDismiss = { showImportDialog = false },
+            onCancel = { vm.cancelImport() },
             onConfirm = { repoUrl ->
                 val binding = bindMode
                 vm.importSkillFromGitHub(repoUrl) { success, message ->
@@ -898,14 +924,25 @@ private fun AutoUpdateSettingDialog(
 private fun ImportSkillDialog(
     title: String,
     description: String,
+    // 进度流在对话框内部收集：tick 只重组合对话框内容，不波及页面级（列表/顶栏）
+    progressFlow: StateFlow<String?>,
     onDismiss: () -> Unit,
     onConfirm: (repoUrl: String) -> Unit,
+    onCancel: () -> Unit = {},
 ) {
+    val importProgress by progressFlow.collectAsStateWithLifecycle()
     var url by rememberSaveable { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
+    // saveable：配置变更（MIUI 主题/深色切换等）重建 Activity 后保持与真实任务一致
+    var loading by rememberSaveable { mutableStateOf(false) }
+
+    // 加载中退出 = 终止下载（在途请求返回后生效）；空闲时仅关闭
+    fun dismiss() {
+        if (loading) onCancel()
+        onDismiss()
+    }
 
     AlertDialog(
-        onDismissRequest = { if (!loading) onDismiss() },
+        onDismissRequest = { dismiss() },
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -932,7 +969,7 @@ private fun ImportSkillDialog(
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Text(
-                            stringResource(R.string.skills_page_downloading),
+                            importProgress ?: stringResource(R.string.skills_page_downloading),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -951,7 +988,7 @@ private fun ImportSkillDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !loading) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = { dismiss() }) { Text(stringResource(R.string.cancel)) }
         },
     )
 }

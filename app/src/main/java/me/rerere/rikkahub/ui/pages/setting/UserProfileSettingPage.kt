@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,11 +25,18 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.MAX_PROFILE_INFO_CHARS
 import me.rerere.rikkahub.data.model.ResponseTonePreset
 import me.rerere.rikkahub.data.model.UserProfileSetting
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Github
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.github.GitHubAuthManager
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.SettingListScaffold
 import me.rerere.rikkahub.ui.components.ui.Switch
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 /**
  * 个人资料设置页：用户基本信息 + 回复语气偏好的全局配置。
@@ -76,6 +84,9 @@ private data class ProfileDraft(
 
 @Composable
 fun UserProfileSettingPage(vm: SettingVM = koinViewModel()) {
+    val navController = LocalNavController.current
+    val githubAuthManager: GitHubAuthManager = koinInject()
+    val githubState by githubAuthManager.state.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val displaySetting = settings.displaySetting
     val profile = settings.userProfile
@@ -246,6 +257,31 @@ fun UserProfileSettingPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                 }
+            }
+        }
+
+        // GitHub 账号绑定（认证入口，详情/解绑/PAT 在子页）
+        item {
+            IosGroup(
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                item(
+                    onClick = { navController.navigate(Screen.SettingGitHub) },
+                    leadingContent = { Icon(HugeIcons.Github, null) },
+                    headlineContent = { Text("GitHub") },
+                    supportingContent = {
+                        Text(
+                            githubState.account?.login?.let { login ->
+                                if (githubState.invalid) "已失效：$login" else "已绑定：$login"
+                            }
+                                ?: settings.githubAccount?.login?.let { "上次绑定：$it，重新登录即可恢复" }
+                                ?: "未绑定",
+                        )
+                    },
+                    trailingContent = {
+                        Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    },
+                )
             }
         }
     }

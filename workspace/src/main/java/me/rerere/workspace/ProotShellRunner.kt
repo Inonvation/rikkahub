@@ -99,6 +99,12 @@ class ProotShellRunner(
             "CI=true",
             "NO_COLOR=1",
             "PAGER=cat",
+        )
+        // 额外环境变量（如 GITHUB_TOKEN / git extraheader）：env -i 语义下必须逐项显式列出
+        context.extraEnv.forEach { (key, value) ->
+            command += "$key=$value"
+        }
+        command += listOf(
             "/bin/bash",
             "-l",
             "-c",

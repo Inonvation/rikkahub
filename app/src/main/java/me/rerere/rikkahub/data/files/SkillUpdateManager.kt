@@ -219,7 +219,7 @@ class SkillUpdateManager(
         }
     }
 
-    private fun applyUpdateLocked(skillName: String, overwriteLocal: Boolean): ApplyResult {
+    private suspend fun applyUpdateLocked(skillName: String, overwriteLocal: Boolean): ApplyResult {
         val source = _sources.value[skillName] ?: return ApplyResult.Failed("未找到技能来源")
         val skillDir = skillManager.getSkillDir(skillName)
             ?: return ApplyResult.Failed("技能不存在")

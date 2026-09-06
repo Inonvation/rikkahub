@@ -34,6 +34,7 @@ import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeDepth
 import me.rerere.rikkahub.data.ai.prompts.PromptOptimizeScene
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
+import me.rerere.rikkahub.data.github.GitHubAccount
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
@@ -182,6 +183,8 @@ class SettingsStore(
 
         // Skill 自动更新总开关（关 = 仅检测提示，不自动应用）
         val SKILL_AUTO_UPDATE_ENABLED = booleanPreferencesKey("skill_auto_update_enabled")
+        val WORKSPACE_GITHUB_TOKEN_ENABLED = booleanPreferencesKey("workspace_github_token_enabled")
+        val GITHUB_ACCOUNT = stringPreferencesKey("github_account")
         val WEB_SERVER_PORT = intPreferencesKey("web_server_port")
         val WEB_SERVER_JWT_ENABLED = booleanPreferencesKey("web_server_jwt_enabled")
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
@@ -339,6 +342,10 @@ class SettingsStore(
                     decodeListOrDefault<String>(preferences[SKILL_ORDER_LKG], emptyList())
                 ),
                 skillAutoUpdateEnabled = preferences[SKILL_AUTO_UPDATE_ENABLED] == true,
+                workspaceGithubTokenEnabled = preferences[WORKSPACE_GITHUB_TOKEN_ENABLED] == true,
+                githubAccount = preferences[GITHUB_ACCOUNT]?.let {
+                    runCatching { JsonInstant.decodeFromString<GitHubAccount>(it) }.getOrNull()
+                },
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] != false,
@@ -578,6 +585,12 @@ class SettingsStore(
             preferences[SKILL_ORDER] = JsonInstant.encodeToString(settings.skillOrder)
             preferences[SKILL_ORDER_LKG] = JsonInstant.encodeToString(settings.skillOrder)
             preferences[SKILL_AUTO_UPDATE_ENABLED] = settings.skillAutoUpdateEnabled
+            preferences[WORKSPACE_GITHUB_TOKEN_ENABLED] = settings.workspaceGithubTokenEnabled
+            if (settings.githubAccount != null) {
+                preferences[GITHUB_ACCOUNT] = JsonInstant.encodeToString(settings.githubAccount!!)
+            } else {
+                preferences.remove(GITHUB_ACCOUNT)
+            }
             preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
@@ -931,6 +944,10 @@ data class Settings(
     val skillOrder: List<String> = emptyList(),
     /** 技能自动更新总开关（默认关）：关 = 仅检测提示有更新；开 = 按各技能的自动更新开关自动应用 */
     val skillAutoUpdateEnabled: Boolean = false,
+    /** 向工作区 shell 注入 GitHub 凭据（GITHUB_TOKEN/GH_TOKEN），默认关（安全考量见 docs/github-auth-plan.md） */
+    val workspaceGithubTokenEnabled: Boolean = false,
+    /** GitHub 绑定账号元数据镜像（不含 token；进同步白名单，换机恢复后引导重绑） */
+    val githubAccount: GitHubAccount? = null,
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
     val webServerJwtEnabled: Boolean = true,
