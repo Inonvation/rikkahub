@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.rikkahub.utils.JsonInstant
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Base64
 
@@ -99,6 +100,12 @@ class GitHubSkillClient {
             // 文件链接 → 取所在目录（技能入口以目录为单位）；根文件时目录为空
             path = path.substringBeforeLast('/', missingDelimiterValue = "")
         }
+        if (path.isNotBlank()) {
+            // 网页复制的路径可能是 URL 编码的（如 skills%2Fppt-master）；解码时保护字面 +
+            path = runCatching {
+                URLDecoder.decode(path.replace("+", "%2B"), "UTF-8")
+            }.getOrDefault(path)
+        }
         return GitHubRepoInfo(
             owner = match.groupValues[1],
             repo = repo,
@@ -164,14 +171,17 @@ class GitHubSkillClient {
 
     /**
      * 在列树结果中找技能根目录（相对 [info.path]）：根有 SKILL.md → 单技能；
-     * 否则扫描**直接子目录**一层（examples/ 等深层示例不误收），返回全部技能根。
+     * 否则扫描**任意层级**的 SKILL.md（skills/<name>/ 布局常见于技能合集仓库），
+     * 嵌套在其他技能目录内部的（技能自带的示例/子技能）不重复算作独立技能。
      */
     internal fun findSkillRoots(relativePaths: List<String>): List<String> {
         if (relativePaths.contains("SKILL.md")) return listOf("")
-        return relativePaths.filter { path ->
-            val segments = path.split('/')
-            segments.size == 2 && segments[1] == "SKILL.md"
-        }.map { it.split('/')[0] }
+        val dirs = relativePaths
+            .filter { it.endsWith("/SKILL.md") }
+            .map { it.removeSuffix("/SKILL.md") }
+        return dirs.filter { dir ->
+            dirs.none { other -> other != dir && dir.startsWith("$other/") }
+        }.sorted()
     }
 
     /** raw 之外的第二条路：contents API 单文件 base64。文件超过 1MB 时 GitHub 不返回 content，会失败。 */

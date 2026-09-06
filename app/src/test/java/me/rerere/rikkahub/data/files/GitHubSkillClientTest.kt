@@ -63,6 +63,13 @@ class GitHubSkillClientTest {
     }
 
     @Test
+    fun decodesPercentEncodedPath() {
+        // GitHub 网页复制的编码路径（hugohe3/ppt-master 场景）
+        val info = client.parseGitHubUrl("https://github.com/owner/repo/tree/main/skills%2Fppt-master")
+        assertEquals("skills/ppt-master", info?.path)
+    }
+
+    @Test
     fun rejectsNonGithubUrls() {
         assertNull(client.parseGitHubUrl("https://gitlab.com/owner/repo"))
         assertNull(client.parseGitHubUrl("not a url"))
@@ -91,26 +98,31 @@ class GitHubSkillClientTest {
     }
 
     @Test
-    fun findsMultipleTopLevelSkillRoots() {
+    fun findsSkillsInNestedCollectionLayout() {
+        // hugohe3/ppt-master 布局：技能在 skills/<name>/ 第二层
+        val paths = listOf(
+            "README.md",
+            "skills/ppt-master/SKILL.md",
+            "skills/ppt-master/assets/a.png",
+        )
+        assertEquals(listOf("skills/ppt-master"), client.findSkillRoots(paths))
+    }
+
+    @Test
+    fun findsAllSkillRootsWithNestingDedup() {
         val paths = listOf(
             "docs/README.md",
             "skill-a/SKILL.md",
             "skill-a/assets/x.txt",
             "skill-b/SKILL.md",
             "skill-b/nested/deep/SKILL.md", // 嵌套在 skill-b 内，不是独立技能根
+            "collection/c-skill/SKILL.md",  // 第二层目录布局
         )
-        // 只扫直接子目录一层；skill-b 的嵌套 SKILL.md 不产生额外根
-        assertEquals(listOf("skill-a", "skill-b"), client.findSkillRoots(paths))
+        assertEquals(listOf("collection/c-skill", "skill-a", "skill-b"), client.findSkillRoots(paths))
     }
 
     @Test
     fun findsNoneWhenNoSkillMd() {
         assertEquals(emptyList<String>(), client.findSkillRoots(listOf("README.md", "src/main.kt")))
-    }
-
-    @Test
-    fun ignoresDeeplyNestedSkillMdWhenNoRootSkill() {
-        // 仅深层嵌套（examples/…）时不算技能根，避免误收示例
-        assertEquals(emptyList<String>(), client.findSkillRoots(listOf("examples/demo/SKILL.md")))
     }
 }

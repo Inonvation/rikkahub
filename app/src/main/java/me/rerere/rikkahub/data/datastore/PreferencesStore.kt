@@ -179,6 +179,9 @@ class SettingsStore(
 
         // Web Server
         val WEB_SERVER_ENABLED = booleanPreferencesKey("web_server_enabled")
+
+        // Skill 自动更新总开关（关 = 仅检测提示，不自动应用）
+        val SKILL_AUTO_UPDATE_ENABLED = booleanPreferencesKey("skill_auto_update_enabled")
         val WEB_SERVER_PORT = intPreferencesKey("web_server_port")
         val WEB_SERVER_JWT_ENABLED = booleanPreferencesKey("web_server_jwt_enabled")
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
@@ -335,6 +338,7 @@ class SettingsStore(
                     preferences[SKILL_ORDER],
                     decodeListOrDefault<String>(preferences[SKILL_ORDER_LKG], emptyList())
                 ),
+                skillAutoUpdateEnabled = preferences[SKILL_AUTO_UPDATE_ENABLED] == true,
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] != false,
@@ -573,6 +577,7 @@ class SettingsStore(
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
             preferences[SKILL_ORDER] = JsonInstant.encodeToString(settings.skillOrder)
             preferences[SKILL_ORDER_LKG] = JsonInstant.encodeToString(settings.skillOrder)
+            preferences[SKILL_AUTO_UPDATE_ENABLED] = settings.skillAutoUpdateEnabled
             preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
@@ -924,6 +929,8 @@ data class Settings(
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
     val skillOrder: List<String> = emptyList(),
+    /** 技能自动更新总开关（默认关）：关 = 仅检测提示有更新；开 = 按各技能的自动更新开关自动应用 */
+    val skillAutoUpdateEnabled: Boolean = false,
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
     val webServerJwtEnabled: Boolean = true,

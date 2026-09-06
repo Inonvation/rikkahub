@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
 
 /**
  * 技能更新管理器：来源注册表 + 手动/自动更新。
@@ -17,6 +18,10 @@ import kotlinx.coroutines.withContext
  * 1. GitHub 导入成功后登记来源（repo/branch/path + 安装时影响该路径的最新 commit + ETag + 内容指纹）；
  * 2. 检查时查 commits API（带 If-None-Match 条件请求，304 无变化且不消耗配额），对比 SHA；
  * 3. 应用更新 = 重跑导入（递归列目录 + 下载 + 原子替换），内容无变化时只刷新 SHA 消除徽标。
+ *
+ * 自动更新为两级开关，且均默认关闭：
+ * - 全局总闸 settings.skillAutoUpdateEnabled（默认关）：关时只检测提示，绝不自动应用；
+ * - 按技能开关 SkillSource.autoUpdate：总闸开启后，仅对显式开启的技能自动应用。
  *
  * 安全护栏：
  * - 磁盘内容指纹 != 安装指纹 视为「本地已修改」，自动更新跳过（防静默覆盖用户编辑），
@@ -27,6 +32,7 @@ import kotlinx.coroutines.withContext
 class SkillUpdateManager(
     private val skillManager: SkillManager,
     private val client: GitHubSkillClient,
+    private val settingsStore: SettingsStore,
 ) {
     companion object {
         private const val TAG = "SkillUpdateManager"
@@ -118,12 +124,14 @@ class SkillUpdateManager(
     suspend fun checkAll(force: Boolean): Unit = withContext(Dispatchers.IO) {
         mutex.withLock {
             pruneMissingLocked()
+            // 总闸默认关：关时只检测亮徽标，绝不自动应用（per-skill 开关仅在总闸开启后生效）
+            val autoUpdateGloballyEnabled = settingsStore.settingsFlow.value.skillAutoUpdateEnabled
             for (name in _sources.value.keys.toList()) {
                 val result = runCatching { checkLocked(name, force) }.getOrElse { e ->
                     Log.w(TAG, "checkAll: check $name failed", e)
                     null
                 }
-                if (result is CheckResult.UpdateAvailable) {
+                if (result is CheckResult.UpdateAvailable && autoUpdateGloballyEnabled) {
                     val source = _sources.value[name] ?: continue
                     if (source.autoUpdate && !source.localModified) {
                         val applied = runCatching { applyUpdateLocked(name, overwriteLocal = false) }

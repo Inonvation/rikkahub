@@ -1276,6 +1276,9 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="skills_page_check_update">检查更新</string>
   <string name="skills_page_update_now">立即更新</string>
   <string name="skills_page_auto_update">自动更新</string>
+  <string name="skills_page_auto_update_desc">技能自动更新的总开关。开启后，单独开启了「自动更新」的技能会在检测到新版本时于后台自动应用；关闭时仅提示有更新，不会自动改动任何文件。</string>
+  <string name="skills_page_auto_update_on">自动更新技能</string>
+  <string name="skills_page_auto_update_off">仅提示有更新</string>
   <string name="skills_page_up_to_date">已是最新</string>
   <string name="skills_page_update_success">技能已更新</string>
   <string name="skills_page_check_update_failed">检查失败：%s</string>

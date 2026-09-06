@@ -83,6 +83,7 @@ object SettingsSyncCodec {
         "lorebooks",
         "quickMessages",
         "skillOrder",
+        "skillAutoUpdateEnabled",
         // WebServer（访问密码除外）
         "webServerEnabled",
         "webServerPort",

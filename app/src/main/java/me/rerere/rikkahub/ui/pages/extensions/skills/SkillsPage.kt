@@ -39,6 +39,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -75,6 +76,7 @@ import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Refresh01
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.files.SkillSource
@@ -98,6 +100,7 @@ fun SkillsPage() {
     val skills by vm.skills.collectAsStateWithLifecycle()
     val skillSources by vm.skillSources.collectAsStateWithLifecycle()
     val busySkills by vm.busySkills.collectAsStateWithLifecycle()
+    val autoUpdateGloballyEnabled by vm.autoUpdateGloballyEnabled.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -109,6 +112,8 @@ fun SkillsPage() {
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
     // 更新流程：本地已修改时的覆盖确认弹窗目标
     var overwriteTarget by remember { mutableStateOf<String?>(null) }
+    // 自动更新总开关设置对话框
+    var showAutoUpdateDialog by rememberSaveable { mutableStateOf(false) }
 
     fun showUpdateResult(result: SkillUpdateManager.ApplyResult, name: String) {
         when (result) {
@@ -177,6 +182,12 @@ fun SkillsPage() {
                             )
                         }
                     } else {
+                        IconButton(onClick = { showAutoUpdateDialog = true }) {
+                            Icon(
+                                HugeIcons.Settings03,
+                                contentDescription = stringResource(R.string.skills_page_auto_update),
+                            )
+                        }
                         IconButton(onClick = { selecting = true }) {
                             Icon(
                                 HugeIcons.MoreVertical,
@@ -260,6 +271,7 @@ fun SkillsPage() {
                             skill = skill,
                             source = skillSources[skill.name],
                             busy = skill.name in busySkills,
+                            showAutoUpdateOption = autoUpdateGloballyEnabled,
                             onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
                             onDelete = { deleteTarget = skill },
                             onBindRepo = {
@@ -457,6 +469,14 @@ fun SkillsPage() {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
     }
 
+    if (showAutoUpdateDialog) {
+        AutoUpdateSettingDialog(
+            enabled = autoUpdateGloballyEnabled,
+            onEnabledChange = { vm.setAutoUpdateGlobally(it) },
+            onDismiss = { showAutoUpdateDialog = false },
+        )
+    }
+
     RikkaConfirmDialog(
         show = overwriteTarget != null,
         title = stringResource(R.string.skills_page_update_title),
@@ -504,6 +524,7 @@ private fun SkillCard(
     skill: SkillMetadata,
     source: SkillSource?,
     busy: Boolean,
+    showAutoUpdateOption: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onBindRepo: () -> Unit,
@@ -607,22 +628,24 @@ private fun SkillCard(
                                 },
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.skills_page_auto_update)) },
-                            leadingIcon = {
-                                Icon(HugeIcons.Refresh01, contentDescription = null)
-                            },
-                            trailingIcon = {
-                                Checkbox(
-                                    checked = source.autoUpdate,
-                                    onCheckedChange = null,
-                                )
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                onToggleAutoUpdate(!source.autoUpdate)
-                            },
-                        )
+                        if (showAutoUpdateOption) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.skills_page_auto_update)) },
+                                leadingIcon = {
+                                    Icon(HugeIcons.Refresh01, contentDescription = null)
+                                },
+                                trailingIcon = {
+                                    Checkbox(
+                                        checked = source.autoUpdate,
+                                        onCheckedChange = null,
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onToggleAutoUpdate(!source.autoUpdate)
+                                },
+                            )
+                        }
                     } else {
                         // 无来源技能（手动创建/zip 导入/旧版导入）：绑定 GitHub 仓库以启用更新检测
                         DropdownMenuItem(
@@ -830,6 +853,43 @@ private fun AddSkillDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun AutoUpdateSettingDialog(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.skills_page_auto_update)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = stringResource(R.string.skills_page_auto_update_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (enabled) R.string.skills_page_auto_update_on else R.string.skills_page_auto_update_off
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = enabled, onCheckedChange = onEnabledChange)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) }
         },
     )
 }

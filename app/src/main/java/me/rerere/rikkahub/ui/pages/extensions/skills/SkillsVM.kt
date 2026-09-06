@@ -10,10 +10,14 @@ import java.util.LinkedHashMap
 import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.files.GitHubSkillClient
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
@@ -26,6 +30,7 @@ class SkillsVM(
     private val skillManager: SkillManager,
     private val gitHubSkillClient: GitHubSkillClient,
     private val skillUpdateManager: SkillUpdateManager,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     companion object {
         private const val TAG = "SkillsVM"
@@ -36,6 +41,11 @@ class SkillsVM(
 
     /** 技能来源注册表（skillName -> 来源），更新徽标 / 更新菜单的数据源 */
     val skillSources: StateFlow<Map<String, SkillSource>> = skillUpdateManager.sources
+
+    /** 自动更新全局总闸（默认关）：关时仅检测提示，per-skill 自动更新不生效 */
+    val autoUpdateGloballyEnabled: StateFlow<Boolean> = settingsStore.settingsFlow
+        .map { it.skillAutoUpdateEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** 正在检查/应用更新的技能名集合，UI 用于禁用重复操作 */
     private val _busySkills = MutableStateFlow<Set<String>>(emptySet())
@@ -120,6 +130,12 @@ class SkillsVM(
     fun setAutoUpdate(name: String, enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             skillUpdateManager.setAutoUpdate(name, enabled)
+        }
+    }
+
+    fun setAutoUpdateGlobally(enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsStore.update { it.copy(skillAutoUpdateEnabled = enabled) }
         }
     }
 

@@ -140,6 +140,6 @@ val repositoryModule = module {
     }
 
     single {
-        SkillUpdateManager(get(), get())
+        SkillUpdateManager(get(), get(), get())
     }
 }

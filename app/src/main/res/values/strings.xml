@@ -1505,6 +1505,9 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="skills_page_check_update">Check for updates</string>
   <string name="skills_page_update_now">Update now</string>
   <string name="skills_page_auto_update">Auto update</string>
+  <string name="skills_page_auto_update_desc">Master switch for automatic skill updates. When enabled, skills whose auto update toggle is on are updated automatically in the background when a new version is detected. When disabled, you are only notified of available updates and nothing is changed automatically.</string>
+  <string name="skills_page_auto_update_on">Update skills automatically</string>
+  <string name="skills_page_auto_update_off">Only notify about updates</string>
   <string name="skills_page_up_to_date">Already up to date</string>
   <string name="skills_page_update_success">Skill updated</string>
   <string name="skills_page_check_update_failed">Check failed: %s</string>
