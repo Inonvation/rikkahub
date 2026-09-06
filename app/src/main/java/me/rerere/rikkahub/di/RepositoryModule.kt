@@ -3,7 +3,9 @@ package me.rerere.rikkahub.di
 import android.content.Context
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.GitHubSkillClient
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.SkillUpdateManager
 import me.rerere.rikkahub.data.config.AgentConfigPaths
 import me.rerere.rikkahub.data.config.AgentConfigRepository
 import me.rerere.rikkahub.data.db.fts.MemoryFtsManager
@@ -131,5 +133,13 @@ val repositoryModule = module {
 
     single {
         SkillManager(get(), get())
+    }
+
+    single {
+        GitHubSkillClient()
+    }
+
+    single {
+        SkillUpdateManager(get(), get())
     }
 }

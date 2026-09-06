@@ -2,33 +2,53 @@ package me.rerere.rikkahub.ui.pages.extensions.skills
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.ByteArrayInputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.LinkedHashMap
 import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.files.FileUtils
+import me.rerere.rikkahub.data.files.GitHubSkillClient
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
-import org.json.JSONArray
-import kotlin.collections.iterator
+import me.rerere.rikkahub.data.files.SkillSource
+import me.rerere.rikkahub.data.files.SkillUpdateManager
 
 class SkillsVM(
     private val skillManager: SkillManager,
+    private val gitHubSkillClient: GitHubSkillClient,
+    private val skillUpdateManager: SkillUpdateManager,
 ) : ViewModel() {
+    companion object {
+        private const val TAG = "SkillsVM"
+    }
+
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
     val skills = _skills.asStateFlow()
 
+    /** 技能来源注册表（skillName -> 来源），更新徽标 / 更新菜单的数据源 */
+    val skillSources: StateFlow<Map<String, SkillSource>> = skillUpdateManager.sources
+
+    /** 正在检查/应用更新的技能名集合，UI 用于禁用重复操作 */
+    private val _busySkills = MutableStateFlow<Set<String>>(emptySet())
+    val busySkills = _busySkills.asStateFlow()
+
     init {
         loadSkills()
+        // 打开页面顺带节流检查（12h 内已查过则直接复用上次结果）；
+        // 若自动更新在后台应用了新内容，重载一次列表让描述等元数据与磁盘同步
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { skillUpdateManager.checkAll(force = false) }
+                .onSuccess { _skills.value = skillManager.listSkills() }
+        }
     }
 
     private fun loadSkills() {
@@ -50,6 +70,7 @@ class SkillsVM(
     fun deleteSkill(name: String) {
         viewModelScope.launch(Dispatchers.IO) {
             skillManager.deleteSkill(name)
+            skillUpdateManager.removeSource(name)
             _skills.value = skillManager.listSkills()
         }
     }
@@ -57,9 +78,56 @@ class SkillsVM(
     fun deleteSkills(names: List<String>) {
         if (names.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            names.forEach { name -> skillManager.deleteSkill(name) }
+            names.forEach { name ->
+                skillManager.deleteSkill(name)
+                skillUpdateManager.removeSource(name)
+            }
             _skills.value = skillManager.listSkills()
             persistOrder()
+        }
+    }
+
+    /** 手动检查单个技能更新（force，跳过节流）。 */
+    fun checkForUpdate(name: String, onResult: (SkillUpdateManager.CheckResult) -> Unit) {
+        setBusy(name, true)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { skillUpdateManager.checkForUpdate(name, force = true) }
+                .getOrElse { SkillUpdateManager.CheckResult.Failed(it.message ?: "unknown") }
+            setBusy(name, false)
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    /**
+     * 手动应用更新。返回 [SkillUpdateManager.ApplyResult.SkippedLocalModified] 时
+     * UI 应弹确认框，用户确认后带 overwriteLocal=true 重试。
+     */
+    fun applyUpdate(
+        name: String,
+        overwriteLocal: Boolean,
+        onResult: (SkillUpdateManager.ApplyResult) -> Unit,
+    ) {
+        setBusy(name, true)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { skillUpdateManager.applyUpdate(name, overwriteLocal) }
+                .getOrElse { SkillUpdateManager.ApplyResult.Failed(it.message ?: "unknown") }
+            _skills.value = skillManager.listSkills()
+            setBusy(name, false)
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    fun setAutoUpdate(name: String, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            skillUpdateManager.setAutoUpdate(name, enabled)
+        }
+    }
+
+    private fun setBusy(name: String, busy: Boolean) {
+        _busySkills.value = if (busy) {
+            _busySkills.value + name
+        } else {
+            _busySkills.value - name
         }
     }
 
@@ -120,60 +188,86 @@ class SkillsVM(
 
     fun importSkillFromGitHub(repoUrl: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
+            fun fail(reason: String) {
+                viewModelScope.launch(Dispatchers.Main) { onResult(false, reason) }
+            }
             try {
-                val info = parseGitHubUrl(repoUrl) ?: run {
-                    withContext(Dispatchers.Main) { onResult(false, "无效的 GitHub 仓库链接") }
+                val info = gitHubSkillClient.parseGitHubUrl(repoUrl) ?: run {
+                    fail("无效的 GitHub 仓库链接")
                     return@launch
                 }
 
-                // Collect all files recursively via GitHub Contents API
-                val files = mutableListOf<Pair<String, String>>() // relativePath -> downloadUrl
-                val listed = listFilesRecursively(info.owner, info.repo, info.branch, info.path, info.path, files)
-                if (!listed) {
-                    withContext(Dispatchers.Main) { onResult(false, "读取 GitHub 目录失败") }
-                    return@launch
-                }
-
-                val skillMdEntry = files.find { it.first == "SKILL.md" } ?: run {
-                    withContext(Dispatchers.Main) { onResult(false, "目录中未找到 SKILL.md") }
-                    return@launch
-                }
-
-                val skillMdContent = downloadText(skillMdEntry.second) ?: run {
-                    withContext(Dispatchers.Main) { onResult(false, "下载 SKILL.md 失败，请检查链接或网络") }
-                    return@launch
-                }
-
-                val frontmatter = SkillFrontmatterParser.parse(skillMdContent)
-                val name = frontmatter["name"]
-                if (name.isNullOrBlank()) {
-                    withContext(Dispatchers.Main) { onResult(false, "SKILL.md 格式错误：缺少 name 字段") }
-                    return@launch
-                }
-
-                val fileContents = LinkedHashMap<String, String>()
-                for ((relativePath, downloadUrl) in files) {
-                    val content = downloadText(downloadUrl)
-                    if (content == null) {
-                        withContext(Dispatchers.Main) { onResult(false, "下载文件失败：$relativePath") }
+                // git trees API 一次列全树（1 个 API 请求，替代逐目录递归）
+                val relPaths = when (val listed = gitHubSkillClient.listTreeFiles(info)) {
+                    is GitHubSkillClient.ListResult.Success -> listed.paths
+                    is GitHubSkillClient.ListResult.Failed -> {
+                        fail(listed.reason)
                         return@launch
                     }
-                    fileContents[relativePath] = content
                 }
 
-                val saved = skillManager.saveSkillFilesAtomically(name, fileContents)
-                if (!saved) {
-                    withContext(Dispatchers.Main) { onResult(false, "保存失败") }
+                // 技能根发现：根有 SKILL.md → 单技能；否则导入直接子目录下的全部技能
+                val roots = gitHubSkillClient.findSkillRoots(relPaths)
+                if (roots.isEmpty()) {
+                    fail("目录中未找到 SKILL.md")
                     return@launch
+                }
+
+                val importedNames = mutableListOf<String>()
+                for (root in roots) {
+                    val rootAbs = joinPath(info.path, root)
+                    // root 下的文件：相对 root 的路径 → 仓库绝对路径
+                    val relToRoot = if (root.isBlank()) {
+                        relPaths
+                    } else {
+                        relPaths.filter { it.startsWith("$root/") }.map { it.removePrefix("$root/") }
+                    }
+                    val absPaths = relToRoot.map { joinPath(rootAbs, it) }
+                    val files = when (val fetched = gitHubSkillClient.downloadFilesByAbsPath(info, absPaths)) {
+                        is GitHubSkillClient.FetchResult.Success -> fetched.files
+                        is GitHubSkillClient.FetchResult.Failed -> {
+                            fail(fetched.reason)
+                            return@launch
+                        }
+                    }
+
+                    // key 先从仓库绝对路径转为相对技能根，再找 SKILL.md
+                    val rootPrefix = if (rootAbs.isBlank()) "" else "$rootAbs/"
+                    val relativeFiles = files.mapKeys { it.key.removePrefix(rootPrefix) }
+                    val skillMdContent = relativeFiles["SKILL.md"] ?: run {
+                        fail("目录中未找到 SKILL.md")
+                        return@launch
+                    }
+                    val frontmatter = SkillFrontmatterParser.parse(skillMdContent.decodeToString())
+                    val name = frontmatter["name"]
+                    if (name.isNullOrBlank()) {
+                        fail("SKILL.md 格式错误：缺少 name 字段")
+                        return@launch
+                    }
+
+                    val saved = skillManager.saveSkillFileBytesAtomically(name, relativeFiles)
+                    if (!saved) {
+                        fail("保存失败")
+                        return@launch
+                    }
+                    // 登记来源供后续更新检查（commit SHA 查询失败不阻塞导入）
+                    skillUpdateManager.recordInstall(name, info.copy(path = rootAbs), relativeFiles)
+                    importedNames += name
                 }
 
                 _skills.value = skillManager.listSkills()
-                withContext(Dispatchers.Main) { onResult(true, name) }
+                withContext(Dispatchers.Main) {
+                    onResult(true, importedNames.distinct().joinToString())
+                }
             } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) { onResult(false, e.message ?: "未知错误") }
+                Log.w(TAG, "importSkillFromGitHub failed", e)
+                fail(e.message ?: "未知错误")
             }
         }
+    }
+
+    private fun joinPath(base: String, relative: String): String {
+        return if (base.isBlank()) relative else "$base/$relative"
     }
 
     private fun importSkillMarkdown(bytes: ByteArray): List<String> {
@@ -290,71 +384,5 @@ class SkillsVM(
     private fun ByteArray.startsWithBytes(vararg values: Int): Boolean {
         if (size < values.size) return false
         return values.indices.all { index -> (this[index].toInt() and 0xFF) == values[index] }
-    }
-
-    private fun listFilesRecursively(
-        owner: String,
-        repo: String,
-        branch: String,
-        dirPath: String,
-        basePath: String,
-        result: MutableList<Pair<String, String>>,
-    ): Boolean {
-        val apiUrl = "https://api.github.com/repos/$owner/$repo/contents/$dirPath?ref=$branch"
-        val json = downloadText(apiUrl) ?: return false
-        val array = JSONArray(json)
-        for (i in 0 until array.length()) {
-            val item = array.getJSONObject(i)
-            val type = item.getString("type")
-            val itemPath = item.getString("path")
-            val relativePath = itemPath.removePrefix("$basePath/").removePrefix(basePath)
-            when (type) {
-                "file" -> {
-                    val downloadUrl = item.optString("download_url").takeIf { it.isNotBlank() }
-                        ?: return false
-                    result.add(relativePath to downloadUrl)
-                }
-
-                "dir" -> {
-                    val ok = listFilesRecursively(owner, repo, branch, itemPath, basePath, result)
-                    if (!ok) return false
-                }
-            }
-        }
-        return true
-    }
-
-    private data class GitHubRepoInfo(
-        val owner: String,
-        val repo: String,
-        val branch: String,
-        val path: String,
-    )
-
-    private fun parseGitHubUrl(url: String): GitHubRepoInfo? {
-        val trimmed = url.trim().trimEnd('/')
-        // https://github.com/owner/repo
-        // https://github.com/owner/repo/tree/branch
-        // https://github.com/owner/repo/tree/branch/sub/path
-        val regex = Regex("""https://github\.com/([^/]+)/([^/]+)(?:/tree/([^/]+)(/.*)?)?""")
-        val match = regex.matchEntire(trimmed) ?: return null
-        val owner = match.groupValues[1]
-        val repo = match.groupValues[2]
-        val branch = match.groupValues[3].ifBlank { "HEAD" }
-        val subPath = match.groupValues[4].trimStart('/')
-        return GitHubRepoInfo(owner, repo, branch, subPath)
-    }
-
-    private fun downloadText(url: String): String? {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 30_000
-        connection.setRequestProperty("Accept", "application/vnd.github+json")
-        return try {
-            if (connection.responseCode == 200) connection.inputStream.bufferedReader().readText()
-            else null
-        } finally {
-            connection.disconnect()
-        }
     }
 }

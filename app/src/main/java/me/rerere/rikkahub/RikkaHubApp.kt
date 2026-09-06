@@ -30,6 +30,7 @@ import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.SkillUpdateManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -81,6 +82,9 @@ class RikkaHubApp : Application() {
         // Start CloudSync (incremental sync)
         startCloudSync()
 
+        // Check skill updates (throttled, auto-apply if enabled)
+        startSkillUpdateCheck()
+
         // delete temp files
         deleteTempFiles()
 
@@ -98,6 +102,9 @@ class RikkaHubApp : Application() {
 
         // Schedule daily sync worker
         scheduleCloudSyncWorker()
+
+        // Schedule daily skill update check worker
+        scheduleSkillUpdateWorker()
 
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
@@ -224,6 +231,38 @@ class RikkaHubApp : Application() {
             )
         }.onFailure {
             Log.e(TAG, "scheduleCloudSyncWorker failed", it)
+        }
+    }
+
+    /** 冷启动检查技能更新（SkillUpdateManager 内部按 12h 节流；命中的自动更新后台静默应用）。 */
+    private fun startSkillUpdateCheck() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<SkillUpdateManager>().checkAll(force = false)
+            }.onFailure {
+                Log.e(TAG, "startSkillUpdateCheck failed", it)
+            }
+        }
+    }
+
+    /** 注册每日兜底技能更新检查 Worker（与冷启动检查共用节流去重）。 */
+    private fun scheduleSkillUpdateWorker() {
+        runCatching {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+            val request = androidx.work.PeriodicWorkRequestBuilder<me.rerere.rikkahub.data.files.SkillUpdateWorker>(
+                24, java.util.concurrent.TimeUnit.HOURS
+            )
+                .setConstraints(constraints)
+                .build()
+            androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "skill_update_check",
+                androidx.work.ExistingPeriodicWorkPolicy.UPDATE,
+                request,
+            )
+        }.onFailure {
+            Log.e(TAG, "scheduleSkillUpdateWorker failed", it)
         }
     }
 

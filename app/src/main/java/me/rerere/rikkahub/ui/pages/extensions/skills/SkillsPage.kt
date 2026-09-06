@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -53,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -69,10 +71,14 @@ import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Puzzle
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.files.SkillSource
+import me.rerere.rikkahub.data.files.SkillUpdateManager
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -90,13 +96,32 @@ fun SkillsPage() {
     val navController = LocalNavController.current
     val vm = koinViewModel<SkillsVM>()
     val skills by vm.skills.collectAsStateWithLifecycle()
+    val skillSources by vm.skillSources.collectAsStateWithLifecycle()
+    val busySkills by vm.busySkills.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
     var showImportSheet by rememberSaveable { mutableStateOf(false) }
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
+    // 导入对话框当前是「GitHub 导入」还是「绑定 GitHub 仓库」（给已存在技能补登记来源）模式
+    var bindMode by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
+    // 更新流程：本地已修改时的覆盖确认弹窗目标
+    var overwriteTarget by remember { mutableStateOf<String?>(null) }
+
+    fun showUpdateResult(result: SkillUpdateManager.ApplyResult, name: String) {
+        when (result) {
+            is SkillUpdateManager.ApplyResult.Updated ->
+                toaster.show(context.getString(R.string.skills_page_update_success))
+            is SkillUpdateManager.ApplyResult.NoChange ->
+                toaster.show(context.getString(R.string.skills_page_up_to_date))
+            is SkillUpdateManager.ApplyResult.SkippedLocalModified ->
+                overwriteTarget = name
+            is SkillUpdateManager.ApplyResult.Failed ->
+                toaster.show(context.getString(R.string.skills_page_update_failed, result.reason))
+        }
+    }
     // 批量选择删除
     val selectedItems = remember { mutableStateListOf<String>() }
     var selecting by rememberSaveable { mutableStateOf(false) }
@@ -233,8 +258,34 @@ fun SkillsPage() {
                     ) { isDragging ->
                         SkillCard(
                             skill = skill,
+                            source = skillSources[skill.name],
+                            busy = skill.name in busySkills,
                             onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
                             onDelete = { deleteTarget = skill },
+                            onBindRepo = {
+                                bindMode = true
+                                showImportDialog = true
+                            },
+                            onCheckUpdate = {
+                                vm.checkForUpdate(skill.name) { result ->
+                                    when (result) {
+                                        is SkillUpdateManager.CheckResult.UpToDate ->
+                                            toaster.show(context.getString(R.string.skills_page_up_to_date))
+                                        is SkillUpdateManager.CheckResult.UpdateAvailable ->
+                                            toaster.show(context.getString(R.string.skills_page_update_available))
+                                        is SkillUpdateManager.CheckResult.Failed ->
+                                            toaster.show(
+                                                context.getString(R.string.skills_page_check_update_failed, result.reason)
+                                            )
+                                    }
+                                }
+                            },
+                            onUpdate = {
+                                vm.applyUpdate(skill.name, overwriteLocal = false) { result ->
+                                    showUpdateResult(result, skill.name)
+                                }
+                            },
+                            onToggleAutoUpdate = { enabled -> vm.setAutoUpdate(skill.name, enabled) },
                             modifier = Modifier
                                 .longPressDraggableHandle()
                                 .graphicsLayer {
@@ -344,6 +395,7 @@ fun SkillsPage() {
             },
             onImportFromGitHub = {
                 showImportSheet = false
+                bindMode = false
                 showImportDialog = true
             },
         )
@@ -365,12 +417,24 @@ fun SkillsPage() {
 
     if (showImportDialog) {
         ImportSkillDialog(
+            title = stringResource(
+                if (bindMode) R.string.skills_page_bind_repo else R.string.skills_page_import_from_github
+            ),
+            description = stringResource(
+                if (bindMode) R.string.skills_page_bind_description else R.string.skills_page_import_description
+            ),
             onDismiss = { showImportDialog = false },
             onConfirm = { repoUrl ->
+                val binding = bindMode
                 vm.importSkillFromGitHub(repoUrl) { success, message ->
                     showImportDialog = false
                     if (success) {
-                        toaster.show(context.getString(R.string.skills_page_import_success, message))
+                        toaster.show(
+                            context.getString(
+                                if (binding) R.string.skills_page_bind_success else R.string.skills_page_import_success,
+                                message,
+                            )
+                        )
                     } else {
                         toaster.show(context.getString(R.string.skills_page_import_failed, message))
                     }
@@ -391,6 +455,25 @@ fun SkillsPage() {
         onDismiss = { deleteTarget = null },
     ) {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
+    }
+
+    RikkaConfirmDialog(
+        show = overwriteTarget != null,
+        title = stringResource(R.string.skills_page_update_title),
+        confirmText = stringResource(R.string.skills_page_update_now),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            val target = overwriteTarget
+            overwriteTarget = null
+            if (target != null) {
+                vm.applyUpdate(target, overwriteLocal = true) { result ->
+                    showUpdateResult(result, target)
+                }
+            }
+        },
+        onDismiss = { overwriteTarget = null },
+    ) {
+        Text(stringResource(R.string.skills_page_update_overwrite_confirm))
     }
 
     RikkaConfirmDialog(
@@ -419,8 +502,14 @@ fun SkillsPage() {
 @Composable
 private fun SkillCard(
     skill: SkillMetadata,
+    source: SkillSource?,
+    busy: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onBindRepo: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onUpdate: () -> Unit,
+    onToggleAutoUpdate: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -452,6 +541,22 @@ private fun SkillCard(
                     text = skill.name,
                     style = MaterialTheme.typography.titleSmallEmphasized,
                 )
+                if (source != null && (source.updateAvailable || source.localModified)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (source.updateAvailable) {
+                            SkillStateChip(
+                                text = stringResource(R.string.skills_page_update_available),
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                        if (source.localModified) {
+                            SkillStateChip(
+                                text = stringResource(R.string.skills_page_local_modified),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = skill.description,
                     style = MaterialTheme.typography.bodySmall,
@@ -477,6 +582,60 @@ private fun SkillCard(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
+                    if (source != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.skills_page_check_update)) },
+                            leadingIcon = {
+                                Icon(HugeIcons.Refresh01, contentDescription = null)
+                            },
+                            enabled = !busy,
+                            onClick = {
+                                menuExpanded = false
+                                onCheckUpdate()
+                            },
+                        )
+                        if (source.updateAvailable) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.skills_page_update_now)) },
+                                leadingIcon = {
+                                    Icon(HugeIcons.Download01, contentDescription = null)
+                                },
+                                enabled = !busy,
+                                onClick = {
+                                    menuExpanded = false
+                                    onUpdate()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.skills_page_auto_update)) },
+                            leadingIcon = {
+                                Icon(HugeIcons.Refresh01, contentDescription = null)
+                            },
+                            trailingIcon = {
+                                Checkbox(
+                                    checked = source.autoUpdate,
+                                    onCheckedChange = null,
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onToggleAutoUpdate(!source.autoUpdate)
+                            },
+                        )
+                    } else {
+                        // 无来源技能（手动创建/zip 导入/旧版导入）：绑定 GitHub 仓库以启用更新检测
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.skills_page_bind_repo)) },
+                            leadingIcon = {
+                                Icon(HugeIcons.Link01, contentDescription = null)
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onBindRepo()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
@@ -494,6 +653,24 @@ private fun SkillCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SkillStateChip(
+    text: String,
+    color: Color,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = color.copy(alpha = 0.12f),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+        )
     }
 }
 
@@ -659,6 +836,8 @@ private fun AddSkillDialog(
 
 @Composable
 private fun ImportSkillDialog(
+    title: String,
+    description: String,
     onDismiss: () -> Unit,
     onConfirm: (repoUrl: String) -> Unit,
 ) {
@@ -667,11 +846,11 @@ private fun ImportSkillDialog(
 
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
-        title = { Text(stringResource(R.string.skills_page_import_from_github)) },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = stringResource(R.string.skills_page_import_description),
+                    text = description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
