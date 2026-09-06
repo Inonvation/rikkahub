@@ -1609,60 +1609,67 @@ class ChatService(
         answer: String? = null,
     ) {
         val session = getOrCreateSession(conversationId)
-        session.getJob()?.cancel()
+        val previousJob = session.getJob()
 
         val job = appScope.launch {
             try {
-                val conversation = session.state.value
-                val newApprovalState = when {
-                    answer != null -> ToolApprovalState.Answered(answer)
-                    approved -> ToolApprovalState.Approved
-                    else -> ToolApprovalState.Denied(reason)
-                }
-
-                // Update the tool approval state
-                val updatedNodes = conversation.messageNodes.map { node ->
-                    node.copy(
-                        messages = node.messages.map { msg ->
-                            msg.copy(
-                                parts = msg.parts.map { part ->
-                                    when {
-                                        part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
-                                            part.copy(approvalState = newApprovalState)
-                                        }
-
-                                        else -> part
-                                    }
-                                }
-                            )
-                        }
-                    )
-                }
-                val updatedConversation = conversation.copy(
-                    messageNodes = updatedNodes,
-                    compressedHistory = null,
-                )
-                saveConversation(conversationId, updatedConversation)
-
-                // Check if there are still pending tools
-                val hasPendingTools = updatedNodes.any { node ->
-                    node.currentMessage.parts.any { part ->
-                        part is UIMessagePart.Tool && part.isPending
+                afterPreviousGeneration(previousJob) {
+                    val conversation = session.state.value
+                    // 忽略重复点击与已完成/已取消工具的过期审批
+                    if (conversation.currentMessages.none { message ->
+                            message.getTools().any { it.toolCallId == toolCallId && it.isPending }
+                        }) return@afterPreviousGeneration
+                    val newApprovalState = when {
+                        answer != null -> ToolApprovalState.Answered(answer)
+                        approved -> ToolApprovalState.Approved
+                        else -> ToolApprovalState.Denied(reason)
                     }
-                }
 
-                // Only continue generation when all pending tools are handled
-                if (!hasPendingTools) {
-                    handleMessageComplete(conversationId)
-                }
+                    // Update the tool approval state
+                    val updatedNodes = conversation.messageNodes.map { node ->
+                        node.copy(
+                            messages = node.messages.map { msg ->
+                                msg.copy(
+                                    parts = msg.parts.map { part ->
+                                        when {
+                                            part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
+                                                part.copy(approvalState = newApprovalState)
+                                            }
 
-                _generationDoneFlow.emit(conversationId)
+                                            else -> part
+                                        }
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    val updatedConversation = conversation.copy(
+                        messageNodes = updatedNodes,
+                        compressedHistory = null,
+                    )
+                    saveConversation(conversationId, updatedConversation)
+
+                    // Check if there are still pending tools
+                    val hasPendingTools = updatedNodes.any { node ->
+                        node.currentMessage.parts.any { part ->
+                            part is UIMessagePart.Tool && part.isPending
+                        }
+                    }
+
+                    // Only continue generation when all pending tools are handled
+                    if (!hasPendingTools) {
+                        handleMessageComplete(conversationId)
+                    }
+
+                    _generationDoneFlow.emit(conversationId)
+                }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
             }
         }
 
-        session.setJob(job)
+        session.setJob(job, cancelPrevious = false)
     }
 
     /**
@@ -1675,7 +1682,7 @@ class ChatService(
         toolCallId: String,
     ) {
         val session = getOrCreateSession(conversationId)
-        session.getJob()?.cancel()
+        val previousJob = session.getJob()
 
         val hasOtherPendingTools = session.state.value.messageNodes.any { node ->
             node.currentMessage.parts.any { part ->
@@ -1688,64 +1695,67 @@ class ChatService(
             keepAliveInBackground = !hasOtherPendingTools,
         ) {
             try {
-                val conversation = session.state.value
-                // 找到包含该 toolCallId 的消息节点（同一轮生成批次），收集其全部 pending 工具调用
-                val relatedToolCallIds = conversation.messageNodes
-                    .firstOrNull { node ->
-                        node.currentMessage.parts.any {
-                            it is UIMessagePart.Tool && it.toolCallId == toolCallId
+                afterPreviousGeneration(previousJob) {
+                    val conversation = session.state.value
+                    // 找到包含该 toolCallId 的消息节点（同一轮生成批次），收集其全部 pending 工具调用
+                    val relatedToolCallIds = conversation.messageNodes
+                        .firstOrNull { node ->
+                            node.currentMessage.parts.any {
+                                it is UIMessagePart.Tool && it.toolCallId == toolCallId
+                            }
                         }
+                        ?.currentMessage
+                        ?.parts
+                        ?.filterIsInstance<UIMessagePart.Tool>()
+                        ?.filter { it.isPending }
+                        ?.map { it.toolCallId }
+                        .orEmpty()
+
+                    if (relatedToolCallIds.isEmpty()) {
+                        // 没有可批的待审批调用（可能已被处理），直接返回
+                        _generationDoneFlow.emit(conversationId)
+                        return@afterPreviousGeneration
                     }
-                    ?.currentMessage
-                    ?.parts
-                    ?.filterIsInstance<UIMessagePart.Tool>()
-                    ?.filter { it.approvalState is ToolApprovalState.Pending }
-                    ?.map { it.toolCallId }
-                    .orEmpty()
 
-                if (relatedToolCallIds.isEmpty()) {
-                    // 没有可批的待审批调用（可能已被处理），直接返回
-                    _generationDoneFlow.emit(conversationId)
-                    return@launchGenerationJob
-                }
-
-                val updatedNodes = conversation.messageNodes.map { node ->
-                    node.copy(
-                        messages = node.messages.map { msg ->
-                            msg.copy(
-                                parts = msg.parts.map { part ->
-                                    if (part is UIMessagePart.Tool && part.toolCallId in relatedToolCallIds) {
-                                        part.copy(approvalState = ToolApprovalState.Approved)
-                                    } else {
-                                        part
+                    val updatedNodes = conversation.messageNodes.map { node ->
+                        node.copy(
+                            messages = node.messages.map { msg ->
+                                msg.copy(
+                                    parts = msg.parts.map { part ->
+                                        if (part is UIMessagePart.Tool && part.toolCallId in relatedToolCallIds) {
+                                            part.copy(approvalState = ToolApprovalState.Approved)
+                                        } else {
+                                            part
+                                        }
                                     }
-                                }
-                            )
-                        }
-                    )
-                }
-                val updatedConversation = conversation.copy(
-                    messageNodes = updatedNodes,
-                    compressedHistory = null,
-                )
-                saveConversation(conversationId, updatedConversation)
-
-                // 仍存在 pending（跨节点）则继续等待，否则继续生成
-                val hasPendingTools = updatedNodes.any { node ->
-                    node.currentMessage.parts.any { part ->
-                        part is UIMessagePart.Tool && part.isPending
+                                )
+                            }
+                        )
                     }
+                    val updatedConversation = conversation.copy(
+                        messageNodes = updatedNodes,
+                        compressedHistory = null,
+                    )
+                    saveConversation(conversationId, updatedConversation)
+
+                    // 仍存在 pending（跨节点）则继续等待，否则继续生成
+                    val hasPendingTools = updatedNodes.any { node ->
+                        node.currentMessage.parts.any { part ->
+                            part is UIMessagePart.Tool && part.isPending
+                        }
+                    }
+                    if (!hasPendingTools) {
+                        handleMessageComplete(conversationId)
+                    }
+                    _generationDoneFlow.emit(conversationId)
                 }
-                if (!hasPendingTools) {
-                    handleMessageComplete(conversationId)
-                }
-                _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
             }
         }
 
-        session.setJob(job)
+        session.setJob(job, cancelPrevious = false)
     }
 
     // ---- 处理消息补全 ----
@@ -2422,13 +2432,14 @@ class ChatService(
     }
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+        // 不再改写 approvalState：写入 output 后 isExecuted=true，isPending 自然为 false；
+        // 保留原 approvalState，避免把用户已批准的工具误标为 Denied
         return tool.copy(
             output = listOf(
                 UIMessagePart.Text(
                     """{"status":"cancelled","error":"Generation cancelled by user before tool execution completed."}"""
                 )
             ),
-            approvalState = ToolApprovalState.Denied("Generation cancelled by user")
         )
     }
 
@@ -3147,9 +3158,10 @@ class ChatService(
     // 同时停止该会话后台运行中的子代理（已确认语义：停止生成 = 子代理全部停止），
     // 停止的子代理是 CANCELLED，不触发异步唤醒。
     suspend fun stopGeneration(conversationId: Uuid) {
-        val job = sessions[conversationId]?.getJob() ?: return
-        job.cancel()
-        runCatching { job.join() }
+        val session = sessions[conversationId] ?: return
+        val jobs = synchronized(session) { session.cancelJobs() }
+        if (jobs.isEmpty()) return
+        jobs.forEach { runCatching { it.join() } }
         finishInterruptedPendingTools(conversationId)
         subAgentRunner.cancelByConversation(conversationId)
     }

@@ -1,13 +1,16 @@
 package me.rerere.rikkahub.service
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.model.Conversation
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,6 +45,7 @@ class ConversationSession(
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
+    private val activeJobs = mutableSetOf<Job>()
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
     val isInUse: Boolean get() = refCount.get() > 0 || isGenerating
@@ -97,24 +101,40 @@ class ConversationSession(
         }
     }
 
-    fun setJob(job: Job?) {
-        _generationJob.value?.cancel()
+    @Synchronized
+    fun setJob(job: Job?, cancelPrevious: Boolean = true) {
+        val previous = _generationJob.value
         _generationJob.value = job
-        job?.invokeOnCompletion {
-            // 身份校验：仅当「当前引用的就是本次 job」时才清空。否则旧 job 被取消后
-            // 仍要跑完 onCompletion（含 suspend 落库），会在新 job 写入之后才完成，
-            // 无条件置 null 会把新 job 引用清掉——停止按钮消失、stopGeneration 失效、
-            // resumeAfterSubAgent 防重入失效（生成停不下来/并发续答）的根因。
-            if (_generationJob.value === job) {
-                _generationJob.value = null
-            }
-            if (refCount.get() <= 0) {
-                scheduleIdleCheck()
+        if (cancelPrevious) previous?.cancel()
+        if (job != null) activeJobs.add(job)
+        job?.invokeOnCompletion { cause ->
+            synchronized(this) {
+                activeJobs.remove(job)
+                // 排队型任务（cancelPrevious=false）还没进入函数体就被取消时，向后传播取消，
+                // 避免已无人等待的前序任务继续挂着
+                if (!cancelPrevious && cause is CancellationException) previous?.cancel()
+                // 身份校验：仅当「当前引用的就是本次 job」时才清空。否则旧 job 被取消后
+                // 仍要跑完 onCompletion（含 suspend 落库），会在新 job 写入之后才完成，
+                // 无条件置 null 会把新 job 引用清掉——停止按钮消失、stopGeneration 失效、
+                // resumeAfterSubAgent 防重入失效（生成停不下来/并发续答）的根因。
+                if (_generationJob.value === job) {
+                    _generationJob.value = null
+                    if (refCount.get() <= 0) {
+                        scheduleIdleCheck()
+                    }
+                }
             }
         }
+        job?.start()
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    @Synchronized
+    fun cancelJobs(): List<Job> = activeJobs.toList().also { jobs ->
+        // 先取消等待者，避免前序任务收尾时又拉起下一个审批
+        jobs.asReversed().forEach { it.cancel() }
+    }
 
     private fun scheduleIdleCheck() {
         idleCheckJob?.cancel()
@@ -131,10 +151,23 @@ class ConversationSession(
         idleCheckJob = null
     }
 
+    @Synchronized
     fun cleanup() {
-        _generationJob.value?.cancel()
         _generationJob.value = null
+        cancelJobs()
         idleCheckJob?.cancel()
         idleCheckJob = null
+    }
+}
+
+/** 串行化审批处理：等前序生成任务结束再落库（不取消前序）；停止时整链一起取消。 */
+internal suspend fun afterPreviousGeneration(previous: Job?, block: suspend () -> Unit) {
+    try {
+        previous?.join()
+        block()
+    } catch (e: CancellationException) {
+        previous?.cancel()
+        withContext(NonCancellable) { previous?.join() }
+        throw e
     }
 }

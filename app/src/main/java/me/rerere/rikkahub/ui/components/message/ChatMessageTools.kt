@@ -410,7 +410,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         onManualContentToggle?.invoke()
     }
     val hapticController = rememberHaptic()
-    val isPending = tool.approvalState is ToolApprovalState.Pending
+    val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
@@ -713,7 +713,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     loading: Boolean,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
 ) {
-    val isPending = tool.approvalState is ToolApprovalState.Pending
+    val isPending = tool.isPending
     val isAnswered = tool.approvalState is ToolApprovalState.Answered
     val arguments = tool.inputAsJson()
     // 用户手动展开/收起问答气泡时通知列表取消自动跟随（主聊天列表加载中生效）

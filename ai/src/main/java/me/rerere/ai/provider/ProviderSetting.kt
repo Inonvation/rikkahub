@@ -97,6 +97,7 @@ sealed class ProviderSetting {
         var rerankPath: String = "/rerank",
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
+        var responsesPath: String = "/responses",
         var authType: OpenAIAuthType = OpenAIAuthType.API_KEY,
         var codexCredentials: OpenAICodexCredentials? = null,
     ) : ProviderSetting() {

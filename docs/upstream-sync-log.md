@@ -249,3 +249,29 @@
 ### 验证
 
 `:app:compileDebugKotlin` BUILD SUCCESSFUL；测试源码无引用旧 `text` 字段的用例。真机行为验证（生成中带附件立即注入/气泡缩略图）由用户自行装机确认。
+
+## 2026-09-07 — 第九次同步（09-06 深夜上游新增 4 提交；手动同步 2，跳过 2）
+
+### A. 跳过（2 个，无需合并）
+
+| 提交 | 内容 | 原因 |
+|---|---|---|
+| `74397a32c` | 新增 MaruCode 提供商（README+推荐列表+赞助图） | 推广条目，按既定偏好一律移除 |
+| `f2f687f04` | web 聊天 composer/选择器/消息对齐改版 | 本地 web-ui 已大幅自主演进（ask_user 改版/RAG/文件夹/SSE 合并流/推理滑块），UI 重构只参考不照搬 |
+
+### B. 手动同步（2 个）
+
+1. **`555064966` 修复连续工具审批丢失及取消状态误标**（并发修复，按本地结构移植）：
+   - `UIMessagePart.Tool.isPending` 加 `!isExecuted` 前提：已写入 output 的工具（如被取消回填 cancelled）不再视为待审批（Kotlin + web-ui `tool-part.tsx` 同语义修复，本地 `ChatMessageTools` 两处改用 `tool.isPending`）。
+   - `ConversationSession`：`setJob(job, cancelPrevious = true)` 排队模式（不取消前序 job，完成时若系排队型取消且未进函数体则向后传播）；新增 `activeJobs` 集合 + `cancelJobs()`（逆序取消等待者）；`cleanup` 改 `@Synchronized` 并走 `cancelJobs`；`setJob` 末尾 `job?.start()`（兼容 LAZY 任务）。本地身份校验注释与 idle 调度语义保留（idle 检查移入身份校验成功分支，对齐上游 CAS 结构）。
+   - 顶层新增 `afterPreviousGeneration(previous, block)`：join 前序 → 落库 → 取消时 NonCancellable 等前序收尾后重抛。
+   - `ChatService.handleToolApproval`：去掉开头的 `getJob()?.cancel()`，改 `afterPreviousGeneration` 串行化 + 过期审批守卫（`currentMessages` 中该 toolCallId 不再 `isPending` 则直接返回），catch 补 `CancellationException` 重抛（此前取消会被吞成 addError 错误气泡）；`setJob(job, cancelPrevious = false)`。本地 `approveAllRelatedToolApprovals` 同款 bug 模式（上游无此函数），一并对齐：串行化 + `isPending` 过滤 + 取消重抛。
+   - `cancelToolByUser` 不再把 approvalState 改写为 Denied（保留原状态，靠 `isExecuted` 让 isPending 失效），避免「用户已批准的工具被停止误标为 Denied」。
+   - `stopGeneration`：`getJob()` 单取消 → `synchronized(session) { cancelJobs() }` + 逐个 join（保留本地子代理取消与 runCatching）。
+   - 测试：`ToolApprovalStateTest` 增上游取消状态用例（构造器适配本地 `description` 参数，改命名实参）；新增 `ConversationSessionTest`（上游 6 例带 5 例——onGenerationFinished 回调与 messageQueue 依赖为上游独有，本地对应删除断言与排队保活用例）。
+   - 无死锁确认：审批挂起时 GenerationHandler `break` 结束生成 job（`waitingForUser = true`），join 只会等连续点击的在途落库。
+2. **`a61d116d8` 支持自定义 response api 路径**：`ProviderSetting.OpenAI` 加 `responsesPath`（默认 `/responses`，序列化向后兼容）；`ResponseAPI` 两处 URL 改拼 `providerSetting.responsesPath`（本地 `effectiveBaseUrl()` 前缀保留）；`ProviderConfigure` API 路径输入框按 `useResponseApi` 切换编辑目标（保留本地 Codex 认证态隐藏逻辑）。Codex 订阅端点不受影响（走独立固定 URL）。
+
+### 验证
+
+`:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:ai:testDebugUnitTest` 全模块通过（含 ToolApprovalStateTest 3 例），`:app:testDebugUnitTest --tests ConversationSessionTest` 5 例全绿（test-results XML 确认）。`isPending` 语义变化影响面复查：全部使用点（审批 UI/续答守卫/hasPendingTools）均为「已执行工具不再等待审批」的修复意图内。

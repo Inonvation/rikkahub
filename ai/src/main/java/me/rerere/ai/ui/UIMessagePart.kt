@@ -232,7 +232,7 @@ sealed class UIMessagePart {
             }
 
         /** Whether the tool is pending user approval */
-        val isPending: Boolean get() = approvalState is ToolApprovalState.Pending
+        val isPending: Boolean get() = !isExecuted && approvalState is ToolApprovalState.Pending
 
         /** Whether generation can resume and handle this tool immediately */
         val canResumeExecution: Boolean get() = !isExecuted && approvalState.canResumeToolExecution()

@@ -114,7 +114,7 @@ class ResponseAPI(
                 stream = false,
             )
             val requestBuilder = Request.Builder()
-                .url("${providerSetting.effectiveBaseUrl()}/responses")
+                .url("${providerSetting.effectiveBaseUrl()}${providerSetting.responsesPath}")
                 .headers(params.customHeaders.toHeaders())
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .addHeader("Content-Type", "application/json")
@@ -155,7 +155,7 @@ class ResponseAPI(
             stream = true,
         )
         val requestBuilder = Request.Builder()
-            .url("${providerSetting.effectiveBaseUrl()}/responses")
+            .url("${providerSetting.effectiveBaseUrl()}${providerSetting.responsesPath}")
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .configureReferHeaders(providerSetting.effectiveBaseUrl())
