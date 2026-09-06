@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.onFailure
@@ -8,6 +9,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
@@ -103,39 +106,41 @@ class ResponseAPI(
             )
         }
 
-        val requestBody = buildRequestBody(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-            stream = false,
-        )
-        val requestBuilder = Request.Builder()
-            .url("${providerSetting.effectiveBaseUrl()}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.effectiveBaseUrl())
-        val request = authenticator.authenticate(requestBuilder, providerSetting).build()
-
-        Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
-
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            // 必须抛 HttpException（带 code）：GenerationHandler.isRetryable 只认它，
-            // 抛裸 Exception 会导致 429/5xx 永不重试
-            throw HttpException(
-                "Failed to get response: ${response.code} ${response.body?.string()}",
-                code = response.code,
-                retryAfterMs = response.headers.retryAfterMillis(),
+        return withContext(Dispatchers.IO) {
+            val requestBody = buildRequestBody(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params,
+                stream = false,
             )
+            val requestBuilder = Request.Builder()
+                .url("${providerSetting.effectiveBaseUrl()}/responses")
+                .headers(params.customHeaders.toHeaders())
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader("Content-Type", "application/json")
+                .configureReferHeaders(providerSetting.effectiveBaseUrl())
+            val request = authenticator.authenticate(requestBuilder, providerSetting).build()
+
+            Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
+
+            // await() waits for the response headers; reading the body can still block.
+            client.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    // 必须抛 HttpException（带 code）：GenerationHandler.isRetryable 只认它，
+                    // 抛裸 Exception 会导致 429/5xx 永不重试
+                    throw HttpException(
+                        "Failed to get response: ${response.code} ${response.body?.string()}",
+                        code = response.code,
+                        retryAfterMs = response.headers.retryAfterMillis(),
+                    )
+                }
+
+                val bodyStr = response.body?.string() ?: ""
+                Log.d(TAG, "generateText: $bodyStr")
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                parseResponseOutput(bodyJson)
+            }
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        Log.d(TAG, "generateText: $bodyStr")
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val output = parseResponseOutput(bodyJson)
-
-        return output
     }
 
     override suspend fun streamText(
@@ -225,7 +230,7 @@ class ResponseAPI(
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
-    }.buffer(Channel.UNLIMITED)
+    }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     internal fun buildRequestBody(
         providerSetting: ProviderSetting.OpenAI,

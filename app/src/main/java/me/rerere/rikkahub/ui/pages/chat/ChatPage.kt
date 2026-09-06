@@ -99,6 +99,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -252,12 +253,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     val errors by vm.conversationErrors.collectAsStateWithLifecycle()
 
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     // 侧边栏状态保存在 ChatVM 中，导航到子页面返回后仍保持展开
     var leftDrawerOpen by remember { mutableStateOf(vm.leftDrawerOpen) }
     var rightDrawerOpen by remember { mutableStateOf(vm.rightDrawerOpen) }
 
     // 双向同步到 ViewModel，导航离开/返回时状态保留
-    LaunchedEffect(leftDrawerOpen) { vm.leftDrawerOpen = leftDrawerOpen }
+    LaunchedEffect(leftDrawerOpen) {
+        vm.leftDrawerOpen = leftDrawerOpen
+        // Clear input focus so popup transitions cannot reopen the keyboard.
+        if (leftDrawerOpen) {
+            focusManager.clearFocus(force = true)
+            softwareKeyboardController?.hide()
+        }
+    }
     LaunchedEffect(rightDrawerOpen) { vm.rightDrawerOpen = rightDrawerOpen }
 
     // Handle back press when left drawer is open

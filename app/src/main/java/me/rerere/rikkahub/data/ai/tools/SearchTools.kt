@@ -16,6 +16,7 @@ import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
 import me.rerere.search.ScrapedResult
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 /**
@@ -58,7 +59,9 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
                             commonOptions = settings.searchCommonOptions,
                             serviceOptions = opts,
                         )
-                        val results = JsonInstantPretty.encodeToJsonElement(result.getOrThrow()).jsonObject.let { json ->
+                        val results = JsonInstantPretty.encodeToJsonElement(
+                            result.getOrThrow().copy(retrievedAt = Clock.System.now().toString())
+                        ).jsonObject.let { json ->
                             val map = json.toMutableMap()
                             map["provider"] = JsonPrimitive(opts.displayName)
                             map["items"] = JsonArray(map["items"]!!.jsonArray.mapIndexed { index, item ->
@@ -79,7 +82,7 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
                         name = "scrape_web__$shortId",
                         description = """
                             Scrape a URL for detailed page content using ${opts.displayName}.
-                            Use this when the user requests content from a specific page or when search snippets are insufficient.
+                            Use this when the user requests content from a specific page, when search snippets are insufficient, or when a current claim needs verification against a specific source.
                             Avoid using it for common questions unless the user asks.
                             Returned content is automatically converted to Markdown when the provider returns raw HTML.
                             """.trimIndent(),
@@ -90,7 +93,9 @@ fun createSearchTools(settings: Settings, concise: Boolean = false): Set<Tool> {
                                 commonOptions = settings.searchCommonOptions,
                                 serviceOptions = opts,
                             )
-                            val payload = result.getOrThrow().toPayloadWithAutoMarkdown()
+                            val payload = result.getOrThrow()
+                                .copy(retrievedAt = Clock.System.now().toString())
+                                .toPayloadWithAutoMarkdown()
                             listOf(UIMessagePart.Text(payload.toString()))
                         }
                     )
@@ -110,6 +115,8 @@ private fun searchToolDescription(providerName: String, concise: Boolean): Strin
         Search the web for up-to-date or specific information using $providerName.
         Use this when the user (or the parent agent) asks for the latest news, current facts, or needs verification.
         Avoid using it for general knowledge you already know unless the user asks for verification.
+        Do not treat result order as proof of freshness. Prefer primary sources and inspect
+        each result's title, URL, publication date, and content before making a current claim.
         Generate focused keywords and run multiple searches if needed.
             When thorough cross-verified info is wanted, call MULTIPLE search_web__* tools (one per provider) and compare results.
             """.trimIndent()
@@ -118,13 +125,19 @@ private fun searchToolDescription(providerName: String, concise: Boolean): Strin
         Search the web for up-to-date or specific information using $providerName.
         Use this when the user asks for the latest news, current facts, or needs verification.
         Avoid using it for general knowledge you already know unless the user asks for verification.
+        Do not treat result order as proof of freshness. Prefer primary sources and inspect
+        each result's title, URL, publication date, and content before making a current claim.
+        Use the optional publication-date and domain filters only when they match the question.
+        If a date or primary source is missing, or sources conflict, run another focused search
+        or use scrape_web to verify the most relevant source before answering.
         Generate focused keywords and run multiple searches if needed.
 
         Multi-source: when the user wants thorough cross-verified info, call MULTIPLE search_web__* tools
         (one per enabled search provider) and compare the independent results.
 
         Response format:
-        - items[].id (short id), title, url, text
+        - retrievedAt is the local retrieval time, never a publication date
+        - items[].id (short id), index, title, url, publishedDate (if supplied), highlights (if supplied), text
         - images[]: image urls related to the query (may be empty)
 
         Citations:
@@ -168,7 +181,9 @@ private fun createSingleSearchTools(settings: Settings, concise: Boolean): Set<T
                         serviceOptions = options,
                     )
                     val results =
-                        JsonInstantPretty.encodeToJsonElement(result.getOrThrow()).jsonObject.let { json ->
+                        JsonInstantPretty.encodeToJsonElement(
+                            result.getOrThrow().copy(retrievedAt = Clock.System.now().toString())
+                        ).jsonObject.let { json ->
                             val map = json.toMutableMap()
                             map["items"] =
                                 JsonArray(map["items"]!!.jsonArray.mapIndexed { index, item ->
@@ -194,7 +209,7 @@ private fun createSingleSearchTools(settings: Settings, concise: Boolean): Set<T
                     name = "scrape_web",
                     description = """
                         Scrape a URL for detailed page content.
-                        Use this when the user requests content from a specific page or when search snippets are insufficient.
+                        Use this when the user requests content from a specific page, when search snippets are insufficient, or when a current claim needs verification against a specific source.
                         Avoid using it for common questions unless the user asks.
                         Returned content is automatically converted to Markdown when the provider returns raw HTML.
                         """.trimIndent(),
@@ -215,7 +230,9 @@ private fun createSingleSearchTools(settings: Settings, concise: Boolean): Set<T
                             commonOptions = settings.searchCommonOptions,
                             serviceOptions = options,
                         )
-                        val payload = result.getOrThrow().toPayloadWithAutoMarkdown()
+                        val payload = result.getOrThrow()
+                            .copy(retrievedAt = Clock.System.now().toString())
+                            .toPayloadWithAutoMarkdown()
                         listOf(UIMessagePart.Text(payload.toString()))
                     }
                 ))

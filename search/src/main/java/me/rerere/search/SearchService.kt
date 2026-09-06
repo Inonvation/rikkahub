@@ -102,18 +102,25 @@ data class SearchResult(
     val answer: String? = null,
     val items: List<SearchResultItem>,
     val images: List<String> = emptyList(),
+    /** Local time at which this result was retrieved; not a publication date. */
+    val retrievedAt: String? = null,
 ) {
     @Serializable
     data class SearchResultItem(
         val title: String,
         val url: String,
         val text: String,
+        /** Provider-supplied publication date. Null means that no date was supplied. */
+        val publishedDate: String? = null,
+        val highlights: List<String> = emptyList(),
     )
 }
 
 @Serializable
 data class ScrapedResult(
     val urls: List<ScrapedResultUrl>,
+    /** Local time at which this result was retrieved; not a publication date. */
+    val retrievedAt: String? = null,
 )
 
 @Serializable
@@ -128,6 +135,8 @@ data class ScrapedResultMetadata(
     val title: String? = null,
     val description: String? = null,
     val language: String? = null,
+    /** Provider-supplied publication date. Null means that no date was supplied. */
+    val publishedDate: String? = null,
 )
 
 @Serializable
@@ -174,7 +183,7 @@ sealed class SearchServiceOptions {
     data class ZhipuOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("doubao")
@@ -197,7 +206,7 @@ sealed class SearchServiceOptions {
     data class ExaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("searxng")
@@ -223,21 +232,21 @@ sealed class SearchServiceOptions {
     data class BraveOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("metaso")
     data class MetasoOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("ollama")
     data class OllamaOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("perplexity")
@@ -253,7 +262,7 @@ sealed class SearchServiceOptions {
     data class FirecrawlOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("jina")
@@ -295,14 +304,14 @@ sealed class SearchServiceOptions {
     data class TinyfishOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("serper")
     data class SerperOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
-        ) : SearchServiceOptions()
+    ) : SearchServiceOptions()
 
     @Serializable
     @SerialName("custom_js")

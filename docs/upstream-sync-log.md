@@ -193,3 +193,37 @@
 | 提交 | 内容 | 结论 |
 |---|---|---|
 | `540b9dfa` | 备份一致性快照 + 启动安全恢复 | 维持第五次论证：本地 schema v47 迁移链与上游 v16 工厂不兼容、本地自研 sync 体系（`SyncManager`/`BackupSplitter`/`importer` 等）与上游 `BackupManager`/`PendingRestore` 是两套设计。用户本轮拍板暂缓，如需吸收其能力（WAL 一致性快照、启动时安全恢复）建议单独立项 |
+
+## 2026-09-07 — 第七次同步（09-06 单日 7 提交；落地 6，跳过 1）
+
+### A. 无需合并（1 个）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `097cdb90` | ChatToolFactory 集中化重构 | 纯结构重构无功能增量（GenerationHandler→GenerationLoop 改名 + 工具组装从 ChatService 抽出为工厂 + DI 注册），先例同 `8f4f1286`。本地 ChatService/GenerationHandler 深度重构版，移植成本高收益低；新增符号 `InvalidMcpServerNamesException`/`shouldUseExternalWebSearch` 暂无本地依赖，后续提交引用时再补 |
+
+### B. 可放心合并（2 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `1d86b3c1` | 终端键盘手势/resize 修复（#1861） | 终端三件套与上游提交前状态（`ab8b6cc8`）逐字节一致，直接 `git checkout 104040df` 终态一次落地两条 |
+| `104040df` | 终端 tab 栏改版（marquee 标题/加宽 tab/返回+新建合并头部） | 同上；落地后核对新页引用的 11 个 string key 本地全部在位 |
+
+### C. 需本地化手动同步（4 个，已落地）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `ab8b6cc8` | provider 阻塞工作移 IO 调度器 | Claude/Google/ChatCompletionsAPI 三处流式 flow 在 `.buffer(Channel.UNLIMITED)` 后加 `.flowOn(Dispatchers.IO)`（锚点 #1295 注释本地在位）；ResponseAPI `generateText` 非 Codex 分支包 `withContext(Dispatchers.IO)` + body 读取进 `use{}`（保留本地 HttpException 硬化与 Codex 订阅分流），`streamText` flow 同加 flowOn |
+| `5902feab` | 图片-only 消息允许无空 text part | 本地已有 `part is Text` 空白过滤与两处 `text.isBlank()` 返回（此前等价修复），本次补齐三处：`editedTextIndex` 分支加空白守卫、`editedTextIndex < 0 && text.isNotBlank()` 时文本插到第 0 位、`isEmpty()` 改 `text.isBlank() && messageContent.isEmpty()`（有附件即可发送） |
+| `7b76847f` | 移动会话时键盘闪烁修复（#1855） | 本地 drawer 重构为 `leftDrawerOpen`/`rightDrawerOpen` 状态：在 `LaunchedEffect(leftDrawerOpen)` 内加 `focusManager.clearFocus(force = true)` + 键盘 hide（上游同语义）；`ConversationItem.onLongClick` 加 `clearFocus(force = true)`（本地保留 haptic 反馈差异不动） |
+| `a8f8c3a1` | Exa freshness 证据保留 + UI 展示 | `ExaSearchService`/`SearchService` 与上游提交前一致（SearchService 仅无关缩进漂移）、两个测试文件为上游新增 → 四文件直接 checkout；`SearchTools`/`BuiltinToolUIs` 按本地多服务商重构版移植：① 搜索描述加新鲜度指引（concise 版取前 3 行防冗长）+ Response format 加 `retrievedAt`/`publishedDate`/`highlights` ② scrape 描述加「验证当前论断」用途（两变体）③ 4 个执行点 `getOrThrow().copy(retrievedAt = Clock.System.now())`（本地 scrape 走 `toPayloadWithAutoMarkdown` 前置 copy）④ UI：参数标签 FlowRow（排除 query）+ 结果卡发布日期行（ISO_DATE_TIME→ISO_DATE 回退解析，`toLocalString(includeYear = true)`；`jsonObjectOrNull` 用本地已 import 的 `me.rerere.common.http` 版） |
+
+### 暂缓（延续）
+
+| 提交 | 内容 | 结论 |
+|---|---|---|
+| `540b9dfa` | 备份一致性快照 + 启动安全恢复 | 维持暂缓（第三次确认） |
+
+### 验证
+
+`:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:search:testDebugUnitTest`（含新增 `ExaSearchServiceTest` 9 例）与 `:app:testDebugUnitTest --tests SearchToolsTest(2 例)/ToolDescriptionConventionTest(1 例)` 全绿（test-results XML 确认）。
