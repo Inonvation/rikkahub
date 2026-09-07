@@ -17,6 +17,9 @@ data class SubAgentRequest(
     val modelId: String? = null,
     /** 上次执行的部分结果（详情页"重新执行"续跑用）。仅内存传递，不落库。 */
     val priorContext: String? = null,
+    /** 题目/资料图片（file:// uri，须位于应用私有目录）。vision 模型直接多模态输入；
+     *  默认空列表保持旧落库数据反序列化兼容。 */
+    val images: List<String> = emptyList(),
 ) {
     companion object {
         // ignoreUnknownKeys: 运行时 args 里可能混入隐藏字段（如 __toolCallId），需容忍未知键

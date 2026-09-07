@@ -36,6 +36,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.CustomBody
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
@@ -1168,7 +1169,234 @@ class GenerationHandler(
             }
         }
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * 拍照搜题核心入口：图片（+可选补充文本）→ 流式解题。
+ *
+ * 模型路由：
+ * - 解题模型（settings.solveModelId）支持 IMAGE 输入 → 直接多模态请求；
+ * - 不支持且配置了 OCR 模型（settings.ocrModelId）→ 先把图片 OCR 成文本，再纯文本解题
+ *   （独立实现而非复用 OcrTransformer.performOcr：后者的静默兜底 "[Image]"/"[ERROR..]"
+ *   适合聊天上下文注入，不适合解题场景——OCR 失败必须让用户看到可读错误而非解题跑偏）；
+ * -两者皆无 → 抛 IllegalStateException（UI 显示配置引导）。
+ *
+ * 重试语义与 translateText 一致：仅在尚未输出任何正文时重试，已输出后失败直接抛出，
+ * 避免重试造成内容重复。
+ */
+fun solveQuestion(
+    settings: Settings,
+    imageUris: List<String>,
+    questionText: String? = null,
+    onStreamUpdate: ((SolveStreamUpdate) -> Unit)? = null,
+): Flow<SolveResult> = flow {
+    require(imageUris.isNotEmpty() || !questionText.isNullOrBlank()) {
+        "solveQuestion requires at least one image or question text"
+    }
+
+    val model = settings.providers.findModelById(settings.solveModelId)
+        ?: error("解题模型未配置或已失效，请到设置中配置默认解题模型")
+    val provider = model.findProvider(settings.providers)
+        ?: error("解题模型对应的服务商不存在")
+    val providerHandler = providerManager.getProviderByType(provider)
+
+    val supportsVision = model.inputModalities.contains(Modality.IMAGE)
+    // 语言规则：{user_lang} 占位符按系统语言注入，保证输出跟随用户语言（题干/图片语言可能不同）
+    val userLang = Locale.getDefault().let { "${it.displayName} (${it.toLanguageTag()})" }
+    val solvePrompt = settings.solvePrompt.applyPlaceholders("user_lang" to userLang)
+    // 降级路径下实际发给模型的题干文本（OCR 结果 + 用户补充），供调用方落库
+    var degradedQuestionText: String? = null
+    val messages: List<UIMessage> = if (supportsVision) {
+        buildList {
+            add(UIMessage.system(solvePrompt))
+            add(
+                UIMessage(
+                    role = MessageRole.USER,
+                    parts = buildList {
+                        imageUris.forEach { add(UIMessagePart.Image(it)) }
+                        val text = buildString {
+                            append("Please solve the problem in the attached image(s).")
+                            if (!questionText.isNullOrBlank()) {
+                                append("\n\nAdditional notes from the user:\n")
+                                append(questionText)
+                            }
+                        }
+                        add(UIMessagePart.Text(text))
+                    }
+                )
+            )
+        }
+    } else {
+        // 降级：解题模型无视觉能力 → OCR 转文本后纯文本解题（共享实现见 SolveOcr.kt）
+        if (imageUris.isNotEmpty()) {
+            val ocrTexts = ocrSolveImages(providerManager, settings, imageUris)
+            val combinedQuestion = buildString {
+                append(ocrTexts.joinToString(separator = "\n\n"))
+                if (!questionText.isNullOrBlank()) {
+                    append("\n\nAdditional notes from the user:\n")
+                    append(questionText)
+                }
+            }
+            degradedQuestionText = combinedQuestion
+            listOf(UIMessage.system(solvePrompt), UIMessage.user(combinedQuestion))
+        } else {
+            degradedQuestionText = questionText
+            listOf(
+                UIMessage.system(solvePrompt),
+                UIMessage.user(questionText!!),
+            )
+        }
+    }
+
+    // 与翻译相同的重试策略：只在无任何正文输出时重试，避免重复内容
+    val solveRetryPolicy = RetryPolicy(maxRetries = 2, initialDelayMs = 400, maxDelayMs = 5_000)
+    var attempt = 0
+    while (true) {
+        var messages = messages
+        var reasoningText = ""
+        var fullText = ""
+        val streamChunkHandler = StreamChunkHandler(model)
+        try {
+            providerHandler.streamText(
+                providerSetting = provider,
+                messages = messages,
+                params = TextGenerationParams(
+                    model = model,
+                    // 思考默认跟随模型默认（AUTO）：fromBudgetTokens(0) 是 OFF（显式关闭），
+                    // 把默认预算 0 当 OFF 会让解题默认无思考流；用户显式配置 >0 才按预算档位
+                    reasoningLevel = if (settings.solveThinkingBudget > 0) {
+                        ReasoningLevel.fromBudgetTokens(settings.solveThinkingBudget)
+                    } else {
+                        ReasoningLevel.AUTO
+                    },
+                    customHeaders = model.customHeaders,
+                    customBody = model.customBodies,
+                ),
+            ).collect { chunk ->
+                messages = streamChunkHandler.handle(messages, chunk)
+                val lastMessage = messages.lastOrNull()
+                reasoningText = lastMessage?.parts
+                    ?.filterIsInstance<UIMessagePart.Reasoning>()
+                    ?.joinToString("") { it.reasoning }
+                    ?: ""
+                fullText = lastMessage?.toText() ?: ""
+                val (process, finalAnswer) = splitSolveOutput(fullText)
+                onStreamUpdate?.invoke(
+                    SolveStreamUpdate(
+                        reasoning = reasoningText,
+                        process = process,
+                        finalAnswer = finalAnswer,
+                    )
+                )
+            }
+            val (process, finalAnswer) = splitSolveOutput(fullText)
+            emit(
+                SolveResult(
+                    reasoning = reasoningText,
+                    process = process,
+                    finalAnswer = finalAnswer,
+                    questionText = degradedQuestionText,
+                )
+            )
+            break
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (fullText.isNotBlank() ||
+                attempt >= solveRetryPolicy.maxRetries ||
+                !e.isRetryable()
+            ) {
+                throw e
+            }
+            attempt++
+            val retryAfterMs = (e as? HttpException)?.retryAfterMs
+            val delayMs = retryBackoffDelay(solveRetryPolicy, attempt, retryAfterMs)
+            if (delayMs == RETRY_STOP_DELAY) throw e
+            Log.w(TAG, "solve stream retry #$attempt/${solveRetryPolicy.maxRetries} after ${e.message}")
+            delay(delayMs)
+        }
+    }
+    }.flowOn(Dispatchers.IO)
+
+/**
+ * 结果页页内追问：对已解出的题目（题干 + 解题过程 + 精炼作答，可选题图）追加单轮提问。
+ *
+ * 与 [solveQuestion] 的差异（根因：追问是"接着解答聊天"，不是新解题）：
+ * - 不分段输出（无 <final_answer> 切分），回答整段流式给调用方；
+ * - 无 OCR 降级 / 无多轮重试（交互型问答，失败让用户直接重发即可）；
+ * - 模型 = solve 模型；支持视觉时随问题携带题图，否则纯文本（沿用 solve 的降级假设，
+ *   无视觉时不发图避免 provider 报错）。
+ * 思考预算沿用 solve 的档位规则；思考文本与回答文本都随流式回调返回（调用方负责展示，
+ * 不在此丢弃——追问同样是会"先想后答"的任务）。
+ */
+fun followUpQuestion(
+    settings: Settings,
+    question: String,
+    contextText: String,
+    imageUris: List<String>,
+    onStreamUpdate: ((FollowUpStreamUpdate) -> Unit)? = null,
+): Flow<FollowUpStreamUpdate> = flow {
+    require(question.isNotBlank()) { "followUpQuestion requires a question" }
+    val model = settings.providers.findModelById(settings.solveModelId)
+        ?: error("解题模型未配置或已失效，请到设置中配置默认解题模型")
+    val provider = model.findProvider(settings.providers)
+        ?: error("解题模型对应的服务商不存在")
+    val providerHandler = providerManager.getProviderByType(provider)
+    val supportsVision = model.inputModalities.contains(Modality.IMAGE)
+
+    var messages: List<UIMessage> = buildList {
+        add(UIMessage.system(contextText))
+        add(
+            UIMessage(
+                role = MessageRole.USER,
+                parts = buildList {
+                    if (supportsVision) {
+                        imageUris.forEach { add(UIMessagePart.Image(it)) }
+                    }
+                    add(UIMessagePart.Text(question))
+                }
+            )
+        )
+    }
+    val streamChunkHandler = StreamChunkHandler(model)
+    var reasoningText = ""
+    var fullText = ""
+    providerHandler.streamText(
+        providerSetting = provider,
+        messages = messages,
+        params = TextGenerationParams(
+            model = model,
+            // 思考档位与解题一致：显式预算 >0 按档位，否则跟随模型默认
+            reasoningLevel = if (settings.solveThinkingBudget > 0) {
+                ReasoningLevel.fromBudgetTokens(settings.solveThinkingBudget)
+            } else {
+                ReasoningLevel.AUTO
+            },
+            customHeaders = model.customHeaders,
+            customBody = model.customBodies,
+        ),
+    ).collect { chunk ->
+        messages = streamChunkHandler.handle(messages, chunk)
+        reasoningText = messages.lastOrNull()?.parts
+            ?.filterIsInstance<UIMessagePart.Reasoning>()
+            ?.joinToString("") { it.reasoning }
+            ?: ""
+        fullText = messages.lastOrNull()?.toText() ?: ""
+        if (reasoningText.isNotBlank() || fullText.isNotBlank()) {
+            onStreamUpdate?.invoke(FollowUpStreamUpdate(reasoning = reasoningText, text = fullText))
+        }
+    }
+    if (reasoningText.isBlank() && fullText.isBlank()) {
+        error("模型未返回有效回答，请重试")
+    }
+    emit(FollowUpStreamUpdate(reasoning = reasoningText, text = fullText))
+}.flowOn(Dispatchers.IO)
 }
+
+/** 追问单次流式回调载荷：思考全文 + 回答全文（均为累积值，非增量） */
+data class FollowUpStreamUpdate(
+    val reasoning: String,
+    val text: String,
+)
 
 /**
  * 给最后一条 assistant 消息设置/清除 finishedAt。

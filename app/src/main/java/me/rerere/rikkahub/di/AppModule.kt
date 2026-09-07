@@ -213,4 +213,16 @@ val appModule = module {
             appScope = get(),
         ).also { it.start() }
     }
+
+    // 拍照解题控制器：单例 + AppScope，job 不随页面 entry 销毁，
+    // 用户解题中途退出页面任务继续、再次进入可接上进度（生成状态跨页面保存）
+    single {
+        me.rerere.rikkahub.ui.pages.solve.SolveVM(
+            context = get(),
+            settingsStore = get(),
+            generationHandler = get(),
+            solveHistoryDao = get(),
+            appScope = get(),
+        )
+    }
 }

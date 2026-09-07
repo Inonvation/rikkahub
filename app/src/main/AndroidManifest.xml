@@ -5,6 +5,11 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <!-- 取景页最近照片缩略图：33+ 用 READ_MEDIA_IMAGES；32- 需 READ_EXTERNAL_STORAGE -->
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+  <uses-permission
+    android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />
   <uses-permission android:name="android.permission.VIBRATE" />
   <uses-permission
     android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -116,6 +121,10 @@
 
     <service
       android:name=".service.ChatGenerationForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
+    <service
+      android:name=".service.SolveGenerationForegroundService"
       android:exported="false"
       android:foregroundServiceType="dataSync" />
     <service

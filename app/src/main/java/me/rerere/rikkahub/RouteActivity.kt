@@ -157,6 +157,7 @@ import me.rerere.rikkahub.ui.pages.study.notes.NotesPanelPage
 import me.rerere.rikkahub.ui.pages.study.wrongquestions.WrongQuestionPanelPage
 import me.rerere.rikkahub.ui.pages.study.knowledgecards.KnowledgeCardPanelPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
+import me.rerere.rikkahub.ui.pages.solve.SolvePage
 import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderDetailPage
 import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderFileEditorPage
 import me.rerere.rikkahub.ui.pages.trustedfolders.TrustedFolderSettingsPage
@@ -484,6 +485,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Translator> {
                                 TranslatorPage()
+                            }
+
+                            entry<Screen.PhotoSolve> {
+                                SolvePage()
                             }
 
                             entry<Screen.Setting> {
@@ -885,6 +890,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Translator : Screen
+
+    @Serializable
+    data object PhotoSolve : Screen
 
     @Serializable
     data object Setting : Screen

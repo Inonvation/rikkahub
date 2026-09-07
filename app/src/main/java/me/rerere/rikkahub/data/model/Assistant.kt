@@ -53,6 +53,8 @@ data class Assistant(
         LocalToolOption.AskUser,
     ),
     val enableWebSearch: Boolean = false, // 网络搜索开关(每个助手独立)
+    /** 解题工具（solve_question 子代理）开关：每个助手独立，默认关。开启后模型在遇到解题类问题时可派发解题助手并交叉验证 */
+    val enableQuestionSolver: Boolean = false,
     val workspaceId: Uuid? = null,
     /** 绑定的信任文件夹项目 id（TrustedFolderProject.id）；null = 未绑定，不注入 trusted_folder_* 工具与环境说明 */
     val trustedFolderProjectId: String? = null,

@@ -71,6 +71,7 @@ import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
+import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Recycle01
 import me.rerere.hugeicons.stroke.Refresh01
@@ -842,6 +843,11 @@ fun ColumnScope.StudyDrawerSections(
         GroupDiscussionSections(navController = navController)
 
         DrawerSection(title = "更多工具") {
+            DrawerListItem(
+                icon = HugeIcons.Camera01,
+                title = stringResource(R.string.photo_solve_page_title),
+                onClick = { navController.navigate(Screen.PhotoSolve) },
+            )
             DrawerListItem(
                 icon = HugeIcons.LanguageCircle,
                 title = stringResource(R.string.chat_page_menu_ai_translator),

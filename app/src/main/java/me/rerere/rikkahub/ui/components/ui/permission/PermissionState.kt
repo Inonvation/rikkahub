@@ -105,6 +105,15 @@ class PermissionState internal constructor(
         get() = permissions.filter { permissionStates[it.permission] != PermissionStatus.Granted }
 
     /**
+     * 已授权的权限字符串集合（含非 required 的可选权限；供调用方按单个权限查询，
+     * 如取景页判断"最近照片缩略图"的媒体读取授权是否就绪）
+     */
+    val grantedPermissionNames: Set<String>
+        get() = permissions
+            .filter { permissionStates[it.permission] == PermissionStatus.Granted }
+            .mapTo(mutableSetOf()) { it.permission }
+
+    /**
      * 获取需要显示说明的权限（包括永久拒绝的权限）
      */
     private val permissionsNeedRationale: List<PermissionInfo>

@@ -24,6 +24,9 @@ data class SubAgentDefinition(
     val maxSteps: Int = 16,
     val timeoutSeconds: Long = 300,
     val allowParallel: Boolean = false,
+    /** 模型是否必须具备 TOOL 能力。无工具纯生成的子代理（如解题）置 false，
+     *  否则 resolveModel 会把「有视觉但无工具调用」的模型误判为全候选失效。 */
+    val requiresToolAbility: Boolean = true,
 )
 
 /** 子代理可用的工具能力白名单，由 [SubAgentToolAssembler] 解析成具体 Tool 列表 */

@@ -37,6 +37,8 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.github.GitHubAccount
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SOLVE_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.LEGACY_SOLVE_PROMPTS
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.ENGLISH_TUTOR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.MATH_TUTOR_PROMPT
@@ -130,6 +132,10 @@ class SettingsStore(
         val TITLE_PROMPT = stringPreferencesKey("title_prompt")
         val TRANSLATION_PROMPT = stringPreferencesKey("translation_prompt")
         val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
+        // 拍照搜题
+        val SOLVE_MODEL = stringPreferencesKey("solve_model")
+        val SOLVE_PROMPT = stringPreferencesKey("solve_prompt")
+        val SOLVE_THINKING_BUDGET = intPreferencesKey("solve_thinking_budget")
         val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
         val OCR_MODEL = stringPreferencesKey("ocr_model")
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
@@ -281,6 +287,12 @@ class SettingsStore(
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                 translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
+                solveModelId = parseUuidOrNull(preferences[SOLVE_MODEL]) ?: UNSET_MODEL_ID,
+                // 旧默认（v1 跟随题目语言 / v2 思考未限定语言）静默升级为新默认；用户自定义过则原样保留
+                solvePrompt = preferences[SOLVE_PROMPT]
+                    ?.takeUnless { stored -> LEGACY_SOLVE_PROMPTS.any { it == stored } }
+                    ?: DEFAULT_SOLVE_PROMPT,
+                solveThinkingBudget = preferences[SOLVE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
                 ocrModelId = parseUuidOrNull(preferences[OCR_MODEL]) ?: UNSET_MODEL_ID,
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
@@ -526,6 +538,9 @@ class SettingsStore(
             preferences[TITLE_PROMPT] = settings.titlePrompt
             preferences[TRANSLATION_PROMPT] = settings.translatePrompt
             preferences[TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
+            preferences[SOLVE_MODEL] = settings.solveModelId.toString()
+            preferences[SOLVE_PROMPT] = settings.solvePrompt
+            preferences[SOLVE_THINKING_BUDGET] = settings.solveThinkingBudget
             preferences[SUGGESTION_PROMPT] = settings.suggestionPrompt
             preferences[OCR_MODEL] = settings.ocrModelId.toString()
             preferences[OCR_PROMPT] = settings.ocrPrompt
@@ -904,6 +919,10 @@ data class Settings(
     val translateModeId: Uuid = Uuid.random(),
     val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
     val translateThinkingBudget: Int = 0,
+    /** 拍照搜题默认解题模型（要求 vision；无 vision 时 solveQuestion 走 OCR 降级） */
+    val solveModelId: Uuid = UNSET_MODEL_ID,
+    val solvePrompt: String = DEFAULT_SOLVE_PROMPT,
+    val solveThinkingBudget: Int = 0,
     val enableSuggestion: Boolean = true,
     val suggestionModelId: Uuid? = null,
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,

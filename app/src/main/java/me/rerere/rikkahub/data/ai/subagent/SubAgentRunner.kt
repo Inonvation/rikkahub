@@ -145,11 +145,12 @@ class SubAgentRunner(
             settings.subAgentModelId,
             settings.chatModelId,
         )
-        // 逐个尝试解析，优先命中第一个有效且支持工具调用的；全失效才返回 null。
-        // B1: 子代理依赖工具完成多步执行，模型不支持 TOOL 能力时工具永不触发、白跑成纯文本。
+        // 逐个尝试解析，优先命中第一个有效的；requiresToolAbility 时还须支持工具调用。
+        // B1: 依赖工具完成多步执行的子代理，模型不支持 TOOL 能力时工具永不触发、白跑成纯文本。
+        // 纯生成子代理（requiresToolAbility=false，如解题）豁免该检查。
         candidates.forEach { id ->
             val m = settings.findModelById(id)
-            if (m != null && m.abilities.contains(ModelAbility.TOOL)) return m
+            if (m != null && (!def.requiresToolAbility || m.abilities.contains(ModelAbility.TOOL))) return m
         }
         return null
     }
@@ -656,8 +657,21 @@ class SubAgentRunner(
                 // 重试/续跑：以上一轮已执行内容作为上下文（排除 system，system 由上面新构造）
                 addAll(seedMessages.filter { it.role != MessageRole.SYSTEM })
             } else {
-                // 子代理主任务紧接 system（任务上下文最近，且保持 system→task 前缀稳定，利于缓存）
-                add(UIMessage.user(request.task))
+                // 子代理主任务紧接 system（任务上下文最近，且保持 system→task 前缀稳定，利于缓存）。
+                // 带图片请求（如解题）时图片 parts 与任务文本合并进首条 user 消息。
+                add(
+                    if (request.images.isEmpty()) {
+                        UIMessage.user(request.task)
+                    } else {
+                        UIMessage(
+                            role = MessageRole.USER,
+                            parts = buildList {
+                                request.images.forEach { add(UIMessagePart.Image(it)) }
+                                add(UIMessagePart.Text(request.task))
+                            }
+                        )
+                    }
+                )
                 // 续跑上下文：上次执行的部分结果（详情页"重新执行"）。放在任务之后、父摘要之前，
                 // 不打断 system→task 缓存前缀。无续跑时为 null，走原有结构。
                 request.priorContext?.takeIf { it.isNotBlank() }?.let {

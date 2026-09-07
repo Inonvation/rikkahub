@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.ai.tools.createTrustedFolderAdminTools
 import me.rerere.rikkahub.data.ai.tools.createTrustedFolderTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceAdminTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
+import me.rerere.rikkahub.data.ai.tools.createQuestionSolverTools
 import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
@@ -114,6 +115,15 @@ class ChatToolRegistry(
         },
         Entry(setOf(Capability.SUBAGENT)) { req ->
             createSubAgentTools(subAgentRunner, req.conversation.id)
+        },
+        Entry(setOf(Capability.QUESTION_SOLVER)) { req ->
+            createQuestionSolverTools(
+                subAgentRunner = subAgentRunner,
+                parentConversationId = req.conversation.id,
+                context = context,
+                settings = req.settings,
+                providerManager = providerManager,
+            )
         },
         Entry(setOf(Capability.STUDY)) { req ->
             studyTools.getTools(

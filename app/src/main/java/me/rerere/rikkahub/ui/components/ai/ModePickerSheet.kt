@@ -82,6 +82,7 @@ fun Capability.note(): String = when (this) {
     Capability.MEMORY -> "记忆工具与记忆提示词"
     Capability.TODO -> "todo 工具"
     Capability.SUBAGENT -> "子代理工具"
+    Capability.QUESTION_SOLVER -> "解题子代理工具（solve_question，每助手独立开关）"
     Capability.DEVICE_TOOLS -> "设备工具族（诊断/存储/冻结，依赖 Shizuku）"
     Capability.STUDY -> "学习工具（生词/笔记/错题/知识卡/测验）"
     Capability.HISTORY -> "历史对话引用/会话搜索"

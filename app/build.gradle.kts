@@ -251,6 +251,11 @@ dependencies {
     implementation(libs.barcode.scanning)
     implementation(libs.androidx.camera.core)
 
+    // CameraX (应用内相机取景：拍照解题 ViewFinder)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     // ML Kit text recognition (bundled, offline Chinese OCR for scanned PDFs)
     implementation(libs.mlkit.text.recognition.chinese)
 

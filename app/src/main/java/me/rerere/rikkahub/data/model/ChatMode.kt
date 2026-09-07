@@ -107,6 +107,9 @@ fun ChatModePolicy.withAvailability(
         if (Capability.MEMORY in capabilities && !assistant.enableMemory) add(Capability.MEMORY)
         if (Capability.TODO in capabilities && !settings.enableTodoList) add(Capability.TODO)
         if (Capability.SUBAGENT in capabilities && !settings.enableSubAgent) add(Capability.SUBAGENT)
+        if (Capability.QUESTION_SOLVER in capabilities && !assistant.enableQuestionSolver) {
+            add(Capability.QUESTION_SOLVER)
+        }
         if (Capability.STUDY in capabilities && assistant.enabledStudyTools.isEmpty()) add(Capability.STUDY)
         if (Capability.HISTORY in capabilities && !assistant.enableRecentChatsReference) {
             add(Capability.HISTORY)
@@ -163,6 +166,9 @@ enum class Capability(val managementOnly: Boolean = false) {
 
     /** 子代理工具 */
     SUBAGENT,
+
+    /** 解题子代理工具（solve_question）：每个助手独立开关，默认关 */
+    QUESTION_SOLVER,
 
     /** 学习工具（生词/笔记/错题/知识卡/测验） */
     STUDY,
@@ -243,6 +249,7 @@ data class ChatModePolicy(
     val allowMemory: Boolean get() = Capability.MEMORY in capabilities
     val allowTodo: Boolean get() = Capability.TODO in capabilities
     val allowSubAgent: Boolean get() = Capability.SUBAGENT in capabilities
+    val allowQuestionSolver: Boolean get() = Capability.QUESTION_SOLVER in capabilities
     val allowStudy: Boolean get() = Capability.STUDY in capabilities
     val allowDeviceTools: Boolean get() = Capability.DEVICE_TOOLS in capabilities
     val allowHistory: Boolean get() = Capability.HISTORY in capabilities
@@ -283,6 +290,7 @@ data class ChatModePolicy(
             Capability.MEMORY,
             Capability.TODO,
             Capability.SUBAGENT,
+            Capability.QUESTION_SOLVER,
             Capability.STUDY,
             Capability.HISTORY,
             Capability.KNOWLEDGE,

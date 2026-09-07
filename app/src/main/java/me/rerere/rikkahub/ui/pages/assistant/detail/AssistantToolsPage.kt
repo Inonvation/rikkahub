@@ -24,6 +24,7 @@ import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.FolderLocked
 import me.rerere.hugeicons.stroke.Globe02
+import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Wrench01
@@ -86,6 +87,26 @@ fun AssistantToolsPage(id: String) {
                                 checked = assistant.enableWebSearch,
                                 onCheckedChange = { enabled ->
                                     vm.update(assistant.copy(enableWebSearch = enabled))
+                                },
+                                size = SwitchSize.Small,
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { Icon(HugeIcons.Camera01, contentDescription = null) },
+                        headlineContent = { Text("解题助手") },
+                        supportingContent = {
+                            Text(
+                                text = if (assistant.enableQuestionSolver) "遇到解题类问题时派发解题子代理，并交叉验证其解答" else "助手不会调用解题子代理",
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = assistant.enableQuestionSolver,
+                                onCheckedChange = { enabled ->
+                                    vm.update(assistant.copy(enableQuestionSolver = enabled))
                                 },
                                 size = SwitchSize.Small,
                             )
