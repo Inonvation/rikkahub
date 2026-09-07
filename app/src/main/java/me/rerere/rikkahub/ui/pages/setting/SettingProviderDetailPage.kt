@@ -4,12 +4,14 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +71,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -874,6 +877,161 @@ private fun AddModelButton(
     }
 }
 
+/**
+ * 模型分组「其他」组的内部 key。与真实前缀撞名无妨：撞上的模型归入「其他」在语义上也正确。
+ */
+private const val OTHER_MODEL_GROUP = "other"
+
+/**
+ * 主流模型前缀白名单（词干，小写）。命中者各自成组，未命中的小众厂商/自建/冷门前缀
+ * 统一收进「其他」组——避免中转站返回百来个模型时，每个冷门前缀都开一个一两个模型的
+ * 小组，组头噪音大于检索价值。
+ *
+ * 注意：这是"分组显示"用的近似清单，覆盖中文用户常接触的模型家族即可，不追求穷尽；
+ * 缺主流前缀时往集合里补词干即可（例如新增 xyz 系模型 → 加 "xyz"）。
+ */
+private val KNOWN_MODEL_GROUPS = setOf(
+    "deepseek", "kimi", "moonshot", "claude", "anthropic",
+    "gpt", "o1", "o3", "chatgpt", "openai", "dall",
+    "qwen", "glm", "zhipu", "gemini", "gemma",
+    "llama", "mistral", "pixtral", "command", "cohere",
+    "grok", "xai", "minimax", "doubao", "volcengine",
+    "hunyuan", "ernie", "yi", "spark", "step",
+    "internlm", "phi", "nemotron",
+    "flux", "stable", "sora", "kling", "wan",
+    "whisper", "text", "embedding", "jina", "bge", "gte", "rerank",
+)
+
+/**
+ * 计算 modelId 所属的分组名，供「可用模型」窗口按厂商/系列折叠浏览。
+ *
+ * 根因：中转站/OpenRouter 风格的模型目录可达上百条，扁平列表难以定位；而模型
+ * ID 本身是唯一可靠的分类信号（deepseek-chat、kimi-latest、azure/gpt-4o）。
+ *
+ * 方案：
+ * 1. 取最右侧路径段，忽略 "<渠道>/" 前缀（gpt-4o 与 azure/gpt-4o-mini 同组）；
+ * 2. 按分隔符取首词后做"词干化"：剥掉尾部版本号（qwen2.5→qwen、glm4→glm），
+ *    使同厂商不同版本的前缀合流，避免 qwen/qwen2.5/qwen3 拆成多个组；
+ *    o1/o3 这类"系列名本身是版本号"的例外：词干不足 2 字符时保留原词；
+ * 3. 词干命中 [KNOWN_MODEL_GROUPS] 则归该组，否则归「其他」组。
+ */
+private fun modelGroupName(modelId: String): String {
+    val base = modelId.substringAfterLast('/')
+    val token = base.split('-', '_', '.', ':').first().trim().lowercase()
+    if (token.isEmpty()) return OTHER_MODEL_GROUP
+    val stem = token.trimEnd { it == '.' || it == '-' || it == '_' || it.isDigit() }
+    val key = if (stem.length >= 2) stem else token
+    return if (key in KNOWN_MODEL_GROUPS) key else OTHER_MODEL_GROUP
+}
+
+@Composable
+private fun ModelGroupHeader(
+    groupName: String,
+    modelCount: Int,
+    collapsed: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (collapsed) HugeIcons.ArrowDown01 else HugeIcons.ArrowUp01,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(modifier = Modifier.size(6.dp))
+        Text(
+            text = groupName,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = modelCount.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun AvailableModelRow(
+    model: Model,
+    added: Boolean,
+    onAdd: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val hapticController = rememberHaptic()
+    Card {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(
+                8.dp
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+        ) {
+            AutoAIIcon(
+                model.modelId,
+                Modifier.size(32.dp)
+            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(
+                    4.dp
+                ),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = model.modelId,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    val modelMeta = remember(model) {
+                        model.copy(
+                            contextLength = model.contextLengthOrDefault(),
+                            inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId),
+                            outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId),
+                            abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId),
+                        )
+                    }
+                    ModelModalityTag(
+                        model = modelMeta,
+                    )
+                    ModelAbilityTag(
+                        model = modelMeta,
+                    )
+                }
+            }
+            IconButton(
+                onClick = {
+                    hapticController.tap()
+                    if (added) {
+                        onRemove()
+                    } else {
+                        onAdd()
+                    }
+                }
+            ) {
+                if (added) {
+                    Icon(HugeIcons.Cancel01, null)
+                } else {
+                    Icon(HugeIcons.Add01, null)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ModelPicker(
     models: List<Model>,
@@ -903,6 +1061,19 @@ private fun ModelPicker(
                     }
                 }
             }
+            // 是否处于搜索态：搜索时强制展开所有组并把组头当作“带命中数”的分区标尺，
+            // 避免命中项被折叠组藏住、看起来像没搜到。
+            val isFiltering = filterKeywords.isNotEmpty()
+            // 折叠集合只影响“浏览全量目录”的视图：默认空集 = 全部展开
+            var collapsedGroups by remember { mutableStateOf(emptySet<String>()) }
+            LaunchedEffect(isFiltering) {
+                if (isFiltering) collapsedGroups = emptySet()
+            }
+            // 按 modelId 前缀分组，组间近字典序（groupBy 保留首次出现顺序，上游已按 modelId 排序）；
+            // 排序把「其他」组固定置底，避免小众模型在浏览主流目录时"插队"。
+            val groupedModels = filteredModels.groupBy { modelGroupName(it.modelId) }
+                .toList()
+                .sortedBy { (group, _) -> group == OTHER_MODEL_GROUP }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -963,70 +1134,48 @@ private fun ModelPicker(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(8.dp),
                 ) {
-                    items(filteredModels) {
-                        Card {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(
-                                    8.dp
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(8.dp),
-                            ) {
-                                AutoAIIcon(
-                                    it.modelId,
-                                    Modifier.size(32.dp)
-                                )
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(
-                                        4.dp
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(
-                                        text = it.modelId,
-                                        style = MaterialTheme.typography.titleSmall,
-                                    )
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        val modelMeta = remember(it) {
-                                            it.copy(
-                                                contextLength = it.contextLengthOrDefault(),
-                                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
-                                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
-                                                abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
-                                            )
-                                        }
-                                        ModelModalityTag(
-                                            model = modelMeta,
-                                        )
-                                        ModelAbilityTag(
-                                            model = modelMeta,
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = {
-                                        hapticController.tap()
-                                        if (selectedModels.any { model -> model.modelId == it.modelId }) {
-                                            // 从selectedModels中计算出要删除的model，因为删除需要id匹配，而不是ModelId
-                                            onModelDeselected(selectedModels.firstOrNull { model -> model.modelId == it.modelId }
-                                                ?: it)
+                    groupedModels.forEach { (group, groupModels) ->
+                        // 搜索态下折叠不生效（见下方 onClick 的 !isFiltering 判断）：
+                        // 组头此时只充当“带命中数”的分区标尺，避免折叠状态被静默篡改。
+                        val collapsed = !isFiltering && group in collapsedGroups
+                        item(key = "group:$group") {
+                            ModelGroupHeader(
+                                groupName = if (group == OTHER_MODEL_GROUP) {
+                                    // 「其他」组的显示名走字符串资源；其余组名即模型前缀原文
+                                    stringResource(R.string.setting_provider_page_models_other)
+                                } else {
+                                    group
+                                },
+                                modelCount = groupModels.size,
+                                collapsed = collapsed,
+                                onClick = {
+                                    hapticController.lightTap()
+                                    if (!isFiltering) {
+                                        collapsedGroups = if (group in collapsedGroups) {
+                                            collapsedGroups - group
                                         } else {
-                                            onModelSelected(it)
+                                            collapsedGroups + group
                                         }
                                     }
-                                ) {
-                                    if (selectedModels.any { model -> model.modelId == it.modelId }) {
-                                        Icon(HugeIcons.Cancel01, null)
-                                    } else {
-                                        Icon(HugeIcons.Add01, null)
-                                    }
-                                }
+                                },
+                            )
+                        }
+                        if (!collapsed) {
+                            items(groupModels, key = { it.id }) { model ->
+                                AvailableModelRow(
+                                    model = model,
+                                    added = selectedModels.any { selected -> selected.modelId == model.modelId },
+                                    onAdd = {
+                                        onModelSelected(model)
+                                    },
+                                    onRemove = {
+                                        // 删除需要 id 匹配而非 modelId，从 selectedModels 中取出实际添加的那条
+                                        onModelDeselected(
+                                            selectedModels.firstOrNull { selected -> selected.modelId == model.modelId }
+                                                ?: model
+                                        )
+                                    },
+                                )
                             }
                         }
                     }
