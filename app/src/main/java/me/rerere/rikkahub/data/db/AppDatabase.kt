@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.db.dao.KnowledgeCardDao
 import me.rerere.rikkahub.data.db.dao.NoteDao
 import me.rerere.rikkahub.data.db.dao.SubAgentUsageDAO
 import me.rerere.rikkahub.data.db.dao.SubAgentTaskDAO
+import me.rerere.rikkahub.data.db.dao.TranslationHistoryDao
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.ContextCompositionEntity
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
@@ -47,6 +48,7 @@ import me.rerere.rikkahub.data.db.entity.KnowledgeCardEntity
 import me.rerere.rikkahub.data.db.entity.NoteEntity
 import me.rerere.rikkahub.data.db.entity.SubAgentUsageEntity
 import me.rerere.rikkahub.data.db.entity.SubAgentTaskEntity
+import me.rerere.rikkahub.data.db.entity.TranslationRecordEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_38_39
@@ -81,8 +83,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         SubAgentTaskEntity::class,
         GroupEntity::class,
         ManagementAuditEntity::class,
+        TranslationRecordEntity::class,
     ],
-    version = 47,
+    version = 48,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -104,6 +107,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 23, to = 24),
         AutoMigration(from = 24, to = 25),
         AutoMigration(from = 25, to = 26),
+        AutoMigration(from = 47, to = 48),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -147,6 +151,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDAO
 
     abstract fun managementAuditDao(): ManagementAuditDao
+
+    abstract fun translationHistoryDao(): TranslationHistoryDao
 
     /**
      * 备份/同步前把未落盘的 WAL 合并进主库文件，保证导出的 .db 单文件自洽一致，

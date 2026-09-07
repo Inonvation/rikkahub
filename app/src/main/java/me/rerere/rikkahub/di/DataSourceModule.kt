@@ -268,6 +268,10 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().translationHistoryDao()
+    }
+
+    single {
         StudyDaoSet(
             vocabularyDao = get(),
             noteDao = get(),
