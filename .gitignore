@@ -22,3 +22,4 @@ debug.log
 
 # WorkBuddy 工作区数据（会话记忆/索引，非项目产物）
 .workbuddy/
+*.log
