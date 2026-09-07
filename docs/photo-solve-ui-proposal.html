@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="3CVHRJiMJaYlG9CrAMm9Mb">
+<head data-page-node-id="OoyAbin49MERHSLlE3EapE">
+<meta charset="UTF-8" data-page-node-id="OwUu1mY6wvRZDi19Uz83kG">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="Ry6NsFtihj1BSZXsgbU0J5">
+<title>拍照搜题 · 交互与排版重构方案</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1c1e21;
+    --ink-2: #5f6672;
+    --ink-3: #9aa1ad;
+    --line: #e6e8ec;
+    --primary: #3d6df5;
+    --primary-soft: #edf2ff;
+    --answer-bg: #eef4ff;
+    --answer-line: #b9cef8;
+    --warn-bg: #fff7e8;
+    --warn-ink: #8a6116;
+    --ok: #2ba471;
+    --phone-w: 300px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65; padding: 40px 20px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 6px; }
+  .sub { color: var(--ink-2); margin-bottom: 32px; }
+  h2 { font-size: 19px; margin: 44px 0 14px; padding-left: 12px; border-left: 4px solid var(--primary); }
+  h3 { font-size: 15px; margin: 20px 0 8px; }
+  p, li { font-size: 14px; color: var(--ink-2); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin-top: 14px; }
+  .grid { display: grid; gap: 14px; }
+  ul.tight { padding-left: 18px; }
+  ul.tight li { margin: 4px 0; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 9px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); margin-right: 6px; }
+  .tag.gray { background: #f0f1f4; color: var(--ink-2); }
+  code { background: #f0f2f5; padding: 1px 6px; border-radius: 5px; font-size: 12.5px; color: #333; font-family: Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-3); font-weight: 600; }
+  td.c1 { color: var(--ink); white-space: nowrap; }
+
+  /* ---------- 手机 mockup ---------- */
+  .phones { display: flex; gap: 26px; flex-wrap: wrap; justify-content: flex-start; margin-top: 18px; }
+  .phone-col { width: var(--phone-w); }
+  .phone {
+    width: var(--phone-w); height: 600px; background: #fbfbfd; border: 1px solid var(--line);
+    border-radius: 30px; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 10px 30px rgba(30,40,70,.08); position: relative;
+  }
+  .phone-cap { text-align: center; font-size: 13px; color: var(--ink); font-weight: 600; margin: 12px 0 2px; }
+  .phone-cap-sub { text-align: center; font-size: 12px; color: var(--ink-3); margin-bottom: 4px; }
+  .appbar {
+    padding: 14px 14px 10px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--line); background: #fff; flex: none;
+  }
+  .appbar .title { font-weight: 600; font-size: 15px; flex: 1; }
+  .ico { width: 26px; height: 26px; border-radius: 8px; background: #f0f2f6; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: var(--ink-2); flex: none; }
+  .ico.primary { background: var(--primary-soft); color: var(--primary); }
+  .body { flex: 1; padding: 12px; overflow: hidden; display: flex; flex-direction: column; gap: 10px; }
+
+  .img-hero { border: 1px dashed var(--line); border-radius: 16px; background: #fff; display: flex; gap: 10px; padding: 18px 12px; }
+  .img-hero .half { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 14px 0 10px; text-align: center; }
+  .img-hero .half .big { font-size: 22px; }
+  .img-hero .half .lbl { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+  .img-preview { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: #fff; }
+  .img-preview .paper { height: 96px; background: repeating-linear-gradient(#fff, #fff 18px, #f2f4f8 19px); position: relative; }
+  .img-preview .paper::after { content: "a² + b² = c² ？"; position: absolute; left: 14px; top: 30px; color: #7c8494; font-size: 12px; }
+  .img-preview .ops { display: flex; gap: 8px; padding: 8px 10px; }
+  .chip { font-size: 11.5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--ink-2); background: #fff; }
+  .chip.em { color: var(--primary); border-color: var(--answer-line); background: var(--primary-soft); }
+  .note { border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 9px 12px; font-size: 12px; color: var(--ink-3); }
+  .btn { border-radius: 13px; text-align: center; padding: 11px 0; font-size: 13.5px; font-weight: 600; }
+  .btn.primary { background: var(--primary); color: #fff; }
+  .btn.ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+
+  /* 思考条 */
+  .think { border: 1px solid var(--line); border-radius: 14px; background: #f3f4f7; overflow: hidden; flex: none; }
+  .think .head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; color: var(--ink-2); }
+  .think .head .grow { flex: 1; }
+  .think .head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+  .think .tail { max-height: 64px; overflow: hidden; padding: 0 12px 8px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; position: relative; }
+  .think .tail .fade { position: absolute; left: 0; right: 0; top: 0; height: 26px; background: linear-gradient(#f3f4f7, rgba(243,244,247,0)); }
+  .think.open .tail { max-height: none; color: var(--ink-2); }
+  .think.open .tail .fade { display: none; }
+
+  /* 解答卡 */
+  .solve { border: 1px solid var(--line); border-radius: 14px; background: #fff; overflow: hidden; flex: 1; display: flex; flex-direction: column; }
+  .solve .head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); flex: none; }
+  .solve .head .grow { flex: 1; font-weight: 600; color: var(--ink); }
+  .solve .content { padding: 10px 12px; overflow: hidden; font-size: 12px; color: var(--ink-2); flex: 1; }
+  .solve .sec-lbl { font-size: 10.5px; color: var(--ink-3); margin: 2px 0 4px; }
+  .line { height: 8px; border-radius: 4px; background: #eef0f4; margin: 6px 0; }
+  .line.w60 { width: 60%; } .line.w80 { width: 80%; } .line.w90 { width: 90%; } .line.w40 { width: 40%; }
+  .answer {
+    border: 1px solid var(--answer-line); background: var(--answer-bg); border-radius: 12px;
+    padding: 8px 10px; margin-top: 8px;
+  }
+  .answer .a-head { display: flex; align-items: center; font-size: 11px; color: var(--primary); font-weight: 700; }
+  .answer .a-head .grow { flex: 1; }
+  .answer .aline { height: 7px; background: #d8e4fb; border-radius: 4px; margin: 6px 0; }
+  .answer .aline.w50 { width: 50%; }
+  .bottombar { display: flex; gap: 8px; padding: 8px 12px 12px; flex: none; }
+  .bottombar .btn { flex: 1; padding: 8px 0; font-size: 12px; border-radius: 11px; }
+  .thumb-strip {
+    display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: #fff;
+    border-radius: 12px; padding: 6px 8px; flex: none;
+  }
+  .thumb { width: 34px; height: 42px; border-radius: 7px; background: repeating-linear-gradient(#fff, #fff 8px, #f2f4f8 9px); border: 1px solid var(--line); flex: none; }
+  .thumb-strip .meta { flex: 1; font-size: 11.5px; color: var(--ink-2); }
+  .thumb-strip .meta b { display: block; font-size: 12px; color: var(--ink); }
+  .img-sm-ico { width: 30px; height: 30px; border-radius: 8px; background: #f0f2f6; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--ink-2); flex: none; }
+
+  /* 折叠对比特写 */
+  .fold-demo { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 14px; }
+  .fold-box { flex: 1; min-width: 280px; border: 1px solid var(--line); border-radius: 12px; background: #fbfbfd; padding: 14px; }
+  .fold-box h4 { font-size: 13px; margin-bottom: 8px; }
+  .fold-box .demo { border: 1px solid var(--line); border-radius: 10px; background: #f3f4f7; }
+  .fold-box .cap { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
+  .mono { font-family: Consolas, monospace; font-size: 11px; color: #8b93a1; padding: 8px 10px 10px; line-height: 1.55; position: relative; }
+  .mono .dim { color: #c2c7d0; }
+  .mono .fresh { color: #5a6472; }
+  .mono .fadeup { position: absolute; left: 0; right: 0; top: 0; height: 30px; background: linear-gradient(#f3f4f7, rgba(243,244,247,0)); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--primary); background: var(--primary-soft); border-radius: 999px; padding: 2px 8px; }
+  .badge.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.2s infinite; }
+
+  .arrow-note { font-size: 12px; color: var(--ink-3); text-align: center; margin-top: 2px; }
+  .no { color: #c0392b; font-weight: 600; }
+  .yes { color: var(--ok); font-weight: 600; }
+  .flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .flow .node { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 14px; font-size: 13px; }
+  .flow .node small { display: block; color: var(--ink-3); font-size: 11px; }
+  .flow .arr { color: var(--ink-3); }
+  .footer-note { margin-top: 40px; font-size: 12px; color: var(--ink-3); text-align: center; }
+</style>
+</head>
+<body data-page-node-id="BPgzbLGFjQBj4H2Bev0Vcm">
+<div class="wrap" data-page-node-id="P2DYliTzEtCwV0Rsu29DoW">
+
+  <h1 data-page-node-id="H8kxNC7eAeCckuLRRWdSOi">拍照搜题 · 交互与排版重构方案</h1>
+  <div class="sub" data-page-node-id="dYgiuW0cxG0C4ohUUJp21q">099 · 2026-09-07 · 基于真机反馈：思考过程折叠态不可见 + 整页排版层次不清</div>
+
+  <h2 data-page-node-id="RG98ZBroGj4udQKi4ygktY">一、现状问题</h2>
+  <div class="card" data-page-node-id="mn8lRtNL9VPyaGkClG4LVR">
+    <ul class="tight" data-page-node-id="RoR7CotdcFF4dorn1x15pi">
+      <li data-page-node-id="1RuQN5fTOrL9cmo2FKfop7"><span class="tag" data-page-node-id="pufhq5gWdQnlz9bUkZsPQ8">思考过程</span>折叠后<strong data-page-node-id="UKl4tFVy9GgVzVEPhhJes1">完全不可见</strong>——流式思考期间用户什么都看不到，只能点开才能确认"它在动"。聊天界面的做法是：折叠态仍露出<strong data-page-node-id="z5twFDNF0GSEwtg4h058H7">末尾最新内容</strong>，旧的自动折叠。</li>
+      <li data-page-node-id="66hHWXA7gfpYbuncFB4ztn"><span class="tag" data-page-node-id="klvfJf26ZNEJ4XdOH8BWoj">排版</span>输入区（图片卡 + 补充说明 + 按钮）永远占据上半屏，解题完成后输出被挤到屏幕下方，要滚很久才能看到结果。</li>
+      <li data-page-node-id="SKYHQBQMd0XOysSUBIcshU"><span class="tag" data-page-node-id="aD1cY0NiHqMQ76P6XDKSf8">排版</span>解题完成后输入区仍保持"待输入"的大块形态，与当前任务（阅读结果）不匹配，视觉重心错位。</li>
+      <li data-page-node-id="KHUK55bthKpZfVbdCBNttP"><span class="tag" data-page-node-id="AhrZoWz6JJ5t2zYrHMUjRl">解答卡</span>生成中默认折叠——用户必须手动点开才能看到流式进度，与"实时流式输出"的产品预期矛盾。</li>
+    </ul>
+  </div>
+
+  <h2 data-page-node-id="rc2QE97gDoOHpxy3LbMFyP">二、设计原则（输出语义的三层结构）</h2>
+  <div class="card" data-page-node-id="DsuCbysh65weDH5wmtoi8T">
+    <ul class="tight" data-page-node-id="BJRBEM9uSO010DRTGtBsHD">
+      <li data-page-node-id="dHUYn1t46Cp0tFnKcaloL0"><strong data-page-node-id="y14dPCa5KbSuQzMWUmNdtN">思考过程 = 过程流</strong>：模型的实时思考，属于"幕后直播"。默认只露尾部（最新），点击展开看全量。<em data-page-node-id="HuDzypYnp7y7Ol8jvInh25">形态参照聊天界面思考条。</em></li>
+      <li data-page-node-id="Va7978KQHZNWMCQhFtwTgZ"><strong data-page-node-id="HbBxCQduThn7VVB5xSXzuS">解答 = 过程 + 作答一体</strong>：解题过程（详细推导，便于理解）与精炼作答（可誊抄）是<strong data-page-node-id="HFK10f9vRndwmimQJhV82J">同一份解答的两个层次</strong>，合并在一张卡内，上下相邻，用小节标签与高亮底色区分。</li>
+      <li data-page-node-id="vlDAfwxqpVrogKzqlCNTGo"><strong data-page-node-id="xXi5DE04prunPpRgQ0fcDu">页面随任务切换重心</strong>：没解题时输入区是主角；解题中/完成后输出区是主角，输入收缩成一条摘要。空间让给用户真正要看的东西。</li>
+    </ul>
+  </div>
+
+  <h2 data-page-node-id="CKi2ZF1QnETGcLzNIsJyhA">三、页面状态机与三屏布局</h2>
+  <div class="card" data-page-node-id="utTG5UxMcSCEi4OsPsKlFR">
+    <div class="flow" data-page-node-id="lF0k3CBUveUhDMfU7pZAgA">
+      <div class="node" data-page-node-id="SyI4PtcMnXjVCIixcksC5R">输入态<small data-page-node-id="6rgEzdg7E0tsGKgmx4dkp9">选图 / 裁剪 / 补充说明</small></div>
+      <div class="arr" data-page-node-id="w5nGFwofvno4hC424oGhVm">→</div>
+      <div class="node" data-page-node-id="NwEZFBbrb3UwaqA8GBESPN">生成态<small data-page-node-id="uMTP5E2aGHNcRRUmICNv8Z">思考直播 + 解答跟随</small></div>
+      <div class="arr" data-page-node-id="5hf7NT1Si6WQlyX5fgX98V">→</div>
+      <div class="node" data-page-node-id="kdcbFSxEJmox13l9Phbyyv">结果态<small data-page-node-id="uE6V4m28kukMFgsepmNTet">作答优先展示</small></div>
+      <div class="arr" data-page-node-id="FoMOnEMHUCm1oMzbQvEEiF">⇄</div>
+      <div class="node" data-page-node-id="5IUPMxJzLBieAykpsL846q">历史回看<small data-page-node-id="Fg4DHDeIxeHAYkPA1fxxam">同一布局复用</small></div>
+    </div>
+
+    <div class="phones" data-page-node-id="5amRbFTanGYFkRQRdYKWa8">
+      <!-- 屏1 输入态 -->
+      <div class="phone-col" data-page-node-id="sogXN3F4YJusX6IlBplpdF">
+        <div class="phone" data-page-node-id="RbWEMW0VEXuwGcUHRWaYf9">
+          <div class="appbar" data-page-node-id="50ST73vImHC7FkzT9cQteZ"><span class="ico" data-page-node-id="YBJq0OSImg8yBCyjbHKck2">‹</span><span class="title" data-page-node-id="wzr6SUCPdJmQye6FwMkhoK">拍照搜题</span><span class="ico" data-page-node-id="gS2UAiNljeYnErqGlqcy6V">🕘</span><span class="ico primary" data-page-node-id="qh0fBQo9hsu5OAbqnAAOdU">模型▾</span></div>
+          <div class="body" data-page-node-id="zczTfMkbAjbgxdtHlvhXIf">
+            <div class="img-hero" data-page-node-id="Y0iP44MuOmlMFhX46AqoJ8">
+              <div class="half" data-page-node-id="6GryVCrExAbx3vGSkB7KpH"><div class="big" data-page-node-id="tCwkvwbDAvQG8dEdmEeuXk">📷</div><div class="lbl" data-page-node-id="g0PepW2C9QA8G3CxDgdNNm">拍照</div></div>
+              <div class="half" data-page-node-id="dewr33EpNKc3KEEDt4Q4F7"><div class="big" data-page-node-id="KjZHc3ZcyxfhIJYUhRoChR">🖼️</div><div class="lbl" data-page-node-id="iyjcsBqYB2ubFqqpHFnuDG">相册</div></div>
+            </div>
+            <div class="note" data-page-node-id="rVehMBwjkwvlttikkCNEXJ">补充说明（选填）："第 3 问" "求详细过程"…</div>
+            <div class="btn primary" data-page-node-id="sHL0on2FMUumxTYrlwT4TT">开始解题</div>
+          </div>
+        </div>
+        <div class="phone-cap" data-page-node-id="hCfOqlMpvE0wJ3Qdj2Ipzz">① 输入态</div>
+        <div class="phone-cap-sub" data-page-node-id="NPC00ohEvncwKUac5u2CQp">大入口 + 说明；保持现有结构，仅放大热区</div>
+      </div>
+
+      <!-- 屏2 生成态 -->
+      <div class="phone-col" data-page-node-id="t6mdrdkShJPqfa5tehvLnx">
+        <div class="phone" data-page-node-id="4fSmihoTKp6YQLdRrH8fcr">
+          <div class="appbar" data-page-node-id="0TnxWnq1ZFVQtpSowqGYHW"><span class="ico" data-page-node-id="BITJx17D3dYsT7CN00fdcY">‹</span><span class="title" data-page-node-id="dUBkA0vMqyYeJmxhJUMKi0">拍照搜题</span><span class="ico" data-page-node-id="zi1ywjOLJqhBGN2g54d3ta">🕘</span><span class="ico primary" data-page-node-id="FovTcHMJjvwxByed7FrmPi">模型▾</span></div>
+          <div class="body" data-page-node-id="AlnReguc1jtDBCA2g7etXo">
+            <div class="thumb-strip" data-page-node-id="ctX6GAjPzQ9yIr0bQVHKTf">
+              <div class="thumb" data-page-node-id="NZBTUCCwl8ThN3YuN1f4NJ"></div>
+              <div class="meta" data-page-node-id="07WRnt0h7RWSm8Fa6XIsNk"><b data-page-node-id="U3EsQezm6fxUBcAmG6lgAh">题目图片</b>点击放大核对 · 重新裁剪</div>
+              <div class="img-sm-ico" data-page-node-id="G72NGPP2KODuOaidSKAXvH">⟳</div>
+              <div class="img-sm-ico" data-page-node-id="ZvhGJV6uLj3kTcp5E5NEa3">🗑</div>
+            </div>
+            <div class="think open" data-page-node-id="dfbpTtT3hcaaRLmZDf0Dih">
+              <div class="head" data-page-node-id="m59F374Ebo0WxT5bMpd45Y"><span class="dot" data-page-node-id="DLcR1FOAKEf8ETfPFztJnM"></span><span class="badge live" data-page-node-id="kk5CGHQ5IsL43xZ572QVlO">思考中</span><span class="grow" data-page-node-id="ufF4zBsuFo9da8VriEC9k6"></span><span data-page-node-id="DD3hM7VlcrOhpWilctGTZK">收起</span></div>
+              <div class="tail" data-page-node-id="RN16lDuKr1pYpjVgIP85C7"><div class="fade" data-page-node-id="GcgSPbYYhLs42pys130q3P"></div>……所以先对 A 点做受力分析，再列力矩平衡方程，注意支座反力方向……</div>
+            </div>
+            <div class="solve" data-page-node-id="vNOaTkLRSbCbiBvineel83">
+              <div class="head" data-page-node-id="giGpQzn1L5XW4VeVNAhkW6"><span class="grow" data-page-node-id="pkC33ywpsELZUyyIzh9oqq">解答</span><span data-page-node-id="4lw8DDofwUnyWsbo0fgXYN">收起</span></div>
+              <div class="content" data-page-node-id="YizgA2oT1XeXiVhuaSUoa4">
+                <div class="sec-lbl" data-page-node-id="Ys83vx2CNfyZ0xCugWQ748">解题过程</div>
+                <div class="line w90" data-page-node-id="UlCBIbLlaNRPJCQVzp142w"></div><div class="line w80" data-page-node-id="9fqhPCNck4L7EevPa96y6q"></div>
+                <div class="line w90" data-page-node-id="nHQfywtHdPnBFd9ZzEvTdW"></div><div class="line w60" data-page-node-id="dd2iJp0ODakcYM9KPTPTjB"></div>
+                <div class="sec-lbl" style="margin-top:10px" data-page-node-id="MDnYlhZKPgxvOqGppim5x7">作答 · 可直接誊抄</div>
+                <div class="line w70" style="background:#d8e4fb" data-page-node-id="KOWUIFeqSX8oQo00Y3IzVI"></div>
+                <div class="line w50" style="background:#d8e4fb" data-page-node-id="Pi8DVPw2nhK38ezhnzrrL7"></div>
+              </div>
+            </div>
+            <div class="btn ghost" style="flex:none" data-page-node-id="w2rId7W6X9z5cnnHQYQtDI">停止生成</div>
+          </div>
+        </div>
+        <div class="phone-cap" data-page-node-id="9eQoO7DZ3LEzQeBBTmy0CL">② 生成态</div>
+        <div class="phone-cap-sub" data-page-node-id="wEh8Pi2uFo6uvs5eQZmjfj">输入收缩为摘要条 · 思考露尾部 · 解答卡展开跟随</div>
+      </div>
+
+      <!-- 屏3 结果态 -->
+      <div class="phone-col" data-page-node-id="ZRErlgMgjpACUmKd1IstLD">
+        <div class="phone" data-page-node-id="OnZUG61bJzIZHXybPpLhWl">
+          <div class="appbar" data-page-node-id="X1HZttfH1jhxBqz8PS3Qxh"><span class="ico" data-page-node-id="VmST8tPC3clZNAkry6raMV">‹</span><span class="title" data-page-node-id="q6Dm82gES9I7o7HtRRa6rl">拍照搜题</span><span class="ico" data-page-node-id="cMA2pRwZUbrRdFGPWOHKd9">🕘</span><span class="ico primary" data-page-node-id="EvBfoBGlGN4pEX3a8pseot">模型▾</span></div>
+          <div class="body" data-page-node-id="EAguNaNEo5GZ1vdXzrJFZA">
+            <div class="thumb-strip" data-page-node-id="DWwYLFyuV9xz3fLYEuDbad">
+              <div class="thumb" data-page-node-id="pwrXaltlKcb9fTsVkbfXiy"></div>
+              <div class="meta" data-page-node-id="Zm87hyjeFnNbyBGv1oaduC"><b data-page-node-id="kR6cCVCmEL7LfHpLyxOE7B">题目图片</b>12 秒前 · 点击放大</div>
+              <div class="img-sm-ico" data-page-node-id="ZmyFDKJpFl6GafE5KecqeO">⟳</div>
+              <div class="img-sm-ico" data-page-node-id="DTibKDBGcaWdudUB2rZnwx">🗑</div>
+            </div>
+            <div class="think" data-page-node-id="6ZORv5oYZ8ybrUQ5UdT4Br">
+              <div class="head" data-page-node-id="xeqf168t2HHX0dAzIwCqr0"><span class="grow" data-page-node-id="Fds32au43N32432hLzKyj8">思考过程</span><span data-page-node-id="O4rQTh8jTNd7ZHY16iEDL6">展开</span></div>
+            </div>
+            <div class="solve" data-page-node-id="pVMzQMImZIuQsH3Rpsrlb5">
+              <div class="head" data-page-node-id="xPlCZi9g23aVb96V4E4XT4"><span class="grow" data-page-node-id="1DOLjbXNOuH5LzZ5iFU1Wi">解答</span><span data-page-node-id="LayvGH4W1c5xmhFUA0ywqn">收起</span></div>
+              <div class="content" data-page-node-id="wjka9qHfYS3oB9xGVpxK8a">
+                <div class="sec-lbl" data-page-node-id="HVGkONIftU7VHeoJtLDOd7">解题过程</div>
+                <div class="line w90" data-page-node-id="qH4zHMCUFCsnj9zzoIzvV6"></div><div class="line w80" data-page-node-id="MGk75mWSVFNzKPUeTu1s7s"></div><div class="line w90" data-page-node-id="HEW9BWVnHypaIEOKVaE06X"></div>
+                <div class="line w60" data-page-node-id="0R1DnU6Lf1m5EisBKJCPli"></div><div class="line w80" data-page-node-id="2BykjoSH6XktJWgEMQOYtT"></div><div class="line w40" data-page-node-id="kkINCVPGmwHabgA7Awp9iX"></div>
+                <div class="answer" data-page-node-id="1NV7DkH8S1Lk8a8v2rA9uH">
+                  <div class="a-head" data-page-node-id="qrmkpmy0gFC6vd8R5hbPGB"><span class="grow" data-page-node-id="UOPPvzZqjGEaTI8MvuZooe">作答 · 可直接誊抄</span><span data-page-node-id="UxEWZJWW0kMy10hpIM4BHv">⧉</span></div>
+                  <div class="aline" data-page-node-id="O0VP15jy4xhc4gPXP2Sprh"></div><div class="aline" data-page-node-id="xmGDSlqwewmAqnUvDDXy9E"></div><div class="aline w50" data-page-node-id="draM4LVP2IvLIjDB66X0K5"></div>
+                </div>
+              </div>
+            </div>
+            <div class="bottombar" data-page-node-id="3M2fkGiDaKy4FjZOpfp2db">
+              <div class="btn ghost" data-page-node-id="EuIUrBAurEobH9YFha2hB0">重新解题</div>
+              <div class="btn primary" data-page-node-id="ZMIZwZ02tp7LpA2icjo2tb">复制作答</div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-cap" data-page-node-id="bPNIqAHxYaRloeNZ2iGaTE">③ 结果态</div>
+        <div class="phone-cap-sub" data-page-node-id="aTMIafg9lZJ7KfQDsHxCDN">作答高亮区收尾 · 底部常驻操作条</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 data-page-node-id="vyNT8Nevo9EJEhYChEFcAq">四、重点细节 1：思考过程「折叠露出尾部」</h2>
+  <div class="card" data-page-node-id="nDWBYW9ADFxujBGopCJe6J">
+    <p data-page-node-id="cAUnNEQjrDowL1KFkLXnES">对齐聊天界面思考条的行为：<strong data-page-node-id="DUybcoHk7JxPgjTxzRamGt">折叠 ≠ 隐藏</strong>，而是"顶部旧的收起、底部最新的始终可见"。流式期间无需任何操作就能看到它正在工作。</p>
+    <div class="fold-demo" data-page-node-id="eNu2tY5fIRvNskSm5DUhmA">
+      <div class="fold-box" data-page-node-id="yVeNAkZTa9dOKFL8fSsLog">
+        <h4 data-page-node-id="uWiEDcw4k8HJpo59iH3x8m">折叠态（默认）<span class="tag gray" style="margin-left:6px" data-page-node-id="d7qkZnvYLPbuAbHbiSnBnj">live</span></h4>
+        <div class="demo" data-page-node-id="ovs4Xvh1PFQ2QaMI6DqueT">
+          <div class="mono" style="position:relative" data-page-node-id="xfvdfL1qVFXYb266sz2BtI">
+            <div class="fadeup" data-page-node-id="JFqr0GmKKnIaQcl9vX2v5C"></div>
+            <div class="dim" data-page-node-id="1oBtdapihyglWX2RE710tg">……先设斜面倾角为 θ，对物块进行受力分解……</div>
+            <div class="dim" data-page-node-id="EYseyB3aHaxFrMW7QbLxNB">……摩擦力 f = μN，N = mg·cosθ……</div>
+            <div class="fresh" data-page-node-id="TmPbQt9eGrSmoUrZbVA5Lz">……沿斜面方向列牛顿第二定律：mg·sinθ − f = ma，</div>
+            <div class="fresh" data-page-node-id="mcpdYzVosHQfohnuCNI1Hi">……代入数据解得 a ≈ 3.2 m/s²，接下来验证……</div>
+          </div>
+        </div>
+        <div class="cap" data-page-node-id="2lExZdAaEixWP2EAJEDRVz"><span class="yes" data-page-node-id="51Dl0zdyIipL2p69BkYF3Y">✓</span> 固定预览高度（约 64dp），只渲染文本<strong data-page-node-id="z6wjS9UQ8UbPVjgIxEJToW">末尾</strong>；顶部渐隐遮罩提示"上面还有更多"；思考中带脉冲圆点 + “思考中”角标。</div>
+      </div>
+      <div class="fold-box" data-page-node-id="DXv8lfbADO4fUQ5A33lr4c">
+        <h4 data-page-node-id="ucHsg3LqFXerrHArkFzrxp">展开态<span class="tag gray" style="margin-left:6px" data-page-node-id="eM9iIhDzkHn2azsDSvPpnX">点击切换</span></h4>
+        <div class="demo" data-page-node-id="6T2FPsPh0pU7EpzT8lWGWC">
+          <div class="mono" data-page-node-id="KhXcEQuYQGzStdWttvhxg7">
+            <div class="fresh" data-page-node-id="c5j1YV5wVdGGNAPVtKm6Ld">题目要求求加速度 a。已知 μ=0.25，θ=30°，g 取 9.8……</div>
+            <div class="fresh" data-page-node-id="8MH1PRHXvsHFSjHDsYrzAg">先设斜面倾角为 θ，对物块进行受力分解……</div>
+            <div class="fresh" data-page-node-id="yfGQSvOtmBGCnUvt5hVq58">摩擦力 f = μN，N = mg·cosθ……</div>
+            <div class="fresh" data-page-node-id="y3murrRtT1CWhDpOaOSDV4">沿斜面方向列牛顿第二定律：mg·sinθ − f = ma，</div>
+            <div class="fresh" data-page-node-id="LyMeDQR1Wze0ERvB8JI2I5">代入数据解得 a ≈ 3.2 m/s²，接下来验证单位与合理性……</div>
+          </div>
+        </div>
+        <div class="cap" data-page-node-id="kAxZpEYjsdQwsRBz6CuXKY"><span class="yes" data-page-node-id="RUehwLGWTyJGMtICTyBFDg">✓</span> 全量内容；流式更新时自动跟随底部（用户上滚阅读则暂停跟随，滚回底部附近恢复）。再次点击收起回预览态。</div>
+      </div>
+    </div>
+    <p style="margin-top:10px" data-page-node-id="sG1npmIqV9U8sqH4hhoOQZ">实现要点：预览区用 <code data-page-node-id="aBc7V2bMsx0MkKmRO1zlks">heightIn(max = 64.dp)</code> + 反向内容对齐（<code data-page-node-id="GgxzsLnox21ocEJDb4Uj2H">verticalArrangement = Arrangement.Bottom</code> 或测量后滚动到底），顶部叠加渐隐 <code data-page-node-id="bUB4TkxBjDFnZi3VlpLyZT">Bruh</code> 遮罩；思考生成中的圆点复用现有动画。</p>
+  </div>
+
+  <h2 data-page-node-id="hbLtsB8xEUKS2RMSSSO5vl">五、重点细节 2：解答卡与操作条</h2>
+  <div class="card" data-page-node-id="JFJMnyRWI2VEBzjoQSiFhg">
+    <table data-page-node-id="2ePT1vuXtlPESuOvdBQE13">
+      <tr data-page-node-id="QKPX8yyoiSfQfKsD6YnUrg"><th data-page-node-id="mUeR8LeGy8W7P2AeVzKrXx">项</th><th data-page-node-id="as9TZku8GquLfwtokRgb03">行为</th></tr>
+      <tr data-page-node-id="5p251W1Tv7Y2WanMgp656t"><td class="c1" data-page-node-id="j67oCFG3w8hBluQTSmq6EG">解答卡默认状态</td><td data-page-node-id="nmvPNuIICvQD55qNQXfJEN"><strong data-page-node-id="zSsUzQCx8PF5ZXgjw7zrMs">生成中自动展开并跟随底部</strong>（修正"默认折叠看不到流式"）；完成后保持展开，用户可手动收起；历史回看时默认展开（结果优先）。</td></tr>
+      <tr data-page-node-id="pptGcolHrego9LmL6sAqLO"><td class="c1" data-page-node-id="tG6HjRagh6q0QgdOYy8wPr">卡内结构</td><td data-page-node-id="sbcTxtNCRXoUnvDFx1iEPP">保持：小节标签「解题过程」→ Markdown 流式 → 高亮子块「作答 · 可直接誊抄」（独立复制按钮）。作答子块首次出现时若视口不在底部，轻滚动一次到可见。</td></tr>
+      <tr data-page-node-id="3B9pQR8ejVy5RrMl2mfJoX"><td class="c1" data-page-node-id="h4LhbuCpLcgPCsl08bYCGi">底部操作条（结果态）</td><td data-page-node-id="1D8Ne7BEDvcgFB3kDWrmvc"><strong data-page-node-id="vpIZa9CBGAj02FDZLmufLi">复制作答</strong>（主按钮，直接复制精炼作答全文）+ <strong data-page-node-id="Md3Ah8ZujSuDO4K3HAOkGi">重新解题</strong>（用当前图重跑）。仅在有结果时出现，生成中隐藏（由"停止生成"替代）。</td></tr>
+      <tr data-page-node-id="zPUbOfEBubrApAlWTIiRnM"><td class="c1" data-page-node-id="7WKHCGzGYeef26mEUYptwA">题图摘要条（生成/结果态）</td><td data-page-node-id="SpUghV8ucehGNPRCxM5hCV">小缩略图 + 时间/状态 + 重新裁剪、移除图标按钮；点击缩略图打开<strong data-page-node-id="MriJ24aV7V0FeJA8s12WKv">全屏缩放预览</strong>（复用 <code data-page-node-id="WXWqu8jwxBAkfGA4horfT3">ZoomableAsyncImage</code>）。</td></tr>
+      <tr data-page-node-id="uh9PPzACwBR3cqXQTwjAHq"><td class="c1" data-page-node-id="ZRIKsrgfZzK66DnPJWMzU2">状态切换动画</td><td data-page-node-id="DmtOGos8wmWZnqtc7Mw3mF">输入区大卡 ↔ 摘要条用 <code data-page-node-id="E6NNg0sLvKNAoaPi4582OY">AnimatedContent</code> 过渡，避免布局跳变；输出区从底部淡入。</td></tr>
+    </table>
+  </div>
+
+  <h2 data-page-node-id="G5HZsiune5Z9k0dM2mIxLy">六、改动清单与边界</h2>
+  <div class="card" data-page-node-id="H1EywokbpXTg5M0iGNwlTc">
+    <h3 data-page-node-id="uQbKiamscGKW3tFf7HpjNO">改</h3>
+    <ul class="tight" data-page-node-id="3RvMJDHFxMJ3RDlAejnmxx">
+      <li data-page-node-id="dGOYa4v28RQIusWhOHRoIw"><code data-page-node-id="S7l8Uj7YsGTLcNOEtZTO8T">SolvePage.kt</code>：页面按 输入/生成/结果 三态重排（AnimatedContent 切换输入区两种形态）；新增题图摘要条与底部操作条；思考条折叠露出尾部（预览高度 + 渐隐 + 思考中角标）；解答卡生成中自动展开跟随、作答子块出现时轻滚动。</li>
+      <li data-page-node-id="CNJgtsKEP63UxJoyWZl3ua"><code data-page-node-id="MMYUhmzohQlOvYnkqcb3qI">strings.xml</code>（EN/zh）：新增 思考中 / 复制作答 / 重新解题 / 点击放大核对 等文案。</li>
+      <li data-page-node-id="HFnoZb6h9A7FswdIdEEzs5">复用不动：<code data-page-node-id="gxBaoFndPzPhJtcaoTbw25">SolutionCard</code> 的过程+作答合并结构、跟随滚动策略（600px 阈值）、<code data-page-node-id="jieiU8k5Nk6yBCw43iQAaW">SplitSolveOutput</code> 协议、前台保活、历史与 DAO。</li>
+    </ul>
+    <h3 data-page-node-id="Zn0DezE9L6D59emV8p113y">不改</h3>
+    <ul class="tight" data-page-node-id="il71b3sAARRHfXSDqABqvv">
+      <li data-page-node-id="EHTpk0um33eIIFfUBBxRD6">生成链路（<code data-page-node-id="fDrzLtgdIIsPf5bKRmShAv">solveQuestion</code> / OCR 降级 / 输出协议）、<code data-page-node-id="VUlAbQBHU0w1y1wDbbKTTf">solve_question</code> 工具与子代理、Room 历史结构。</li>
+      <li data-page-node-id="WZPvBHXzCRPKGaXakiaCAC">后续可选（本期不做）：解答一键存入错题本、多题图批量解题。</li>
+    </ul>
+  </div>
+
+  <div class="footer-note" data-page-node-id="ozCTc05UtaxoCDeUOXoklw">099 · photo-solve UI proposal · 确认后按此实施并装机</div>
+</div>
+</body>
+</html>
