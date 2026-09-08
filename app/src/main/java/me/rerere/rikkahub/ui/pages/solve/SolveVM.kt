@@ -3,9 +3,11 @@ package me.rerere.rikkahub.ui.pages.solve
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.RectF
 import android.net.Uri
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import java.io.File
@@ -16,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.Modality
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.SolveResult
 import me.rerere.rikkahub.data.datastore.Settings
@@ -52,6 +56,10 @@ private const val SOLVE_WORK_DIR = "solve_work"
 /** 相机取景输出目录（cache）：pending 原图暂存地，与 FileProvider content:// uri 对应 */
 private const val SOLVE_CAMERA_DIR = "solve_camera"
 
+/** 旋转产物输出目录（cache）：与相机目录分离——旋转生成新文件时若与旧 pending 同目录，
+ *  清目录语义会把新文件误删；独立目录 + cancel/confirm 时整体清理，闭环无残留 */
+private const val SOLVE_ROTATE_DIR = "solve_rotate"
+
 /** 解码上限：与 uCrop maxResultSize 4096 对齐，控制内存与 token 成本 */
 private const val MAX_CROP_DIMENSION = 4096
 
@@ -60,6 +68,15 @@ private const val SOLVE_JPEG_QUALITY = 92
 
 /** 裁切后最小边长（px）：框选过小视为误触，防止把脏点当题目 */
 private const val MIN_CROP_EDGE = 8
+
+/**
+ * 孤儿图片清扫的延迟窗口（ms）：
+ * 根因——历史删除带「撤销」入口（snackbar 短暂窗口）。若删记录时立刻物理删除题图，
+ * 撤销只回插 DB 记录、文件已丢，历史行缩略图变空（imagePath 悬空）。
+ * 改为删除记录后延迟清扫：窗口内撤销的记录重新进入引用集，清扫按「当前引用集」判断，
+ * 幂等安全；窗口后仍无引用的文件才真正删除，也顺带回收超限裁剪（insertAndTrim）的孤儿。
+ */
+private const val ORPHAN_SWEEP_DELAY_MS = 10_000L
 
 /**
  * 拍照解题页面的主状态机阶段：驱动整页布局。
@@ -87,6 +104,27 @@ data class FollowUpTurn(
     val question: String,
     val reasoning: String = "",
     val answer: String = "",
+)
+
+/**
+ * 一次完整解题产出的不可变快照：供「重新解题失败回滚」与「上一版解答回看」共用。
+ *
+ * 根因：新一轮求解在 launchSolveInternal 开头就清空三段输出，若新请求失败，
+ * 上一轮成功结果已被清掉、连题图一并被 resetToViewFinder 删除——用户重解一次
+ * 可能弄丢可用答案。引入上一轮快照：失败时回滚展示；也作为「上一版解答」
+ * 的只读数据源（会话内，不落库）。
+ */
+data class SolveSnapshot(
+    val images: List<String>,
+    val resultQuestion: String?,
+    val reasoning: String,
+    val process: String,
+    val finalAnswer: String,
+    val noteText: String,
+    val reasoningStartAt: Long? = null,
+    val reasoningEndAt: Long? = null,
+    val followUps: List<FollowUpTurn> = emptyList(),
+    val activeRecordId: String? = null,
 )
 
 /**
@@ -148,9 +186,12 @@ class SolveVM(
     val reasoningEndAt: StateFlow<Long?> = _reasoningEndAt.asStateFlow()
 
     /**
-     * 题干卡文本：无视觉解题模型（OCR 降级路径）时，solveQuestion 会把发给模型的
-     * 题干文本回传为 SolveResult.questionText，这里存起来供结果页展示/编辑。
-     * 视觉直送路径为 null → 题干卡隐藏（不打断解题，符合已拍板的 Y 方案）。
+     * 题干卡文本（全路径有值，语义随来源不同）：
+     * - vision 直送路径：模型 <problem_statement> 读题块（AI 识读的题面），流式解析到即上屏，
+     *   用户可据此对照原图判断 AI 有没有识别错题目，错可立即停止；
+     * - OCR 降级/纯文本路径：solveQuestion 回传的题干文本（OCR 结果 + 用户补充），
+     *   输入侧权威，模型读题块只作为内部复述、不回填覆盖（避免 OCR 原文被模型改写降保真）。
+     * 两个来源都展示在结果页题干卡，可修正后重新解题。
      */
     private val _resultQuestion = MutableStateFlow<String?>(null)
     val resultQuestion: StateFlow<String?> = _resultQuestion.asStateFlow()
@@ -170,6 +211,14 @@ class SolveVM(
 
     private val _followUps = MutableStateFlow<List<FollowUpTurn>>(emptyList())
     val followUps: StateFlow<List<FollowUpTurn>> = _followUps.asStateFlow()
+
+    /**
+     * 上一版解答快照（会话内，非空 = 结果页可回看「上一版」）：
+     * 新一轮求解（重新解题 / 题干修正重解）启动前，若当前结果态有已产出内容则归档至此；
+     * 新请求失败且无半成品时据此回滚。换题/恢复历史时清空（新上下文不再相关）。
+     */
+    private val _previousVersion = MutableStateFlow<SolveSnapshot?>(null)
+    val previousVersion: StateFlow<SolveSnapshot?> = _previousVersion.asStateFlow()
 
     private val _followUpGenerating = MutableStateFlow(false)
     val followUpGenerating: StateFlow<Boolean> = _followUpGenerating.asStateFlow()
@@ -326,7 +375,44 @@ class SolveVM(
     fun cancelCrop() {
         _pendingCapture.value?.let { deletePendingWork(it) }
         _pendingCapture.value = null
+        clearRotateArtifacts()
         _phase.value = SolvePhase.ViewFinder
+    }
+
+    /**
+     * 框选确认页旋转原图（顺时针 90°，每点一次 +90°）。
+     *
+     * 根因：竖持手机拍横向卷面是高频场景——图内容整体横置，OCR/视觉识别质量下降，
+     * 且 fill 放大后框选困难。实现为「旋转产物替换 pending」而非显示层变换：
+     * 旋转结果落盘为新图并替换 [pendingCapture]，显示与后续裁切都基于旋转后图，
+     * 坐标系天然一致（框选归一化矩形直接映射旋转后位图），无需在裁切链路传旋转角。
+     */
+    fun rotatePending(clockwise: Boolean = true) {
+        val pending = _pendingCapture.value ?: return
+        if (_phase.value != SolvePhase.CropConfirm) return
+        if (_generating.value) return
+        appScope.launch {
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    rotatePendingImage(Uri.parse(pending), clockwise)
+                }
+                if (file != null) {
+                    // 旋转产物落在独立 solve_rotate 目录（与相机目录分离避免清目录互删）；
+                    // 旧 pending（相机缓存或外部相册 uri）保持不动，由 cancel/confirm 统一清理
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file,
+                    )
+                    _pendingCapture.value = uri.toString()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "rotatePending failed", e)
+                errorFlow.emit(e)
+            }
+        }
     }
 
     /**
@@ -350,6 +436,8 @@ class SolveVM(
                     cropPendingImage(Uri.parse(pending), cropRect)
                 }
                 _pendingCapture.value = null
+                // 裁切已持久化，旋转产物目录一并清掉（同一会话不再引用）
+                clearRotateArtifacts()
                 _images.value = _images.value + persisted.toUri().toString()
                 launchSolveInternal(
                     images = _images.value,
@@ -360,10 +448,10 @@ class SolveVM(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "confirmCropAndSolve failed", e)
-                _pendingCapture.value = null
                 errorFlow.emit(e)
-                // 裁切失败且无已产出内容：清回取景让用户重拍（避免卡在无主图的结果态）
-                resetToViewFinder()
+                // 裁切/解码失败（格式不支持、文件损坏等）：保留 pending 原图回框选页，
+                // 用户可直接重新框选或换图重试——清回取景等于要求重拍，重试成本过高。
+                _phase.value = SolvePhase.CropConfirm
             }
         }
     }
@@ -391,6 +479,8 @@ class SolveVM(
             return
         }
         if (_generating.value) return
+        // 新一轮求解前把当前结果态内容归档为「上一版」：失败回滚与旧解回看共用
+        archiveCurrentVersion()
         _phase.value = SolvePhase.Solving
         currentJob = appScope.launch {
             launchSolveInternal(images, _noteText.value.trim(), model)
@@ -398,9 +488,11 @@ class SolveVM(
     }
 
     /**
-     * 题干卡编辑后重解（Y 方案的纠错闭环）：
-     * 把修正后的题干文本作为纯文本请求重新解题（不重发题图——OCR 降级模型无视觉，
-     * 重发图会再次触发内部 OCR 覆盖掉用户修正；图片引用仍记入新历史便于回看）。
+     * 题干卡编辑后重解（纠错闭环）：
+     * 用户修正题干后重新解题。按解题模型视觉能力分流（根因：OCR 降级模型无视觉，
+     * 重发图会再次触发内部 OCR 覆盖掉用户修正，只能纯文本重解；vision 模型能自己读图，
+     * 重发原图 + 修正文本作 Additional notes 让模型重读图并对齐用户修正，纠错更可靠——
+     * 图片引用记入新历史便于回看）。
      */
     fun resolveWithQuestion(text: String) {
         val trimmed = text.trim()
@@ -413,11 +505,18 @@ class SolveVM(
             }
             return
         }
+        // 题干修正重解同样是「新一轮」：把基于旧题干的结果归档为上一版，失败可回滚
+        archiveCurrentVersion()
         // 立即用修正文本刷新题干卡（避免新一轮生成期间卡内容回跳）
         _resultQuestion.value = trimmed
         _phase.value = SolvePhase.Solving
+        val supportsVision = model.inputModalities.contains(Modality.IMAGE)
         currentJob = appScope.launch {
-            launchSolveInternal(images = emptyList(), note = trimmed, model = model)
+            launchSolveInternal(
+                images = if (supportsVision) _images.value else emptyList(),
+                note = trimmed,
+                model = model,
+            )
         }
     }
 
@@ -437,6 +536,8 @@ class SolveVM(
     ) {
         val solveId = UUID.randomUUID().toString()
         currentSolveId = solveId
+        // vision 直送 / OCR 降级分流的判定：题干卡数据源与编辑重解策略都依赖它
+        val supportsVision = model.inputModalities.contains(Modality.IMAGE)
         // 新解题 = 新上下文：清掉基于旧解答的追问会话
         clearFollowUps()
         _generating.value = true
@@ -456,6 +557,12 @@ class SolveVM(
                 imageUris = images,
                 questionText = note.ifBlank { null },
             ) { update ->
+                // 题干卡实时上屏（仅 vision 直送路径）：模型读题块解析到就立即展示——
+                // 这是用户判断"AI 有没有读错题"的唯一文本窗口，等整轮结束就太晚了；
+                // OCR 路径不实时覆盖，结束后用输入侧权威的 questionText 一次回填。
+                if (supportsVision && update.statement.isNotBlank()) {
+                    _resultQuestion.value = update.statement
+                }
                 // 思考计时打点：首个 reasoning chunk 记开始，首个过程/作答 chunk 记结束
                 val now = System.currentTimeMillis()
                 if (update.reasoning.isNotBlank() && _reasoningStartAt.value == null) {
@@ -474,22 +581,46 @@ class SolveVM(
 
             // 只把真正出结果的解题写入历史（process/final 至少一个非空）
             val finalResult = result
+            // 题干卡终值（与 saveRecord 落库共用同一取值，保证「结果页题干卡」与
+            // 「历史回看题干卡」一致）：
+            // - vision 直送：AI 读题块（statement）优先；模型未遵守协议输出时回落到输入文本；
+            // - OCR/纯文本：questionText 权威（编辑重解时即用户修正文本），statement 不复述覆盖。
+            val displayQuestion = finalResult?.let { r ->
+                if (supportsVision) {
+                    r.statement.takeIf { it.isNotBlank() }
+                        ?: r.questionText
+                        ?: note.ifBlank { null }
+                } else {
+                    r.questionText ?: note.ifBlank { null }
+                }
+            }
             if (finalResult != null &&
                 (finalResult.process.isNotBlank() || finalResult.finalAnswer.isNotBlank())
             ) {
                 // 纯文本重解（题干编辑）时 images 为空，但会话仍持有题图文件，
                 // 用会话首图作历史缩略图引用，回看时图不丢。
                 val recordImage = images.firstOrNull() ?: _images.value.firstOrNull()
+                // 思考耗时：首个 reasoning chunk 至首个过程/作答 chunk（或任务结束）区间；
+                // 模型无思考流时两者皆 null，落库 null（历史展示不显示时长）
+                val solveReasoningMs = if (_reasoningStartAt.value != null &&
+                    _reasoningEndAt.value != null
+                ) {
+                    _reasoningEndAt.value!! - _reasoningStartAt.value!!
+                } else {
+                    null
+                }
                 saveRecord(
                     image = recordImage,
-                    questionText = finalResult.questionText ?: note.ifBlank { null },
+                    questionText = displayQuestion,
+                    reasoning = finalResult.reasoning,
+                    reasoningMs = solveReasoningMs,
                     process = finalResult.process,
                     finalAnswer = finalResult.finalAnswer,
                     modelId = model.id.toString(),
                 )
             }
-            // 题干卡数据：OCR 降级路径的回传题干（编辑重解时会回传用户修正后的文本）
-            finalResult?.questionText
+            // 题干卡兜底回填：流式中 statement 未覆盖到时（无 statement / OCR 路径）这里补齐
+            displayQuestion
                 ?.takeIf { it.isNotBlank() }
                 ?.let { _resultQuestion.value = it }
             _phase.value = SolvePhase.Result
@@ -500,13 +631,21 @@ class SolveVM(
         } catch (e: Exception) {
             Log.e(TAG, "solve failed", e)
             errorFlow.emit(e)
-            // 出错且无任何已产出内容：回取景重拍；有半成品则留在结果区供用户判断
+            // 出错且无任何已产出内容：先回滚到上一版成功结果（若有），否则留在结果区
+            // 保留题图供「重新解题」重试。根因：旧实现直接 resetToViewFinder 清图，
+            // 网络瞬时错误（限流/超时）就把用户打回重拍起点，且重解失败会连带清掉
+            // 上一轮可用答案。
             val hasOutput = _process.value.isNotBlank() ||
                 _finalAnswer.value.isNotBlank() || _reasoning.value.isNotBlank()
             if (hasOutput) {
                 _phase.value = SolvePhase.Result
             } else {
-                resetToViewFinder()
+                val rollback = _previousVersion.value
+                if (rollback != null) {
+                    applySnapshot(rollback)
+                } else {
+                    _phase.value = SolvePhase.Result
+                }
             }
         } finally {
             // 取消/异常/正常结束兜底：思考中被打断也要补上结束时刻，UI 才能显示已思考时长
@@ -521,7 +660,7 @@ class SolveVM(
 
     // ---------- 历史记录 ----------
 
-    /** 把某条历史回填到当前界面（图片 + 题干 + 过程 + 精炼作答），可复制或重新解题 */
+    /** 把某条历史回填到当前界面（图片 + 题干 + 思考 + 过程 + 精炼作答），可复制或重新解题 */
     fun restoreRecord(recordId: String) {
         appScope.launch {
             solveHistoryDao.getById(recordId)?.let { record ->
@@ -533,9 +672,17 @@ class SolveVM(
                     else listOf(File(context.filesDir, record.imagePath).toUri().toString())
                 _resultQuestion.value = record.questionText?.takeIf { it.isNotBlank() }
                 _noteText.value = ""
-                _reasoning.value = ""
-                _reasoningStartAt.value = null
-                _reasoningEndAt.value = null
+                // 恢复思考全文（v51 起落库；老记录为空串）。真实思考起止时刻未落库，
+                // 只有总时长 reasoningMs：合成 start/end（end=createdAt, start=createdAt-ms）
+                // 使 UI 的 endAt-startAt 差值恰好等于记录时长，无真实时间语义仅作展示。
+                _reasoning.value = record.reasoningText
+                val hasReasoning = record.reasoningText.isNotBlank()
+                _reasoningStartAt.value = if (hasReasoning) {
+                    record.reasoningMs?.let { record.createdAt - it } ?: record.createdAt - 1L
+                } else {
+                    null
+                }
+                _reasoningEndAt.value = if (hasReasoning) record.createdAt else null
                 _process.value = record.processText
                 _finalAnswer.value = record.finalText
                 _pendingCapture.value = null
@@ -543,26 +690,29 @@ class SolveVM(
                 // 恢复该记录内嵌的追问线程（与记录同生命周期，列内快照）
                 activeRecordId = record.id
                 _followUps.value = decodeFollowUps(record.followUpsJson)
+                // 历史回填 = 切换上下文，旧会话的「上一版」不再相关
+                _previousVersion.value = null
             }
         }
     }
 
+    /**
+     * 删除记录（单条/批量共用）：只删 DB 行，题图文件延迟清扫（见 ORPHAN_SWEEP_DELAY_MS
+     * 注释——滑动删除带撤销，立即删文件会让撤销后缩略图空图）。
+     */
     fun deleteRecords(ids: List<String>) {
         if (ids.isEmpty()) return
         appScope.launch {
-            // 先取记录拿图片路径，删记录后同步删图片文件（imagePath 与记录同生命周期）；
             // 追问内嵌在记录行内，随行删除，无需额外处理
-            val stale = solveHistoryDao.getByIds(ids)
             solveHistoryDao.deleteByIds(ids)
-            stale.forEach { resolveImageFile(it.imagePath)?.delete() }
+            scheduleOrphanSweep()
         }
     }
 
     fun deleteAllRecords() {
         appScope.launch {
-            val all = records.value
             solveHistoryDao.deleteAll()
-            all.forEach { resolveImageFile(it.imagePath)?.delete() }
+            scheduleOrphanSweep()
         }
     }
 
@@ -645,6 +795,143 @@ class SolveVM(
         }
     }
 
+    /**
+     * 把 pending 原图顺时针/逆时针旋转 90° 并落盘到 cacheDir/solve_rotate。
+     *
+     * 实现：先按 EXIF 烘焙解码（复用 convertHeifToJpeg，与裁切链路同一朝向基准），
+     * 再用 Matrix 旋转位图后重编码 JPEG。返回新文件；解码失败返回 null（调用方保留原图）。
+     */
+    private fun rotatePendingImage(pending: Uri, clockwise: Boolean): File? {
+        val workDir = File(context.cacheDir, SOLVE_WORK_DIR).apply { mkdirs() }
+        val workFile = File(workDir, "solve_work_${Uuid.random()}.jpg")
+        try {
+            val converted = ImageUtils.convertHeifToJpeg(
+                context = context,
+                uri = pending,
+                target = workFile,
+                maxSize = MAX_CROP_DIMENSION,
+                quality = 95,
+            )
+            if (!converted) {
+                error("无法解码该图片（格式不支持或已损坏），请重试或换一张")
+            }
+            val bitmap = BitmapFactory.decodeFile(workFile.absolutePath)
+                ?: error("图片解码失败，请重试")
+            try {
+                val matrix = Matrix().apply {
+                    // Compose 中 RotateRight01 的视觉语义 = 顺时针旋转画面
+                    postRotate(if (clockwise) 90f else -90f)
+                }
+                val rotated = Bitmap.createBitmap(
+                    bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+                )
+                try {
+                    val dir = File(context.cacheDir, SOLVE_ROTATE_DIR).apply { mkdirs() }
+                    val out = File(dir, "solve_rot_${System.currentTimeMillis()}.jpg")
+                    out.outputStream().use { output ->
+                        rotated.compress(Bitmap.CompressFormat.JPEG, SOLVE_JPEG_QUALITY, output)
+                    }
+                    return out
+                } finally {
+                    ImageUtils.recycleBitmapSafely(rotated)
+                }
+            } finally {
+                ImageUtils.recycleBitmapSafely(bitmap)
+            }
+        } finally {
+            workFile.delete()
+        }
+    }
+
+    /** 清空旋转产物目录（框选取消/确认后旧旋转文件不再被引用，cache 也无需保留） */
+    private fun clearRotateArtifacts() {
+        runCatching {
+            File(context.cacheDir, SOLVE_ROTATE_DIR)
+                .listFiles()?.forEach { it.delete() }
+        }
+    }
+
+    // ---------- 上一版快照 / 失败回滚 ----------
+
+    /**
+     * 新一轮求解启动前调用：结果态且已有产出时，把当前内容归档为「上一版」。
+     * 半成品（正在生成被 UI 禁用，此处 generating 必为 false）或空结果不归档。
+     */
+    private fun archiveCurrentVersion() {
+        if (_phase.value != SolvePhase.Result) return
+        if (_generating.value) return
+        val hasContent = _reasoning.value.isNotBlank() ||
+            _process.value.isNotBlank() || _finalAnswer.value.isNotBlank()
+        if (!hasContent) return
+        _previousVersion.value = snapshotOfCurrent()
+    }
+
+    /** 取当前界面完整状态为快照（回滚与归档共用同一捕获逻辑） */
+    private fun snapshotOfCurrent(): SolveSnapshot = SolveSnapshot(
+        images = _images.value,
+        resultQuestion = _resultQuestion.value,
+        reasoning = _reasoning.value,
+        process = _process.value,
+        finalAnswer = _finalAnswer.value,
+        noteText = _noteText.value,
+        reasoningStartAt = _reasoningStartAt.value,
+        reasoningEndAt = _reasoningEndAt.value,
+        followUps = _followUps.value,
+        activeRecordId = activeRecordId,
+    )
+
+    /** 把快照整体恢复到界面（新一轮失败回滚；进行中的 followUp job 一并停掉） */
+    private fun applySnapshot(snapshot: SolveSnapshot) {
+        followUpJob?.cancel()
+        _followUpGenerating.value = false
+        _images.value = snapshot.images
+        _resultQuestion.value = snapshot.resultQuestion
+        _reasoning.value = snapshot.reasoning
+        _reasoningStartAt.value = snapshot.reasoningStartAt
+        _reasoningEndAt.value = snapshot.reasoningEndAt
+        _process.value = snapshot.process
+        _finalAnswer.value = snapshot.finalAnswer
+        _noteText.value = snapshot.noteText
+        _followUps.value = snapshot.followUps
+        activeRecordId = snapshot.activeRecordId
+        _pendingCapture.value = null
+        _phase.value = SolvePhase.Result
+    }
+
+    // ---------- 孤儿图片延迟清扫 ----------
+
+    /**
+     * 记录删除/超限裁剪后调度一次延迟清扫（延迟窗口见 ORPHAN_SWEEP_DELAY_MS）。
+     * 幂等：清扫依据「执行时刻的引用集」（历史记录 imagePath ∪ 当前会话 images），
+     * 被撤销的记录重新出现则其文件被保留，窗口内多次调度收敛为一次清扫。
+     */
+    private fun scheduleOrphanSweep() {
+        appScope.launch {
+            delay(ORPHAN_SWEEP_DELAY_MS)
+            sweepOrphanImages()
+        }
+    }
+
+    /** 删除 solve_images 下未被任何记录引用、也不属于当前会话的图片文件 */
+    private fun sweepOrphanImages() {
+        runCatching {
+            val referenced = records.value.mapNotNull { it.imagePath }.toSet()
+            val sessionFiles = buildSet {
+                _images.value.forEach { uri ->
+                    resolveImageFile(uri)?.let { add(it.absolutePath) }
+                }
+            }
+            val dir = File(context.filesDir, SOLVE_IMAGE_DIR)
+            if (!dir.exists()) return@runCatching
+            dir.listFiles()?.forEach { file ->
+                val relative = runCatching { file.relativeTo(context.filesDir).path }.getOrNull()
+                if (relative == null || relative in referenced) return@forEach
+                if (file.absolutePath in sessionFiles) return@forEach
+                file.delete()
+            }
+        }
+    }
+
     /** 回到取景的公共复位：清图、清输出、清补充，保证 ViewFinder 阶段 images 恒为空 */
     private fun resetToViewFinder() {
         cleanupCurrentImages()
@@ -658,6 +945,7 @@ class SolveVM(
         _finalAnswer.value = ""
         _resultQuestion.value = null
         _pendingCapture.value = null
+        _previousVersion.value = null
         _phase.value = SolvePhase.ViewFinder
     }
 
@@ -687,6 +975,8 @@ class SolveVM(
     private suspend fun saveRecord(
         image: String?,
         questionText: String?,
+        reasoning: String,
+        reasoningMs: Long?,
         process: String,
         finalAnswer: String,
         modelId: String,
@@ -697,15 +987,20 @@ class SolveVM(
             id = UUID.randomUUID().toString(),
             imagePath = relativePath,
             questionText = questionText,
+            reasoningText = reasoning,
+            reasoningMs = reasoningMs,
             processText = process,
             finalText = finalAnswer,
             modelId = modelId,
             createdAt = System.currentTimeMillis(),
         )
-        solveHistoryDao.insertAndTrim(
+        val trimmedIds = solveHistoryDao.insertAndTrim(
             record = record,
             keep = HISTORY_LIMIT
         )
+        // 超限裁剪掉的老记录：其题图立即成为孤儿（无撤销语义，历史自动淘汰），
+        // 走延迟清扫统一回收（清扫按引用集判断，幂等安全）
+        if (trimmedIds.isNotEmpty()) scheduleOrphanSweep()
         // 当前界面与这条记录绑定：此后追问落库归属它
         activeRecordId = record.id
     }

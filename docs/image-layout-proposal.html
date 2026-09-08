@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="ME2RVK064uOMYMgekdegYE">
+<head data-page-node-id="CxQPMeQpC7suzY4nOIK9IU">
+<meta charset="UTF-8" data-page-node-id="OBEgvAJFDKxNEzvWGdZYmN">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="FlQkgCP235CO3z4KA9iakD">
+<title>聊天气泡图片排版提案</title>
+<style>
+  :root {
+    --bg: #f6f6f8;
+    --card: #ffffff;
+    --ink: #1c1c1e;
+    --ink-2: #6e6e73;
+    --line: #e8e8ec;
+    --bubble-ai: #ffffff;
+    --accent: #4f6ef7;
+    --bad: #d05a5a;
+    --good: #3d9a6c;
+    --img1: linear-gradient(135deg, #8fb4f5, #5d7fd6);
+    --img2: linear-gradient(135deg, #f5c98f, #d69a5d);
+    --img3: linear-gradient(135deg, #9fe0b8, #5db987);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding: 32px 16px 80px; line-height: 1.6;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: var(--ink-2); font-size: 13px; margin-bottom: 28px; }
+  h2 { font-size: 16px; margin: 36px 0 12px; display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; }
+  .tag.bad  { background: #fdeaea; color: var(--bad); }
+  .tag.good { background: #e7f4ec; color: var(--good); }
+  .tag.dim  { background: #eef0f4; color: var(--ink-2); }
+
+  /* 模拟手机 */
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .case { flex: 1 1 300px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .case h3 { font-size: 13px; color: var(--ink-2); margin-bottom: 12px; font-weight: 500; }
+  .phone {
+    background: var(--bg); border-radius: 12px; padding: 14px 12px;
+    display: flex; flex-direction: column; gap: 12px; min-height: 200px;
+  }
+  .msg { display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble {
+    max-width: 86%; border-radius: 14px; padding: 10px 12px;
+    font-size: 13px; background: var(--bubble-ai);
+    border: 1px solid var(--line);
+  }
+  .msg.user .bubble { background: var(--accent); color: #fff; border: none; }
+  .bubble p { margin: 0; }
+  .bubble p + p { margin-top: 8px; }
+  img.demo { display: block; border-radius: 8px; width: 100%; height: 100%; object-fit: cover; }
+  .ph { border-radius: 8px; overflow: hidden; }
+  .ph.small { width: 88px; height: 66px; }
+  .ph.wide { aspect-ratio: 16/7; }
+  .ph.tall { aspect-ratio: 3/4; }
+  .ph.sq { aspect-ratio: 1/1; }
+  .note { font-size: 12px; margin-top: 10px; color: var(--ink-2); }
+  .note b { color: var(--bad); font-weight: 600; }
+  .note.ok b { color: var(--good); }
+
+  .verdict {
+    margin-top: 10px; font-size: 12px; padding: 8px 10px;
+    border-radius: 8px; background: #f2f3f7; color: var(--ink-2);
+  }
+  .verdict.reco { background: #e7f4ec; color: #2c6e4c; }
+
+  ol.spec { font-size: 13px; color: var(--ink-2); padding-left: 20px; margin-top: 8px; }
+  ol.spec li { margin: 4px 0; }
+  code { background: #eef0f4; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+</style>
+</head>
+<body data-page-node-id="JME4pDPN66dZ0a1bDBymAg">
+<div class="wrap" data-page-node-id="h5CxJGAEk0u8lrUdZWU44J">
+  <h1 data-page-node-id="lqduByf2e5hZaHMH7vxt9u">聊天气泡 · 图片排版提案</h1>
+  <div class="sub" data-page-node-id="zIMznkJf7Aijkzmoc6f13M">针对「消息内图片引用排版乱」的三个方案对比 · 2026-09-08</div>
+
+  <h2 data-page-node-id="CqA4GVMpoBNAn13f2Ticfh">现状 <span class="tag bad" data-page-node-id="4Tbn9MnXchEecv3SNqrO7v">问题定位</span></h2>
+  <div class="row" data-page-node-id="I8wKfNMVCCeAs0a4Y4W4kl">
+    <div class="case" data-page-node-id="qeKUijSxtyWRzBItjYOtKw">
+      <h3 data-page-node-id="DBFya3SVzO7ZMzqSy7I8Uc">问题 1 · 图文挤在同一行（FlowRow 混排）</h3>
+      <div class="phone" data-page-node-id="IpgOuVFoDa4BeAGpepjEMc">
+        <div class="msg" data-page-node-id="GBcmN4cbO3KoPWlpFXviDt"><div class="bubble" data-page-node-id="PuUHCFucXjCA3AJi4pjOCF">
+          <p data-page-node-id="pT9Ok3ZZwh8ajBMZANNVdq">这是生成的对比图</p>
+          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px;" data-page-node-id="dCQkNMB2e44u1nXdskAktU">
+            <span data-page-node-id="K0aJFNiEbOqx0jHNMxBvYf">如下</span>
+            <div class="ph" style="width:120px;height:120px;" data-page-node-id="KgK35bBdKSR9PGQxGUqCQ7"><img class="demo" style="background:var(--img1)" data-page-node-id="pr5Tzaspc3FpoZHXRhsQb9"></div>
+            <span data-page-node-id="SnrGmGM04GO0aY8l3XaVqP">以及这张</span>
+            <div class="ph" style="width:200px;height:88px;" data-page-node-id="lyRDcABd6DJ3eHkIvLM5IJ"><img class="demo" style="background:var(--img2)" data-page-node-id="vjJZiy1ZDD3v96F2IdCV5k"></div>
+          </div>
+        </div></div>
+      </div>
+      <div class="note" data-page-node-id="c0HiqDtCPKpXmsU0pvCqYv"><b data-page-node-id="ziq6tpNvmnd36sYJuqfpKx">图片与文字基线不齐、行内绕排</b>，图片高度 120 起底参差不齐，段落视觉断裂。</div>
+    </div>
+    <div class="case" data-page-node-id="ZoSPkgZAKp88cqj2HIV9Rf">
+      <h3 data-page-node-id="sAuzIABTJpQmPAgh5lX8XW">问题 2 · 连续多图无规则堆叠</h3>
+      <div class="phone" data-page-node-id="ayQdqee1krQmWr06DNEeNt">
+        <div class="msg" data-page-node-id="HHl1fuwihPgNMh1VJSmVEp"><div class="bubble" data-page-node-id="tmek5T5m50vWqOq7zZjSdF">
+          <p data-page-node-id="eqoF4cBmWXdUCy7OgTaRcK">共三张：</p>
+          <div class="ph" style="width:180px;height:120px;" data-page-node-id="6JFDhplrFXIcoDB4bapxfn"><img class="demo" style="background:var(--img1)" data-page-node-id="xXUqWs9BrdboIMVuSxrDmD"></div>
+          <div class="ph" style="width:80px;height:80px;margin-top:4px;" data-page-node-id="X2yKSRgaMrPHk8BuPCWtNF"><img class="demo" style="background:var(--img3)" data-page-node-id="Pw8bOpfkiUdh7CKiyLGbmM"></div>
+          <div class="ph" style="width:230px;height:90px;margin-top:4px;" data-page-node-id="LJJ3NpBEIKfen1CfQUjC8h"><img class="demo" style="background:var(--img2)" data-page-node-id="90Ht4WVghMDKF0EXClWNDx"></div>
+        </div></div>
+      </div>
+      <div class="note" data-page-node-id="gAlVpxKuPOfI8jtwaTGYCg"><b data-page-node-id="VoE8NrfdvWoqqvxxgyQ3u1">三张图三种宽度</b>，左对齐但长短不一，无间距节奏。</div>
+    </div>
+  </div>
+
+  <h2 data-page-node-id="7XDA7TrVykSXG9EPS4aL1Q">方案 A · 图片独立成行 + 统一宽度策略 <span class="tag good" data-page-node-id="u2kaOvKy29HtbuAPlnx1hm">推荐</span></h2>
+  <div class="row" data-page-node-id="xE8qptYasqGRnHy5o3nqIM">
+    <div class="case" data-page-node-id="iud3OqW1Zg0Olmz5ClSQQy">
+      <h3 data-page-node-id="kDVks6pPKfRyQlhmm4AVI6">单图 + 上下文文字</h3>
+      <div class="phone" data-page-node-id="R2CuG6gNaRq15GmrfPDUPU">
+        <div class="msg" data-page-node-id="YoSc0zwgBmIJYPWbrUAYAD"><div class="bubble" data-page-node-id="ENDYHHFxqP0P5q6uaU5YBV">
+          <p data-page-node-id="2HuFmtW1HKK0m6p5eqvlaF">这是生成的对比图：</p>
+          <div class="ph wide" style="margin-top:8px;" data-page-node-id="xmh6fJBM8gIwE6VCAZS63Q"><img class="demo" style="background:var(--img1)" data-page-node-id="64qYCvxtMYXrAF6vxAL1Dr"></div>
+          <p style="margin-top:8px;" data-page-node-id="FELR2RGXao1s5VTGTCqOCM">可以看到曲线在 t=2s 后趋于平稳。</p>
+        </div></div>
+      </div>
+      <div class="verdict reco" data-page-node-id="zx3vjgqdZAZJDSRf2uL8pm">图片独立成行，宽度统一为气泡宽的 85%，上下各留 8dp。</div>
+    </div>
+    <div class="case" data-page-node-id="QxzPbqTKlwE09aUq4bINJb">
+      <h3 data-page-node-id="uLoi2G1aLMucyPpmtOaHEr">连续多图 → 纵向等宽序列</h3>
+      <div class="phone" data-page-node-id="1k5mwcHT4g0IYsBkyGHsSg">
+        <div class="msg" data-page-node-id="YLFZdMipUXeR3ODBQivnsO"><div class="bubble" data-page-node-id="y2cPN3UnYuxqQ7ZywyPOAI">
+          <p data-page-node-id="oxwnAfvG2yCiBBCwsfLREf">共三张：</p>
+          <div class="ph wide" style="margin-top:8px;" data-page-node-id="bEnWGNMmWJ3LS665zg26XW"><img class="demo" style="background:var(--img1)" data-page-node-id="1WpzRZwkJ0heUTQDejwCWs"></div>
+          <div class="ph wide" style="margin-top:4px;" data-page-node-id="e1cGqeMUB92wOA5CMIbFSp"><img class="demo" style="background:var(--img3)" data-page-node-id="6DfrC1CtBNsaH8VIFORaxB"></div>
+          <div class="ph wide" style="margin-top:4px;" data-page-node-id="qGRtbUd6wA6xWbRJuanLli"><img class="demo" style="background:var(--img2)" data-page-node-id="iWrCvQaD9eVhsWve9mejoV"></div>
+        </div></div>
+      </div>
+      <div class="verdict reco" data-page-node-id="wvwBT9FG1fNJyQ2UEYhgN4">统一宽度纵向堆叠，4dp 间距，节奏一致。</div>
+    </div>
+    <div class="case" data-page-node-id="fnbUgXA1nuvEzsTQhrHF5d">
+      <h3 data-page-node-id="ICAL3JzOkNvWQiuMnDuQsF">小图（图标/截图局部）</h3>
+      <div class="phone" data-page-node-id="HKfEijRPpL6iDOjqB5lk25">
+        <div class="msg" data-page-node-id="gICJ8nIYqVxf5YAW3vECsv"><div class="bubble" data-page-node-id="cL72cOKqAiypPKuTPeMMDw">
+          <p data-page-node-id="dHsPDCBveDDTBwTogwbR5J">按钮样式如下：</p>
+          <div style="display:flex; margin-top:8px;" data-page-node-id="w7UHRTWMaIhidZnQhP50QO"><div class="ph sq" style="width:120px;" data-page-node-id="CGYQVFO9ZRDS5lpxHaA0II"><img class="demo" style="background:var(--img3)" data-page-node-id="yJgrhO2GoUga1osDVcfCn9"></div></div>
+        </div></div>
+      </div>
+      <div class="verdict reco" data-page-node-id="7TJRVckuUYCmltVB231RPA">intrinsic ≤ 160dp 的小图保持原尺寸、左对齐，不放大。</div>
+    </div>
+  </div>
+  <ol class="spec" data-page-node-id="lJFT8A39kVJYcHGVteNvn1">
+    <li data-page-node-id="hOf46y0GBCCg7GHsn3dYEo">图片一律<b data-page-node-id="5ce5o564bOgTsmnu8IE6wC">独立成行</b>（block 级），不再与文字 FlowRow 混排；段落内图片前后的文字各成一段。</li>
+    <li data-page-node-id="VVFNgDFk1cxZIQQWz1PNQM">宽度策略：intrinsic 宽 ≤ 160dp → 原尺寸；否则统一 <code data-page-node-id="AtNBgbVrJoZwQeaoVA0d2z">min(气泡宽 × 0.85, intrinsic)</code>，高度按比例。</li>
+    <li data-page-node-id="mmXf2dxseLCY5Z4Gb09mdn">圆角统一 8dp、图间距 4dp、图文间距 8dp；连续多图自然纵向堆叠。</li>
+    <li data-page-node-id="R3vP3FCXYDbNLjqbwiWgwr">改动集中在 <code data-page-node-id="URHjPGKdPOrR3oarDAGb1v">MarkdownNew</code> / <code data-page-node-id="VGymy7uDAoGs3AGJ4eghzu">Markdown</code> 图片渲染处，行为可预期，风险小。</li>
+  </ol>
+
+  <h2 data-page-node-id="5JC44EQPI0StQfpaM7bGm0">方案 B · 连续多图两列网格 <span class="tag dim" data-page-node-id="DKzB7dG4FrAr50uRpRrRKq">可选增强</span></h2>
+  <div class="row" data-page-node-id="E1PGpYF9GUHmSR7TPneYHr">
+    <div class="case" data-page-node-id="IrlCQ2q47RwMFHwPr7m48Y">
+      <h3 data-page-node-id="zTfJvZClvKmiJaZZtZRQyM">多图 2 列网格（微信九宫格风格）</h3>
+      <div class="phone" data-page-node-id="oF3az7dstW2F40aAQBBTSC">
+        <div class="msg" data-page-node-id="x0pFLJXNzBie75CweN5WFb"><div class="bubble" data-page-node-id="teEKRgGDggqBnYtG3Y3LtZ">
+          <p data-page-node-id="eo1sxBXRc4JPKyczVRCGA9">共四张：</p>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:8px;" data-page-node-id="FbGVFm5fc3xDGKFFuX9UAA">
+            <div class="ph sq" data-page-node-id="hTJ9Mw4nlLJqgURAzudohC"><img class="demo" style="background:var(--img1)" data-page-node-id="6AoNQbOEqEmtsknI5RgCAT"></div>
+            <div class="ph sq" data-page-node-id="3VeC1qk5IHTSoIMUc8vY0K"><img class="demo" style="background:var(--img2)" data-page-node-id="kSykHVNZLrwpN4ae8HWVlj"></div>
+            <div class="ph sq" data-page-node-id="RAqkWQGL7ioglGW59dfloW"><img class="demo" style="background:var(--img3)" data-page-node-id="KziKrk3pKFqNjk8k1qbK0O"></div>
+            <div class="ph sq" data-page-node-id="MwZLwXuV1BHwolknaoK4Nf"><img class="demo" style="background:var(--img1)" data-page-node-id="S6wyHZcxvfSsKv0LYIvhkp"></div>
+          </div>
+        </div></div>
+      </div>
+      <div class="verdict" data-page-node-id="WSJNmi6cwvOIaxP3MquiQJ">省空间、整齐；但单张大图也会被压成半宽格子，会牺牲大图细节（点击可放大弥补）。</div>
+    </div>
+    <div class="case" data-page-node-id="rB04vfoCFp0gaTK2OYUWby">
+      <h3 data-page-node-id="IrbIY8jnjuXxwuMdOfFoJb">混合：单图走方案 A，≥2 张才进网格</h3>
+      <div class="phone" data-page-node-id="9ejmvFrC4EGLPe0HqiUHTw">
+        <div class="msg" data-page-node-id="EDqw4gyAQQvJVnG3ECvYo0"><div class="bubble" data-page-node-id="gbvGK6i2At2gG5J0Xpz8RL">
+          <p data-page-node-id="yUSPzXarIJoY5AZdfhA11q">第一张单独展示：</p>
+          <div class="ph wide" style="margin-top:8px;" data-page-node-id="clmSI1v6WzCa4oaZIJJpHl"><img class="demo" style="background:var(--img2)" data-page-node-id="rCneDoqpTPKJU1g0l4KG9L"></div>
+          <p style="margin-top:8px;" data-page-node-id="wHDihOInEwJC8nB113BE9W">其余两张：</p>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:4px;" data-page-node-id="1obSApU40IxlTdMESo8cZm">
+            <div class="ph sq" data-page-node-id="jo4hN4I6SckUkGFhWgAoSw"><img class="demo" style="background:var(--img1)" data-page-node-id="4S7Wyi28YXm3u2u3Flhxsc"></div>
+            <div class="ph sq" data-page-node-id="BA9veg0ro8GqKj05Vo9JaB"><img class="demo" style="background:var(--img3)" data-page-node-id="OBnku3WWybCzAO6LMztalh"></div>
+          </div>
+        </div></div>
+      </div>
+      <div class="verdict" data-page-node-id="TXEXvbTSFbIvdhBrthLSP4">逻辑略复杂：需要跨块合并连续图片（AST 后处理），改动面更大。</div>
+    </div>
+  </div>
+  <ol class="spec" data-page-node-id="u3T5giLkwBZVRSYPzzdXhJ">
+    <li data-page-node-id="IG1CWsBnJLfLLeFOEtf6Gh">仅当<b data-page-node-id="Np4TcYJog10yBiY4knD6EU">连续 ≥2 张图片</b>时进 2 列网格，单图仍按方案 A。</li>
+    <li data-page-node-id="QJhdeN8YvGwj8LnWcAaN5Y">需要把相邻 image 块合并成组（MarkdownNew 块级预处理），实现成本中等。</li>
+  </ol>
+
+  <h2 data-page-node-id="BF5BBuBsOZtMWbr47in8mu">方案 C · 全部满宽 <span class="tag dim" data-page-node-id="dVjmVRJGAy96ob0lCoRoKs">不推荐，仅对比</span></h2>
+  <div class="row" data-page-node-id="oBPBUAOfoCRsHCh5YCkFNE">
+    <div class="case" data-page-node-id="IPVfylQp43NlA9RdTmduZY">
+      <h3 data-page-node-id="CxVq7euCbSPo6S714dDc8P">所有图片 fillMaxWidth</h3>
+      <div class="phone" data-page-node-id="WaYTY9QzTJpFrQLj94B9bd">
+        <div class="msg" data-page-node-id="ExgSdOc1wFEiZEwxLF14om"><div class="bubble" data-page-node-id="Wza1RMfv5tOFZ3HZbLsZGr">
+          <p data-page-node-id="7x5c8rtD4LbjDUTepOIucy">按钮样式如下：</p>
+          <div class="ph sq" style="margin-top:8px;" data-page-node-id="8AksmzE2G5EDmru4jEYZxO"><img class="demo" style="background:var(--img3); height:260px;" data-page-node-id="BBsZ7FAfYHZF7xmQDNGEx0"></div>
+        </div></div>
+      </div>
+      <div class="verdict" data-page-node-id="0QEoD3OExWbIPtCyabdByb">最整齐，但小图标被放大到满宽，模糊且喧宾夺主；表情/签名档类小图体验差。</div>
+    </div>
+  </div>
+
+  <div class="case" style="margin-top:28px;" data-page-node-id="c47hbieSiEtLOgVm7UUSoO">
+    <h3 style="color:var(--ink); font-size:14px;" data-page-node-id="rRmmDd7PqjYGK8pfXEinVo">结论建议</h3>
+    <div style="font-size:13px; color:var(--ink-2);" data-page-node-id="nOZe0xi1aYV7BndgwVdwI7">
+      先落 <b style="color:var(--good)" data-page-node-id="dNLIVJvVR6fq26Rmk5ERlc">方案 A</b>（独立成行 + 统一宽度 + 间距节奏），解决 90% 的「乱」；
+      网格（方案 B）作为后续增强可叠加，不影响 A 的规则。gif 动图、尺寸预占、失败重试等既有能力不受影响。
+    </div>
+  </div>
+</div>
+</body>
+</html>

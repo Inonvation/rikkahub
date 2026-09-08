@@ -272,6 +272,15 @@ private fun createWriteFileTool(
                     put("sizeBytes", entry.sizeBytes)
                     put("updatedAt", entry.updatedAt)
                     put("changeStatus", if (existedBefore) "edited" else "added")
+                    // 图片文件附带可直接复用的正文引用片段：让模型复制确切路径，
+                    // 而不是自己拼（拼错会导致聊天气泡里图片占位空白）
+                    if (entry.path.startsWith(WorkspaceManager.ROOTFS_WORKSPACE_DIR) && entry.path.isImagePath()) {
+                        put("markdown", "![${entry.name}](${entry.path})")
+                        put(
+                            "markdownNote",
+                            "Copy this exact markdown into your reply body to display the image inline (do not rewrite the path)",
+                        )
+                    }
                 }.toString()
             )
         )

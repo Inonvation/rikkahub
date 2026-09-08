@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.subagent
 
+import me.rerere.rikkahub.data.ai.prompts.SOLVE_PROMPT_CORE
+
 /**
  * 内置子代理注册表。
  *
@@ -256,6 +258,9 @@ object SubAgentCatalog {
     /**
      * 解题子代理：纯 LLM（无工具），解答学科题目，输出分步推导 + <final_answer> 精炼作答，
      * 供母代理交叉验证。支持图片题目（images 随请求传入，须 vision 模型）。
+     *
+     * systemPrompt 与页面直调共享 [SOLVE_PROMPT_CORE]（含 <problem_statement> 题干协议 /
+     * 学科化校验 / 多题约定），这里只追加子代理特有规则——不再复制正文，避免漂移。
      */
     val solver = SubAgentDefinition(
         id = "solver",
@@ -263,46 +268,16 @@ object SubAgentCatalog {
         description = "解答学科题目（数学/物理/化学/生物/英语等），输出分步推导与可直接誊抄的精炼作答，供母代理交叉验证。支持图片题目。",
         commandAlias = "solve",
         systemPrompt = """
-            ## Role
-            You are an expert subject tutor sub-agent for students (middle school through university).
-            Solve the given problem completely and rigorously. The problem may be given as text and/or
-            as attached image(s) (photo of a worksheet, exam paper or textbook).
+$SOLVE_PROMPT_CORE
 
-            ## Workflow
-            1. Read the problem carefully. If images are attached, transcribe the key information
-               (question stem, known values, what is asked). If part of an image is unreadable,
-               state exactly what you could not read instead of inventing it.
-            2. Identify the subject and the knowledge points involved.
-            3. Solve step by step: formulas used, why they apply, intermediate computations, and how
-               each step leads to the next.
-            4. Verify the result when feasible (substitute back, sanity-check units/magnitude, or an
-               alternative method).
-
-            ## Output Format (STRICT)
-            Write the full worked solution as normal markdown. Then, as the LAST thing in your reply,
-            output a refined, exam-ready answer wrapped in markers. The markers MUST each be on
-            their own line:
-
-            <final_answer>
-            ...the refined answer...
-            </final_answer>
-
-            The refined answer inside the markers must be a clean, well-organized version that a
-            student can copy directly onto an answer sheet: numbered standard steps with brief
-            justifications, key equations in proper math notation (LaTeX where appropriate), and the
-            final result clearly stated (e.g. "Answer:"). Concise — no meta commentary, no
-            alternative attempts.
-
-            ## Rules
+            ## Sub-agent rules
+            - You are the solver sub-agent invoked by a parent agent. Your reply (including the
+              <problem_statement> block, when required by the rules above) is consumed by the parent
+              for cross-verification — include the full reasoning so the parent can check each step.
             - Respond in the language specified by the "Language:" line in the task (the user's app
-              language) — even if the problem text or image is in another language. Keep mathematical
-              symbols and formulas in standard notation. If no Language line is present, use the
-              problem's language.
-            - Never fabricate data. If information is missing, list the missing conditions, state the
-              most reasonable assumption explicitly, and solve under that assumption.
-            - The <final_answer> block must appear exactly once, at the very end.
-            - This output is consumed by the parent agent for cross-verification — include the full
-              reasoning so the parent can check each step.
+              language) — even if the problem text or image is in another language. Keep
+              mathematical symbols and formulas in standard notation. If no Language line is
+              present, use the problem's language.
         """.trimIndent(),
         capabilities = setOf(SubAgentCapability.NONE),
         maxSteps = 1,

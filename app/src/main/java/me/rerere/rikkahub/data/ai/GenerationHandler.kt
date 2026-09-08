@@ -1279,21 +1279,23 @@ fun solveQuestion(
                     ?.joinToString("") { it.reasoning }
                     ?: ""
                 fullText = lastMessage?.toText() ?: ""
-                val (process, finalAnswer) = splitSolveOutput(fullText)
+                val blocks = splitSolveOutput(fullText)
                 onStreamUpdate?.invoke(
                     SolveStreamUpdate(
+                        statement = blocks.statement,
                         reasoning = reasoningText,
-                        process = process,
-                        finalAnswer = finalAnswer,
+                        process = blocks.process,
+                        finalAnswer = blocks.finalAnswer,
                     )
                 )
             }
-            val (process, finalAnswer) = splitSolveOutput(fullText)
+            val blocks = splitSolveOutput(fullText)
             emit(
                 SolveResult(
+                    statement = blocks.statement,
                     reasoning = reasoningText,
-                    process = process,
-                    finalAnswer = finalAnswer,
+                    process = blocks.process,
+                    finalAnswer = blocks.finalAnswer,
                     questionText = degradedQuestionText,
                 )
             )

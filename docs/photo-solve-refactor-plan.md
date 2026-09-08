@@ -1,8 +1,27 @@
 # 拍照解题体验重构规划（v2：从「翻译式页面」到「拍题工作台」）
 
-> 状态：**阶段 A + B 已实施，待真机验收**（2026-09-07；阶段 C 待拍板）
+> 状态：**阶段 A + B 已实施，待真机验收**（2026-09-07）；**交互体验增强包 0.3 已实施**（2026-09-08，`:app:compileDebugKotlin` ✅ 8m57s 一次通过；待 assemble + 真机走查）
 > 目标：把当前「镜像 AI 翻译的表格工具页」重构为真正的拍题体验——**应用内相机取景 → 框选题目 → 自动解题 → 题干可核对修正**的连贯闭环。
 > 方向已与 Inonvation 拍板：① 拍题入口采用 **CameraX 应用内取景**；② 题干可编辑按 **Y 方案**（仅 OCR 降级路径展示可编辑题干）；③ 生成中退出页面需**保存进度/续解**。
+
+## 0.3 实施记录（交互体验增强包，2026-09-08）
+
+对 solve 页面做了代码级体验走查后落地的 P0+P1 增强（根因与取舍见各代码注释）：
+
+1. **失败恢复路径重构**（P0-1）：求解失败不再 `resetToViewFinder` 清图重拍——
+   - 裁切/解码失败 → 回 `CropConfirm` 保留 pending 原图（可直接重新框选/换图）；
+   - 求解失败且无半成品 → 回滚到 `previousVersion` 快照（若有），否则留在 Result 保留题图供「重新解题」重试。
+   - 新增 `SolveSnapshot` 会话内快照（images/question/reasoning/process/final/note/followUps）。
+2. **思考弹窗滚动锚点修复**（P0-2）：`ReasoningSheetContent` 流式贴底从无条件改为 nearBottom 条件跟随（阈值 200px，弹窗阅读场景），与文档流 SolutionCard 策略一致；用户上翻阅读不再被新 chunk 拉扯。
+3. **横向卷面旋转**（P0-3）：`SolveCropOverlay` 预览区右上新增 90° 旋转按钮；`SolveVM.rotatePending` 旋转产物落盘到独立 `cacheDir/solve_rotate`（与 solve_camera 目录分离，避免清目录互删新文件），替换 pending 后框选/裁切坐标系天然一致；cancel/confirm 时闭环清理。未改取景 hint 文案（旋转按钮自身可发现，避免顶部提示换行）。
+4. **上一版解答回看**（P1-4）：新一轮求解（重解/题干修正重解）启动前归档当前结果为 `previousVersion`；结果区题图下新增入口行，弹窗只读展示上一版（题干/思考/过程/作答，与主解答同渲染源）。失败回滚与回看共用同一快照。
+5. **求解等待反馈**（P1-5）：`generating && !hasOutput`（首 chunk 前）区间显示「解题中 · 已等待 n 秒」计时，与思考计时同理，提供「还在跑」的确定性感知。
+6. **补充说明前置**（P1-6）：取景态顶栏新增备注入口（`FloatingCameraTopBar` note icon）+ `NoteEditSheet` 底部弹层输入，拍前写好、框选确认页自动带出（共享 VM.noteText；vision 直送路径下这是唯一题干文本通道）。
+7. **历史撤销空图修复**（P1-7）：删除记录不再立即物理删图，改 `ORPHAN_SWEEP_DELAY_MS=10s` 延迟孤儿清扫（按执行时刻引用集判断，幂等安全）；撤销窗口内记录重插即保留文件；超限裁剪（insertAndTrim stale）一并纳入清扫。
+8. **思考落库**（P1-8）：`solve_history` 新增 `reasoning_text`/`reasoning_ms`（AutoMigration 50→51，version 51）；restoreRecord 恢复思考全文与「思考了 n 秒」（合成 start/end 差值=记录时长，仅展示无真实时间语义）。
+
+strings：en/zh 各 +9（旋转、等待计时、上一版、补充说明弹层等）。其余语言待 locale-tui 同步。
+验证：`:app:compileDebugKotlin` ✅ 8m57s（离线）；`:app:testDebugUnitTest` 见 0.3 记录后；真机走查清单：旋转→框选坐标一致、断网重解回滚、滑删撤销缩略图、老库 50→51 升级。
 
 ## 0.2 实施记录（阶段 B + 续解，2026-09-07）
 

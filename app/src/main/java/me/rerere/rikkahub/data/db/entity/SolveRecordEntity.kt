@@ -38,4 +38,16 @@ data class SolveRecordEntity(
     val createdAt: Long,
     @ColumnInfo(name = "follow_ups", defaultValue = "[]")
     val followUpsJson: String = "[]",
+    /**
+     * 思考全文：解题时模型输出的 reasoning（如有）。历史回填后仍可查看思考，
+     * 供「复盘解题思路」场景使用。老记录默认空串（无思考）。
+     */
+    @ColumnInfo("reasoning_text", defaultValue = "")
+    val reasoningText: String = "",
+    /**
+     * 思考耗时（ms）：模型思考 startAt→endAt 区间，恢复历史时用于展示
+     * 「思考了 n 秒」。老记录为 null（无思考或未记录时长，UI 降级为不显示时长）。
+     */
+    @ColumnInfo("reasoning_ms")
+    val reasoningMs: Long? = null,
 )

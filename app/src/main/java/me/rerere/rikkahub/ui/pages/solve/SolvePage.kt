@@ -4,6 +4,8 @@ import android.content.ClipData
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -87,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import coil3.compose.AsyncImage
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
@@ -94,12 +97,14 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.CameraRotated01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Clock02
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.Note
 import me.rerere.hugeicons.stroke.Idea01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.R
@@ -145,6 +150,7 @@ fun SolvePage(vm: SolveVM = koinInject()) {
     val records by vm.records.collectAsStateWithLifecycle()
     val followUps by vm.followUps.collectAsStateWithLifecycle()
     val followUpGenerating by vm.followUpGenerating.collectAsStateWithLifecycle()
+    val previousVersion by vm.previousVersion.collectAsStateWithLifecycle()
     val clipboard = LocalClipboard.current
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -162,6 +168,8 @@ fun SolvePage(vm: SolveVM = koinInject()) {
     var selecting by rememberSaveable { mutableStateOf(false) }
     var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteAllDialog by rememberSaveable { mutableStateOf(false) }
+    // 取景态补充说明编辑弹层（页面级 UI 状态，进入不销毁相机组合，返回即收起）
+    var showNoteSheet by remember { mutableStateOf(false) }
 
     fun exitSelection() {
         selecting = false
@@ -196,167 +204,184 @@ fun SolvePage(vm: SolveVM = koinInject()) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        when {
-            // ---------- 历史子模式 ----------
-            showHistory -> {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.photo_solve_history_title)) },
-                        navigationIcon = {
-                            IconButton(onClick = {
-                                if (selecting) exitSelection() else showHistory = false
-                            }) {
-                                Icon(
-                                    imageVector = HugeIcons.ArrowLeft01,
-                                    contentDescription = stringResource(R.string.photo_solve_history_back)
-                                )
-                            }
-                        },
-                        actions = {
-                            if (!selecting && records.isNotEmpty()) {
-                                IconButton(onClick = { selecting = true }) {
+        // 页面四模式间交叉淡化过渡（根因：框选确认 → 解题 等模式切换原先硬切、
+        // 无任何转场，确认瞬间直接跳到新界面观感突兀；Crossfade 做 240ms 淡入淡出，
+        // 不引入滑动方向语义，与页面其余克制转场保持一致）
+        Crossfade(
+            targetState = when {
+                showHistory -> SolvePageMode.History
+                phase == SolvePhase.ViewFinder -> SolvePageMode.ViewFinder
+                phase == SolvePhase.CropConfirm -> SolvePageMode.Crop
+                else -> SolvePageMode.Work
+            },
+            animationSpec = tween(240),
+            label = "solvePageMode",
+        ) { mode ->
+            when (mode) {
+                // ---------- 历史子模式 ----------
+                SolvePageMode.History -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.photo_solve_history_title)) },
+                            navigationIcon = {
+                                IconButton(onClick = {
+                                    if (selecting) exitSelection() else showHistory = false
+                                }) {
                                     Icon(
-                                        HugeIcons.MoreVertical,
-                                        contentDescription = stringResource(R.string.photo_solve_history_batch_select)
+                                        imageVector = HugeIcons.ArrowLeft01,
+                                        contentDescription = stringResource(R.string.photo_solve_history_back)
                                     )
                                 }
-                                IconButton(onClick = { showDeleteAllDialog = true }) {
-                                    Icon(
-                                        HugeIcons.Delete01,
-                                        contentDescription = stringResource(R.string.photo_solve_history_delete_all)
-                                    )
+                            },
+                            actions = {
+                                if (!selecting && records.isNotEmpty()) {
+                                    IconButton(onClick = { selecting = true }) {
+                                        Icon(
+                                            HugeIcons.MoreVertical,
+                                            contentDescription = stringResource(R.string.photo_solve_history_batch_select)
+                                        )
+                                    }
+                                    IconButton(onClick = { showDeleteAllDialog = true }) {
+                                        Icon(
+                                            HugeIcons.Delete01,
+                                            contentDescription = stringResource(R.string.photo_solve_history_delete_all)
+                                        )
+                                    }
                                 }
                             }
+                        )
+                        SolveHistoryList(
+                            records = records,
+                            selecting = selecting,
+                            selectedIds = selectedIds,
+                            onSelectChange = { id ->
+                                if (id in selectedIds) selectedIds.remove(id) else selectedIds.add(id)
+                            },
+                            onOpenRecord = { record ->
+                                vm.restoreRecord(record.id)
+                                showHistory = false
+                            },
+                            onLongPressRecord = { record ->
+                                if (record.id !in selectedIds) {
+                                    selectedIds.add(record.id)
+                                }
+                                selecting = true
+                            },
+                            onDeleteRecord = { record ->
+                                // 左滑单条删除：先删后给撤销入口（误滑兜底）
+                                scope.launch {
+                                    vm.deleteRecords(listOf(record.id))
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = deletedRecordMessage,
+                                        actionLabel = undoLabel,
+                                        withDismissAction = true,
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        vm.undeleteRecord(record)
+                                    }
+                                }
+                            },
+                            onSelectAllToggle = {
+                                if (selectedIds.size == records.size) {
+                                    selectedIds.clear()
+                                } else {
+                                    selectedIds.clear()
+                                    selectedIds.addAll(records.map { it.id })
+                                }
+                            },
+                            onCancelSelect = { exitSelection() },
+                            onDeleteSelectedClick = {
+                                if (selectedIds.isNotEmpty()) {
+                                    showBatchDeleteDialog = true
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // ---------- 取景 ----------
+                SolvePageMode.ViewFinder -> {
+                    // 顶栏与取景区分层（根因：悬浮控件叠在取景画面上，与照片内容重叠遮挡）
+                    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                        FloatingCameraTopBar(
+                            onHistory = ::openHistory,
+                            onModelSelect = { id ->
+                                vm.updateSettings(settings.copy(solveModelId = id))
+                            },
+                            onNoteEdit = { showNoteSheet = true },
+                            settings = settings,
+                            // 取景首屏补页面标题，避免只有一排图标没有语境（重构 P3）
+                            title = stringResource(R.string.photo_solve_page_title),
+                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            SolveCameraView(
+                                onImageCaptured = vm::startCrop,
+                                onPickFromGallery = { galleryLauncher.launch("image/*") },
+                                modifier = Modifier.fillMaxSize(),
+                            )
                         }
-                    )
-                    SolveHistoryList(
-                        records = records,
-                        selecting = selecting,
-                        selectedIds = selectedIds,
-                        onSelectChange = { id ->
-                            if (id in selectedIds) selectedIds.remove(id) else selectedIds.add(id)
-                        },
-                        onOpenRecord = { record ->
-                            vm.restoreRecord(record.id)
-                            showHistory = false
-                        },
-                        onLongPressRecord = { record ->
-                            if (record.id !in selectedIds) {
-                                selectedIds.add(record.id)
-                            }
-                            selecting = true
-                        },
-                        onDeleteRecord = { record ->
-                            // 左滑单条删除：先删后给撤销入口（误滑兜底）
-                            scope.launch {
-                                vm.deleteRecords(listOf(record.id))
-                                val result = snackbarHostState.showSnackbar(
-                                    message = deletedRecordMessage,
-                                    actionLabel = undoLabel,
-                                    withDismissAction = true,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    vm.undeleteRecord(record)
-                                }
-                            }
-                        },
-                        onSelectAllToggle = {
-                            if (selectedIds.size == records.size) {
-                                selectedIds.clear()
-                            } else {
-                                selectedIds.clear()
-                                selectedIds.addAll(records.map { it.id })
-                            }
-                        },
-                        onCancelSelect = { exitSelection() },
-                        onDeleteSelectedClick = {
-                            if (selectedIds.isNotEmpty()) {
-                                showBatchDeleteDialog = true
-                            }
-                        },
-                    )
+                    }
                 }
-            }
 
-            // ---------- 取景 ----------
-            phase == SolvePhase.ViewFinder -> {
-                // 顶栏与取景区分层（根因：悬浮控件叠在取景画面上，与照片内容重叠遮挡）
-                Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    FloatingCameraTopBar(
+                // ---------- 框选确认 ----------
+                SolvePageMode.Crop -> {
+                    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                        FloatingCameraTopBar(
+                            onBack = { vm.cancelCrop() },
+                            onHistory = ::openHistory,
+                            onModelSelect = { id ->
+                                vm.updateSettings(settings.copy(solveModelId = id))
+                            },
+                            settings = settings,
+                            title = stringResource(R.string.photo_solve_crop_title),
+                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            SolveCropOverlay(
+                                imageUri = pendingCapture,
+                                noteText = noteText,
+                                modelConfigured = solveModel != null,
+                                onNoteChange = vm::updateNoteText,
+                                onRotate = vm::rotatePending,
+                                onConfirm = vm::confirmCropAndSolve,
+                                onRetake = { vm.cancelCrop() },
+                                onPickFromGallery = { galleryLauncher.launch("image/*") },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                }
+
+                // ---------- 解题中 / 结果 ----------
+                else -> {
+                    SolveWorkScreen(
+                        phase = phase,
+                        imageUri = imageUri,
+                        generating = generating,
+                        reasoning = reasoning,
+                        reasoningStartAt = reasoningStartAt,
+                        reasoningEndAt = reasoningEndAt,
+                        process = process,
+                        finalAnswer = finalAnswer,
+                        resultQuestion = resultQuestion,
+                        solveModelConfigured = solveModel != null,
                         onHistory = ::openHistory,
                         onModelSelect = { id ->
                             vm.updateSettings(settings.copy(solveModelId = id))
                         },
                         settings = settings,
-                        // 取景首屏补页面标题，避免只有一排图标没有语境（重构 P3）
-                        title = stringResource(R.string.photo_solve_page_title),
+                        onRetake = vm::retake,
+                        onSolveAgain = vm::solve,
+                        onResolveQuestion = vm::resolveWithQuestion,
+                        onCopyFinal = ::copyFinal,
+                        onStop = vm::cancelSolve,
+                        canSolve = imageUri != null,
+                        followUps = followUps,
+                        followUpGenerating = followUpGenerating,
+                        previousVersion = previousVersion,
+                        onAskFollowUp = vm::askFollowUp,
+                        onCancelFollowUp = vm::cancelFollowUp,
                     )
-                    Box(modifier = Modifier.weight(1f)) {
-                        SolveCameraView(
-                            onImageCaptured = vm::startCrop,
-                            onPickFromGallery = { galleryLauncher.launch("image/*") },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
                 }
-            }
-
-            // ---------- 框选确认 ----------
-            phase == SolvePhase.CropConfirm -> {
-                Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    FloatingCameraTopBar(
-                        onBack = { vm.cancelCrop() },
-                        onHistory = ::openHistory,
-                        onModelSelect = { id ->
-                            vm.updateSettings(settings.copy(solveModelId = id))
-                        },
-                        settings = settings,
-                        title = stringResource(R.string.photo_solve_crop_title),
-                    )
-                    Box(modifier = Modifier.weight(1f)) {
-                        SolveCropOverlay(
-                            imageUri = pendingCapture,
-                            noteText = noteText,
-                            modelConfigured = solveModel != null,
-                            onNoteChange = vm::updateNoteText,
-                            onConfirm = vm::confirmCropAndSolve,
-                            onRetake = { vm.cancelCrop() },
-                            onPickFromGallery = { galleryLauncher.launch("image/*") },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            }
-
-            // ---------- 解题中 / 结果 ----------
-            else -> {
-                SolveWorkScreen(
-                    phase = phase,
-                    imageUri = imageUri,
-                    generating = generating,
-                    reasoning = reasoning,
-                    reasoningStartAt = reasoningStartAt,
-                    reasoningEndAt = reasoningEndAt,
-                    process = process,
-                    finalAnswer = finalAnswer,
-                    resultQuestion = resultQuestion,
-                    solveModelConfigured = solveModel != null,
-                    onHistory = ::openHistory,
-                    onModelSelect = { id ->
-                        vm.updateSettings(settings.copy(solveModelId = id))
-                    },
-                    settings = settings,
-                    onRetake = vm::retake,
-                    onSolveAgain = vm::solve,
-                    onResolveQuestion = vm::resolveWithQuestion,
-                    onCopyFinal = ::copyFinal,
-                    onStop = vm::cancelSolve,
-                    canSolve = imageUri != null,
-                    followUps = followUps,
-                    followUpGenerating = followUpGenerating,
-                    onAskFollowUp = vm::askFollowUp,
-                    onCancelFollowUp = vm::cancelFollowUp,
-                )
             }
         }
 
@@ -394,35 +419,24 @@ fun SolvePage(vm: SolveVM = koinInject()) {
         )
     }
 
-    if (showDeleteAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteAllDialog = false },
-            title = { Text(stringResource(R.string.photo_solve_history_delete_all)) },
-            text = { Text(stringResource(R.string.photo_solve_delete_all_message)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteAllDialog = false
-                    scope.launch {
-                        vm.deleteAllRecords()
-                        toaster.show(context.getString(R.string.photo_solve_cleared))
-                    }
-                }) {
-                    Text(stringResource(R.string.photo_solve_delete))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteAllDialog = false }) {
-                    Text(stringResource(R.string.photo_solve_cancel))
-                }
-            }
-        )
+    if (showNoteSheet) {
+        // 取景态补充说明编辑：拍前可先写好（vision 直送路径下它是唯一题干文本通道），
+        // 内容直写 VM，框选确认页的输入框与这里同源、自动带出；下滑/外部即收起
+        ModalBottomSheet(onDismissRequest = { showNoteSheet = false }) {
+            NoteEditSheet(
+                text = noteText,
+                onTextChange = vm::updateNoteText,
+            )
+        }
     }
 }
 
 /**
  * 取景/框选阶段的顶栏（实心黑底通栏，不再悬浮在取景画面上）：
- * 返回（默认弹栈或自定义）+ 标题 + 历史 + 模型选择。
+ * 返回（默认弹栈或自定义）+ 标题 + [备注(仅取景)] + 历史 + 模型选择。
  * ModelSelector 在深色条上以主题色呈现，可辨识。
+ * 备注入口只挂取景态：vision 直送路径下补充说明是唯一题干文本通道，拍前可先写好，
+ * 框选确认页自动带出（两态共享 VM.noteText）。
  */
 @Composable
 private fun FloatingCameraTopBar(
@@ -430,6 +444,7 @@ private fun FloatingCameraTopBar(
     onHistory: () -> Unit,
     onModelSelect: (Uuid) -> Unit,
     onBack: (() -> Unit)? = null,
+    onNoteEdit: (() -> Unit)? = null,
     title: String? = null,
 ) {
     Row(
@@ -458,6 +473,15 @@ private fun FloatingCameraTopBar(
             } else {
                 Spacer(modifier = Modifier.weight(1f))
             }
+            if (onNoteEdit != null) {
+                IconButton(onClick = onNoteEdit) {
+                    Icon(
+                        imageVector = HugeIcons.Note,
+                        contentDescription = stringResource(R.string.photo_solve_note_entry),
+                        tint = Color.White,
+                    )
+                }
+            }
             IconButton(onClick = onHistory) {
                 Icon(
                     imageVector = HugeIcons.Clock02,
@@ -472,6 +496,67 @@ private fun FloatingCameraTopBar(
                 type = ModelType.CHAT,
                 onlyIcon = true,
             )
+        }
+    }
+}
+
+/**
+ * 补充说明编辑弹层（取景态顶栏备注入口打开）：
+ * 拍前可写「只求第 3 问」等约束；输入直写 VM.noteText（与框选确认页输入框同源），
+ * 无显式保存——关闭即生效。键盘弹出用 imePadding 上推，不遮输入。
+ */
+@Composable
+private fun NoteEditSheet(
+    text: String,
+    onTextChange: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.photo_solve_note_sheet_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    minLines = 2,
+                    maxLines = 8,
+                    decorationBox = { inner ->
+                        Box {
+                            if (text.isEmpty()) {
+                                Text(
+                                    text = stringResource(R.string.photo_solve_note_placeholder),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -514,6 +599,7 @@ private fun SolveWorkScreen(
     canSolve: Boolean,
     followUps: List<FollowUpTurn>,
     followUpGenerating: Boolean,
+    previousVersion: SolveSnapshot?,
     onAskFollowUp: (String, String?) -> Unit,
     onCancelFollowUp: () -> Unit,
 ) {
@@ -522,6 +608,23 @@ private fun SolveWorkScreen(
     // ---------- 思考内容展示（区块 + 独立弹窗） ----------
     // 思考流式进行中 = 生成中且思考已开始、过程/作答尚未到达（与聊天 Reasoning.finishedAt 语义对齐）
     val reasoningStreaming = generating && reasoning.isNotBlank() && reasoningEndAt == null
+
+    // 首块输出前的等待计时（generating 但无任何输出内容时展示「已等待 n 秒」）：
+    // 根因——从确认到首个 chunk 常需数秒到十余秒（图片处理 + 首 token），无限波浪条
+    // 无法让用户判断「还在跑」还是「卡死」，秒数增长提供确定性感知。
+    var waitSeconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(generating) {
+        if (!generating) return@LaunchedEffect
+        waitSeconds = 0
+        val startMs = System.currentTimeMillis()
+        while (true) {
+            val elapsedMs = System.currentTimeMillis() - startMs
+            waitSeconds = (elapsedMs / 1000).toInt()
+            if (elapsedMs >= 5 * 60_000L) break // 5 分钟后停止增长，避免无限 tick
+            kotlinx.coroutines.delay(500)
+        }
+    }
+
     // 生成中每 200ms 刷新计时（与聊天相同节奏），完成后用 endAt-startAt 定值
     var durationTickMs by remember { mutableStateOf(0L) }
     LaunchedEffect(reasoningStreaming) {
@@ -542,6 +645,8 @@ private fun SolveWorkScreen(
     // 思考全文用弹窗承载（根因：思考内容常很长，展开在页面内会长时间占据阅读区；
     // 弹窗内独立滚动，流式生成中自动贴底，互不干扰页面排版）
     var showReasoningSheet by remember { mutableStateOf(false) }
+    // 上一版解答弹窗（重解后旧解回看，只读）
+    var showPreviousVersion by remember { mutableStateOf(false) }
 
     // ---------- 结果页页内追问 UI 状态 ----------
     // followUpMode = 底部输入条开启（把结果操作条切换为追问输入行）；
@@ -706,9 +811,51 @@ private fun SolveWorkScreen(
                 onRetake = onRetake,
             )
 
+            // 上一版解答入口：新一轮求解（重解/题干修正重解）成功后仍可回看旧解，
+            // 避免「换种解法再看」把上一版彻底冲掉（会话内保留，不落库）
+            if (isResult && !generating && previousVersion != null &&
+                (previousVersion.process.isNotBlank() || previousVersion.finalAnswer.isNotBlank())
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showPreviousVersion = true }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Idea01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
+                    Text(
+                        text = stringResource(R.string.photo_solve_previous_view),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                    Text(
+                        text = stringResource(R.string.photo_solve_previous_compare_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = HugeIcons.ArrowRight01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             val hasOutput = reasoning.isNotBlank() || process.isNotBlank() || finalAnswer.isNotBlank()
 
-            // ---------- 区块 2：题干（仅 OCR 降级路径有文本时出现） ----------
+            // ---------- 区块 2：题干卡（两条路径都有内容可展示：
+            // vision 直送 = AI 读题块 statement（流式实时）；OCR 降级 = 回传题干文本） ----------
             resultQuestion?.takeIf { it.isNotBlank() }?.let { question ->
                 SolveSectionDivider()
                 QuestionCard(
@@ -746,7 +893,11 @@ private fun SolveWorkScreen(
                             .height(6.dp)
                     )
                     Text(
-                        text = stringResource(R.string.photo_solve_solving),
+                        text = if (waitSeconds > 0) {
+                            stringResource(R.string.photo_solve_solving_wait, waitSeconds)
+                        } else {
+                            stringResource(R.string.photo_solve_solving)
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -830,6 +981,22 @@ private fun SolveWorkScreen(
             )
         }
     }
+
+    // 上一版解答弹窗：只读快照（思考/过程/作答），与主解答同一 Markdown 渲染
+    if (showPreviousVersion) {
+        val previous = previousVersion
+        if (previous != null) {
+            ModalBottomSheet(onDismissRequest = { showPreviousVersion = false }) {
+                PreviousVersionSheetContent(
+                    previous = previous,
+                    onClose = { showPreviousVersion = false },
+                )
+            }
+        } else {
+            // previousVersion 已清空（换题/恢复历史）而弹窗还开着：直接关闭避免空壳
+            LaunchedEffect(Unit) { showPreviousVersion = false }
+        }
+    }
 }
 
 /**
@@ -846,8 +1013,15 @@ private fun ReasoningSheetContent(
     onClose: () -> Unit,
 ) {
     val innerScroll = remember { ScrollState(0) }
+    // 流式贴底跟随带「用户在底部才贴」判断（根因：弹窗是阅读场景，无条件贴底会在
+    // 用户上翻读早期内容时被新 chunk 强拉到底部；与文档流 SolutionCard 同一策略）。
+    // 用户离开底部后不再跟随，直到他主动滚回底部区域。
     LaunchedEffect(reasoning, streaming) {
-        if (streaming) innerScroll.scrollTo(innerScroll.maxValue)
+        if (streaming) {
+            val nearBottom = innerScroll.maxValue - innerScroll.value <
+                REASONING_SHEET_FOLLOW_THRESHOLD_PX
+            if (nearBottom) innerScroll.scrollTo(innerScroll.maxValue)
+        }
     }
     Column(
         modifier = Modifier
@@ -885,7 +1059,116 @@ private fun ReasoningSheetContent(
     }
 }
 
+/** 页面全屏模式（Crossfade target）：与 SolvePhase 解耦——历史是多页覆盖态 */
+private enum class SolvePageMode { History, ViewFinder, Crop, Work }
+
 private const val FOLLOW_BOTTOM_THRESHOLD_PX = 600
+
+/**
+ * 思考全文弹窗的跟随阈值（px）：用户滚动位置距底部小于该值才随流式贴底。
+ * 弹窗是用户主动打开阅读的场景，阈值取小（约两行高），一旦上翻即停止拉扯。
+ */
+private const val REASONING_SHEET_FOLLOW_THRESHOLD_PX = 200
+
+/**
+ * 上一版解答弹窗内容：只读展示归档的旧解快照（题干/思考/过程/作答，有则显示），
+ * 与主解答同源 MarkdownBlock 渲染，可长按选择文本。
+ */
+@Composable
+private fun PreviousVersionSheetContent(
+    previous: SolveSnapshot,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.85f)
+            .padding(horizontal = 16.dp)
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.photo_solve_previous_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClose) {
+                Text(stringResource(R.string.photo_solve_previous_close))
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    previous.resultQuestion
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { question ->
+                            SectionLabel(stringResource(R.string.photo_solve_question_title))
+                            MarkdownBlock(
+                                content = question,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    if (previous.reasoning.isNotBlank()) {
+                        SectionLabel(stringResource(R.string.photo_solve_reasoning_sheet_title))
+                        MarkdownBlock(
+                            content = previous.reasoning,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (previous.process.isNotBlank()) {
+                        SectionLabel(stringResource(R.string.photo_solve_solution_title))
+                        MarkdownBlock(
+                            content = previous.process,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (previous.finalAnswer.isNotBlank()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            SectionLabel(stringResource(R.string.photo_solve_final_title))
+                            MarkdownBlock(
+                                content = previous.finalAnswer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 弹窗内容小节的小标题（labelMedium 弱色） */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 /** 页面内预览的最大高度：只露出文本尾部（最新流式内容），对齐聊天 100dp */
 private val REASONING_PREVIEW_HEIGHT = 100.dp
@@ -1057,6 +1340,9 @@ private fun SolutionCard(
     val hasProcess = process.isNotBlank()
     var processExpanded by rememberSaveable { mutableStateOf(true) }
     val justExpanded = remember { mutableStateOf(false) }
+    // 「解答首块到达」的强制滚底锚：从等待/思考进入解答的首 chunk 到达时无条件
+    // 滚底一次（用户此刻在等答案，理应看到答案开始出现），随后回归 nearBottom 跟随
+    var outputPinned by remember { mutableStateOf(false) }
     // 直达作答：记录作答块在窗口中的 Y，配合滚动容器 Y 换算其内容偏移（见 jumpToAnswer）
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1188,11 +1474,21 @@ private fun SolutionCard(
         }
     }
 
-    LaunchedEffect(processExpanded, process, generating) {
+    // 解答区块的流式跟随：key 含 finalAnswer（根因——此前不含：模型先流完 process
+    // 再流 final 时，final 每 chunk 到达 LaunchedEffect 都不重启，作答增长不再贴底；
+    // 同时缺「首块到达」锚点，从等待/思考区刚进入解答时页面停留在原处不滚动）。
+    // 规则：解答首块（outputPinned）无条件滚底一次 → 其后用户位于底部附近才继续
+    // 跟随（上翻阅读过程/思考时不被拉扯）。
+    val hasOutputNow = process.isNotBlank() || finalAnswer.isNotBlank()
+    LaunchedEffect(hasOutputNow, generating) {
+        if (hasOutputNow && generating) outputPinned = true
+    }
+    LaunchedEffect(processExpanded, process, finalAnswer, generating) {
         // 仅生成中自动跟随底部；生成结束后展开/收起都不再拉扯页面滚动
         if (!processExpanded || !generating) return@LaunchedEffect
         val nearBottom = scrollState.maxValue - scrollState.value < FOLLOW_BOTTOM_THRESHOLD_PX
-        if (justExpanded.value || nearBottom) {
+        if (outputPinned || justExpanded.value || nearBottom) {
+            outputPinned = false
             justExpanded.value = false
             scrollState.animateScrollTo(scrollState.maxValue)
         }
@@ -1206,9 +1502,11 @@ private fun uriToPrivateFile(ctx: android.content.Context, uri: String): File? {
 }
 
 /**
- * 题干区块（阶段 B，Y 方案；文档流版，无卡壳）：展示 OCR 降级路径回传的题干文本，
- * 可修正后重新解题。头部行 = 「题干」标签 + 「修正」操作；正文可长按选择。
- * 视图/纠错闭环：识别错 → 点「修正」改文本（或附加追问）→ 保存 → 以纯文本重解。
+ * 题干区块（文档流版，无卡壳）：展示「AI 读到的题面」——
+ * vision 直送路径为模型 <problem_statement> 读题块，OCR 降级路径为回传题干文本；
+ * 可修正后重新解题（vision 模型带图重读，OCR 模型纯文本重解）。
+ * 头部行 = 「题干」标签 + 「修正」操作；正文可长按选择。
+ * 视图/纠错闭环：识别错 → 点「修正」改文本 → 保存 → 重新解题。
  */
 @Composable
 private fun QuestionCard(

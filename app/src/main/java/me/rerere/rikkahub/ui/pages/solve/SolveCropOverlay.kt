@@ -4,6 +4,7 @@ import android.graphics.RectF
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
@@ -65,6 +67,7 @@ import coil3.compose.AsyncImagePainter
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CameraRotated01
 import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.RotateRight01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.math.abs
@@ -84,11 +87,17 @@ import kotlin.math.abs
  * 视口偏移被 clamp 在「缩放后图片覆盖视口」的范围内（图片不足以覆盖时回中），
  * 保证框选矩形永远可达、不会落到图片可视范围之外。
  *
- * 框选手势始终工作在 fit 空间（屏幕坐标按视口变换逆映射），与 VM 的归一化映射解耦；
+ * 框选矩形（crop）存「屏幕坐标」（相对预览容器，不随视口变换缩放）：
+ * 根因：若框存 fit 空间并随 viewScale 一起放大，用户放大图片想看细节时框同步变大，
+ * 永远框不住「放大后才看清的局部」；框固定在屏幕上后，缩放/平移只让图片在框下流动，
+ * 先放大、再微调框即所见即所得（对齐常见裁剪器的取景窗交互）。手势命中/拖拽因此
+ * 直接在屏幕空间进行；确认时逆视口变换回 fit、再归一化传给 VM。
+ *
  * 遮罩/框线/手柄绘制在未变换的覆盖层上、以屏幕空间坐标绘制——线宽与手柄尺寸不随缩放变化。
  *
- * 手势：框内拖动 = 平移；四角圆柄 = 单角两维缩放；拖拽始终 clamp 在图片区域内，
- * 并有最小边长约束，防止把脏点误当题目。
+ * 手势：框内拖动 = 平移；四角圆柄 = 单角两维缩放；拖拽始终 clamp 在图片可视区域内，
+ * 并有最小边长约束，防止把脏点误当题目。拖动采用「平移截断」而非逐边 clamp，
+ * 保证框拖到边缘时只停止、不被挤压变形。
  */
 @Composable
 internal fun SolveCropOverlay(
@@ -96,6 +105,7 @@ internal fun SolveCropOverlay(
     noteText: String,
     modelConfigured: Boolean,
     onNoteChange: (String) -> Unit,
+    onRotate: () -> Unit,
     onConfirm: (RectF) -> Unit,
     onRetake: () -> Unit,
     onPickFromGallery: () -> Unit,
@@ -115,13 +125,17 @@ internal fun SolveCropOverlay(
     var imageAspect by remember { mutableStateOf(1f) }
     var imageLoaded by remember { mutableStateOf(false) }
 
-    // 以 imageUri 为 key：CropConfirm 内相册换图时（phase 不变、组合不销毁）重置框选与视口
+    // 以 imageUri 为 key：CropConfirm 内相册换图时（phase 不变、组合不销毁）重置框选与视口。
+    // crop 四值 = 屏幕像素坐标（相对预览容器），缩放/平移视口只移动图片、框保持不动。
     var cropLeft by remember(imageUri) { mutableStateOf(0f) }
     var cropTop by remember(imageUri) { mutableStateOf(0f) }
     var cropRight by remember(imageUri) { mutableStateOf(0f) }
     var cropBottom by remember(imageUri) { mutableStateOf(0f) }
     var viewScale by remember(imageUri) { mutableStateOf(1f) }
     var viewOffset by remember(imageUri) { mutableStateOf(Offset.Zero) }
+    // 默认框已按哪个渲染基准生成：图或渲染矩形变化（换图/旋转后宽高互换）则重设，
+    // 避免沿用旧基准的框造成错位
+    var cropInitKey by remember(imageUri) { mutableStateOf<String?>(null) }
 
     val renderedRect: Rect? = remember(containerSize, imageAspect, imageLoaded) {
         if (!imageLoaded || containerSize == IntSize.Zero) null
@@ -149,6 +163,42 @@ internal fun SolveCropOverlay(
         )
     }
 
+    /** 图片当前在屏幕上的矩形（fit 渲染矩形经视口变换） */
+    fun imageScreenRect(): Rect? {
+        val r = renderedRect ?: return null
+        return Rect(
+            r.left * viewScale + viewOffset.x,
+            r.top * viewScale + viewOffset.y,
+            r.right * viewScale + viewOffset.x,
+            r.bottom * viewScale + viewOffset.y,
+        )
+    }
+
+    /**
+     * 框可活动的边界 = 图片屏幕矩形 ∩ 预览容器（框必须落在「可见的图片」内，黑边不可框）。
+     * 缩放/平移后图片可能在容器内留黑边（接近 fit 或双击回整图时），此时边界缩小，
+     * 框自动被拉回图内避免悬空。
+     */
+    fun activeBounds(): Rect? {
+        val img = imageScreenRect() ?: return null
+        val left = maxOf(img.left, 0f)
+        val top = maxOf(img.top, 0f)
+        val right = minOf(img.right, containerWidth())
+        val bottom = minOf(img.bottom, containerHeight())
+        return if (right > left && bottom > top) Rect(left, top, right, bottom) else null
+    }
+
+    /** 视口变换后把框 clamp 回可活动边界（图片在框下流动，框本身不随缩放变化） */
+    fun clampCropToImage() {
+        val bounds = activeBounds() ?: return
+        if (cropRight - cropLeft <= 0f || cropBottom - cropTop <= 0f) return
+        val min = minOf(minEdgePx, bounds.width * 0.5f, bounds.height * 0.5f)
+        cropLeft = cropLeft.coerceIn(bounds.left, cropRight - min)
+        cropRight = cropRight.coerceIn(cropLeft + min, bounds.right)
+        cropTop = cropTop.coerceIn(bounds.top, cropBottom - min)
+        cropBottom = cropBottom.coerceIn(cropTop + min, bounds.bottom)
+    }
+
     /** 以填满(fill)缩放并居中（进入页面与双击放大共用） */
     fun zoomToFill() {
         val r = renderedRect ?: return
@@ -159,6 +209,7 @@ internal fun SolveCropOverlay(
         val minY = containerHeight() - r.bottom * viewScale
         val maxY = -r.top * viewScale
         viewOffset = Offset((minX + maxX) / 2f, (minY + maxY) / 2f)
+        clampCropToImage()
     }
 
     /**
@@ -176,13 +227,16 @@ internal fun SolveCropOverlay(
         viewScale = newScale
         viewOffset += pan
         clampOffset()
+        // 图片动完后框回贴可活动边界（fill 覆盖态为空操作；缩回整图时把悬空框拉回图上）
+        clampCropToImage()
     }
 
-    /** 双击切换：非整图态回 fit（全图概览），整图态切填满缩放 */
+    /** 双击切换：非整图态回 fit（全图概览，框自动收进图内），整图态切填满缩放 */
     fun toggleZoom() {
         if (viewScale > 1.05f) {
             viewScale = 1f
             viewOffset = Offset.Zero
+            clampCropToImage()
         } else {
             zoomToFill()
         }
@@ -211,93 +265,82 @@ internal fun SolveCropOverlay(
         return Offset(dx, dy)
     }
 
-    // 图片加载/预览区确定后初始化：自动居中放大 + 默认框取「当前可视区域 ∩ 图片」内缩 8%
-    // （根因：fit 全图下默认框的用户感知与最终发送内容割裂，按可视区初始化所见即所得）
+    // 图片加载/预览区确定后初始化：自动居中放大 + 默认框取「可视图片区域」内缩 8%
+    // （根因：fit 全图下默认框的用户感知与最终发送内容割裂，按可视区初始化所见即所得；
+    //   以「uri+渲染矩形」为基准 key —— 旋转/换图后宽高互换，沿用旧基准的框会错位）
     LaunchedEffect(renderedRect, imageUri) {
         val r = renderedRect ?: return@LaunchedEffect
-        if (cropRight - cropLeft < 1f || cropBottom - cropTop < 1f) {
-            zoomToFill()
-            val visible = Rect(
-                -viewOffset.x / viewScale, -viewOffset.y / viewScale,
-                (containerWidth() - viewOffset.x) / viewScale,
-                (containerHeight() - viewOffset.y) / viewScale,
-            )
-            val base = Rect(
-                maxOf(visible.left, r.left), maxOf(visible.top, r.top),
-                minOf(visible.right, r.right), minOf(visible.bottom, r.bottom),
-            )
-            if (base.width >= minEdgePx && base.height >= minEdgePx) {
-                val insetX = base.width * 0.08f
-                val insetY = base.height * 0.08f
-                cropLeft = base.left + insetX
-                cropTop = base.top + insetY
-                cropRight = base.right - insetX
-                cropBottom = base.bottom - insetY
-            } else {
-                cropLeft = r.left
-                cropTop = r.top
-                cropRight = r.right
-                cropBottom = r.bottom
-            }
+        val initKey = "$imageUri@${r.width.toInt()}x${r.height.toInt()}"
+        if (cropInitKey == initKey) return@LaunchedEffect
+        zoomToFill()
+        val base = activeBounds() ?: return@LaunchedEffect
+        if (base.width >= minEdgePx && base.height >= minEdgePx) {
+            val insetX = base.width * 0.08f
+            val insetY = base.height * 0.08f
+            cropLeft = base.left + insetX
+            cropTop = base.top + insetY
+            cropRight = base.right - insetX
+            cropBottom = base.bottom - insetY
+        } else {
+            cropLeft = base.left
+            cropTop = base.top
+            cropRight = base.right
+            cropBottom = base.bottom
         }
+        cropInitKey = initKey
     }
 
-    fun clampCrop(rect: Rect) {
-        val min = minOf(minEdgePx, rect.width * 0.5f, rect.height * 0.5f)
-        cropLeft = cropLeft.coerceIn(rect.left, cropRight - min)
-        cropRight = cropRight.coerceIn(cropLeft + min, rect.right)
-        cropTop = cropTop.coerceIn(rect.top, cropBottom - min)
-        cropBottom = cropBottom.coerceIn(cropTop + min, rect.bottom)
-    }
-
-    /** 命中测试在 fit 空间做：屏幕命中半径 / viewScale，保证手柄热区不随缩放缩小 */
+    /** 命中测试在屏幕空间直接做：框四角近邻命中 → 缩放，框内 → 平移（热区半径不随缩放变化） */
     fun hitMode(pos: Offset): DragMode {
         if (renderedRect == null) return DragMode.None
-        val fit = Offset(
-            (pos.x - viewOffset.x) / viewScale,
-            (pos.y - viewOffset.y) / viewScale,
-        )
-        val hit = handleHitPx / viewScale
         val crop = Rect(cropLeft, cropTop, cropRight, cropBottom)
-        fun near(px: Float, py: Float, hx: Float, hy: Float): Boolean =
-            abs(px - hx) <= hit && abs(py - hy) <= hit
+        // 默认框尚未初始化（图片仍在加载）时四个角都落在原点，直接判 None 防误命中
+        if (crop.width <= 0f || crop.height <= 0f) return DragMode.None
+        fun near(px: Float, py: Float): Boolean =
+            abs(pos.x - px) <= handleHitPx && abs(pos.y - py) <= handleHitPx
         return when {
-            near(fit.x, fit.y, crop.left, crop.top) -> DragMode.ResizeTopLeft
-            near(fit.x, fit.y, crop.right, crop.top) -> DragMode.ResizeTopRight
-            near(fit.x, fit.y, crop.left, crop.bottom) -> DragMode.ResizeBottomLeft
-            near(fit.x, fit.y, crop.right, crop.bottom) -> DragMode.ResizeBottomRight
-            crop.contains(fit) -> DragMode.Move
+            near(crop.left, crop.top) -> DragMode.ResizeTopLeft
+            near(crop.right, crop.top) -> DragMode.ResizeTopRight
+            near(crop.left, crop.bottom) -> DragMode.ResizeBottomLeft
+            near(crop.right, crop.bottom) -> DragMode.ResizeBottomRight
+            crop.contains(pos) -> DragMode.Move
             else -> DragMode.None
         }
     }
 
-    fun applyCropDrag(mode: DragMode, deltaFit: Offset) {
+    fun applyCropDrag(mode: DragMode, deltaScreen: Offset) {
         when (mode) {
             DragMode.Move -> {
-                cropLeft += deltaFit.x
-                cropRight += deltaFit.x
-                cropTop += deltaFit.y
-                cropBottom += deltaFit.y
+                // 平移截断式 clamp（根因：若逐边 clamp，框拖到边界时靠边的一侧被推回、
+                // 另一侧保持位移，宽度/高度被压缩变形；平移只应在边界处停止、尺寸不变）
+                val b = activeBounds() ?: return
+                val dx = deltaScreen.x.coerceIn(-(cropLeft - b.left), b.right - cropRight)
+                val dy = deltaScreen.y.coerceIn(-(cropTop - b.top), b.bottom - cropBottom)
+                cropLeft += dx
+                cropRight += dx
+                cropTop += dy
+                cropBottom += dy
             }
             DragMode.ResizeTopLeft -> {
-                cropLeft += deltaFit.x
-                cropTop += deltaFit.y
+                cropLeft += deltaScreen.x
+                cropTop += deltaScreen.y
             }
             DragMode.ResizeTopRight -> {
-                cropRight += deltaFit.x
-                cropTop += deltaFit.y
+                cropRight += deltaScreen.x
+                cropTop += deltaScreen.y
             }
             DragMode.ResizeBottomLeft -> {
-                cropLeft += deltaFit.x
-                cropBottom += deltaFit.y
+                cropLeft += deltaScreen.x
+                cropBottom += deltaScreen.y
             }
             DragMode.ResizeBottomRight -> {
-                cropRight += deltaFit.x
-                cropBottom += deltaFit.y
+                cropRight += deltaScreen.x
+                cropBottom += deltaScreen.y
             }
             DragMode.None -> Unit
         }
-        renderedRect?.let { clampCrop(it) }
+        // resize 后回贴可活动边界（Move 已截断，此处为空操作，统一兜底）
+        clampCropToImage()
     }
 
     // 双击检测用的跨手势状态
@@ -353,7 +396,8 @@ internal fun SolveCropOverlay(
                                 if (moved) {
                                     change.consume()
                                     if (mode != DragMode.None) {
-                                        applyCropDrag(mode, pan / viewScale)
+                                        // crop 是屏幕坐标：增量直用，不再除以 viewScale 换算 fit
+                                        applyCropDrag(mode, pan)
                                         // 指针贴近视口边缘时自动跟随平移，框远端题目不必两步走
                                         val autoPan = autoPanDelta(change.position)
                                         if (autoPan != Offset.Zero) {
@@ -421,14 +465,8 @@ internal fun SolveCropOverlay(
                 val handleAccent = MaterialTheme.colorScheme.primary
                 val handleAccentText = MaterialTheme.colorScheme.onPrimary
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    // fit 空间 → 屏幕空间（与 graphicsLayer 的视口变换一致）
-                    fun toScreenRect(rect: Rect): Rect = Rect(
-                        rect.left * viewScale + viewOffset.x,
-                        rect.top * viewScale + viewOffset.y,
-                        rect.right * viewScale + viewOffset.x,
-                        rect.bottom * viewScale + viewOffset.y,
-                    )
-                    val cropScreen = toScreenRect(crop)
+                    // crop 存屏幕坐标：无需视口变换，直接以屏幕空间绘制（与覆盖层同空间）
+                    val cropScreen = crop
                     // 遮罩压暗「框选矩形之外」的全部区域（根因：原先只压暗图片外黑边，
                     // 框内与图片其余部分同样高亮，用户感知不到框住的到底是哪一段；
                     // 框外压暗让已框选部分从整图中直接跳出来，这也是各类裁剪器的通用范式）
@@ -459,6 +497,30 @@ internal fun SolveCropOverlay(
                             style = Stroke(2.dp.toPx()),
                         )
                         drawCircle(handleAccent, radius = radius * 0.55f, center = h)
+                    }
+                }
+            }
+
+            // 右上悬浮旋转钮（根因：竖持手机拍横向卷面是高频场景，内容整体横置导致
+            // 识别与框选双受损；旋转产物替换 pending 图后框选/裁切坐标系天然一致）。
+            // 与 zoom chip 同构：子级 clickable 叠加在预览全屏手势之上，已在该场景验证可行。
+            if (imageUri != null) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.45f),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 12.dp, end = 12.dp)
+                        .size(44.dp)
+                        .clickable(onClick = onRotate),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = HugeIcons.RotateRight01,
+                            contentDescription = stringResource(R.string.photo_solve_crop_rotate),
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
                     }
                 }
             }
@@ -564,11 +626,20 @@ internal fun SolveCropOverlay(
                                 val rect = renderedRect ?: return@Button
                                 if (rect.width <= 0f || rect.height <= 0f) return@Button
                                 val crop = Rect(cropLeft, cropTop, cropRight, cropBottom)
+                                // 屏幕框 → 逆视口变换回 fit → 相对渲染矩形归一化（0..1）
+                                // （根因：crop 存屏幕坐标后不再随缩放变化，发送给 VM 前必须
+                                //   映射回图片坐标系，与 VM 按像素比例裁切保持同一基准）
+                                val fitCrop = Rect(
+                                    (crop.left - viewOffset.x) / viewScale,
+                                    (crop.top - viewOffset.y) / viewScale,
+                                    (crop.right - viewOffset.x) / viewScale,
+                                    (crop.bottom - viewOffset.y) / viewScale,
+                                )
                                 val norm = RectF(
-                                    ((crop.left - rect.left) / rect.width).coerceIn(0f, 1f),
-                                    ((crop.top - rect.top) / rect.height).coerceIn(0f, 1f),
-                                    ((crop.right - rect.left) / rect.width).coerceIn(0f, 1f),
-                                    ((crop.bottom - rect.top) / rect.height).coerceIn(0f, 1f),
+                                    ((fitCrop.left - rect.left) / rect.width).coerceIn(0f, 1f),
+                                    ((fitCrop.top - rect.top) / rect.height).coerceIn(0f, 1f),
+                                    ((fitCrop.right - rect.left) / rect.width).coerceIn(0f, 1f),
+                                    ((fitCrop.bottom - rect.top) / rect.height).coerceIn(0f, 1f),
                                 )
                                 // 确认解题：中档触感，与抓取手柄的轻档区分
                                 haptic.tap()

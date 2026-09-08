@@ -167,10 +167,84 @@ fun MarkdownNew(
 
     ProvideTextStyle(style) {
         Column(modifier = modifier.padding(start = 4.dp)) {
-            document.body().childNodes().fastForEach { node ->
-                HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+            // 方案 A+B：连续图片块合并成组（单图独立行、≥2 张进网格），其余块保持原序渲染
+            val blocks = remember(document) { groupHtmlBlocks(document.body().childNodes()) }
+            blocks.fastForEach { block ->
+                when (block) {
+                    is HtmlBlockRun.Nodes -> block.nodes.fastForEach { node ->
+                        HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                    }
+                    is HtmlBlockRun.Images -> MarkdownImageBlock(images = block.images)
+                }
             }
         }
+    }
+}
+
+/** 正文块分组结果：普通节点序列，或合并出的连续图片组 */
+private sealed interface HtmlBlockRun {
+    data class Nodes(val nodes: List<Node>) : HtmlBlockRun
+    data class Images(val images: List<MarkdownImageRef>) : HtmlBlockRun
+}
+
+/**
+ * 把 body 顶层节点分组：连续的「纯图片块」（独立 <img> 或仅含图片的 <p>）合并为 Images 组，
+ * 图片组之间被任何文本/结构块打断则重新开组。避免多张图各自为政、宽度参差。
+ */
+private fun groupHtmlBlocks(nodes: List<Node>): List<HtmlBlockRun> {
+    val blocks = mutableListOf<HtmlBlockRun>()
+    var pendingNodes = mutableListOf<Node>()
+    var pendingImages = mutableListOf<MarkdownImageRef>()
+    fun flushNodes() {
+        if (pendingNodes.isNotEmpty()) {
+            blocks += HtmlBlockRun.Nodes(pendingNodes.toList())
+            pendingNodes = mutableListOf()
+        }
+    }
+    fun flushImages() {
+        if (pendingImages.isNotEmpty()) {
+            blocks += HtmlBlockRun.Images(pendingImages.toList())
+            pendingImages = mutableListOf()
+        }
+    }
+    for (node in nodes) {
+        val images = node.blockImageRefs()
+        if (images != null) {
+            flushNodes()
+            pendingImages += images
+        } else {
+            flushImages()
+            pendingNodes += node
+        }
+    }
+    flushNodes()
+    flushImages()
+    return blocks
+}
+
+/** 独立 <img> 块或纯图片段落 → 图片引用列表；含文本/结构内容的块返回 null */
+private fun Node.blockImageRefs(): List<MarkdownImageRef>? {
+    if (this !is Element) return null
+    return when (tagName().lowercase()) {
+        "img" -> if (attr("src").isNotEmpty()) {
+            listOf(MarkdownImageRef(src = attr("src"), alt = attr("alt")))
+        } else {
+            null
+        }
+        "p" -> {
+            val images = mutableListOf<MarkdownImageRef>()
+            var hasOtherContent = false
+            childNodes().forEach { child ->
+                val isImage = child is Element && child.tagName().equals("img", true) && child.attr("src").isNotEmpty()
+                if (isImage) {
+                    images += MarkdownImageRef(src = child.attr("src"), alt = child.attr("alt"))
+                } else if (child !is TextNode || child.text().isNotBlank()) {
+                    hasOtherContent = true
+                }
+            }
+            if (images.isNotEmpty() && !hasOtherContent) images else null
+        }
+        else -> null
     }
 }
 
@@ -348,13 +422,18 @@ private fun HtmlParagraphContent(
     val hasBlockMath = element.select("span.math").any { it.attr("inline") != "true" }
 
     if (hasImages || hasBlockMath) {
-        // Mixed block content: render children individually in a FlowRow
-        FlowRow(
-            modifier = modifier.fillMaxWidth(),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            element.childNodes().fastForEach { child ->
-                HtmlInlineAsComposable(node = child, onClickCitation = onClickCitation)
+        // 方案 A：图片独立成行，不再与文字 FlowRow 混排（基线不齐、宽度参差的根源）；
+        // 连续图片合并成组（≥2 张进网格），文本片段保持 inline 渲染
+        val segments = remember(element) { splitInlineImageSegments(element) }
+        Column(modifier = modifier.fillMaxWidth()) {
+            segments.fastForEach { segment ->
+                when (segment) {
+                    is InlineSegment.TextNodes -> HtmlInlineGroup(
+                        nodes = segment.nodes,
+                        onClickCitation = onClickCitation,
+                    )
+                    is InlineSegment.Images -> MarkdownImageBlock(images = segment.images)
+                }
             }
         }
         return
@@ -785,6 +864,44 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
 }
 
 // ---- Inline-as-Composable rendering (for FlowRow mixed content) ----
+
+/** 混排段落拆分结果：连续文本节点片段，或合并出的连续图片组 */
+private sealed interface InlineSegment {
+    data class TextNodes(val nodes: List<Node>) : InlineSegment
+    data class Images(val images: List<MarkdownImageRef>) : InlineSegment
+}
+
+/** 段落 inline 子节点按「文本 / 连续图片」拆段，保持原顺序 */
+private fun splitInlineImageSegments(element: Element): List<InlineSegment> {
+    val segments = mutableListOf<InlineSegment>()
+    var textBuffer = mutableListOf<Node>()
+    var imageBuffer = mutableListOf<MarkdownImageRef>()
+    fun flushText() {
+        if (textBuffer.isNotEmpty()) {
+            segments += InlineSegment.TextNodes(textBuffer.toList())
+            textBuffer = mutableListOf()
+        }
+    }
+    fun flushImages() {
+        if (imageBuffer.isNotEmpty()) {
+            segments += InlineSegment.Images(imageBuffer.toList())
+            imageBuffer = mutableListOf()
+        }
+    }
+    element.childNodes().fastForEach { child ->
+        val isImage = child is Element && child.tagName().equals("img", true) && child.attr("src").isNotEmpty()
+        if (isImage) {
+            flushText()
+            imageBuffer += MarkdownImageRef(src = child.attr("src"), alt = child.attr("alt"))
+        } else {
+            flushImages()
+            textBuffer += child
+        }
+    }
+    flushText()
+    flushImages()
+    return segments
+}
 
 /**
  * Renders an individual Jsoup node as a standalone Composable.

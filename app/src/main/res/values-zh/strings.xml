@@ -1385,6 +1385,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="photo_solve_image_title">题目图片</string>
   <string name="photo_solve_from_gallery">相册</string>
   <string name="photo_solve_note_placeholder">例如：“第 3 问”“求详细过程”…</string>
+  <string name="photo_solve_note_entry">补充说明</string>
+  <string name="photo_solve_note_sheet_title">补充说明（选填）</string>
   <string name="photo_solve_solve">开始解题</string>
   <string name="photo_solve_cancel">停止</string>
   <string name="photo_solve_solving">解题中…</string>
@@ -1443,6 +1445,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="photo_solve_question_save">保存并重新解题</string>
   <string name="photo_solve_edit_cancel">取消</string>
   <string name="photo_solve_view_reasoning">查看全文</string>
+  <string name="photo_solve_crop_rotate">旋转 90°</string>
+  <string name="photo_solve_solving_wait">解题中 · 已等待 %1$d 秒</string>
+  <string name="photo_solve_previous_view">上一版</string>
+  <string name="photo_solve_previous_compare_hint">本题上一轮的完整解答，可点开对比</string>
+  <string name="photo_solve_previous_title">上一版解答</string>
+  <string name="photo_solve_previous_close">关闭</string>
   <string name="notification_solve_generation_title">正在解题…</string>
   <string name="tts">语音</string>
   <string name="unpin_chat">取消置顶聊天</string>

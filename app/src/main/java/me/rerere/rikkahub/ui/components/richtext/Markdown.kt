@@ -426,6 +426,68 @@ object HeaderStyle {
     )
 }
 
+/** AST 正文块分组结果：普通节点序列，或合并出的连续图片组 */
+private sealed interface AstBlockRun {
+    data class Nodes(val nodes: List<ASTNode>) : AstBlockRun
+    data class Images(val images: List<MarkdownImageRef>) : AstBlockRun
+}
+
+/** 从 IMAGE AST 节点提取图片引用；非 IMAGE 或缺 URL 返回 null */
+private fun astImageRefOrNull(node: ASTNode, content: String): MarkdownImageRef? {
+    if (node.type != MarkdownElementTypes.IMAGE) return null
+    val alt = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content) ?: ""
+    val url = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
+    if (url.isEmpty()) return null
+    return MarkdownImageRef(src = url, alt = alt)
+}
+
+/** 仅含图片的段落 → 图片引用列表（同一段落内多张图合并）；混排段落或非段落返回 null */
+private fun paragraphImageRefs(node: ASTNode, content: String): List<MarkdownImageRef>? {
+    if (node.type != MarkdownElementTypes.PARAGRAPH) return null
+    val images = mutableListOf<MarkdownImageRef>()
+    node.children.fastForEach { child ->
+        val image = astImageRefOrNull(child, content)
+        if (image != null) {
+            images += image
+        } else if (child.getTextInNode(content).isNotBlank()) {
+            return null
+        }
+    }
+    return if (images.isNotEmpty()) images else null
+}
+
+/** 顶层节点分组：连续纯图片段落合并为 Images 组，被任何文本/结构块打断则重新开组 */
+private fun groupAstBlocks(nodes: List<ASTNode>, content: String): List<AstBlockRun> {
+    val blocks = mutableListOf<AstBlockRun>()
+    var pendingNodes = mutableListOf<ASTNode>()
+    var pendingImages = mutableListOf<MarkdownImageRef>()
+    fun flushNodes() {
+        if (pendingNodes.isNotEmpty()) {
+            blocks += AstBlockRun.Nodes(pendingNodes.toList())
+            pendingNodes = mutableListOf()
+        }
+    }
+    fun flushImages() {
+        if (pendingImages.isNotEmpty()) {
+            blocks += AstBlockRun.Images(pendingImages.toList())
+            pendingImages = mutableListOf()
+        }
+    }
+    for (node in nodes) {
+        val images = paragraphImageRefs(node, content)
+        if (images != null) {
+            flushNodes()
+            pendingImages += images
+        } else {
+            flushImages()
+            pendingNodes += node
+        }
+    }
+    flushNodes()
+    flushImages()
+    return blocks
+}
+
 @Composable
 private fun MarkdownNode(
     node: ASTNode,
@@ -437,10 +499,17 @@ private fun MarkdownNode(
     when (node.type) {
         // 文件根节点
         MarkdownElementTypes.MARKDOWN_FILE -> {
-            node.children.fastForEach { child ->
-                MarkdownNode(
-                    node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
-                )
+            // 方案 A+B：连续纯图片段落合并成组（单图独立行、≥2 张进网格），其余块保持原序
+            val blocks = remember(node, content) { groupAstBlocks(node.children, content) }
+            blocks.fastForEach { block ->
+                when (block) {
+                    is AstBlockRun.Nodes -> block.nodes.fastForEach { child ->
+                        MarkdownNode(
+                            node = child, content = content, modifier = modifier, onClickCitation = onClickCitation
+                        )
+                    }
+                    is AstBlockRun.Images -> MarkdownImageBlock(images = block.images)
+                }
             }
         }
 
@@ -920,12 +989,42 @@ private fun Paragraph(
     modifier: Modifier,
 ) {
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
-        FlowRow(modifier = modifier) {
-            node.children.fastForEach { child ->
-                MarkdownNode(
-                    node = child, content = content, onClickCitation = onClickCitation
-                )
+        // 方案 A：图片独立成行，不再与文字 FlowRow 混排；文本片段保持原 inline 排版
+        Column(modifier = modifier) {
+            var textBuffer = mutableListOf<ASTNode>()
+            var imageBuffer = mutableListOf<MarkdownImageRef>()
+            @Composable
+            fun flushText() {
+                if (textBuffer.isNotEmpty()) {
+                    FlowRow {
+                        textBuffer.fastForEach { child ->
+                            MarkdownNode(
+                                node = child, content = content, onClickCitation = onClickCitation
+                            )
+                        }
+                    }
+                    textBuffer = mutableListOf()
+                }
             }
+            @Composable
+            fun flushImages() {
+                if (imageBuffer.isNotEmpty()) {
+                    MarkdownImageBlock(images = imageBuffer.toList())
+                    imageBuffer = mutableListOf()
+                }
+            }
+            node.children.fastForEach { child ->
+                val image = astImageRefOrNull(child, content)
+                if (image != null) {
+                    flushText()
+                    imageBuffer += image
+                } else {
+                    flushImages()
+                    textBuffer += child
+                }
+            }
+            flushText()
+            flushImages()
         }
         return
     }

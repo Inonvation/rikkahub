@@ -61,11 +61,17 @@ fun createQuestionSolverTools(
                 Avoid: general concept explanations ("what is Newton's second law"), casual chat,
                 or problems the user explicitly wants you to solve WITHOUT verification.
 
-                The sub-agent cannot see this conversation — restate the full problem in `question`
-                (self-contained) and pass any problem image paths via `image_paths`.
+                The sub-agent cannot see this conversation. When the image is attached via
+                `image_paths`, you do NOT need to transcribe the problem: the sub-agent reads the
+                image itself (it may be a stronger reader than you). Put into `question` only the
+                context you have: which problem to solve if the image holds several, any text you
+                can read, and the subject if known. A full transcription in `question` is required
+                only when you cannot attach the image.
                 After receiving the result, cross-verify it against your own analysis step by step,
                 point out any discrepancy, and give the user your final judgment — do not relay the
-                result verbatim without checking.
+                result verbatim without checking. If you have no vision and cannot independently
+                verify image-based work, relay the sub-agent's steps faithfully instead of rewriting
+                them from your own (possibly wrong) reading of the image.
             """.trimIndent(),
             // 行为强引导（随 system 注入）：解题类消息必须先派发解题子代理再作答。
             // 根因：模型默认倾向"自己会做就不调工具"，且行为层提示词有"简单事自己做"的反派发倾向，
@@ -83,6 +89,11 @@ fun createQuestionSolverTools(
                   but your final answer must reconcile your analysis with the sub-agent's result:
                   agree → answer confidently; disagree → point out the divergent step and justify
                   your conclusion.
+                - Cross-verification caveat: you can only reconcile steps you can independently
+                  verify. If the problem is image-based and you have no vision (or the image is the
+                  only source of truth), do NOT override the sub-agent's result based on your own
+                  reading of the image — relay its steps faithfully, clearly mark the parts you
+                  could not verify yourself, and let the user decide.
                 """.trimIndent()
             },
             parameters = {
@@ -92,10 +103,13 @@ fun createQuestionSolverTools(
                             put("type", "string")
                             put(
                                 "description",
-                                "The complete, self-contained problem statement in text form. " +
-                                    "For image-based problems, transcribe the question stem, known " +
-                                    "values and what is asked. Include the subject in a prefix when " +
-                                    "it is not obvious (e.g. \"[physics] ...\")."
+                                "The problem statement in text form. When images are attached via " +
+                                    "image_paths, this does NOT need to be a full transcription — " +
+                                    "the sub-agent reads the image itself. Provide only the context " +
+                                    "you have: which problem to solve if the image contains several " +
+                                    "(e.g. \"the 2nd question\"), any text you can read, and the " +
+                                    "subject if known (e.g. \"[physics] ...\"). A full transcription " +
+                                    "is required only when you cannot attach the image."
                             )
                         })
                         put("image_paths", buildJsonObject {
@@ -105,7 +119,9 @@ fun createQuestionSolverTools(
                                 "description",
                                 "Optional: local file paths of the problem image(s) taken from the " +
                                     "user messages in this conversation (file:// paths). The sub-agent " +
-                                    "supports vision when the configured solve model does."
+                                    "supports vision when the configured solve model does. If an image " +
+                                    "contains several problems and the user did not point to one, " +
+                                    "keep the crop to the intended problem when possible."
                             )
                         })
                         put("subject", buildJsonObject {

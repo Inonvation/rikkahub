@@ -1615,6 +1615,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="photo_solve_image_title">Problem Image</string>
   <string name="photo_solve_from_gallery">Gallery</string>
   <string name="photo_solve_note_placeholder">e.g. "Part 3", "show detailed steps"...</string>
+  <string name="photo_solve_note_entry">Add a note</string>
+  <string name="photo_solve_note_sheet_title">Optional note</string>
   <string name="photo_solve_solve">Solve</string>
   <string name="photo_solve_cancel">Stop</string>
   <string name="photo_solve_solving">Solving...</string>
@@ -1673,6 +1675,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="photo_solve_question_save">Save &amp; Solve Again</string>
   <string name="photo_solve_edit_cancel">Cancel</string>
   <string name="photo_solve_view_reasoning">View full reasoning</string>
+  <string name="photo_solve_crop_rotate">Rotate 90°</string>
+  <string name="photo_solve_solving_wait">Solving… waiting %1$d s</string>
+  <string name="photo_solve_previous_view">Previous version</string>
+  <string name="photo_solve_previous_compare_hint">The earlier solution for this problem — tap to compare</string>
+  <string name="photo_solve_previous_title">Previous Solution</string>
+  <string name="photo_solve_previous_close">Close</string>
   <string name="notification_solve_generation_title">Solving a problem…</string>
   <string name="tts">TTS</string>
   <string name="unpin_chat">Unpin the Chat</string>

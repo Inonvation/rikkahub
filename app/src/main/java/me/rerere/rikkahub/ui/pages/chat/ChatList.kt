@@ -396,10 +396,11 @@ private fun ChatListNormal(
         }
     }
     // 工作区图片解析器：AI 正文用 ![描述](/workspace/路径) 引用工作区图片时，
-    // 结合当前会话绑定的 workspace 解析成沙箱内实际文件 Uri（createWorkspace 时 root = id）
+    // 结合当前会话绑定的 workspace 解析成沙箱内实际文件 Uri（createWorkspace 时 root = id）。
+    // cwd 参与会话相对路径候选解析（AI 常相对 cwd 写图片路径），会话 cwd 变化时重建解析器与缓存
     val workspaceManager = koinInject<WorkspaceManager>()
-    val workspaceImgResolver = remember(assistant) {
-        workspaceImageResolver(workspaceManager, assistant?.workspaceId?.toString())
+    val workspaceImgResolver = remember(assistant, conversation.workspaceCwd) {
+        workspaceImageResolver(workspaceManager, assistant?.workspaceId?.toString(), conversation.workspaceCwd)
     }
     val modelById = remember(settings.providers) {
         settings.providers
