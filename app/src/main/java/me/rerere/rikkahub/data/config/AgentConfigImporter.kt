@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.AssistantRegex
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.utils.JsonInstant
 import java.io.File
@@ -209,10 +210,11 @@ object AgentConfigImporter {
             },
             avatar = if (has("avatar")) parseAvatar(dto.avatar) ?: current.avatar else current.avatar,
             useAssistantAvatar = if (has("useAssistantAvatar")) dto.useAssistantAvatar else current.useAssistantAvatar,
-            tags = if (has("tags")) {
-                dto.tags.mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
+            // 单归属：文件里的 tags 只取第一个作为分类，结束（历史多分类数据不保留）
+            category = if (has("tags")) {
+                dto.tags.mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }.firstOrNull()
             } else {
-                current.tags
+                current.effectiveCategory
             },
             systemPrompt = dto.systemPrompt.ifBlank { current.systemPrompt },
             temperature = dto.temperature ?: current.temperature,

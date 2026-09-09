@@ -1381,6 +1381,7 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="setting_files_page_clean_range_description">영구적으로 삭제할 파일을 선택하세요. 이 작업은 되돌릴 수 없습니다.</string>
   <string name="done">완료</string>
   <string name="assistant_category_all">전체</string>
+    <string name="assistant_category_other">기타</string>
   <string name="assistant_category_manage">카테고리 관리</string>
   <string name="assistant_category_count">어시스턴트 %1$d개</string>
   <string name="assistant_category_rename">카테고리 이름 변경</string>

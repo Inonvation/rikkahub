@@ -1939,6 +1939,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_files_page_clean_range_description">Select files to permanently delete. This action cannot be undone.</string>
   <string name="done">Done</string>
   <string name="assistant_category_all">All</string>
+  <string name="assistant_category_other">Other</string>
   <string name="assistant_category_manage">Manage Categories</string>
   <string name="assistant_category_count">%1$d assistants</string>
   <string name="assistant_category_rename">Rename Category</string>

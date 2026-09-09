@@ -53,6 +53,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV7Migration
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.ChatMode
 import me.rerere.rikkahub.data.model.ChatModePolicy
@@ -461,6 +462,9 @@ class SettingsStore(
                 },
                 assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
                     assistant.copy(
+                        // 单分类迁移：旧多分类数据取第一个归属落到 category，并清空遗留字段后随下次更新落盘
+                        category = assistant.category ?: assistant.effectiveCategory,
+                        tags = emptyList(),
                         // 过滤掉不存在的 MCP 服务器 ID
                         mcpServers = assistant.mcpServers.filter { serverId ->
                             serverId in validMcpServerIds

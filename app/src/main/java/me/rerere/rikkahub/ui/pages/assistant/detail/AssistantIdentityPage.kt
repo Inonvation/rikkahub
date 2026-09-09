@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.TagsInput
@@ -150,10 +151,10 @@ private fun AssistantIdentityContent(
                     modifier = Modifier.padding(8.dp),
                 ) {
                     TagsInput(
-                        value = assistant.tags,
+                        value = assistant.effectiveCategory,
                         tags = tags,
-                        onValueChange = { tagIds, tagList ->
-                            vm.updateTags(tagIds, tagList)
+                        onValueChange = { categoryId, tagList ->
+                            vm.updateCategory(categoryId, tagList)
                         },
                     )
                 }

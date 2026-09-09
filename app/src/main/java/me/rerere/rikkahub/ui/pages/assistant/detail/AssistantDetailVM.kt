@@ -23,6 +23,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import kotlin.uuid.Uuid
@@ -113,40 +114,38 @@ class AssistantDetailVM(
                 initialValue = emptyList(),
             )
 
-    fun updateTags(tagIds: List<Uuid>, tags: List<Tag>) {
+    /** 设置当前助手的归属分类（单归属：null = 未分类，归入「其他」） */
+    fun updateCategory(categoryId: Uuid?, categories: List<Tag>) {
         viewModelScope.launch {
             val settings = settings.value
             settingsStore.update(
                 settings = settings.copy(
-                    assistantTags = tags
+                    assistantTags = categories
                 )
             )
             update(
                 assistant.value.copy(
-                    tags = tagIds.toList()
+                    category = categoryId
                 )
             )
-            Log.d(TAG, "updateTags: ${tagIds.joinToString(",")}")
-            cleanupInvalidTagReferences()
+            cleanupInvalidCategoryReference()
         }
     }
 
     /**
-     * 只清理助手侧引用了不存在 tag id 的悬空引用。
+     * 清理助手侧指向不存在分类的悬空归属（落到「其他」）。
      * 不再隐式删除零引用的分类：分类是一级实体（助手页分类管理可见 0 助手分类），
      * 删除只能走分类管理的显式入口并同步清理引用。
      */
-    fun cleanupInvalidTagReferences() {
+    fun cleanupInvalidCategoryReference() {
         viewModelScope.launch {
             val settings = settings.value
             val validTagIds = settings.assistantTags.map { it.id }.toSet()
 
             val cleanedAssistants = settings.assistants.map { assistant ->
-                val validTags = assistant.tags.filter { tagId ->
-                    validTagIds.contains(tagId)
-                }
-                if (validTags.size != assistant.tags.size) {
-                    assistant.copy(tags = validTags)
+                val category = assistant.effectiveCategory
+                if (category != null && category !in validTagIds) {
+                    assistant.copy(category = null)
                 } else {
                     assistant
                 }

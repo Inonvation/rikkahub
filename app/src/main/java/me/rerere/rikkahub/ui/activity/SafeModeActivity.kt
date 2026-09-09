@@ -49,6 +49,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.ui.components.ai.AssistantCategoryTabRow
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
@@ -191,7 +192,7 @@ private fun AssistantPickerSheet(
     val filteredAssistants = remember(settings.assistants, settings.assistantTags, selectedCategoryIdNormalized) {
         val categoryId = selectedCategoryIdNormalized
         if (categoryId == null) settings.assistants
-        else settings.assistants.filter { categoryId in it.tags }
+        else settings.assistants.filter { it.effectiveCategory == categoryId }
     }
 
     ModalBottomSheet(

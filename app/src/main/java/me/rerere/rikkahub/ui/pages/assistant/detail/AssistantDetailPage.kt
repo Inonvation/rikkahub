@@ -33,6 +33,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.ui.components.ui.IosGroup
 import me.rerere.rikkahub.ui.components.ui.IosGroupScope
 import me.rerere.rikkahub.ui.components.ui.SettingListScaffold
@@ -88,7 +89,7 @@ fun AssistantDetailPage(id: String) {
                 settingItem("记忆与上下文", memorySummary(assistant), HugeIcons.Brain02) {
                     navController.navigate(Screen.AssistantMemory(id))
                 }
-                settingItem("身份与外观", basicSummary(assistant), HugeIcons.IdentityCard) {
+                settingItem("身份与外观", basicSummary(assistant, settings.assistantTags), HugeIcons.IdentityCard) {
                     navController.navigate(Screen.AssistantIdentity(id))
                 }
                 settingItem("能力与工具", toolsSummary(assistant, settings, enabledMcpCount), HugeIcons.Wrench01) {
@@ -148,8 +149,12 @@ private fun AssistantHeader(
 
 // ---- 分组摘要（供总览页与二级入口页共用） ----
 
-internal fun basicSummary(assistant: Assistant): String =
-    "标签 ${assistant.tags.size} 个 · ${appearanceSummary(assistant)}"
+internal fun basicSummary(assistant: Assistant, categories: List<me.rerere.rikkahub.data.model.Tag>): String {
+    val categoryName = assistant.effectiveCategory?.let { id ->
+        categories.find { it.id == id }?.name
+    }
+    return "分类：${categoryName ?: "未分类"} · ${appearanceSummary(assistant)}"
+}
 
 internal fun modelSummary(assistant: Assistant): String {
     val model = if (assistant.chatModelId == null) "跟随全局聊天模型" else "已指定聊天模型"

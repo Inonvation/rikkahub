@@ -29,7 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastForEach
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
@@ -38,18 +37,22 @@ import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import kotlin.uuid.Uuid
 
+/**
+ * 分类单选输入：一个助手至多属于一个分类（null = 未分类）。
+ * 展示当前选中分类 chip（点击取消），+ 弹窗里单选其它分类或新建并选中。
+ */
 @Composable
 fun TagsInput(
-    value: List<Uuid>,
+    value: Uuid?,
     tags: List<Tag>,
     modifier: Modifier = Modifier,
-    onValueChange: (value: List<Uuid>, tags: List<Tag>) -> Unit,
+    onValueChange: (categoryId: Uuid?, tags: List<Tag>) -> Unit,
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     val hapticController = rememberHaptic()
 
-    // 根据value获取对应的tags
-    val selectedTags = tags.filter { tag -> value.contains(tag.id) }
+    // 当前选中的分类
+    val selectedTag = tags.find { it.id == value }
 
     FlowRow(
         modifier = modifier,
@@ -57,11 +60,11 @@ fun TagsInput(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         itemVerticalAlignment = Alignment.CenterVertically
     ) {
-        // 显示已选择的tags
-        selectedTags.fastForEach { tag ->
+        // 显示当前选中的分类（可点击取消归属）
+        if (selectedTag != null) {
             InputChip(onClick = {}, label = {
-                Text(tag.name)
-            }, selected = false, trailingIcon = {
+                Text(selectedTag.name)
+            }, selected = true, trailingIcon = {
                 Icon(
                     imageVector = HugeIcons.Cancel01,
                     contentDescription = null,
@@ -69,16 +72,14 @@ fun TagsInput(
                         .size(16.dp)
                         .clickable {
                             hapticController.lightTap()
-                            onValueChange(
-                                value.filter { it != tag.id }, tags
-                            )
+                            onValueChange(null, tags)
                         },
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             })
         }
 
-        // 添加按钮
+        // 添加/修改按钮
         Surface(
             shape = CircleShape,
             tonalElevation = 2.dp,
@@ -96,13 +97,13 @@ fun TagsInput(
         }
     }
 
-    // 添加tag对话框
+    // 选择分类对话框
     if (showAddDialog) {
         var tagName by remember { mutableStateOf("") }
         var showError by remember { mutableStateOf(false) }
 
-        // 获取未选择的标签
-        val unselectedTags = tags.filter { tag -> !value.contains(tag.id) }
+        // 除当前已选分类外均可单选
+        val selectableTags = tags.filter { it.id != value }
 
         AlertDialog(onDismissRequest = {
             showAddDialog = false
@@ -112,8 +113,8 @@ fun TagsInput(
             Text(stringResource(R.string.tag_input_dialog_title))
         }, text = {
             Column {
-                // 显示现有标签列表（如果有未选择的标签）
-                if (unselectedTags.isNotEmpty()) {
+                // 显示现有分类列表（可单选）
+                if (selectableTags.isNotEmpty()) {
                     Text(
                         text = stringResource(R.string.tag_input_dialog_existing_tags),
                         style = MaterialTheme.typography.labelMedium,
@@ -127,11 +128,11 @@ fun TagsInput(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        unselectedTags.forEach { tag ->
+                        selectableTags.forEach { tag ->
                             InputChip(
                                 onClick = {
                                     hapticController.lightTap()
-                                    onValueChange(value + tag.id, tags)
+                                    onValueChange(tag.id, tags)
                                     showAddDialog = false
                                     tagName = ""
                                     showError = false
@@ -151,7 +152,7 @@ fun TagsInput(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // 输入新标签名称
+                // 输入新分类名称
                 OutlinedTextField(
                     value = tagName,
                     onValueChange = {
@@ -181,16 +182,16 @@ fun TagsInput(
                     hapticController.lightTap()
                     if (tagName.isNotBlank()) {
                         val trimmedName = tagName.trim()
-                        // 检查是否已存在同名标签
+                        // 检查是否已存在同名分类
                         val existingTag =
                             tags.find { it.name.equals(trimmedName, ignoreCase = true) }
                         if (existingTag != null) {
-                            // 如果存在同名标签，显示错误信息
+                            // 如果存在同名分类，显示错误信息
                             showError = true
                         } else {
-                            // 创建新标签
+                            // 创建新分类并选中
                             val newTag = Tag(id = Uuid.random(), name = trimmedName)
-                            onValueChange(value + newTag.id, tags + newTag)
+                            onValueChange(newTag.id, tags + newTag)
                             showAddDialog = false
                             tagName = ""
                             showError = false

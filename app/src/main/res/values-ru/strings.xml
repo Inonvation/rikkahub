@@ -1381,6 +1381,7 @@
   <string name="setting_files_page_clean_range_description">Выберите файлы для окончательного удаления. Это действие нельзя отменить.</string>
   <string name="done">Готово</string>
   <string name="assistant_category_all">Все</string>
+    <string name="assistant_category_other">Другое</string>
   <string name="assistant_category_manage">Управление категориями</string>
   <string name="assistant_category_count">Ассистентов: %1$d</string>
   <string name="assistant_category_rename">Переименовать категорию</string>

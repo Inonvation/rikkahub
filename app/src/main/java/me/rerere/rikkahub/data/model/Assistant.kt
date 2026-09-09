@@ -20,6 +20,21 @@ data class Assistant(
     val name: String = "",
     val avatar: Avatar = Avatar.Dummy,
     val useAssistantAvatar: Boolean = false, // 使用助手头像替代模型头像
+    /**
+     * 所属分类（单分类语义）：一个助手至多属于一个分类，null = 未分类（归入「其他」组）。
+     *
+     * 根因：分类浏览从「多对多标签」收敛为「单归属分组」，避免同一助手在多个分类里重复出现、
+     * 也避免分组计数与组内排序在交叉归属时无法定义。
+     */
+    val category: Uuid? = null,
+    /**
+     * 旧的多分类字段，仅用于解码历史数据并迁移到 [category]，新逻辑一律读写 [category]。
+     *
+     * 保留字段而非直接重命名/删除：Settings 是整包 JSON 序列化（ignoreUnknownKeys=true），
+     * 一旦字段消失，旧数据里的分类引用会被静默丢弃且无法迁移；读取侧由
+     * [Assistant.effectiveCategory] 兜底并清空本字段后落盘。
+     */
+    @Deprecated("仅兼容历史数据的解码，迁移到 category 后不再使用")
     val tags: List<Uuid> = emptyList(),
     val systemPrompt: String = "",
     val temperature: Float? = null,
@@ -74,6 +89,14 @@ data class Assistant(
     val enabledStudyTools: List<String> = emptyList(), // 启用的学习工具名称列表（save_vocabulary, save_note, save_wrong_question, save_knowledge_card, quiz_user）
     val studySubject: String = "", // 学科标识（english, math, politics, mechanics），用于错题本和知识点卡片的科目分类
 )
+
+/**
+ * 助手的有效分类：优先新字段 [Assistant.category]，历史多分类数据取第一个完成收敛。
+ *
+ * UI/业务层统一走这里，避免各处重复写 `category ?: tags.firstOrNull()`。
+ */
+val Assistant.effectiveCategory: Uuid?
+    get() = category ?: @Suppress("DEPRECATION") tags.firstOrNull()
 
 @Serializable
 data class QuickMessage(

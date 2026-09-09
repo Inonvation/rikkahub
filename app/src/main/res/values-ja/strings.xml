@@ -1381,6 +1381,7 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="setting_files_page_clean_range_description">完全に削除するファイルを選択してください。この操作は元に戻せません。</string>
   <string name="done">完了</string>
   <string name="assistant_category_all">すべて</string>
+    <string name="assistant_category_other">その他</string>
   <string name="assistant_category_manage">カテゴリ管理</string>
   <string name="assistant_category_count">アシスタント %1$d 件</string>
   <string name="assistant_category_rename">カテゴリ名を変更</string>

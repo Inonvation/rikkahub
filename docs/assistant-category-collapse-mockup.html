@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="0GEYQZA6VVbsCd9FB7Ek7U">
+<head data-page-node-id="JQcj9VWbEaTDRiEBnnC7Cu">
+<meta charset="UTF-8" data-page-node-id="5EhYGwey9ktpFP4PM2IxqA">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="DWeNnrnXgNIJOM5V54Qb44">
+<title>助手分类 · 折叠分组浏览提案（v1）</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --sub: #8e8e93;
+    --sep: #e5e5ea;
+    --accent: #007aff;
+    --accent-soft: #e5f1ff;
+    --chevron: #c7c7cc;
+    --frame: #1c1c1e;
+    --purple-bg: #efe7fb; --purple-tx: #6b4fa3;
+    --green-bg: #e2f6e6; --green-tx: #2e7d43;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; }
+  body { background: #d9dce3; min-height: 100vh; padding: 32px 24px 64px; }
+  .doc { max-width: 1180px; margin: 0 auto; }
+  .doc h1 { font-size: 22px; margin-bottom: 6px; }
+  .doc .ver { font-size: 12px; color: #888; margin-bottom: 12px; }
+  .stage { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
+  .phone {
+    width: 393px; background: var(--bg);
+    border-radius: 44px; border: 10px solid var(--frame);
+    box-shadow: 0 24px 60px rgba(0,0,0,.35);
+    overflow: hidden; position: relative; display: flex; flex-direction: column;
+    flex: none; height: 780px;
+  }
+  .statusbar { height: 44px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 28px 8px; font-size: 14px; font-weight: 600; }
+  .sig { display: inline-block; width: 16px; height: 10px; }
+  .batt { display: inline-block; width: 22px; height: 11px; border: 1.4px solid var(--text); border-radius: 3px; position: relative; }
+  .batt::after { content:""; position:absolute; inset: 1.5px; right: 5px; background: var(--text); border-radius: 1px; }
+  .topbar { padding: 2px 14px 6px; display: flex; align-items: center; gap: 4px; }
+  .topbar .back { width: 40px; height: 40px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .topbar .back svg { width: 24px; height: 24px; stroke: var(--accent); fill:none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .topbar .title { font-size: 28px; font-weight: 800; flex: 1; }
+  .topbar .add { width: 38px; height: 38px; border-radius: 50%; display:flex; align-items:center; justify-content:center; }
+  .topbar .add svg { width: 22px; height: 22px; stroke: var(--accent); fill:none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  /* search */
+  .search { margin: 4px 16px 8px; background: #e3e3e8; border-radius: 12px; height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--sub); font-size: 15px; flex: none; }
+  .search svg { width: 17px; height: 17px; stroke: var(--sub); fill:none; stroke-width: 2; stroke-linecap: round; }
+  .search .clr { margin-left: auto; display:none; }
+  .search.on .clr { display:block; }
+  .search.on .ph { display:none; }
+  /* group list */
+  .list { flex: 1; overflow-y: auto; padding: 4px 12px 16px; }
+  .grouphead {
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 8px 7px; cursor: pointer; user-select: none; -webkit-user-select: none;
+  }
+  .grouphead svg { width: 18px; height: 18px; stroke: var(--accent); fill:none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; flex: none; transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  .grouphead.collapsed svg { transform: rotate(-90deg); }
+  .grouphead .nm { font-size: 14px; font-weight: 700; color: var(--accent); flex: 1; letter-spacing: .2px; }
+  .grouphead .ct { font-size: 12px; color: var(--sub); font-weight: 500; }
+  .grouphead:active { opacity: .55; }
+  .gbody { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .32s cubic-bezier(.33,.6,.25,1); }
+  .group.collapsed .gbody { grid-template-rows: 0fr; }
+  .gbody > .ginner { overflow: hidden; min-height: 0; }
+  .gcards { display: flex; flex-direction: column; gap: 7px; padding: 2px 0 4px; }
+  /* assistant card */
+  .acard { background: var(--card); border-radius: 16px; padding: 12px; display: flex; gap: 11px; align-items: center; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 19px; }
+  .acard .mid { flex: 1; min-width: 0; }
+  .acard .name { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acard .tags { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
+  .tchip { font-size: 11px; padding: 2px 9px; border-radius: 10px; background: var(--purple-bg); color: var(--purple-tx); font-weight: 500; white-space: nowrap; }
+  .tchip.mem { background: var(--green-bg); color: var(--green-tx); }
+  .dots { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; opacity: .9; }
+  .dots svg { width: 19px; height: 19px; stroke: var(--sub); fill:none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  /* drag affordance on "all" group card only */
+  .allcard { box-shadow: 0 1px 0 rgba(0,0,0,.02); }
+  .allcard .grip { flex: none; color: #c9c9ce; font-size: 11px; letter-spacing: -1px; align-self: center; visibility: hidden; }
+  .allgrp.open .allcard .grip { visibility: visible; }
+  .dragbadge { font-size: 11px; color: var(--sub); padding: 2px 8px 8px; display: flex; gap: 5px; align-items: center; }
+  .dragbadge svg { width: 12px; height: 12px; stroke: var(--sub); fill:none; stroke-width: 2; }
+  .addcard { border: 1.6px dashed var(--chevron); border-radius: 16px; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--sub); font-size: 13.5px; background: transparent; }
+  .addcard svg { width: 15px; height: 15px; stroke: var(--sub); fill:none; stroke-width: 2; stroke-linecap: round; }
+  /* manage footer */
+  .mngfoot { display: flex; align-items: center; gap: 8px; padding: 13px 10px 4px; color: var(--sub); font-size: 14px; cursor: pointer; }
+  .mngfoot svg { width: 17px; height: 17px; stroke: var(--sub); fill:none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mngfoot:active { opacity: .5; }
+  .footnote { font-size: 11.5px; color: #a0a0a6; padding: 10px 8px 0; line-height: 1.6; }
+  /* ===== search mode ===== */
+  .phone.search .grouphead, .phone.search .catgrp, .phone.search .mngfoot, .phone.search .dragbadge, .phone.search .grip { display: none; }
+  .phone.search .allgrp .gbody { grid-template-rows: 1fr; }
+  /* ===== notes ===== */
+  .notes { flex: 1; min-width: 300px; max-width: 560px; }
+  .notes .panel { background: #fff; border-radius: 16px; padding: 20px 22px; box-shadow: 0 8px 28px rgba(0,0,0,.10); margin-bottom: 16px; }
+  .notes h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .notes h3 .tag { font-size: 11px; background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 8px; font-weight: 700; }
+  .notes ul { list-style: none; }
+  .notes li { font-size: 13px; color: #444; line-height: 1.75; padding-left: 20px; position: relative; margin-bottom: 3px; }
+  .notes li::before { content: ""; position: absolute; left: 4px; top: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .55; }
+  .notes li b { color: var(--text); }
+  .notes li .k { font-weight: 700; color: var(--accent); }
+  .notes li.warn::before { background: #ff9f0a; }
+  .notes .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .notes .btn { border: 1px solid var(--sep); background: #fff; border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+  .notes .btn.on { background: var(--frame); color: #fff; border-color: var(--frame); }
+  .notes .btn:active { opacity: .7; }
+  .notes .ask { background: #fff7ec; border: 1px solid #ffe2b8; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.8; margin-bottom: 16px; }
+  .notes .ask b { color: #b25e00; }
+  .hintline { font-size: 12px; color: #666; line-height: 1.8; }
+</style>
+</head>
+<body data-page-node-id="1WIfmROt0NaMM3RCGEWODk">
+<div class="doc" data-page-node-id="H2wTEXdqwwWHiA48kKvbIr">
+  <h1 data-page-node-id="aSevjZWSGPQBdm3fR6C7Fg">助手分类 · 折叠分组浏览提案 v1</h1>
+  <div class="ver" data-page-node-id="0IHXrhXEqBt2u7XOfUEZsn">参照：设置 → 模型供应商 →「可用模型」分组折叠样式 · 交互稿（点击组头体验展开/收起平滑动画）</div>
+
+  <div class="stage" data-page-node-id="oVW1sWMkfGLdYhgTczBIcH">
+    <div class="phone" id="phone" data-page-node-id="uWPPBJEsuO0p9o0UI9EXyw">
+      <div class="statusbar" data-page-node-id="u1fotGmLjDwWDbUJiUljAd">
+        <span data-page-node-id="oKojsIqWU7F2GCokNdr6Lc">9:41</span>
+        <span class="right" data-page-node-id="gtMhJumeB6T40euuhYwD5j"><span class="sig" data-page-node-id="UMgoAHtUOUauBFKwa0WKEH">▲</span><span class="batt" data-page-node-id="kK0i4APsTgM2yREUuYxdH6"></span></span>
+      </div>
+      <div class="topbar" data-page-node-id="8CHeCA4zdVypQadZRv3FLX">
+        <span class="back" data-page-node-id="2idySCl05nOGbExzBfrPBT"><svg viewBox="0 0 24 24" data-page-node-id="BlVJy2rdChSyMNtYxvx3UJ"><path d="M15 5l-7 7 7 7" data-page-node-id="imjSBB3xrfgRIEgiVZtR0r"/></svg></span>
+        <span class="title" data-page-node-id="6Ao6cL2x1zeBwzQHRO4vC7">助手</span>
+        <span class="add" data-page-node-id="ri5EVFmK0wGMKFvYlwbah7"><svg viewBox="0 0 24 24" data-page-node-id="wWLNrUNCwo1fFUQZhHkPFG"><path d="M12 5v14M5 12h14" data-page-node-id="xDN1B4M5Ck6G1rsrdXKF4r"/></svg></span>
+      </div>
+      <div class="search" id="searchbox" data-page-node-id="6KypIwMhqNVSqthxj8GxY1">
+        <svg viewBox="0 0 24 24" data-page-node-id="wN5SA4cRCMZ1NFVgcDHalW"><circle cx="11" cy="11" r="7" data-page-node-id="U0rljS6r9BTZEuN3l4d65n"/><path d="M20 20l-3.5-3.5" data-page-node-id="svVM5TBSUaF7GXVsm9GoIU"/></svg>
+        <span class="ph" data-page-node-id="qQTJl9eglH2nNMW1THmEKM">搜索助手名称…</span>
+        <span class="clr" data-page-node-id="awvAfbXMnIYlZs5veAu6Jh"><svg viewBox="0 0 24 24" width="15" height="15" stroke="#8e8e93" fill="none" stroke-width="2" data-page-node-id="mQhiSHcb2WNmd4GxfMIvaN"><path d="M6 6l12 12M18 6L6 18" data-page-node-id="PKFGF982hly8Jy829tC2wJ"/></svg></span>
+      </div>
+
+      <div class="list" id="list" data-page-node-id="CATStxBdQtYqPshG9UDgNH">
+        <!-- 全部组 -->
+        <div class="group allgrp open" data-g="all" data-page-node-id="vf9z7i0LQSg00DyZDOpwL4">
+          <div class="grouphead" data-page-node-id="7uRROBdmtZ9EvXf5tvP7g0">
+            <svg viewBox="0 0 24 24" data-page-node-id="FwT9GkOk53TvNTStuUVcad"><path d="M6 9l6 6 6-6" data-page-node-id="NbGeG55aBwzSzqeqVgQIsR"/></svg>
+            <span class="nm" data-page-node-id="6zKcRiSBQLXeLlS6rzCUU2">全部</span>
+            <span class="ct" data-page-node-id="VQ4H6H9TOJ9nJfNgpqYj0C">8</span>
+          </div>
+          <div class="gbody" data-page-node-id="en6gqYMFlOh2m9tUDiWXAP"><div class="ginner" data-page-node-id="UVu8a3B36Q0xpnqdqBIcqP"><div class="gcards" data-page-node-id="dhlMalqJxF8mw8EyZEgI7u">
+            <div class="acard allcard" data-page-node-id="DOrGhECqrgoa2x4GF5HT54"><span class="grip" data-page-node-id="bpzjxMWim2tNAXeZX5HX5x">⠿</span>
+              <span class="avatar" style="background:#e5f1ff" data-page-node-id="WZb8gLS1H0ifn8K8tEeS2z">💬</span>
+              <div class="mid" data-page-node-id="ZSLE3WxgCk2CpfDsUTyQKl"><div class="name" data-page-node-id="UoO9P2pEp1hSQQlzPfKWxg">日常问答</div><div class="tags" data-page-node-id="jLRpu08fylQ7fhl0F9RG9Y"><span class="tchip mem" data-page-node-id="ts3qnwAcFP07cq4jjPplgT">记忆 12</span></div></div>
+              <span class="dots" data-page-node-id="hlUwDOJnIdhvV7hvXs2qR4"><svg viewBox="0 0 24 24" data-page-node-id="b5XnD6WJEuDKClPTtdRNOT"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="OXf7RccLpZsQPL6WDedOqy"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="qqJS1nATXrAQGdEOhoR6Vn"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="cJdahgLlRxR259aGMwLjET"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="dxyGileUuGEW9FjfZG6k4w"><span class="grip" data-page-node-id="wPFVZyuyzM9F8iGFOKwu1U">⠿</span>
+              <span class="avatar" style="background:#fff1e0" data-page-node-id="W0jiuvWeb7F7wbeXOQbCqY">📖</span>
+              <div class="mid" data-page-node-id="wMXniVl2rAbIJpDaE6xRuI"><div class="name" data-page-node-id="n8CkU4UYqu98zo25t2jIxA">英语导师</div><div class="tags" data-page-node-id="ote1yoalIUHLS04sDmziaM"><span class="tchip" data-page-node-id="7dpEANjjXYmMWAAL3x7rFh">学习</span><span class="tchip" data-page-node-id="wjvtkKSkgf6SCEj9t2wYhM">外语</span></div></div>
+              <span class="dots" data-page-node-id="XbGRX4GMV1dvPMi2UDWrHy"><svg viewBox="0 0 24 24" data-page-node-id="5IkakvnOlYWKz1Q8h64r4q"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="zhJaYkOC5B8zRyrj46g87W"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="mD1HdAaDcICVcZ8ZQRtI1C"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="XFBFptEBluyYMulYN3bixu"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="HA8M3pSLXsnByPx7gZkya9"><span class="grip" data-page-node-id="hMlRbKYOKjomcwwVAQBYNB">⠿</span>
+              <span class="avatar" style="background:#e9f7ee" data-page-node-id="sNyxRFwbnYAArUTyHFwonE">🧮</span>
+              <div class="mid" data-page-node-id="nt3imSEKleN9eDZm2zvxb0"><div class="name" data-page-node-id="w5KCWYf3pytLonIaDm5VXh">数学导师</div><div class="tags" data-page-node-id="tWJc9D3hHYbfBDodLlxTsu"><span class="tchip" data-page-node-id="eFnzgvJ5C2o3t1UdIcLLfR">学习</span></div></div>
+              <span class="dots" data-page-node-id="cLIcZrQrfgdcBfelYUxAtu"><svg viewBox="0 0 24 24" data-page-node-id="X6la2L6SWWOFCoxrWxpCya"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="gfiTacs8dOKU5qyOAtl0AO"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="EAs7kjKKn0NU66EFZbANcw"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="KF2YyAqdXecGaFoDD6yTX4"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="GE3YQED8LYwLALw0t2LrPP"><span class="grip" data-page-node-id="HRiYz8faOY36khTGzdsGdR">⠿</span>
+              <span class="avatar" style="background:#fdeaea" data-page-node-id="Ijic0xiKZgGkzahvdkfAkn">📜</span>
+              <div class="mid" data-page-node-id="3r9ogLYoPmTdYyrOwbFrMI"><div class="name" data-page-node-id="pd9w9SyqwuDgf168jhuKKN">政治导师</div><div class="tags" data-page-node-id="KfBD5cQJuXZBmpV6IQ9qxB"><span class="tchip" data-page-node-id="3CyPA9LRcu77iGw3qvXkBj">学习</span></div></div>
+              <span class="dots" data-page-node-id="XmHAjluANhdoJpVMF5d2jd"><svg viewBox="0 0 24 24" data-page-node-id="WmyFx72JeHB4KtBKeUgjnc"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="zIcFtszDCEZfMF8TsKf45f"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="bACl5IxuMKBDC2PguImjzU"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="TvdgE4mjHBAJLVqP9s0Kgu"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="sCeFGkAVztCm1aSeoOMiec"><span class="grip" data-page-node-id="3XpnxfX0pXyhC19huQuRuz">⠿</span>
+              <span class="avatar" style="background:#efe7fb" data-page-node-id="lmrlrosOw1vCt8d8TgIaRC">⚙️</span>
+              <div class="mid" data-page-node-id="gnjbqnIAfU382jdTzFA2Qk"><div class="name" data-page-node-id="I1Y3fkXIbWRgDuBr1lLtSR">机械原理</div><div class="tags" data-page-node-id="u1ItpAuaWPkiZzEGadUfCn"><span class="tchip" data-page-node-id="jDPqjsCRhmKwq3lZnnszCn">学习</span><span class="tchip mem" data-page-node-id="1IPD7xCNDek6tgE23Za6Mz">记忆 3</span></div></div>
+              <span class="dots" data-page-node-id="jjosO14F4DxJzDQNGeIczE"><svg viewBox="0 0 24 24" data-page-node-id="Npv3AyNzcoD7zvWkZY8eQD"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="7Dbn7Z29API5ee2WLwGYwG"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="BzHCRUsgwQWYZV1rG6ZwdM"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="l6U1ZTjhIxEq9Q8XhFXBtK"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="rDNLtZxyjvyHP9IzCBkPKp"><span class="grip" data-page-node-id="dg5O9zH1xTmgm5dfyzk0YV">⠿</span>
+              <span class="avatar" style="background:#f0f2f7" data-page-node-id="dDAHkG4TJeSO9dyhBp3AZ1">✍️</span>
+              <div class="mid" data-page-node-id="Kz1BP3r0LolaI1jsOFgCDn"><div class="name" data-page-node-id="wxo2J2zvWGDzwgu6hhjswH">论文润色</div><div class="tags" data-page-node-id="L01RuP656vJDyUPdJkUfif"><span class="tchip" data-page-node-id="WyfIUMDb3ZvZGhYCa5rN9G">外语</span></div></div>
+              <span class="dots" data-page-node-id="lBjQgVDv9KvQuddOQcIl8w"><svg viewBox="0 0 24 24" data-page-node-id="KRomQP0VMkYCjRgqS2ILHK"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="OyQg8TSc0HFlZz78vpl5Hb"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="Jt2vf1AERomRJ5noHKS4Jy"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="EXKLFL0n3SnexjGbj8MNXp"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="0ADkOPkJZlL4svO7sHgPCB"><span class="grip" data-page-node-id="iddPK03es4Yt7nW3Hriw3f">⠿</span>
+              <span class="avatar" style="background:#e6f2fb" data-page-node-id="OeFIJ0eV9xQ32K35IAVS6f">🧑‍💻</span>
+              <div class="mid" data-page-node-id="Lx7BHdLQkC3Hl6KjtojEkD"><div class="name" data-page-node-id="8Mkv17WUSRg8kzDHFZFjGb">代码助手</div><div class="tags" data-page-node-id="K18AXEhHIq1BoFhXRfxysD"><span class="tchip" data-page-node-id="dDawVgO5U8FdqwMHPDU5Ov">工具</span></div></div>
+              <span class="dots" data-page-node-id="seekkonJuv7s3CDYUM3N9x"><svg viewBox="0 0 24 24" data-page-node-id="PZTwMriXeO6JIHKXCEqrxT"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="PZXYmVOnkbbab0g2rHY4JH"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="umgEXJATZ9tx91kmUPwVgk"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="weVE9MqExmLOBtTP0Vz7TW"/></svg></span>
+            </div>
+            <div class="acard allcard" data-page-node-id="SSGCJHxqTLn9lCJbEVEwb5"><span class="grip" data-page-node-id="iBtWMZWMdlOLEETRlGbtOH">⠿</span>
+              <span class="avatar" style="background:#e6f7f1" data-page-node-id="vZi2HDB2YPuOA8a8WYHbnc">📰</span>
+              <div class="mid" data-page-node-id="qw9KLYUz91Ik2A8iTo6o1f"><div class="name" data-page-node-id="H3xZx1P44Um2Pu6x5Jytm8">每日新闻</div><div class="tags" data-page-node-id="ViAqldYyUA3ps5fbXjPtQz"><span class="tchip" data-page-node-id="vPBTsuVBQNFD1IBmJ9JSmJ">工具</span><span class="tchip mem" data-page-node-id="dTMMx1O7WnMxT89BS5CW3F">记忆 8</span></div></div>
+              <span class="dots" data-page-node-id="U6Si0waO1vq5UMKQaCotvs"><svg viewBox="0 0 24 24" data-page-node-id="Sw6dWzukW1bhpvMXXdCsMo"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="OTB0CmFZ4odrLwsu6pwfJM"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="rQrHAd5IByJKBCAlssFFtD"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="o1RKT6ztEEgStv3P3B14r0"/></svg></span>
+            </div>
+          </div></div></div>
+          <div class="dragbadge" data-page-node-id="l05MB1QE7n8mObryxsAY5g">长按卡片拖动排序（仅「全部」组内可用）</div>
+        </div>
+
+        <!-- 学习 -->
+        <div class="group catgrp open" data-g="学习" data-page-node-id="fQFWhfIC9bT6aRkdeyeEWK">
+          <div class="grouphead" data-page-node-id="MHo020XjMG5HyiiucVIGtN">
+            <svg viewBox="0 0 24 24" data-page-node-id="yu8mjrKcbKTauAgWUI1mig"><path d="M6 9l6 6 6-6" data-page-node-id="FM94Wy8neo3Iw9TzgEL53F"/></svg>
+            <span class="nm" data-page-node-id="RhwEp4dzgU7lGl2jtAHz82">学习</span><span class="ct" data-page-node-id="gDUodWKPRKSASP1pKlREhL">4</span>
+          </div>
+          <div class="gbody" data-page-node-id="u6KGzCMz2y9Wp4FSGcJ4LY"><div class="ginner" data-page-node-id="DmgDD6dtz1l7AxYppSLwE1"><div class="gcards" data-page-node-id="WmqmHWx3GuAFQtu1zEFdZF">
+            <div class="acard" data-page-node-id="gVoZBHjPHCLuClA8ljCduj"><span class="avatar" style="background:#fff1e0" data-page-node-id="hNMOfOAO0AgDxmm4ragiGG">📖</span><div class="mid" data-page-node-id="eF3f0c6V7nQ3zV2NgXdNBV"><div class="name" data-page-node-id="XKbQPVMh5SrvavTr8pOK4O">英语导师</div><div class="tags" data-page-node-id="vfQh2IBoSxMCo75XxiKPsa"><span class="tchip" data-page-node-id="ayLMm7ldkQcQZQAcGvY9Rp">学习</span><span class="tchip" data-page-node-id="iUVGTqTY0oGYmdIpnFWCgQ">外语</span></div></div><span class="dots" data-page-node-id="QRapmBe5MUw6RoLMbc4sA4"><svg viewBox="0 0 24 24" data-page-node-id="VUmeKxjPr3QipJaHYAWJIe"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="qPG9J9CuGUBXzgdtlhPwnv"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="oW7UUEuTiiPUwwnyCHkm5Y"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="PDSsBjBbqL9ipEjj0hqbPy"/></svg></span></div>
+            <div class="acard" data-page-node-id="Ae3dNyPR55X0l5SGhP2J4r"><span class="avatar" style="background:#e9f7ee" data-page-node-id="EuCKwEqxKIGHDJuEz621GT">🧮</span><div class="mid" data-page-node-id="G3ibqG6iFZ1negs7V1TUdR"><div class="name" data-page-node-id="wiONqWo4QdshDKdvBmDqka">数学导师</div><div class="tags" data-page-node-id="FcSSM4mHjZVfuRCJ5w7waf"><span class="tchip" data-page-node-id="wGDYdMRaMZXLwc0Y4Vzrgw">学习</span></div></div><span class="dots" data-page-node-id="h1jP2EeNatJxPAsfGriQzw"><svg viewBox="0 0 24 24" data-page-node-id="HIcZjaCdEb58QZoMQJ0YQF"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="ftfACVK8cBYAYHjZmm8dan"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="xznDyBkg2meq2BKJseNmI9"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="ge1h3IhnjNoFCu0Zg9GAHZ"/></svg></span></div>
+            <div class="acard" data-page-node-id="Uadt2XoEIr9biGRFsMHdQF"><span class="avatar" style="background:#fdeaea" data-page-node-id="r0oaEsLHkf4GwiekIEzbad">📜</span><div class="mid" data-page-node-id="vNps0I9f7UVA13n2LZ463m"><div class="name" data-page-node-id="N8Smj14hUuxCMjDWnWsgvD">政治导师</div><div class="tags" data-page-node-id="q506EzRsl0JCiIXm51AX9G"><span class="tchip" data-page-node-id="Znhxom6f5WvbtNM6SAVpV0">学习</span></div></div><span class="dots" data-page-node-id="11imnhP88eAFNU0ceOROMf"><svg viewBox="0 0 24 24" data-page-node-id="YJ6XFsmZQdpxL7lsSCZHHX"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="RBTBJh9G2rFli4EPe7bNGA"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="oAeRIEjakPFC7qYXQikkPo"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="m2LI6VFxw1r9ZtP8QWjrP7"/></svg></span></div>
+            <div class="acard" data-page-node-id="FAD29LI1ByLLAZStGg2Zcu"><span class="avatar" style="background:#efe7fb" data-page-node-id="F94ZB8AY9fXJ3uKql4saDs">⚙️</span><div class="mid" data-page-node-id="FKs4T2jcJyvkXq28HChd7G"><div class="name" data-page-node-id="DhVc2PijAVdyTRf1JbsUIb">机械原理</div><div class="tags" data-page-node-id="VCb5GM2yGceUFEdTshngLF"><span class="tchip" data-page-node-id="lpoWJXPKzWzZ4wphwKDX4M">学习</span><span class="tchip mem" data-page-node-id="ppFzxneG7oyTzlTvdjqWcH">记忆 3</span></div></div><span class="dots" data-page-node-id="pfQa1BOutT42OCnXhDSvY0"><svg viewBox="0 0 24 24" data-page-node-id="msuVVzCHXu1CEuQ359mfvc"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="vMGwfzhmwg0Fccr09QS1nJ"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="EVcSE1BzoOtOu4CDbNeeUD"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="a5Oxl2XucCBCfBxEbCikdW"/></svg></span></div>
+            <div class="addcard" data-add="学习" data-page-node-id="dFMmvEdOCPsgMWTfp51yeG"><svg viewBox="0 0 24 24" data-page-node-id="x85Urq5h5tvx3jo95E7jvO"><path d="M12 5v14M5 12h14" data-page-node-id="tPUIFu210EN1hCUL5GE1LO"/></svg><span data-page-node-id="CrIHtSBnFSxpZpNGsKTlEy">添加助手到「学习」</span></div>
+          </div></div></div>
+        </div>
+
+        <!-- 外语 -->
+        <div class="group catgrp collapsed" data-g="外语" data-page-node-id="FHcnzs8xIku725MJKBAXvH">
+          <div class="grouphead" data-page-node-id="bFj2fGx2E4LK6kfmmy2xSB">
+            <svg viewBox="0 0 24 24" data-page-node-id="VicB2lOO2Rb0uIKAMwhahr"><path d="M6 9l6 6 6-6" data-page-node-id="h1pSP15nM8MU0LIB5LYOn2"/></svg>
+            <span class="nm" data-page-node-id="DY1EzuKpRH3E90lcZ4BBK7">外语</span><span class="ct" data-page-node-id="HnQ0W9mKliDCHumw5RfzE6">2</span>
+          </div>
+          <div class="gbody" data-page-node-id="PLcJf9KR0CJREkJE5oyOFT"><div class="ginner" data-page-node-id="KDA4FQXgIwEKPfPBkf4GYa"><div class="gcards" data-page-node-id="PGNSQsKtKVtlE92UTzafK4">
+            <div class="acard" data-page-node-id="pHZEUr0zETMOY7AnfNFSkp"><span class="avatar" style="background:#fff1e0" data-page-node-id="5JSVMJj7165YezqQYBiVF4">📖</span><div class="mid" data-page-node-id="ZajpXO02O4epdUI8f7IqOq"><div class="name" data-page-node-id="aIxanRXLnremWr5i3qPT04">英语导师</div><div class="tags" data-page-node-id="pkDs8lLgbsLTRekfurDdqx"><span class="tchip" data-page-node-id="NFeAlLKHzKJzGymFIxeG4E">学习</span><span class="tchip" data-page-node-id="K78SxsdQBpJdhLZMHj3CEV">外语</span></div></div><span class="dots" data-page-node-id="4FqW2HqiQpBniXJUaI9mqt"><svg viewBox="0 0 24 24" data-page-node-id="vkODDEDkW1viICqNHEC5uK"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="cZ83W4H1Djjt8P0uz0lkTQ"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="76yxczYrASZQxIvnSIl9y3"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="oou0q6J7XZQ81MLKfBDvwa"/></svg></span></div>
+            <div class="acard" data-page-node-id="0qDnkREeF8srDbZc3CUv73"><span class="avatar" style="background:#f0f2f7" data-page-node-id="btJXjH6x85G5e3yAmqDS4I">✍️</span><div class="mid" data-page-node-id="eTJZy9AVhEFeCW0ilcnglS"><div class="name" data-page-node-id="dH8CwW4mNwEzrWLrI8bMxd">论文润色</div><div class="tags" data-page-node-id="C9aZs7mVG4BH9c7bkrgZBw"><span class="tchip" data-page-node-id="1wvRRyvnRVyforU6gAfxcZ">外语</span></div></div><span class="dots" data-page-node-id="4s6BgmuGs9wvJaZJbPeckt"><svg viewBox="0 0 24 24" data-page-node-id="DdZOxglu0p7gSaMuNSpO5j"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="xweBX2D6UYHOTlBw0xfIch"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="PvlDF7ZKAY73cyWgIdEmJw"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="nmNZmlnWfE4ldGacUgbZ1y"/></svg></span></div>
+            <div class="addcard" data-add="外语" data-page-node-id="apYxZQKUfRjOzydCPN0vKx"><svg viewBox="0 0 24 24" data-page-node-id="JvvL9SqnbsBwNM0OA5vfqb"><path d="M12 5v14M5 12h14" data-page-node-id="0CC7XBfPTEL4TonyY0HEMx"/></svg><span data-page-node-id="fuahb7xEUqpVeV2yHRLxKH">添加助手到「外语」</span></div>
+          </div></div></div>
+        </div>
+
+        <!-- 工具 -->
+        <div class="group catgrp collapsed" data-g="工具" data-page-node-id="DxrXFXamP5DI5t3ykFoezf">
+          <div class="grouphead" data-page-node-id="KcdpmpsyV0UodubeS50oQC">
+            <svg viewBox="0 0 24 24" data-page-node-id="EXlHBOrWZmuxGxb2iwJMzq"><path d="M6 9l6 6 6-6" data-page-node-id="mYqoIlOt2F4FCcTO7TLy9Q"/></svg>
+            <span class="nm" data-page-node-id="80xJN3nKbfJnnQSdhNQDGH">工具</span><span class="ct" data-page-node-id="KUIqzhw7QBRktw834pIGCG">2</span>
+          </div>
+          <div class="gbody" data-page-node-id="BtlTjx2rGYrm2ZAWaPU9cS"><div class="ginner" data-page-node-id="MwtQNz1A71VM8ZCIA8PmjH"><div class="gcards" data-page-node-id="wmt4NZb1pDtXuvbBbCeKhd">
+            <div class="acard" data-page-node-id="YyJ81nzymyKQiOG32ckStE"><span class="avatar" style="background:#e6f2fb" data-page-node-id="Tj367rqFYRgX3L9QQ0G1B0">🧑‍💻</span><div class="mid" data-page-node-id="mc5cQv9EP2qGl8jwtpgWoG"><div class="name" data-page-node-id="DtWjl25wFkOoMkpxqCMulF">代码助手</div><div class="tags" data-page-node-id="kN4fKmWkjurCPRlHFOYXEz"><span class="tchip" data-page-node-id="FDPWfbYKhl3cdRMgJg7em3">工具</span></div></div><span class="dots" data-page-node-id="7XoE9MCO6GtXx1osxaoN2Z"><svg viewBox="0 0 24 24" data-page-node-id="P7zKFfVHhIlBIBxw54BjNP"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="uz5vbAFZwuePUgKvoEeEKH"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="BKWXHeO5BtnIbvUYmcqbdv"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="NVIuZNCfyyxhEZiEBqHJTr"/></svg></span></div>
+            <div class="acard" data-page-node-id="EfE2Kc5A6UTyQu3di1vW5y"><span class="avatar" style="background:#e6f7f1" data-page-node-id="pwQyPVqfhkLXWCJ4DOp23j">📰</span><div class="mid" data-page-node-id="gqbMMIuCCI2JeQCt4ev9DL"><div class="name" data-page-node-id="Ae2SHGMg3zl8jZxakOC5zv">每日新闻</div><div class="tags" data-page-node-id="xMLQIVLZTJqcIke5YRHut6"><span class="tchip" data-page-node-id="GXYXm5GVdhLttNhYNqRGC2">工具</span><span class="tchip mem" data-page-node-id="34Ns0sxd1Ug6BODdRHJBY1">记忆 8</span></div></div><span class="dots" data-page-node-id="FYT6i2catC7WgyEZFP70k6"><svg viewBox="0 0 24 24" data-page-node-id="Qod1mUkAwLAXo8AZ3LU5bx"><circle cx="5" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="FgCFgN717Q2ydMEEXlDSDw"/><circle cx="12" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="UfwLAp0StmOCspRSSGomDM"/><circle cx="19" cy="12" r="1.6" fill="#8e8e93" stroke="none" data-page-node-id="6RDIUaK1vWC2XnAytHZPzS"/></svg></span></div>
+            <div class="addcard" data-add="工具" data-page-node-id="WHpkcJ4NBFEJ9FSxyRxxuX"><svg viewBox="0 0 24 24" data-page-node-id="sjRACC8VdJ4G4KrM7VHdaf"><path d="M12 5v14M5 12h14" data-page-node-id="n6ltENLUqOXrxKLVLnR1Ju"/></svg><span data-page-node-id="rRlo5OFMKURHHTSCVxdylF">添加助手到「工具」</span></div>
+          </div></div></div>
+        </div>
+
+        <!-- 空分类：考试突击 -->
+        <div class="group catgrp collapsed" data-g="考试突击" data-page-node-id="3KiuJuklI8u1IhsYDODSzQ">
+          <div class="grouphead" data-page-node-id="RZS1xzzD1MADB8lRSjM810">
+            <svg viewBox="0 0 24 24" data-page-node-id="4ZkrPyrtrd6KkZWizXntst"><path d="M6 9l6 6 6-6" data-page-node-id="MGZQTZEaTgdrnlGjchKB6J"/></svg>
+            <span class="nm" data-page-node-id="G69HPjzTzSoAJ7hQssRbq9">考试突击</span><span class="ct" data-page-node-id="4nJ737FNjZ2PDr0e1Eseck">0</span>
+          </div>
+          <div class="gbody" data-page-node-id="JJve9rFEY1kRy6eqzhRZhR"><div class="ginner" data-page-node-id="ou0FJwn6C5ToeiHnt4LH0g"><div class="gcards" data-page-node-id="lidhP7J3BOYXX9u3xvS9Jo">
+            <div class="addcard" data-add="考试突击" data-page-node-id="FHyduXRQwzmwiPOsaqFVxy"><svg viewBox="0 0 24 24" data-page-node-id="0gDgUjeGaGirUQAx0Eag9G"><path d="M12 5v14M5 12h14" data-page-node-id="ArgZE7i8iuvwK8JN1FHdrp"/></svg><span data-page-node-id="YTpQujNz3YPcjOpUi9gNsh">添加助手到「考试突击」</span></div>
+          </div></div></div>
+        </div>
+
+        <!-- 管理入口 -->
+        <div class="mngfoot" data-page-node-id="ySC32o5m1LRNR4uagN5TNI"><svg viewBox="0 0 24 24" data-page-node-id="v9eB2Jcz17SCjv4x7d366h"><path d="M4 7h10M18 7h2M4 12h2M10 12h10M4 17h10M18 17h2" data-page-node-id="uqvoUfI3zBPhKKR659e8E7"/><circle cx="16" cy="7" r="2" data-page-node-id="YVuyn1ULJW0F18nI7YpchP"/><circle cx="8" cy="12" r="2" data-page-node-id="RB7fEE3GTM0Lu3a8M1iAtR"/><circle cx="16" cy="17" r="2" data-page-node-id="V8dqUOpPdM248XiLt5UOB8"/></svg>管理分类…</div>
+        <div class="footnote" data-page-node-id="35VllxH54F5pc8QlfxqI6Z">注：分类组内助手点击仍可进入详情 / ⋯菜单编辑归属；多分类助手会在所属各组重复出现（与卡片上已有分类标签一致）。</div>
+      </div>
+    </div>
+
+    <div class="notes" data-page-node-id="H5GIa28696YxSsojZFz2Iu">
+      <div class="panel" data-page-node-id="o1dMb7RiEWJArlDOmqA8IJ">
+        <h3 data-page-node-id="A4NawLdIG5alGFgpCjPFgR"><span data-page-node-id="X0ueomZh8LAAaDpUuYtndv">核心改动</span><span class="tag" data-page-node-id="6li4hkNY03Wsdbrj475e1V">假设，可推翻</span></h3>
+        <ul data-page-node-id="vr2Ux2UtonuaEVkjLiBK6k">
+          <li data-page-node-id="cHehdyVEU98DXn18EcF3Mx">去掉顶部 <b data-page-node-id="wVHEnMMML9Ws2IyMnwLass">FilterChip 单选行</b>，改为<b data-page-node-id="tDgp09QUAAKcI3OiUAsF2Y">「全部」组 + 各分类组</b>的折叠浏览列表（对齐「可用模型」窗口结构）。</li>
+          <li data-page-node-id="VeIpW8XDXDVlRMNLL7Qf6A">「全部」组 <b data-page-node-id="H7DtpXqDSPOxX2WHSZh2Su">默认展开、容纳所有助手</b>——接管原「全部」视图，长按拖拽排序<b data-page-node-id="f7hAg4jFfSw5J44aBGAeha">仅在该组可用</b>（原有非过滤态才可排序的语义，只是把“过滤态”换成了“非全部组”）。</li>
+          <li data-page-node-id="FobETgJiMu1vAKw9RSvZfP">分类组成员<b data-page-node-id="h0oI8g23dv7sGAUucomzLD">保留全局顺序</b>（跟随 settings.assistants，即「全部」组内看到的排序），本身不参与拖拽。</li>
+          <li data-page-node-id="eWZeBkJ2CTx0gZtozjk7QG">组头点击折叠/展开，<b data-page-node-id="k1QRa0aP4hJMYCXWtOZxtV">高度 + 箭头带平滑动画</b>；空分类（如「考试突击」）也显示组头，展开后只有“添加助手”虚线入口。</li>
+          <li data-page-node-id="KeYbIMEzmf5So3UNVaVLMB">「管理分类…」入口收到底部一行（齿轮行），点开仍是现有分类管理 Sheet，不动它的拖排序/重命名/删除/新建逻辑。</li>
+        </ul>
+      </div>
+      <div class="panel" data-page-node-id="Hu9FhSu0EExuo4XiA0t3lu">
+        <h3 data-page-node-id="Zco6vfnn8q6nQ6YkfQu5Q0"><span data-page-node-id="A1NI0cH6el6BTOI5TBGED8">体验一下</span></h3>
+        <div class="btns" data-page-node-id="ik0wRk1TPoTUXXuIn7KD5W">
+          <button class="btn" id="btnToogleSearch" data-page-node-id="bdmz1oljC2qDIFe5qo86bQ">🔍 模拟搜索态</button>
+          <button class="btn" id="btnExpandAll" data-page-node-id="k2T0Zl518GPTCuOalHXCgt">⬇ 展开全部组</button>
+          <button class="btn" id="btnCollapseCats" data-page-node-id="zdBdJ9qiP4jm4FGvEuF0Zp">⬆ 折叠全部分类</button>
+          <button class="btn on" id="btnReset" data-page-node-id="ZqwhWdYupdtYXqDJRHHt4r">↺ 恢复默认</button>
+        </div>
+        <div style="height:8px" data-page-node-id="5vfhnmE6yhE5vBTFmPK1cI"></div>
+        <div class="hintline" data-page-node-id="NSTH1YOhKGPjhaWfJjlJND">· 点击任意<b data-page-node-id="bgY9hubrBuylgdQNl0NYM9">组头</b>单独折叠/展开该组（带动画）<br data-page-node-id="G7dbDFETKz5TE9MITyWGug">· “模拟搜索态”：输入关键词时<u data-page-node-id="ECUUIGsd1LB20OiD7FKYUg">隐藏分组头、扁平展示全部命中</u>，清空恢复分组与各自折叠状态（折叠状态不被搜索破坏）</div>
+      </div>
+      <div class="ask" data-page-node-id="UfRQLLJMsEPikBUywAUTAK">
+        <b data-page-node-id="sjvG6cZn8NkdirUIHVsqkx">实现前需要你拍板的 2 点：</b><br data-page-node-id="jOMRfqk8WFViDm3QyfBvvK">
+        ① <b data-page-node-id="OlzZmHiS058ylfcdlj0Ppw">默认折叠态</b>：目前默认是「全部」组 + 首个分类「学习」展开、其余分类折叠。想要“分类默认全部展开（同可用模型）”还是“分类默认全折叠、只留全部”？
+        ② <b data-page-node-id="60NXBhMF5rnQlGLCvXIQD4">管理入口位置</b>：收在列表底部齿轮行 OK，还是想留在顶部搜索框旁边？
+      </div>
+      <div class="panel" data-page-node-id="E2LzcSR8aFJLR7gvLvP4O6">
+        <h3 data-page-node-id="N9njA2F0jKxmlHH7KPx5rj"><span data-page-node-id="BuZwXIHY9NAVxo8biRmKTz">搜索态细节约定</span><span class="tag" data-page-node-id="Tql6yklh0E0a6Y0OttWeaU">交互逻辑</span></h3>
+        <ul data-page-node-id="WOnomrYVmiox08lihfGI58">
+          <li data-page-node-id="T0IoZKIrFHC8Znhq9WfpJm">搜索/折叠状态各自独立保存：搜索清空后回到之前的折叠布局，不重置用户折叠过的手势。</li>
+          <li data-page-node-id="l31GFYqUBCtsemItAQKDyB">搜索时命中项<span class="k" data-page-node-id="HudFnvqGOBiCDTarZr3CyQ">跨全部组与分类组</span>一次收集，只显示有命中的结果，不显示空组头。</li>
+          <li data-page-node-id="A3g4t48ruCtH0XTBNxqP83">分类被删除/重命名后，折叠状态按新 id 集合自动裁剪，不残留死状态。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const phone = document.getElementById('phone');
+  const list = document.getElementById('list');
+  const searchbox = document.getElementById('searchbox');
+  const groups = [...list.querySelectorAll('.group')];
+
+  function setCollapsed(g, collapsed) {
+    g.classList.toggle('collapsed', collapsed);
+  }
+
+  // 组头点击切换（分类组与全部组同样处理）
+  list.addEventListener('click', (e) => {
+    const head = e.target.closest('.grouphead');
+    if (!head || phone.classList.contains('search')) return;
+    const g = head.closest('.group');
+    setCollapsed(g, !g.classList.contains('collapsed'));
+  });
+  // 搜索框点击进入搜索态示意
+  searchbox.addEventListener('click', () => {
+    if (!phone.classList.contains('search')) phone.classList.add('search');
+  });
+  // 全部组可再点（模拟）
+  groups.forEach(g => { const head = g.querySelector('.grouphead'); if (head) head.style.cursor='pointer'; });
+
+  document.getElementById('btnToogleSearch').onclick = (e) => {
+    const on = phone.classList.toggle('search');
+    e.currentTarget.classList.toggle('on', on);
+  };
+  document.getElementById('btnExpandAll').onclick = () => { phone.classList.remove('search'); document.getElementById('btnToogleSearch').classList.remove('on'); groups.forEach(g => setCollapsed(g, false)); };
+  document.getElementById('btnCollapseCats').onclick = () => { phone.classList.remove('search'); document.getElementById('btnToogleSearch').classList.remove('on'); groups.forEach(g => { if (g.classList.contains('catgrp')) setCollapsed(g, true); }); };
+  document.getElementById('btnReset').onclick = () => {
+    phone.classList.remove('search');
+    document.getElementById('btnToogleSearch').classList.remove('on');
+    groups.forEach(g => {
+      const collapsed = g.classList.contains('catgrp') && g.dataset.g !== '学习';
+      setCollapsed(g, collapsed);
+    });
+  };
+</script>
+</body>
+</html>

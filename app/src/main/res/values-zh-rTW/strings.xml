@@ -1385,6 +1385,7 @@
   <string name="setting_files_page_clean_range_description">選擇要永久刪除的檔案。此操作無法復原。</string>
   <string name="done">完成</string>
   <string name="assistant_category_all">全部</string>
+    <string name="assistant_category_other">其他</string>
   <string name="assistant_category_manage">分類管理</string>
   <string name="assistant_category_count">%1$d 個助手</string>
   <string name="assistant_category_rename">重新命名分類</string>

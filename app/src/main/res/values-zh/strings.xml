@@ -1700,6 +1700,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_files_page_clean_range_description">选择要永久删除的文件。此操作无法撤销。</string>
   <string name="done">完成</string>
   <string name="assistant_category_all">全部</string>
+    <string name="assistant_category_other">其他</string>
   <string name="assistant_category_manage">分类管理</string>
   <string name="assistant_category_count">%1$d 个助手</string>
   <string name="assistant_category_rename">重命名分类</string>

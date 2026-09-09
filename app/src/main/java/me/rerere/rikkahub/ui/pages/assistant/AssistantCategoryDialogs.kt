@@ -34,24 +34,25 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.modifier.onClick
 import kotlin.uuid.Uuid
 
 /**
- * 编辑助手的分类归属：多选 chips，可就地新建分类并勾选。
- * onConfirm 返回有序 tagIds（保持原归属顺序，新建分类追加在后）与编辑后的完整分类列表。
+ * 编辑助手的分类归属：单选项（单归属语义，一个助手至多属于一个分类），可就地新建分类并选中。
+ * onConfirm 返回选中的分类 id（null = 未分类）与编辑后的完整分类列表。
  */
 @Composable
 fun AssistantEditCategoriesDialog(
     assistant: Assistant,
     categories: List<Tag>,
-    onConfirm: (tagIds: List<Uuid>, categories: List<Tag>) -> Unit,
+    onConfirm: (categoryId: Uuid?, categories: List<Tag>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
-    var selectedIds by remember { mutableStateOf(assistant.tags.toSet()) }
+    var selectedId by remember { mutableStateOf(assistant.effectiveCategory) }
     var extraCategories by remember { mutableStateOf(emptyList<Tag>()) }
     var showCreate by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
@@ -76,13 +77,10 @@ fun AssistantEditCategoriesDialog(
                 ) {
                     allCategories.forEach { category ->
                         FilterChip(
-                            selected = category.id in selectedIds,
+                            selected = category.id == selectedId,
                             onClick = {
-                                selectedIds = if (category.id in selectedIds) {
-                                    selectedIds - category.id
-                                } else {
-                                    selectedIds + category.id
-                                }
+                                // 单选：再点一次已选中的分类即取消归属（回到「其他」）
+                                selectedId = if (category.id == selectedId) null else category.id
                             },
                             label = { Text(category.name) },
                         )
@@ -108,7 +106,7 @@ fun AssistantEditCategoriesDialog(
                                     if (trimmed.isEmpty() || nameConflict) return@IconButton
                                     val tag = Tag(id = Uuid.random(), name = trimmed)
                                     extraCategories = extraCategories + tag
-                                    selectedIds = selectedIds + tag.id
+                                    selectedId = tag.id
                                     newName = ""
                                     showCreate = false
                                 },
@@ -124,10 +122,7 @@ fun AssistantEditCategoriesDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    // 保持原归属顺序，新建分类追加在后
-                    val tagIds = assistant.tags.filter { it in selectedIds } +
-                        extraCategories.map { it.id }.filter { it in selectedIds }
-                    onConfirm(tagIds, allCategories)
+                    onConfirm(selectedId, allCategories)
                 }
             ) {
                 Text(stringResource(R.string.confirm))
