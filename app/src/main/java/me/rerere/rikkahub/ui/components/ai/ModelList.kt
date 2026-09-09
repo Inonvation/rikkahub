@@ -624,7 +624,11 @@ private fun ColumnScope.ModelList(
 
             items(
                 items = searchFilteredModelsByProvider[providerSetting.id].orEmpty(),
-                key = { it.id }
+                // 根因：key 若只取模型 id，复制/导入供应商产生的"同 id 模型"会在同一
+                // LazyColumn 里撞 key（Key ... was already used）。模型 id 语义上是全局限一
+                // （收藏/会话选中按 id 定位），但旧数据里可能已有跨供应商共享 id 的副本，
+                // 因此 key 补上供应商维度做兜底，保证本列表内唯一。
+                key = { it.id to providerSetting.id }
             ) { model ->
                 val favorite = settings.value.favoriteModels.contains(model.id)
                 ModelItem(

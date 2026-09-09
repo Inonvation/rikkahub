@@ -88,6 +88,25 @@ import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import kotlin.uuid.Uuid
 
+/**
+ * 生成供应商的"独立副本"：供应商与全部模型都换新 id。
+ *
+ * 根因：模型选择弹窗（ModelListSheet）把多个供应商的模型渲染进同一个 LazyColumn，
+ * 行 key 用模型 id；旧的复制/导入只对 provider 换新 id（copyProvider(Uuid.random())），
+ * 模型 UUID 原样共享 → 原供应商与副本出现同 id 模型，打开弹窗即抛
+ * "Key ... was already used"。且收藏、会话选中模型、余额定位都按 model.id 全局
+ * 首中即返回（Settings.findModelById / Model.findProvider），id 被两个供应商共享时
+ * 模型无法区分归属，属于数据层不变量破坏。
+ *
+ * 方案：复制时给每个模型重新生成 id。原供应商一侧的收藏/会话/历史引用不受影响
+ * （它们指向原模型的旧 id，仍能解析到原供应商）。
+ */
+private fun ProviderSetting.duplicated(): ProviderSetting =
+    copyProvider(
+        id = Uuid.random(),
+        models = models.map { it.copy(id = Uuid.random()) },
+    )
+
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -122,14 +141,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             RecommendProviderButton { provider ->
                 vm.updateSettings(
                     settings.copy(
-                        providers = listOf(provider.copyProvider(Uuid.random())) + settings.providers
+                        providers = listOf(provider.duplicated()) + settings.providers
                     )
                 )
             }
             ImportProviderButton {
                 vm.updateSettings(
                     settings.copy(
-                        providers = listOf(it.copyProvider(Uuid.random())) + settings.providers
+                        providers = listOf(it.duplicated()) + settings.providers
                     )
                 )
             }
@@ -209,7 +228,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 hapticController.tap()
                                 vm.updateSettings(
                                     settings.copy(
-                                        providers = listOf(provider.copyProvider(Uuid.random())) + settings.providers
+                                        providers = listOf(provider.duplicated()) + settings.providers
                                     )
                                 )
                                 toaster.show(
