@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import me.rerere.hugeicons.HugeIcons
@@ -57,6 +58,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.unwrapWrappedLatexBlock
 import me.rerere.rikkahub.data.db.entity.SolveRecordEntity
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.Tooltip
@@ -283,6 +285,10 @@ private fun SolveRecordItem(
     val timeText = remember(record.createdAt) {
         Instant.ofEpochMilli(record.createdAt).toLocalDateTime()
     }
+    // 题干为主的列表语义：有题干时题干文本是行主体（markdown/LaTeX 渲染），
+    // 答案预览退居单行摘要（完整内容在回填详情页看）；老记录（无题干）保留
+    // 原「回退标题 + 答案预览」结构作为降级。
+    val question = record.questionText?.takeIf { it.isNotBlank() }
     val interactionSource = remember { MutableInteractionSource() }
 
     Row(
@@ -340,34 +346,99 @@ private fun SolveRecordItem(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = record.questionText
-                        ?: record.processText.ifBlank { record.finalText },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+            if (question != null) {
+                // 题干主体（有题干时优先按题辨认历史）：markdown/LaTeX 渲染，
+                // 与结果页题干卡同源；限高渐隐防止长题干把列表行撑爆
+                SolveHistoryQuestion(
+                    question = question,
+                    modifier = Modifier.fillMaxWidth()
                 )
-                Text(
-                    text = timeText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                // 底行：答案单行摘要（左侧，右留间隙给时间）+ 时间右下。
+                // 摘要不渲染 markdown（单行截断无法容纳公式块），只作扫读提示
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = record.answerSummary(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 10.dp)
+                    )
+                    Text(
+                        text = timeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = record.processText.ifBlank { record.finalText },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = timeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // 内容预览：解题过程/作答用 markdown/latex 渲染（与详情页同源），
+                // 限高裁尾 + 底部渐隐，避免长解答把列表行撑爆
+                SolveHistoryPreview(
+                    process = record.processText,
+                    finalAnswer = record.finalText,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
-            // 内容预览：解题过程/作答用 markdown/latex 渲染（与详情页同源），
-            // 限高裁尾 + 底部渐隐，避免长解答把列表行撑爆
-            SolveHistoryPreview(
-                process = record.processText,
-                finalAnswer = record.finalText,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
+    }
+}
+
+/** 历史行的答案单行摘要：优先作答首行、其次过程首行（去空行），无内容返回空串 */
+private fun SolveRecordEntity.answerSummary(): String =
+    (finalText.ifBlank { processText })
+        .lineSequence()
+        .firstOrNull { it.isNotBlank() }
+        ?.trim()
+        .orEmpty()
+
+/** 题干主体渲染上限（dp）：约 4 行正文，超出渐隐裁尾 */
+private const val QUESTION_MAX_HEIGHT_DP = 96
+
+/**
+ * 历史行题干主体：MarkdownBlock 渲染题干（markdown/LaTeX，公式可读），限高渐隐。
+ * 题干与答案预览复用同一套裁尾容器（[FadeCropBox]），保持列表行视觉一致。
+ */
+@Composable
+private fun SolveHistoryQuestion(
+    question: String,
+    modifier: Modifier = Modifier,
+) {
+    // 题干展示统一去整段 latex 外壳（根因见 unwrapWrappedLatexBlock：整段 $$…$$/
+    // \[…\] 包裹会让 MarkdownBlock 把题干当块级公式排版，正文与 markdown 结构失效）
+    val content = remember(question) { unwrapWrappedLatexBlock(question) }
+    FadeCropBox(maxHeight = QUESTION_MAX_HEIGHT_DP.dp, modifier = modifier) {
+        MarkdownBlock(
+            content = content,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onSurface
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -382,26 +453,7 @@ private fun SolveHistoryPreview(
     finalAnswer: String,
     modifier: Modifier = Modifier,
 ) {
-    val fadeColor = MaterialTheme.colorScheme.surface
-    Box(
-        modifier = modifier
-            .heightIn(max = 108.dp)
-            .clipToBounds()
-            .drawWithContent {
-                drawContent()
-                // 底部渐隐：把被裁掉的末尾"化"进背景，硬切感弱化
-                val fadePx = 28.dp.toPx()
-                if (size.height > fadePx) {
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, fadeColor),
-                            startY = size.height - fadePx,
-                            endY = size.height,
-                        )
-                    )
-                }
-            },
-    ) {
+    FadeCropBox(maxHeight = 108.dp, modifier = modifier) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -425,5 +477,39 @@ private fun SolveHistoryPreview(
                 )
             }
         }
+    }
+}
+
+/**
+ * 限高渐隐容器：内容超高部分裁切并把末尾"化"进页面背景色，
+ * 硬切感弱化、列表行高稳定（题干主体与答案预览共用）。
+ */
+@Composable
+private fun FadeCropBox(
+    maxHeight: Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val fadeColor = MaterialTheme.colorScheme.surface
+    Box(
+        modifier = modifier
+            .heightIn(max = maxHeight)
+            .clipToBounds()
+            .drawWithContent {
+                drawContent()
+                // 底部渐隐：把被裁掉的末尾"化"进背景，硬切感弱化
+                val fadePx = 28.dp.toPx()
+                if (size.height > fadePx) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, fadeColor),
+                            startY = size.height - fadePx,
+                            endY = size.height,
+                        )
+                    )
+                }
+            },
+    ) {
+        content()
     }
 }

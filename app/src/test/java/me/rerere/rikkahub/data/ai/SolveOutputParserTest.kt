@@ -130,4 +130,43 @@ class SolveOutputParserTest {
         assertEquals("过程（缺闭标记的 final 场景）", blocks.process)
         assertEquals("精炼作答截断", blocks.finalAnswer)
     }
+
+    // ---------- unwrapWrappedLatexBlock：题干整段块级 LaTeX 外壳剥离 ----------
+
+    @Test
+    fun `dollar dollar wrapped question with chinese is unwrapped`() {
+        // 模型把整段题干包进 $$…$$：剥壳后内部按 markdown/行内 latex 渲染
+        val wrapped = "$$\n已知 ${'$'}f(x)=x^2+1${'$'}，求 ${'$'}f(2)${'$'}。\n$$"
+        assertEquals("已知 ${'$'}f(x)=x^2+1${'$'}，求 ${'$'}f(2)${'$'}。", unwrapWrappedLatexBlock(wrapped))
+    }
+
+    @Test
+    fun `bracket wrapped question with text command is unwrapped`() {
+        val wrapped = "\\[ \\text{Solve for } x: \\frac{1}{x} = 2 \\]"
+        assertEquals("\\text{Solve for } x: \\frac{1}{x} = 2", unwrapWrappedLatexBlock(wrapped))
+    }
+
+    @Test
+    fun `pure formula wrapped block is kept as block math`() {
+        // 整段就是纯公式：剥壳会让公式失去定界退化回纯文本，保持原样按块级公式排版
+        val pure = "$$\\frac{1}{x} = 2$$"
+        assertEquals(pure, unwrapWrappedLatexBlock(pure))
+        val pureBracket = "\\[\\frac{1}{x} = 2\\]"
+        assertEquals(pureBracket, unwrapWrappedLatexBlock(pureBracket))
+    }
+
+    @Test
+    fun `normal markdown question passes through unchanged`() {
+        val normal = "已知 ${'$'}f(x)=x^2+1${'$'}，求 ${'$'}f(2)${'$'}。\n\n- 选项 A\n- 选项 B"
+        assertEquals(normal, unwrapWrappedLatexBlock(normal))
+    }
+
+    @Test
+    fun `unbalanced or trailing dollar content passes through unchanged`() {
+        // 流式中途 / 非整段包裹：不动，避免误剥正文内的独立块公式
+        val midStream = "$$\n已知 ${'$'}x${'$'}（流式截断"
+        assertEquals(midStream, unwrapWrappedLatexBlock(midStream))
+        val trailing = "题干正文 $${'$'}x^2${'$'}$$ 中间出现的公式"
+        assertEquals(trailing, unwrapWrappedLatexBlock(trailing))
+    }
 }

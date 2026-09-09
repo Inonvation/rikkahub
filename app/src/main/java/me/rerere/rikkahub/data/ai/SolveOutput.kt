@@ -110,3 +110,37 @@ fun splitSolveOutput(text: String): SolveBlocks {
     }
     return SolveBlocks(statement, process, finalAnswer)
 }
+
+/** 题干外壳内「可视为自然语言」的判定用：含中日韩文字即非纯公式 */
+private val CJK_REGEX = Regex("[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+
+/**
+ * 题干展示前剥离「恰好整段包裹」的块级 LaTeX 外壳（根因：部分模型/OCR 在转述题面时
+ * 把整段题干输出进单个 display-math（`$$…$$` 或 `\[…\]`），渲染层会把这整段当块级公式
+ * 排版——中文/英文正文变成数学斜体、markdown 标记（加粗/列表/段落）全部失效，
+ * 用户看到的就是"题干只是一团 latex 块"。
+ *
+ * 边界与取舍：
+ * - 只在"外壳恰好覆盖整段、且内部含自然语言（中文/日文/韩文、`\text`、或 ≥2 个词）"时
+ *   剥壳，内部再交给 markdown + 行内 latex 渲染；整段就是纯公式（如 `$$\frac{1}{x}=2$$`）
+ *   时保持原样走块级公式排版——剥掉外壳反而会让无定界公式退化回纯文本。
+ * - 无外壳 / 不成对（流式中途）的文本原样返回，本函数只作用于展示层，
+ *   不改变落库原文（编辑态仍可查看与修正原始题面）。
+ */
+fun unwrapWrappedLatexBlock(raw: String): String {
+    val t = raw.trim()
+    if (t.length <= 4) return raw
+    val inner = when {
+        t.startsWith("$$") && t.endsWith("$$") ->
+            t.substring(2, t.length - 2).trim()
+        t.startsWith("\\[") && t.endsWith("\\]") ->
+            t.substring(2, t.length - 2).trim()
+        else -> return raw
+    }
+    if (inner.isBlank()) return raw
+    val wordCount = inner.split(Regex("\\s+")).count { it.any(Char::isLetter) }
+    val hasNaturalLanguage = inner.contains(CJK_REGEX) ||
+        inner.contains("\\text") ||
+        wordCount >= 2
+    return if (hasNaturalLanguage) inner else raw
+}
