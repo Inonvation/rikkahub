@@ -84,8 +84,6 @@ private class ReasoningState(
 private fun rememberReasoningState(
     reasoning: UIMessagePart.Reasoning,
     stateKey: String?,
-    /** 列表当前是否钉在底部：仅贴底时才自动折叠思考，避免高度骤减触发 LazyColumn scrollBack 吸底 */
-    atBottom: () -> Boolean,
 ): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
     val loading = reasoning.finishedAt == null
@@ -142,26 +140,26 @@ private fun rememberReasoningState(
                     withFrameNanos {}
                     // 对齐上游：思考内容自身的折叠只受"自动折叠思考"控制；
                     // "自动折叠所有步骤"负责过程内容（思考链/工具链）整体折叠，不掺进这里。
-                    // 只有列表贴底时才自动折叠：贴底时折叠后由 scrollBack/贴底逻辑保持底部；
-                    // 用户在看历史时保持展开，避免 item 高度骤减触发 LazyColumn scrollBack
-                    // 把列表吸回底部（"生成完自动滚到底 + 下拉跳动"根因）。
-                    val autoClose = settings.displaySetting.autoCloseThinking
-                    state.expandState = when {
-                        autoClose && atBottom() -> ReasoningCardState.Collapsed
-                        !autoClose -> ReasoningCardState.Expanded
-                        else -> state.expandState
+                    // 根因：此前的 atBottom() 贴底守卫存在帧级竞态——思考末 chunk 落定与
+                    // finishedAt 写入几乎同帧，上一发自动跟随（即时 scrollToItem / glide 动画）
+                    // 可能尚未落定布局，layoutInfo 快照未贴底 → atBottom() 短暂 false → 折叠
+                    // 被跳过并落库展开态 → 思考永久停在"尾部几行"的 Preview，即"开启自动折叠
+                    // 思考后完成不折叠"根因（上游无条件折叠无此问题）。移除贴底条件：折叠是
+                    // 完成瞬间的一次性高度变化，折叠高度随即被正文流式填补，且生成中用户几乎
+                    // 总在底部，无需以"是否贴底"作为折叠前提。
+                    state.expandState = if (settings.displaySetting.autoCloseThinking) {
+                        ReasoningCardState.Collapsed
+                    } else {
+                        ReasoningCardState.Expanded
                     }
                 }
                 // 根因：完成瞬间系统自动折叠的最终形态只落在组件内存、不进 store，
                 // 而重建（切走切回/滚出视口回收）只信 store / 开关推导，两套语义在
-                // 特定分支分裂——autoClose=ON 时"完成贴底折叠但生成中曾手动展开"
-                // 会在 store 残留 true 使切回又被展开；非贴底保留展开/Preview 的思考
-                // 无记录时切回被开关推导成 Collapsed（思考内容消失）。
-                // 方案：凡"本组合内生成完成定稿"（无论系统折叠还是保留态）都落库，
-                // store 值 = 该条目最终展开态（true=展开）；加载中（loading 分支）不写，
-                // 用户后续手动 toggle 会覆盖本值。Preview 属加载态枚举、store 只有布尔，
-                // 非贴底保留 Preview 时写 true，重建落 Expanded（全展开）作为已知近似，
-                // 观感优于按开关塌成 Collapsed。手动 toggle（onExpandedChange）仍各自写。
+                // 特定分支分裂——autoClose=ON 时"完成折叠但生成中曾手动展开"会在
+                // store 残留 true 使切回又被展开。
+                // 方案：凡"本组合内生成完成定稿"都落库最终形态（折叠写 false / 展开
+                // 写 true），重建后形态与定稿一致；加载中（loading 分支）不写，
+                // 用户后续手动 toggle 会覆盖本值。手动 toggle（onExpandedChange）仍各自写。
                 if (stateKey != null) {
                     setSectionExpanded(stateKey, state.expandState.expanded)
                 }
@@ -267,18 +265,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val stateKey = remember(reasoning.createdAt, conversationId) {
         conversationId?.let { "reasoning:$it:${reasoning.createdAt}" }
     }
-    // 折叠后重新贴底/自动折叠判断用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
+    // 折叠后重新贴底/手动折叠判断用：组合期捕获，回调中调用（lambda 内部按调用时刻读当前布局）
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val scrollChatToBottom = LocalScrollChatToBottom.current
-    // 用户是否正在控制列表（触碰中/滚动中/刚操作过）：自动折叠据此暂缓
-    val isUserControlled = LocalIsChatListUserControlled.current
     val (state, loading) = rememberReasoningState(
         reasoning = reasoning,
         stateKey = stateKey,
-        // 仅"钉在底部且用户未在控制列表"时才自动折叠：用户正在翻历史/刚触碰过列表时
-        // 保持展开，避免 item 高度骤减触发 LazyColumn 锚点修正把列表吸回底部
-        // （"生成完后下滑查看上方消息回弹抽搐"根因）。
-        atBottom = { isChatListAtBottom?.invoke() == true && isUserControlled?.invoke() != true },
     )
     // 标题提取是对整段思考文本的 O(行数) 扫描，必须按文本本身缓存：
     // 下面同步吸顶条数据时读的是 state.duration，step 主体因此订阅了计时，

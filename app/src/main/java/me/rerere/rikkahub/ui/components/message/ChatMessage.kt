@@ -31,7 +31,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -40,7 +39,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +64,6 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -116,16 +113,15 @@ import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * 生成完成到"自动折叠所有步骤"落地的延迟窗口。
+ * 完成兜底折叠的延迟窗口（codex 式时序下的第二折叠时机）。
  *
- * 折叠时机模型（见下方完成 effect 的 when 三分支 + 补折叠重试 effect）：
- * - 视口外（过程区整体在列表视口上方）：瞬时无动画折叠，视觉零变化；
- * - 用户贴底观看（短回复完整在屏上）：**可见折叠是产品语义本身**——折叠落在列表
- *   底部锚上方，底部钉住不漂移，思考内容收成卡、最终输出自然上移填补，带动画
- *   折叠与阅读预期一致，且完成后即刻落库，无任何延迟滚动的"补刀"；
- * - 完成瞬间用户正在操控列表（拖拽/松手窗/翻历史）：折叠推迟，回到底部稳定后
- *   补折叠，期间保持展开并"临时固化"防重建塌缩；临时固化随消息离开组合
- *   （滚出回收/切走销毁）由 DisposableEffect 落 false 到期，自动折叠不失效。
+ * 折叠时机模型（见触发/唤醒/完成/补折叠四个 effect）：
+ * - **第一时机（loading 中）**：正文开始且过程区无进行中步骤 → 收卡，200ms 收起
+ *   动画与正文首行并行（codex/ChatGPT 桌面端同节奏）；折叠高度随即被正文流式
+ *   增长填补，用户控制列表时暂缓、放手后自动重估，无"漏折"路径；
+ * - 完成兜底：第一时机被暂缓的残余场景，消息完成时按视口外（瞬时无动画）/贴底
+ *   （带动画）快速折叠，其余留待补折叠 effect 在用户回底/滚出视口/放手后落地；
+ * - 手动接管（manualOverride）：用户点过折叠卡后本生成周期内自动折叠一律让位。
  * 窗口（350ms）只用于让过生成收尾的布局/动画（reasoning 收起、末块排版落定），
  * 避免与逐卡折叠动画叠帧造成二次抖动。布局回调做"滚出即折叠"实测不可靠
  * （item 滚出视口后停止布局，回调停更），已弃用，一律以组合生命周期为折叠时机。
@@ -447,6 +443,19 @@ private fun MessagePartsBlock(
     }
     val hasProcessContent =
         role == MessageRole.ASSISTANT && (finalOutputStart > 0 || hasThinkingSteps)
+    // codex 式折叠时序的两个信号（最终输出开始 = finalBlocks 非空 ⇔ 存在 ContentBlock）：
+    // - finalOutputStarted：正文首 chunk 已到达（思考/工具链之后的最终输出区非空）；
+    // - processActive：仍有进行中的步骤（思考未 finish / 工具未执行完 / 服务端工具
+    //   未结束）。两者共同构成"过程已结束、正文已开始"的折叠触发条件。按流式顺序
+    //   正文首 chunk 到达时前序过程通常已完成，processActive 为防御条件（防异常
+    //   交错的流式数据在过程未定时提前折叠）；审批/ask_user 未答时 isExecuted=false
+    //   → processActive=true，折叠被天然抑制。
+    val finalOutputStarted = finalOutputStart >= 0
+    val processActive = parts.any {
+        (it is UIMessagePart.Reasoning && it.finishedAt == null) ||
+            (it is UIMessagePart.Tool && !it.isExecuted) ||
+            (it is UIMessagePart.ServerTool && !it.isFinished)
+    }
     // 手动折叠记忆 key（与思考步骤 sectionExpanded / 工具气泡 toolBubbleExpanded 同款进程级存储）：
     // item 滚出视口会被 LazyColumn 销毁，本地 remember 重建后只能按开关强制推导折叠态，
     // 此前以展开态出现过的过程区会在重新进入视口的瞬间塌缩（高度骤减触发 LazyColumn 锚点修正，
@@ -464,12 +473,12 @@ private fun MessagePartsBlock(
     // 列表视口顶（窗口坐标）：来自聊天页提供的思考吸顶冻结状态（其 topBarBottomY 即
     // 消息列表容器顶）；预览等无列表上下文为 null → 视口外折叠不触发。
     val thinkingFreezeState = LocalThinkingFreezeState.current
-    // 整体折叠：开启开关且消息完成后，过程内容折叠成“已处理 n分m秒”卡片，只保留最终输出。
-    // 初始形态优先读进程级记忆；无记忆时按开关推导。
-    // 写入时机：手动点击（下方 Card onClick）、下方 effect 的"生成完成定稿"
-    // （守卫放行折叠 → 折叠 / 过程区仍可见 → 临时固化展开）与消息离开组合的
-    // DisposableEffect 回收折叠（临时固化到期落 false），都只记录此时真正采取的
-    // 形态，不记录中间过程。
+    // 整体折叠：开启开关后，过程内容在"正文开始"时机自动折叠成“已处理 n分m秒”卡片，
+    // 只保留最终输出（codex 式时序，见下方触发 effect）。初始形态优先读进程级记忆；
+    // 无记忆时按开关推导。
+    // 写入口径（单向化）：自动路径只写折叠（false）——触发 effect / 完成兜底 B/C /
+    // 补折叠，折叠落地即写；展开态（生成中 init 强制展开、唤醒展开）一律不写。
+    // 手动路径双向写（点击时 !willCollapse），手动优先级最高（manualOverride 让位自动）。
     // 注意 store 语义统一为「true=展开」（与 reasoning/chain/todo 一致，写入侧也都按
     // 展开语义写），而本变量语义为「true=折叠」，读记忆恢复时必须取反——直接
     // `remembered ?: derived` 会把记忆倒置恢复：手动展开（存 true）重建后变折叠、
@@ -482,108 +491,100 @@ private fun MessagePartsBlock(
         val derived = (autoCollapseAll && !loading && hasProcessContent)
         mutableStateOf(if (loading) false else remembered?.let { !it } ?: derived)
     }
-    // "完成定稿固化展开"持有的临时展开：生成完可见（守卫暂缓）时固化 store true 只是
-    // 为了护住"重建不塌缩"，不代表该消息应永久展开。消息一旦离开组合（LazyColumn
-    // 滚出回收 / 整页切走销毁——都是 100% 触发的可靠时机，见下方 DisposableEffect），
-    // 临时展开即到期，落 false 让自动折叠对该消息生效。用户手动点击过（onClick）即
-    // 释放：手动形态持久，滚出回收重建后保持用户选择，不被自动折叠覆盖。
-    var autoCollapseHold by remember(nodeId) { mutableStateOf(false) }
-    DisposableEffect(nodeId, chainStateKey) {
-        onDispose {
-            if (autoCollapseHold && chainStateKey != null) {
-                setSectionExpanded(chainStateKey, false)
+    // 手动接管标记：用户手动点击过折叠卡后，本生成周期内自动折叠一律让位（手动优先）。
+    // 取代旧方案 autoCollapseHold 的"手动接管"语义——hold 同时承担的"固化展开护重建"
+    // 已随 codex 式时序取消（折叠在 loading 中落地即写 store，无"定稿瞬间展开残留"）。
+    // 复位时机 = loading false→true 翻转（重新生成）：新周期自动折叠重新接管；
+    // 完成时不复位，手动形态持久到周期结束（与 store 手动写入语义一致）。
+    var manualOverride by remember(nodeId) { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (loading) manualOverride = false
+    }
+    // codex 式自动折叠（第一折叠时机，loading 中）：正文开始且过程区无进行中步骤 → 收卡，
+    // 200ms 收起动画与正文首行并行（codex/ChatGPT 桌面端同节奏，对齐设置文案
+    // "before the final answer is shown"）。相比旧"消息完成定稿折叠"，折叠窗口从
+    // "生成刚结束、用户注意力高峰"挪到"正文流式增长期"，完成瞬间折叠与用户起手
+    // 下拉的历史碰撞窗口（回弹主根因）结构性消失。
+    // 折叠态此后**保持不动**（"保留前面的折叠态"）：折叠后模型再发起的工具/思考
+    // 属于新 ThinkingBlock，按分组规则渲染在最终输出区（最后 ContentBlock 下方，
+    // 即正文1 之下），不在折叠的过程区内——步骤与审批气泡天然可见，无需展开；
+    // 曾为此设的"唤醒展开"已删：它在工具循环中反复展开/折叠过程区（真机反馈体验差），
+    // 且审批可见性并不依赖它。待下一个正文块（正文2）出现时分组自动重排，正文1 与
+    // 中间工具一并划回过程区，chainCollapsed 保持 true → 自动并入折叠卡，无需动作。
+    // userControlled 暂缓自带重试：轮询等待（100ms）而非 snapshotFlow 订阅——
+    // "350ms 用户滚动冷却窗过期"这类无触点事件的时刻没有 State 写入，订阅式等待
+    // 可能永不唤醒；轮询读 isUserControlled（内部含冷却窗/闩锁判定）无此死角，
+    // 用户停手最迟 ~100ms 内折叠落地。等待中本 effect 可被 key 翻转取消（loading/
+    // processActive 变化），取消即放弃本次折叠，交由完成兜底接管。
+    LaunchedEffect(autoCollapseAll, loading, hasProcessContent, finalOutputStarted, processActive) {
+        if (autoCollapseAll && loading && hasProcessContent &&
+            finalOutputStarted && !processActive && !chainCollapsed && !manualOverride
+        ) {
+            while (isUserControlled?.invoke() == true) {
+                delay(100)
             }
+            // 等待期间可能被手动接管抢先改变形态，复核后再折
+            if (chainCollapsed || manualOverride || processActive) return@LaunchedEffect
+            chainCollapsed = true
+            chainStateKey?.let { setSectionExpanded(it, false) }
         }
     }
-    // 开关开启时：生成中强制展开（含重新生成场景）。完成后按"折叠能否与用户不争夺
-    // 锚点"分三类时机（见下方 effect 的 when）：
-    // A) 用户在控制列表（拖拽中/松手窗/翻历史）：**任何时刻都不折叠**——可见折叠是
-    //    高度骤变，与起手下拉重叠会抖动（"生成完后下拉跳动抽搐"根因，历史多轮延迟+
-    //    守卫方案均未根除，故用户控制中一律不动，改由下方"补折叠" effect 等稳定后落地）。
-    // B) 过程区已完全滚出视口上方（输出顶 ≤ 视口顶）：用户看不到过程区，瞬时无动画
-    //    折叠——折叠只改视口外高度，贴底锚定同帧吸收，视觉零变化。
-    // C) 用户贴底观看（短回复完整在屏上）：**可见折叠是产品语义本身**（用户选"完成
-    //    立即在眼前折叠"）。折叠发生在列表底部锚的上方：底部钉住不漂移，思考内容收成
-    //    卡、最终输出自然上移填补，带动画折叠与阅读预期一致；折叠即刻落库（store
-    //    false），此后重建保持折叠卡。历史之所以反复回避此分支，是把"贴底观看的可见
-    //    折叠"与"非贴底/滚动中的突缩"混为一谈——非贴底才必须推迟。
-    // 完成定稿若因用户控制/非贴底而推迟（过程区可见）：保持展开，并把"完成定稿=展开"
-    // 临时固化落库（store true）护重建——否则消息滚出视口被回收、或切走切回整页重建
-    // 时，init 无记忆只能按开关推导成折叠，以折叠矮形态替换用户正在看的展开形态，
-    // 高度骤减触发 LazyColumn 锚点修正把列表吸向底部（"生成完下拉回弹/切回后位置
-    // 不一致"根因，9306109a 曾落库修复、1b00bd78 撤掉后实测复发，此处分叉恢复
-    // 9306109a 语义）。固化是"临时"的：置 autoCollapseHold，消息离开组合（回收/切页）
-    // 时由 DisposableEffect 落 false 回收，自动折叠不失效；或由下方"补折叠" effect 在
-    // 用户回到底部稳定后立即折叠。过程区已在视口上方（输出顶 ≤ 视口顶）时不落库：
-    // 消息在视口外，重建由 init 推导折叠，用户看不到塌缩，固化展开反而架空开关语义。
-    // 用户手动展开/收起：手动形态落库优先级最高，覆盖上述自动固化（onClick 清 hold）。
+    // 完成兜底折叠（第二时机，极少数场景）：正文开始时机的折叠被 userControlled
+    // 暂缓、且用户控制到消息完成的残余场景，在完成时再给一次机会。手动接管
+    // （manualOverride）让位。旧 A/B/C 三分类定稿中"用户控制中→固化展开 + hold"
+    // 分支已删：重建由 init 按开关推导折叠，与开关目标形态一致，无展开残留
+    // （旧固化是为护"切走切回不塌缩"，新时序下折叠在 loading 中即落库，不存在该态）。
     var prevChainLoading by remember(nodeId) { mutableStateOf(loading) }
     LaunchedEffect(loading, autoCollapseAll) {
         if (autoCollapseAll) {
             if (loading) {
                 // 生成中强制展开（含重新生成场景）
                 chainCollapsed = false
-            } else if (prevChainLoading && hasProcessContent && !chainCollapsed) {
+            } else if (prevChainLoading && hasProcessContent && !chainCollapsed && !manualOverride) {
                 // 仅"本组合内 loading 由 true 翻转为 false"（即刚生成完）才处理；
                 // 历史消息下拉重建不算生成完成，不折叠、不落库（否则每条被看过的
                 // 历史都会被记成折叠，破坏自动折叠的产品语义）。
                 delay(AUTO_COLLAPSE_DELAY_MS)
                 val viewportTopY = thinkingFreezeState?.topBarBottomY ?: Int.MAX_VALUE
-                val atBottom = isChatListAtBottom?.invoke()
-                val userControlled = isUserControlled?.invoke() == true
                 when {
-                    // A) 用户控制中：不动。过程区可见则临时固化展开护重建（防回收/切页
-                    // 重建被推导成折叠矮形态吸回底部），到期回收见 autoCollapseHold 注释。
-                    userControlled -> {
-                        if (finalOutputTopY > viewportTopY) {
-                            autoCollapseHold = true
-                            chainStateKey?.let { setSectionExpanded(it, true) }
-                        }
-                        // 过程区已在视口上方 → 不落库，重建由 init 推导折叠。
-                    }
                     // B) 过程区已完全滚出视口上方：瞬时无动画折叠（视口外，不可见），
                     // 落库折叠态，滚出重建后读记忆保持折叠卡。
                     finalOutputTopY <= viewportTopY -> {
                         chainCollapseAnimated = false
                         chainCollapsed = true
-                        autoCollapseHold = false
                         chainStateKey?.let { setSectionExpanded(it, false) }
                         // 无动画折叠已同帧落地，恢复标志让用户后续手动展开/收起保持平滑动画
                         withFrameNanos {}
                         chainCollapseAnimated = true
                     }
-                    // C) 贴底观看（短回复完整在屏上）：可见折叠，带动画；完成后即刻落库，
-                    // 此后重建读记忆保持折叠卡；不留任何待执行的延迟滚动。
-                    atBottom == true -> {
+                    // C) 贴底观看：可见折叠，带动画；完成后即刻落库，此后重建读记忆保持折叠卡。
+                    isChatListAtBottom?.invoke() == true -> {
                         chainCollapsed = true
-                        autoCollapseHold = false
                         chainStateKey?.let { setSectionExpanded(it, false) }
                     }
-                    // 过程区可见但不在底部（预览等无列表上下文/异常形态）：按"可见不
-                    // 可折叠"处理，临时固化展开，到期回收同上。
-                    else -> {
-                        autoCollapseHold = true
-                        chainStateKey?.let { setSectionExpanded(it, true) }
-                    }
+                    // 其余（用户控制中/可见非贴底）：不折叠不落库，留待下方补折叠 effect
+                    // 在用户回到底部/过程区滚出视口/放手后落地。
                 }
             }
         }
         prevChainLoading = loading
     }
-    // "完成定稿被推迟"的补折叠（分支 A / else 落 autoCollapseHold 后）：
-    // 完成瞬间用户在操控 → 折叠不落地。此 effect 在消息仍组合、开关开启、持 hold、
-    // 尚未折叠时监视列表：一旦"贴底 或 过程区已滚出视口上方"且用户不再控制（含
-    // 松手冷却与翻历史闩锁，见 LocalIsChatListUserControlled），延迟一帧余量后补折叠
-    // ——保证开关语义下每条消息最终都会收卡，而不是只有"完成瞬间恰好空闲"的那条
-    // 折叠。折叠发生在用户稳定后，不与他正在进行的滚动争夺锚点。
-    LaunchedEffect(autoCollapseAll, loading, autoCollapseHold, chainCollapsed) {
-        if (autoCollapseAll && !loading && autoCollapseHold && !chainCollapsed && hasProcessContent) {
+    // "完成兜底被推迟"的补折叠：完成瞬间用户在操控或非贴底 → 折叠不落地。此 effect
+    // 在消息仍组合、开关开启、无手动接管、尚未折叠时监视列表：一旦"贴底 或 过程区
+    // 已滚出视口上方"且用户不再控制（含松手冷却与翻历史闩锁，见
+    // LocalIsChatListUserControlled），延迟一帧余量后补折叠——保证开关语义下每条
+    // 消息最终都会收卡。折叠发生在用户稳定后，不与他正在进行的滚动争夺锚点。
+    LaunchedEffect(autoCollapseAll, loading, manualOverride, chainCollapsed) {
+        if (autoCollapseAll && !loading && !manualOverride && !chainCollapsed && hasProcessContent) {
             val viewportTopY = thinkingFreezeState?.topBarBottomY ?: Int.MAX_VALUE
-            snapshotFlow {
-                val settled = isUserControlled?.invoke() != true
-                val outOfView = finalOutputTopY <= viewportTopY
-                (settled && (isChatListAtBottom?.invoke() == true || outOfView))
-            }.first { it }
+            // 轮询等待（100ms）：同触发 effect 注释——"冷却窗过期"这类无触点事件的
+            // 时刻没有 State 写入，订阅式等待（snapshotFlow.first）可能永不唤醒，
+            // 即"部分消息永不折叠"的隐性来源；轮询每次重读最终输出顶坐标，无此死角
+            while (isUserControlled?.invoke() == true ||
+                !(isChatListAtBottom?.invoke() == true || finalOutputTopY <= viewportTopY)
+            ) {
+                delay(100)
+            }
             // 条件满足后让过一帧的边界抖动（列表刚回底的收尾），再复核一次才折叠
             delay(120)
             if (isUserControlled?.invoke() != true &&
@@ -593,7 +594,6 @@ private fun MessagePartsBlock(
                     chainCollapseAnimated = false
                 }
                 chainCollapsed = true
-                autoCollapseHold = false
                 chainStateKey?.let { setSectionExpanded(it, false) }
                 if (!chainCollapseAnimated) {
                     withFrameNanos {}
@@ -897,10 +897,10 @@ private fun MessagePartsBlock(
                     collapseAtBottom = willCollapse && (isChatListAtBottom?.invoke() == true)
                     chainCollapsed = willCollapse
                     // 记录用户手动选择的形态（true=展开，与思考步骤同语义）：滚出回收重建后保持所见形态。
-                    // store 自动写入路径：手动点击此处、完成 effect 定稿（折叠 / 临时固化展开）。
-                    // 手动点击即释放 autoCollapseHold——用户接管了本条形态，回收销毁不再自动
-                    // 收卡（手动展开保持展开、手动折叠保持折叠），手动优先级最高。
-                    autoCollapseHold = false
+                    // store 自动写入路径：手动点击此处、自动折叠落地（触发/完成兜底/补折叠）。
+                    // 手动点击即置 manualOverride——本生成周期内自动折叠让位（手动优先级最高），
+                    // 手动展开保持展开、手动折叠保持折叠；重新生成（loading 翻 true）时复位。
+                    manualOverride = true
                     chainStateKey?.let { setSectionExpanded(it, !willCollapse) }
                     // 用户手动展开/收起过程区：通知列表取消自动跟随，避免高度骤增被拽到底部
                     onManualContentToggle?.invoke()
@@ -943,13 +943,16 @@ private fun MessagePartsBlock(
         // 不影响外层/流式正文的高度动画；普通布局下内容在卡片下方自然展开。
         // 用短 tween 与内部 ChainOfThought / 工具步骤的动画同步，避免默认 spring 造成
         // 多层高度动画不同步的回弹/抖动（"工具完成/展开时轻微抖一下"根因）。
-        // chainCollapseAnimated=false：完成时刻的视口外自动折叠，跳过动画瞬时收起
-        // （可见动画会与用户下拉起手重叠，见上方 effect 注释）。
+        // 生成中同样启用：codex 式触发（正文开始收卡）的 200ms 收起与正文首行并行，
+        // 高度差被随后的正文流式增长逐步填补（旧"仅 !loading 启用"会让 loading 中
+        // 折叠高度骤变无过渡，正文开始瞬间闪跳）。
+        // chainCollapseAnimated=false：视口外自动折叠（完成兜底 B 分支/补折叠），跳过
+        // 动画瞬时收起（可见动画会与用户下拉起手重叠，见上方 effect 注释）。
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
-                    if (!loading && chainCollapseAnimated) Modifier.animateContentSize(animationSpec = tween(200))
+                    if (chainCollapseAnimated) Modifier.animateContentSize(animationSpec = tween(200))
                     else Modifier
                 ),
             horizontalAlignment = if (role == MessageRole.USER) Alignment.End else Alignment.Start,
