@@ -11,8 +11,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -90,11 +90,21 @@ fun RikkahubTheme(
     // 更新状态栏图标颜色
     val view = LocalView.current
     if (!view.isInEditMode) {
-        SideEffect {
+        DisposableEffect(view, darkTheme) {
             val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).apply {
+            val controller = WindowCompat.getInsetsController(window, view)
+            // 先记住外层（主界面）设置的图标色，嵌套主题（如工作区终端的 DARK 主题）覆盖后，
+            // 退出该界面时在 onDispose 恢复原值，否则系统栏图标颜色会停留在深色主题设置上
+            // （上游 a7ee362f 同根因）。只恢复图标明暗，不动系统栏背景/透明等其它状态。
+            val previousLightStatusBars = controller.isAppearanceLightStatusBars
+            val previousLightNavigationBars = controller.isAppearanceLightNavigationBars
+            controller.apply {
                 isAppearanceLightStatusBars = !darkTheme
                 isAppearanceLightNavigationBars = !darkTheme
+            }
+            onDispose {
+                controller.isAppearanceLightStatusBars = previousLightStatusBars
+                controller.isAppearanceLightNavigationBars = previousLightNavigationBars
             }
         }
     }

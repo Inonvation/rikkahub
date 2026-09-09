@@ -56,6 +56,7 @@ import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
+import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
@@ -119,6 +120,7 @@ class ResponseAPI(
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .addHeader("Content-Type", "application/json")
                 .configureReferHeaders(providerSetting.effectiveBaseUrl())
+                .configureSessionHeaders(providerSetting.effectiveBaseUrl(), params.sessionId)
             val request = authenticator.authenticate(requestBuilder, providerSetting).build()
 
             Log.d(TAG, "generateText: ${json.encodeToString(requestBody)}")
@@ -159,6 +161,7 @@ class ResponseAPI(
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .configureReferHeaders(providerSetting.effectiveBaseUrl())
+            .configureSessionHeaders(providerSetting.effectiveBaseUrl(), params.sessionId)
         if (providerSetting.authType == OpenAIAuthType.CHATGPT_SUBSCRIPTION) {
             requestBuilder.acceptEventStream()
         }

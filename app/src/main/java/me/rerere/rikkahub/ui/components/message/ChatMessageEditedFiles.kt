@@ -60,6 +60,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -780,7 +781,9 @@ internal fun extractFileChanges(parts: List<UIMessagePart>): FileChangesResult {
                             runCatching { JsonInstant.parseToJsonElement(part.text).jsonObject }.getOrNull()
                         }
                     val path = outputJson?.get("path")?.jsonPrimitive?.contentOrNull
-                        ?: tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                        // input 可能不是 JSON 对象（第三方 relay 流式合并把参数落成数组等），
+                        // 直接 .jsonObject 会抛 IllegalArgumentException 使会话重开即崩溃（上游 dee88dca 同根因）
+                        ?: (tool.inputAsJson() as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     val status = if (tool.toolName == "workspace_edit_file") {
                         FileChangeStatus.EDITED
@@ -1020,7 +1023,7 @@ internal fun extractStudyItems(parts: List<UIMessagePart>): List<StudyItem> =
                 ?.jsonPrimitive?.contentOrNull
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
-                ?: tool.inputAsJson().jsonObject[config.inputField]
+                ?: (tool.inputAsJson() as? JsonObject)?.get(config.inputField)
                     ?.jsonPrimitive?.contentOrNull
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
@@ -1196,7 +1199,7 @@ internal fun extractTrustedFolderChanges(parts: List<UIMessagePart>): List<FileC
                 "trusted_folder_write" -> {
                     // 失败（output 含 error）不计入变更，避免假阳性
                     if (isToolOutputError(tool)) return@forEach
-                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                    val path = (tool.inputAsJson() as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     val changeStatus = tool.output.filterIsInstance<UIMessagePart.Text>()
                         .firstOrNull()?.text
@@ -1222,14 +1225,14 @@ internal fun extractTrustedFolderChanges(parts: List<UIMessagePart>): List<FileC
                 "trusted_folder_edit" -> {
                     // 失败（output 含 error）不计入变更，避免假阳性
                     if (isToolOutputError(tool)) return@forEach
-                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                    val path = (tool.inputAsJson() as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     changes.add(FileChange(path, FileChangeStatus.EDITED))
                 }
 
                 "trusted_folder_delete" -> {
                     if (isToolOutputError(tool)) return@forEach
-                    val path = tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                    val path = (tool.inputAsJson() as? JsonObject)?.get("path")?.jsonPrimitive?.contentOrNull
                         ?: return@forEach
                     changes.add(FileChange(path, FileChangeStatus.REMOVED))
                 }

@@ -78,13 +78,18 @@ data class ModelUsageEntry(val modelId: String = "", val count: Int = 0, val tok
 /** 助手维度使用率（按 assistant_id 分组） */
 data class AssistantUsageEntry(val assistantId: String = "", val count: Int = 0, val tokens: Long = 0)
 
+// 在 json_each() 的参数内校验 JSON，避免损坏行（relay 中断/旧版本写入的非 JSON 内容）导致
+// 整个统计查询抛错、统计页崩溃（上游 77a58c2c 同根因，本地 json_each 展开点多于上游需全覆盖）。
+// 用 CASE 而非依赖 WHERE 条件的求值顺序，无效 JSON 按空数组处理。
+private const val VALID_MESSAGES_JSON = "CASE WHEN json_valid(mn.messages) THEN mn.messages ELSE '[]' END"
+
 // SQLite json_each() 展开 messages JSON 数组，json_extract() 提取 Token 字段并聚合
 private val TOKEN_STATS_SQL = SimpleSQLiteQuery(
     "SELECT COUNT(*) AS totalMessages, " +
         "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER)), 0) AS promptTokens, " +
         "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)), 0) AS completionTokens, " +
         "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.cachedTokens') AS INTEGER)), 0) AS cachedTokens " +
-        "FROM message_node mn, json_each(mn.messages) j"
+        "FROM message_node mn, json_each($VALID_MESSAGES_JSON) j"
 )
 
 suspend fun MessageNodeDAO.getTokenStats(): MessageTokenStats = getTokenStatsRaw(TOKEN_STATS_SQL)
@@ -95,7 +100,7 @@ suspend fun MessageNodeDAO.getMessageCountPerDay(startDate: String): List<Messag
         SimpleSQLiteQuery(
             "SELECT substr(json_extract(j.value, '$.createdAt'), 1, 10) AS day, " +
                 "COUNT(*) AS count " +
-                "FROM message_node mn, json_each(mn.messages) j " +
+                "FROM message_node mn, json_each($VALID_MESSAGES_JSON) j " +
                 "WHERE json_extract(j.value, '$.role') = 'user' " +
                 "AND json_extract(j.value, '$.createdAt') >= ? " +
                 "GROUP BY day",
@@ -113,7 +118,7 @@ private val TREND_BY_MODEL_SQL = SimpleSQLiteQuery(
         "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
         "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
         "), 0) AS tokens " +
-        "FROM message_node mn, json_each(mn.messages) j " +
+        "FROM message_node mn, json_each($VALID_MESSAGES_JSON) j " +
         "WHERE json_extract(j.value, '$.createdAt') >= ? " +
         "AND json_extract(j.value, '$.modelId') IS NOT NULL " +
         "AND json_extract(j.value, '$.modelId') != '' " +
@@ -134,7 +139,7 @@ suspend fun MessageNodeDAO.getModelUsage(startDate: String): List<ModelUsageEntr
                 "  CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER) + " +
                 "  CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)" +
                 "), 0) AS tokens " +
-                "FROM message_node mn, json_each(mn.messages) j " +
+                "FROM message_node mn, json_each($VALID_MESSAGES_JSON) j " +
                 "WHERE json_extract(j.value, '$.modelId') IS NOT NULL " +
                 "AND json_extract(j.value, '$.modelId') != '' " +
                 "AND json_extract(j.value, '$.createdAt') >= ? " +
@@ -155,7 +160,7 @@ suspend fun MessageNodeDAO.getAssistantUsage(startDate: String): List<AssistantU
                 "), 0) AS tokens " +
                 "FROM message_node mn " +
                 "JOIN conversationentity c ON mn.conversation_id = c.id " +
-                "CROSS JOIN json_each(mn.messages) j " +
+                "CROSS JOIN json_each($VALID_MESSAGES_JSON) j " +
                 "WHERE json_extract(j.value, '$.createdAt') >= ? " +
                 "GROUP BY c.assistant_id ORDER BY count DESC",
             arrayOf(startDate)
@@ -172,7 +177,7 @@ suspend fun MessageNodeDAO.getModelNameSnapshots(startDate: String): List<ModelN
         SimpleSQLiteQuery(
             "SELECT json_extract(j.value, '$.modelId') AS modelId, " +
                 "MAX(json_extract(j.value, '$.modelName')) AS modelName " +
-                "FROM message_node mn, json_each(mn.messages) j " +
+                "FROM message_node mn, json_each($VALID_MESSAGES_JSON) j " +
                 "WHERE json_extract(j.value, '$.modelId') IS NOT NULL " +
                 "AND json_extract(j.value, '$.modelId') != '' " +
                 "AND json_extract(j.value, '$.modelName') IS NOT NULL " +

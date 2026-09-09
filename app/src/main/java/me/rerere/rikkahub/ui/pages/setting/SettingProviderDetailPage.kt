@@ -139,6 +139,19 @@ import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
 import kotlin.uuid.Uuid
 
+/**
+ * 保存前规范化：名称与模型 displayName 去除首尾空格。
+ *
+ * 输入态保留空格（见 ProviderConfigure/模型名输入框 onValueChange 不再即时 trim），
+ * 只在这里（保存点）收敛，避免：
+ * - 粘贴/输入法组词被即时 trim 截断；
+ * - 名称合法包含内部空格（如 "Claude Code"）被误删（trim 只动首尾，安全）。
+ */
+private fun ProviderSetting.trimmedForSave(): ProviderSetting {
+    val trimmedModels = models.map { it.copy(displayName = it.displayName.trim()) }
+    return copyProvider(name = name.trim(), models = trimmedModels)
+}
+
 @Composable
 fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -156,9 +169,14 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
         saveJob.value?.cancel()
         saveJob.value = scope.launch {
             delay(AUTO_SAVE_DEBOUNCE_MS)
+            // 防抖落库等效于上游的显式「保存」：provider 名与模型 displayName 的首尾空格在
+            // 此刻统一去除（输入过程中保留空格，粘贴/输入法组词不被截断；上游 1a1e672e 同语义）。
+            // 同步 internalProvider，避免编辑态停留在带空格的旧值导致下次落库又 trim 一次。
+            val trimmed = internalProvider.trimmedForSave()
+            internalProvider = trimmed
             vm.updateProviders(
                 settings.providers.map {
-                    if (it.id == provider.id) internalProvider else it
+                    if (it.id == provider.id) trimmed else it
                 }
             )
         }
@@ -608,7 +626,7 @@ private fun ModelSettingsForm(
                         OutlinedTextField(
                             value = model.displayName,
                             onValueChange = {
-                                onModelChange(model.copy(displayName = it.trim()))
+                                onModelChange(model.copy(displayName = it))
                             },
                             label = { Text(stringResource(if (isEdit) R.string.setting_provider_page_model_name else R.string.setting_provider_page_model_display_name)) },
                             modifier = Modifier.fillMaxWidth(),
@@ -1787,7 +1805,10 @@ private fun ProviderOverrideSettings(
                         TextButton(
                             onClick = {
                                 hapticController.tap()
-                                onUpdateProviderOverride(internalProvider)
+                                // override 编辑保存点：名称去除首尾空格（输入过程保留）
+                                onUpdateProviderOverride(
+                                    internalProvider.copyProvider(name = internalProvider.name.trim())
+                                )
                                 showProviderConfig = false
                                 editingProvider = null
                             },

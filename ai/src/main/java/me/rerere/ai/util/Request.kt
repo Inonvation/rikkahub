@@ -38,6 +38,24 @@ fun Request.Builder.configureReferHeaders(url: String): Request.Builder {
     }
 }
 
+/**
+ * 透传会话标识头。
+ *
+ * - 所有走流式/非流式请求的会话都带 `X-Session-ID`，让兼容层（第三方 relay/proxy）
+ *   能按会话路由或关联日志；
+ * - opencode.ai 端点额外保留其约定的 `x-opencode-session`（此前只在
+ *   ChatCompletionsAPI 内联按 host 特判，这里统一收敛，claude/google/responses 一并覆盖）。
+ * sessionId 为空时不加任何头，避免污染自定义服务端。
+ */
+fun Request.Builder.configureSessionHeaders(url: String, sessionId: String?): Request.Builder = apply {
+    if (sessionId != null) {
+        header("X-Session-ID", sessionId)
+        if (url.toHttpUrl().host == "opencode.ai") {
+            header("x-opencode-session", sessionId)
+        }
+    }
+}
+
 fun ResponseBody.stringSafe(): String? {
     return when (this) {
         is RealResponseBody -> string()

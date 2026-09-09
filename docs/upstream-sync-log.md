@@ -275,3 +275,40 @@
 ### 验证
 
 `:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:ai:testDebugUnitTest` 全模块通过（含 ToolApprovalStateTest 3 例），`:app:testDebugUnitTest --tests ConversationSessionTest` 5 例全绿（test-results XML 确认）。`isPending` 语义变化影响面复查：全部使用点（审批 UI/续答守卫/hasPendingTools）均为「已执行工具不再等待审批」的修复意图内。
+
+## 2026-09-09 — 第十次同步（上游 2.5.0=12ee935e 之后的 20 提交；落地 9，docs 类跳过 3，③ 拍板中）
+
+> 网络代理不可用，git fetch 失败；清单基于 GitHub API 快照（至 09-09 07:54Z），落地全部为手动镜像上游 diff。
+
+### A. 落地（9 个）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `ab07ac1f` | ModelRegistry 注册 DeepSeek V4.1 Flash（多模态/工具/1M） | 照抄 +8 行（DEEPSEEK 定义 + allModels 注册） |
+| `7b92f89e` | 代码块禁用连字（calt/liga/clig 0） | `CodeHighlightText` Text() 加 style（highlight 模块本地有自定义缓存，Text 调用点同构，直接移植） |
+| `20e552f9` | X-Session-ID + opencode session 头 | `ai/util/Request.kt` 抽 `configureSessionHeaders`；ChatCompletionsAPI 两处内联特判替换；ResponseAPI（用 `effectiveBaseUrl()`）/Claude/Google 各补 2 点 |
+| `3d75f83f` | web 模型弹窗厂商标签堆叠 | `model-list.tsx` 收藏标签区 ScrollArea 加 `**:data-[slot=scroll-area-viewport]:max-h-20`（本地主列表已是 flex-1 布局无需第二处）；web 产物已重建 |
+| `77a58c2c` | 统计页坏 JSON 崩溃 | 本地扩展：抽 `VALID_MESSAGES_JSON`（json_valid CASE 守卫）替换 **全部 6 处** `json_each(mn.messages)`（上游只修 2 处，本地趋势/模型/助手维度 4 处同根因一并覆盖）；上游 androidTest 未移植 |
+| `a7ee362f` | 退出终端后系统栏图标色残留 | Theme.kt SideEffect→DisposableEffect，捕获 previous 图标色 + onDispose 恢复（本地 WorkspaceTerminalPage 同嵌套 DARK 主题，复现路径一致） |
+| `dee88dca` | workspace_edit_file 参数非 JSON 崩溃 | 本地扩展：`ChatMessageEditedFiles` 共 **5 处**（编辑链路 + trusted_folder write/edit/delete + 本地学习工具 inputField）改 `(inputAsJson() as? JsonObject)?.get(...)` 安全转换 |
+| `6e0aa7d4` | 工具执行完成前可打开调用详情 | `ChatMessageTools` 保留本地 `alwaysOpenPreview`/`collapsedByDefault` 前置分支，放开末尾门控为无条件 `{ showResult = true }` |
+| `1a1e672e` | 模型/提供商名输入允许空格 | 本地防抖自动保存架构差异：输入点去 trim（ProviderConfigure 3 处 + SettingProviderDetailPage displayName 1 处），在 **保存点** trim——防抖落库统一 `trimmedForSave()`（name + models displayName，同步 internalProvider）、新增 provider `AddButton` 与 override 保存按钮提交处补 trim |
+
+### B. 无需合并（11 个）
+
+- `7038e981` html/svg 预览：本地 `WorkspaceFileEditorPage` 已有 HTML WebView 渲染（带 file:// 相对资源基准，比上游 content-data 更强）；svg 本地归 IMAGE 类型走图片管线。
+- `fcb04126`+`05a85a09` ask_user 多选/全选项自定义文本：本地已超集（text chips/single/multi/**confirmation** + 作答草稿）。
+- `019c46ae` /skills 免审批安全区：本地无 `WRITABLE_ROOT_PREFIXES` 结构，不适用。
+- `45275025` 上下文限制放宽 1~19：本地无 MIN=20 钳制逻辑。
+- `8b3e094b`/`7dd2b3f8`/`5bf6d8c2` 赞助商 docs：推广条目惯例跳过。
+- `e5247be0`/`12ee935e` deps+bump：窗口边界外（2.5.0 bump 本身）。
+
+### C. 待拍板（3 个，均未落地）
+
+- `3896b6d6` 图片页长按多选：patch 已细读——长按进选择模式，顶部操作栏（取消/计数/删除），`vm.deleteImages` 批量删（失败保留选中），BackHandler/切页/成功后退出；本地仅单图删除，需本地化移植（page+VM），待拍板。
+- `5b4d7895` 自定义时间提醒间隔：需 Assistant 字段 + Room v51→v52 + UI + transformer 参数化。
+- `03246406` 工作区 Shell 兼容模式：本地 runner/DB/页面自主演进，成本最高，建议暂缓（除非遇 PRoot seccomp 兼容问题）。
+
+### 验证
+
+`:ai:compileDebugKotlin`、`:app:compileDebugKotlin`、`:highlight:compileDebugKotlin` BUILD SUCCESSFUL；`:web:buildWebUi` 产物重建成功（首次失败为 react-router 清理 build 目录偶发占用，重试即过）。真机行为验证（主题图标色恢复/工具详情提前打开/坏 JSON 会话重开）待装机确认。

@@ -1,6 +1,7 @@
 package me.rerere.highlight
 
 import android.util.LruCache
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -113,6 +114,9 @@ fun CodeHighlightText(
     Text(
         modifier = modifier,
         text = annotatedString,
+        // 禁用连字/上下文替换：代码里 `!=`、`->` 等被字体连字渲染成箭头/不等号会误导阅读，
+        // 且按字符宽度选中/复制会与视觉不符（上游 7b92f89e 同语义）。
+        style = LocalTextStyle.current.copy(fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0"),
         fontSize = fontSize,
         fontFamily = fontFamily,
         fontStyle = fontStyle,

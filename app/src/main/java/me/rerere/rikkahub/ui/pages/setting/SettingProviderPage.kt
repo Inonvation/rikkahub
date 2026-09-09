@@ -548,7 +548,8 @@ private fun handleImageQRCode(
 @Composable
 private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
     val dialogState = useEditState<ProviderSetting> {
-        onAdd(it)
+        // 新建对话框确认即保存点：名称去除首尾空格（输入过程保留，上游 1a1e672e 同语义）
+        onAdd(it.copyProvider(name = it.name.trim()))
     }
     val hapticController = rememberHaptic()
 

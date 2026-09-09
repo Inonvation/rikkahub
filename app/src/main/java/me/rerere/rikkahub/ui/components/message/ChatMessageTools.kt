@@ -589,10 +589,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             // 折叠类工具（内容重、标题已表达意图）：不设置 onClick，header 点击落到
             // 展开/收起内联摘要，完整详情走内容区内的"查看完整详情"入口。
             null
-        } else if (context.content != null || isPending || images.isNotEmpty()) {
-            { showResult = true }
         } else {
-            null
+            // 其余工具无条件允许点击打开详情：等待审批/排队执行等尚无输出与图片的阶段，
+            // 也要能查看入参（上游 6e0aa7d4 同语义），不再要求 content/isPending/images 任一成立。
+            { showResult = true }
         },
         content = if (hasExtraContent) {
             {
