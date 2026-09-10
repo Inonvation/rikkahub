@@ -497,8 +497,10 @@ private fun MessagePartsBlock(
     // 复位时机 = loading false→true 翻转（重新生成）：新周期自动折叠重新接管；
     // 完成时不复位，手动形态持久到周期结束（与 store 手动写入语义一致）。
     var manualOverride by remember(nodeId) { mutableStateOf(false) }
-    LaunchedEffect(loading) {
-        if (loading) manualOverride = false
+    LaunchedEffect(loading, messageFinishedAt) {
+        // messageFinishedAt 守卫：发送新消息时 generationJob 先于新节点落库，旧末条
+        // 已完成消息可能在竞态窗口内短暂吃到 loading=true，不得据此复位手动接管。
+        if (loading && messageFinishedAt == null) manualOverride = false
     }
     // codex 式自动折叠（第一折叠时机，loading 中）：正文开始且过程区无进行中步骤 → 收卡，
     // 200ms 收起动画与正文首行并行（codex/ChatGPT 桌面端同节奏，对齐设置文案
@@ -535,11 +537,15 @@ private fun MessagePartsBlock(
     // 分支已删：重建由 init 按开关推导折叠，与开关目标形态一致，无展开残留
     // （旧固化是为护"切走切回不塌缩"，新时序下折叠在 loading 中即落库，不存在该态）。
     var prevChainLoading by remember(nodeId) { mutableStateOf(loading) }
-    LaunchedEffect(loading, autoCollapseAll) {
+    LaunchedEffect(loading, autoCollapseAll, messageFinishedAt) {
         if (autoCollapseAll) {
             if (loading) {
-                // 生成中强制展开（含重新生成场景）
-                chainCollapsed = false
+                // 生成中强制展开（含重新生成场景）。
+                // messageFinishedAt 守卫：竞态窗口内旧已完成消息短暂 loading=true 时
+                // 不得强展——这是"发第二条时第一条过程闪展闪收"的直接触发点。
+                if (messageFinishedAt == null) {
+                    chainCollapsed = false
+                }
             } else if (prevChainLoading && hasProcessContent && !chainCollapsed && !manualOverride) {
                 // 仅"本组合内 loading 由 true 翻转为 false"（即刚生成完）才处理；
                 // 历史消息下拉重建不算生成完成，不折叠、不落库（否则每条被看过的
@@ -1013,7 +1019,13 @@ private fun MessagePartsBlock(
                                         Text(
                                             text = buildAnnotatedString {
                                                 append("${index + 1}. ")
-                                                withLink(LinkAnnotation.Url(annotation.url)) {
+                                                // file:// URI 不可外开，降级为不可点击
+                                                val ann = if (annotation.url.startsWith("file://", ignoreCase = true)) {
+                                                    LinkAnnotation.Clickable(tag = annotation.url, linkInteractionListener = null)
+                                                } else {
+                                                    LinkAnnotation.Url(annotation.url)
+                                                }
+                                                withLink(ann) {
                                                     append(annotation.title.urlDecode())
                                                 }
                                             }

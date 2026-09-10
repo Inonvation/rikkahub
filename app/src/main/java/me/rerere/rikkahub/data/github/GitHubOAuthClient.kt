@@ -58,6 +58,20 @@ class GitHubOAuthClient(private val clientId: String) {
         val scopes: List<String>,
     )
 
+    /**
+     * token 复核结果。区分「明确被拒」与「无法判定」——onAuthInvalid 只应在
+     * [Rejected] 时永久失效；网络失败（[Inconclusive]）保留绑定，避免误杀。
+     */
+    sealed interface TokenCheck {
+        data class Valid(val profile: GitHubUserProfile) : TokenCheck
+
+        /** GitHub 明确拒绝该 token（HTTP 401/403），可安全判定失效 */
+        data object Rejected : TokenCheck
+
+        /** 网络失败或非 401/403 错误码，无法判定 token 是否有效 */
+        data object Inconclusive : TokenCheck
+    }
+
     fun isConfigured(): Boolean = clientId.isNotBlank()
 
     /** 发起 device flow，返回展示给用户的 user_code 与轮询参数。网络失败抛异常由调用方兜底。 */
@@ -95,6 +109,18 @@ class GitHubOAuthClient(private val clientId: String) {
 
     /** GET /user 验证 token 并取账号信息；X-OAuth-Scopes 响应头携带 token 实际 scope。失败返回 null */
     fun fetchUser(token: String): GitHubUserProfile? {
+        return when (val check = verifyToken(token)) {
+            is TokenCheck.Valid -> check.profile
+            else -> null
+        }
+    }
+
+    /**
+     * 复核 token 是否仍被 GitHub 接受。
+     * 供 401 后的「二次确认」使用：只有 [TokenCheck.Rejected]（HTTP 401/403）才应永久失效凭据；
+     * 网络失败/超时/5xx 返回 [TokenCheck.Inconclusive]，调用方应保留现有绑定。
+     */
+    fun verifyToken(token: String): TokenCheck {
         val connection = (URL(USER_URL).openConnection() as HttpURLConnection).apply {
             connectTimeout = CONNECT_TIMEOUT
             readTimeout = READ_TIMEOUT
@@ -104,20 +130,36 @@ class GitHubOAuthClient(private val clientId: String) {
             setRequestProperty("Authorization", "Bearer $token")
         }
         return try {
-            if (connection.responseCode != 200) return null
-            val body = connection.inputStream.use { it.readBytes().decodeToString() }
-            val obj = runCatching { JsonInstant.parseToJsonElement(body).jsonObject }.getOrNull()
-                ?: return null
-            GitHubUserProfile(
-                login = obj["login"]?.jsonPrimitive?.content ?: return null,
-                avatarUrl = obj["avatar_url"]?.jsonPrimitive?.content.orEmpty(),
-                scopes = connection.getHeaderField("X-OAuth-Scopes")
-                    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-                    .orEmpty(),
-            )
+            val code = connection.responseCode
+            val result = when (code) {
+                200 -> {
+                    val body = connection.inputStream.use { it.readBytes().decodeToString() }
+                    val obj = runCatching { JsonInstant.parseToJsonElement(body).jsonObject }.getOrNull()
+                    val login = obj?.get("login")?.jsonPrimitive?.content
+                    if (obj != null && login != null) {
+                        TokenCheck.Valid(
+                            GitHubUserProfile(
+                                login = login,
+                                avatarUrl = obj["avatar_url"]?.jsonPrimitive?.content.orEmpty(),
+                                scopes = connection.getHeaderField("X-OAuth-Scopes")
+                                    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                                    .orEmpty(),
+                            )
+                        )
+                    } else {
+                        TokenCheck.Inconclusive
+                    }
+                }
+                401, 403 -> TokenCheck.Rejected
+                else -> TokenCheck.Inconclusive
+            }
+            if (result is TokenCheck.Inconclusive) {
+                Log.w(TAG, "verifyToken inconclusive, http=$code")
+            }
+            result
         } catch (e: Exception) {
-            Log.w(TAG, "fetchUser failed", e)
-            null
+            Log.w(TAG, "verifyToken network failed", e)
+            TokenCheck.Inconclusive
         } finally {
             connection.disconnect()
         }

@@ -450,7 +450,7 @@ private fun HtmlParagraphContent(
     val onWsLinkClick: (String) -> Unit = { dest ->
         val url = resolveWorkspaceImage(dest, wsResolver)
         if (url != null) openWsPreview(url)
-        else if (isWorkspaceLink(dest)) openWorkspaceFile(dest)
+        else if (isWorkspaceLink(dest)) openWorkspaceFile(normalizeWorkspaceLink(dest))
     }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
@@ -828,7 +828,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     val onWsLinkClick: (String) -> Unit = { dest ->
         val url = resolveWorkspaceImage(dest, wsResolver)
         if (url != null) openWsPreview(url)
-        else if (isWorkspaceLink(dest)) openWorkspaceFile(dest)
+        else if (isWorkspaceLink(dest)) openWorkspaceFile(normalizeWorkspaceLink(dest))
     }
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
@@ -1132,7 +1132,13 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                             }
                         }
                     } else {
-                        withLink(LinkAnnotation.Url(href)) {
+                        // file:// URI 不可外开（Android N+ 抛 FileUriExposedException），降级为不可点击
+                        val annotation = if (href.startsWith("file://", ignoreCase = true)) {
+                            LinkAnnotation.Clickable(tag = href, linkInteractionListener = null)
+                        } else {
+                            LinkAnnotation.Url(href)
+                        }
+                        withLink(annotation) {
                             withStyle(linkStyle) {
                                 recurseChildren(element, style.merge(linkStyle.asTextStyle()))
                             }

@@ -680,7 +680,7 @@ private fun MarkdownNode(
                     }
                     // workspace 非图片链接：应用内打开文件/定位目录，不走系统浏览器
                     if (isWorkspaceLink(linkDest)) {
-                        openWorkspaceFile(linkDest)
+                        openWorkspaceFile(normalizeWorkspaceLink(linkDest))
                         return@clickable
                     }
                     // note: 前缀的内部笔记链接（双链/内部路径预处理产物）交给回调接管，而非系统浏览器
@@ -688,8 +688,11 @@ private fun MarkdownNode(
                     if (internal != null && handler != null && handler.onLinkClick(internal)) {
                         return@clickable
                     }
-                    val intent = Intent(Intent.ACTION_VIEW, linkDest.toUri())
-                    context.startActivity(intent)
+                    // file:// URI 禁止外部打开（Android N+ 会抛 FileUriExposedException）
+                    if (linkDest.startsWith("file://", ignoreCase = true)) return@clickable
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, linkDest.toUri()))
+                    }
                 })
         }
 
@@ -1056,7 +1059,7 @@ private fun Paragraph(
                 true
             } else if (isWorkspaceLink(dest)) {
                 // workspace 非图片链接：应用内打开文件/定位目录，不走系统浏览器
-                openWorkspaceFile(dest)
+                openWorkspaceFile(normalizeWorkspaceLink(dest))
                 true
             } else {
                 noteHandler?.onLinkClick(dest) ?: false
@@ -1297,7 +1300,12 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
 
         node.type == GFMTokenTypes.GFM_AUTOLINK -> {
             val link = node.getTextInNode(content)
-            withLink(LinkAnnotation.Url(link)) {
+            val annotation = if (link.startsWith("file://", ignoreCase = true)) {
+                LinkAnnotation.Clickable(tag = link, linkInteractionListener = null)
+            } else {
+                LinkAnnotation.Url(link)
+            }
+            withLink(annotation) {
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(link)
                 }
@@ -1470,7 +1478,13 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     }
                 }
             } else {
-                withLink(LinkAnnotation.Url(linkDest)) {
+                // file:// URI 不可外开（Android N+ 抛 FileUriExposedException），降级为不可点击
+                val annotation = if (linkDest.startsWith("file://", ignoreCase = true)) {
+                    LinkAnnotation.Clickable(tag = linkDest, linkInteractionListener = null)
+                } else {
+                    LinkAnnotation.Url(linkDest)
+                }
+                withLink(annotation) {
                     withStyle(
                         SpanStyle(
                             color = colorScheme.primary, textDecoration = TextDecoration.Underline
@@ -1485,9 +1499,15 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         node.type == MarkdownElementTypes.AUTOLINK -> {
             val links = node.children.trim(MarkdownTokenTypes.LT, 1).trim(MarkdownTokenTypes.GT, 1)
             links.fastForEach { link ->
-                withLink(LinkAnnotation.Url(link.getTextInNode(content))) {
+                val url = link.getTextInNode(content)
+                val annotation = if (url.startsWith("file://", ignoreCase = true)) {
+                    LinkAnnotation.Clickable(tag = url, linkInteractionListener = null)
+                } else {
+                    LinkAnnotation.Url(url)
+                }
+                withLink(annotation) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        append(link.getTextInNode(content))
+                        append(url)
                     }
                 }
             }

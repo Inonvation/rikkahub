@@ -286,9 +286,21 @@ private fun buildWorkspaceImageNameIndex(rootDir: File): Map<String, List<String
     return index
 }
 
-/** 是否 workspace 引用（/workspace/ 或 workspace:// 前缀） */
+/** 是否 workspace 引用（/workspace/、workspace:// 或 file:///workspace/ 前缀） */
 fun isWorkspaceLink(src: String): Boolean =
-    src.startsWith("/workspace/") || src.startsWith("workspace://")
+    src.startsWith("/workspace/") || src.startsWith("workspace://") || src.startsWith("file:///workspace/")
+
+/** 剥离 workspace 链接的 scheme 前缀，统一为 /workspace/... 路径供应用内跳转使用 */
+fun normalizeWorkspaceLink(src: String): String {
+    val lower = src.lowercase()
+    return when {
+        lower.startsWith("file:///workspace/") -> src.substring(src.indexOf("://") + 3)
+        lower.startsWith("workspace://") -> "/workspace/" + src.substring(src.indexOf("://") + 3)
+        lower.startsWith("workspace:/") -> "/workspace/" + src.substring(src.indexOf(":/") + 2)
+        lower.startsWith("workspace:") -> "/workspace/" + src.substring(src.indexOf(':') + 1)
+        else -> src
+    }
+}
 
 /**
  * 解析 workspace/相对路径引用成可加载的 file:// URI（含拼错路径降级链，见 [workspaceImageResolver]）。

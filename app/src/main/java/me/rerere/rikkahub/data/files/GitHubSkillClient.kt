@@ -33,8 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * 推荐的轮询方式）。
  *
  * 请求策略（未认证 API 配额 60 次/小时/IP，认证后 5000 次/小时/用户；raw.githubusercontent.com 不占配额）：
- * - 已绑定 GitHub 账号时全部请求自动带 Bearer 头（[GitHubAuthManager] 提供 token），
- *   同时解锁私有仓库；raw 请求也带（公共仓库无害，私仓 raw 多数可用，失败仍有 contents API 回退）；
+ * - 已绑定 GitHub 账号时 **仅 api.github.com 请求**自动带 Bearer 头（[GitHubAuthManager] 提供 token），
+ *   同时解锁私有仓库；raw 请求不带 token——raw CDN 的 401 不代表凭据失效，私仓内容走 contents API 回退；
  * - 列目录用 git trees API 一次性取全树（1 个 API 请求），替代按子目录递归的 N 请求；
  * - 文件内容优先走 raw.githubusercontent.com（无配额），失败回退 contents API 的
  *   base64（占配额但在 raw 被墙/受干扰时可用），两条路互补；
@@ -314,23 +314,31 @@ class GitHubSkillClient(
         else -> "HTTP $code"
     }
 
-    /** 统一的 GET：返回 (响应码, 响应体字节, ETag)。非 2xx/304 时 body 可能为 null。 */
-    private fun request(url: String, etag: String?): Triple<Int, ByteArray?, String?> {
+    /**
+     * 统一的 GET：返回 (响应码, 响应体字节, ETag)。非 2xx/304 时 body 可能为 null。
+     *
+     * @param attachAuth 是否附加 Authorization 头。仅 api.github.com 请求应为 true；
+     *   raw.githubusercontent.com 为 false——raw CDN 的 401 不代表 API 凭据失效，
+     *   误触发 onAuthInvalid 会把有效 token 永久标记为 invalid（频繁「认证失效」的根因）。
+     */
+    private fun request(url: String, etag: String?, attachAuth: Boolean = true): Triple<Int, ByteArray?, String?> {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = CONNECT_TIMEOUT
         connection.readTimeout = READ_TIMEOUT
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         connection.setRequestProperty("User-Agent", "RikkaHub")
-        tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
-            connection.setRequestProperty("Authorization", "Bearer $token")
+        if (attachAuth) {
+            tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
         }
         if (!etag.isNullOrBlank()) {
             connection.setRequestProperty("If-None-Match", etag)
         }
         return try {
             val code = connection.responseCode
-            reportRateLimit(connection)
-            if (code == 401) onAuthInvalid()
+            // 仅 API 主机的 401 才视为凭据失效；raw/其他主机的 401 只是资源访问问题
+            if (code == 401 && attachAuth && url.startsWith(API_BASE)) onAuthInvalid()
             val body = if (code == 200) connection.inputStream.use { it.readBytes() } else null
             val newEtag = connection.getHeaderField("ETag")
             Triple(code, body, newEtag)
@@ -346,11 +354,15 @@ class GitHubSkillClient(
         onRateLimitHeaders(remaining, limit, reset)
     }
 
-    /** raw 下载：网络级失败（超时/连不上）时进入冷却期，冷却期内后续文件直接走 contents API */
+    /**
+     * raw 下载：不带 Authorization（公共仓库无需；私仓 raw 行为不稳定，失败走 contents API 回退）。
+     * 网络级失败（超时/连不上）时进入冷却期，冷却期内后续文件直接走 contents API。
+     */
     private fun fetchRaw(url: String): ByteArray? {
         if (System.currentTimeMillis() < rawUnavailableUntil) return null
         return try {
-            request(url, etag = null).second
+            // raw 请求不带 token、不触发 onAuthInvalid——raw CDN 的 401 不代表 API 凭据失效
+            request(url, etag = null, attachAuth = false).second
         } catch (e: IOException) {
             Log.w(TAG, "fetchRaw unreachable, cooldown ${RAW_RETRY_COOLDOWN_MS}ms: $url", e)
             rawUnavailableUntil = System.currentTimeMillis() + RAW_RETRY_COOLDOWN_MS

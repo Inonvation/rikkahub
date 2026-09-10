@@ -76,8 +76,9 @@ sealed interface DeviceFlowPhase {
  * - 独立 DataStore 文件（github_auth），不进 Settings → 同步白名单天然隔离，不会上云；
  * - Keystore 密钥不随备份/换机迁移，密文换机后解不开即视为未绑定（token 低价值可重取）。
  *
- * 失效语义：GitHub OAuth token 无 refresh 流程，API 401 时置 invalid 并清内存 token，
- * UI 引导重新绑定；解绑只删本地凭据，撤销授权走 github.com/settings/connections 外链。
+ * 失效语义：GitHub OAuth token 无 refresh 流程；API 401 时先用 GET /user 复核——
+ * 仅当复核明确 Rejected 才置 invalid 并清内存 token（Valid/网络失败均保留绑定），
+ * UI 引导重新绑定。解绑只删本地凭据，撤销授权走 github.com/settings/connections 外链。
  */
 class GitHubAuthManager(
     context: Context,
@@ -127,15 +128,35 @@ class GitHubAuthManager(
         _rateLimit.value = GitHubRateLimitSnapshot(remaining, limit, resetEpochSec)
     }
 
-    /** GitHub API 401 回调：置失效并清内存 token，等待用户重新绑定 */
+    /**
+     * GitHub API 401 回调。
+     *
+     * 不立即永久失效：先用 GET /user 复核当前 token——
+     * - 复核 Valid：401 是瞬时误报，保持绑定；
+     * - 复核 Rejected（HTTP 401/403）：确认失效，置 invalid 并清内存 token；
+     * - 复核 Inconclusive（网络失败等）：无法判定，保持绑定（避免网络抖动误杀）。
+     *
+     * OAuth 用户 token 本身不过期，真正失效只发生在用户撤销授权/改密码触发全局撤销。
+     */
     fun onAuthInvalid() {
         val cipher = cachedCipher ?: return
+        val token = cachedToken ?: return
         if (_state.value.invalid) return
-        Log.w(TAG, "GitHub token rejected (401), mark invalid")
-        cachedToken = null
-        _state.value = _state.value.copy(invalid = true)
         scope.launch {
-            persist(GitHubAuthBlob(tokenCipher = cipher, account = _state.value.account, invalid = true))
+            when (oauthClient.verifyToken(token)) {
+                is GitHubOAuthClient.TokenCheck.Valid -> {
+                    Log.w(TAG, "401 was transient, token still valid, keep bound")
+                }
+                GitHubOAuthClient.TokenCheck.Rejected -> {
+                    Log.w(TAG, "GitHub token confirmed rejected, mark invalid")
+                    cachedToken = null
+                    _state.value = _state.value.copy(invalid = true)
+                    persist(GitHubAuthBlob(tokenCipher = cipher, account = _state.value.account, invalid = true))
+                }
+                GitHubOAuthClient.TokenCheck.Inconclusive -> {
+                    Log.w(TAG, "401 re-check inconclusive, keep token")
+                }
+            }
         }
     }
 

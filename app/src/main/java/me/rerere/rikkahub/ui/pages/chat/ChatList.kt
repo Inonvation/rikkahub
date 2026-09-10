@@ -906,12 +906,20 @@ private fun ChatListNormal(
                         val assistantNameCb: () -> Unit = remember(node) {
                             { currentOnAssistantNameClick.value?.invoke() }
                         }
+                        // loading 仅给「正在生成中的末条 assistant」：sendMessage/regenerate 的
+                        // setJob 先于新节点落库，竞态窗口内旧末条 assistant 会短暂命中
+                        // index==lastIndex。若不加 finishedAt/role 守卫，已完成消息会吃到
+                        // loading=true → 过程区强制展开又折叠（"发第二条时第一条过程闪展闪收"）。
+                        val currentMsg = node.currentMessage
                         ChatMessage(
                             node = node,
                             modifier = entranceModifier,
-                            model = node.currentMessage.modelId?.let(modelById::get),
+                            model = currentMsg.modelId?.let(modelById::get),
                             assistant = assistant,
-                            loading = loading && index == conversation.messageNodes.lastIndex,
+                            loading = loading &&
+                                index == conversation.messageNodes.lastIndex &&
+                                currentMsg.role == MessageRole.ASSISTANT &&
+                                currentMsg.finishedAt == null,
                             onRegenerate = regenCb,
                             onEdit = editCb,
                             onFork = forkCb,

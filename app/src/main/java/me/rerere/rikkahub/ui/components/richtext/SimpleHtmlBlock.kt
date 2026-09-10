@@ -56,16 +56,23 @@ fun SimpleHtmlBlock(
     }
 
     val uriHandler = LocalUriHandler.current
+    val openWorkspaceFile = LocalOpenWorkspaceFile.current
 
     Column(modifier = modifier) {
         document.body().childNodes().forEach { node ->
             RenderNode(
                 node = node,
                 onLinkClick = { url ->
-                    try {
-                        uriHandler.openUri(url)
-                    } catch (e: Exception) {
-                        // Handle link click error silently
+                    // workspace 链接：应用内打开文件
+                    if (isWorkspaceLink(url)) {
+                        openWorkspaceFile(normalizeWorkspaceLink(url))
+                    } else if (!url.startsWith("file://", ignoreCase = true)) {
+                        // file:// URI 禁止外部打开（Android N+ 会抛 FileUriExposedException）
+                        try {
+                            uriHandler.openUri(url)
+                        } catch (_: Exception) {
+                            // 无可用 App 处理该 URI 时静默忽略
+                        }
                     }
                 }
             )
