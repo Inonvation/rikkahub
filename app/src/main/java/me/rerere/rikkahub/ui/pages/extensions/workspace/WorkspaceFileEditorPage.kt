@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,10 +31,15 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.richtext.LocalOpenWorkspaceImagePreview
+import me.rerere.rikkahub.ui.components.richtext.LocalWorkspaceImageResolver
 import me.rerere.rikkahub.ui.components.richtext.MarkdownPreviewSwitcher
+import me.rerere.rikkahub.ui.components.richtext.workspaceImageResolver
+import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 
@@ -65,6 +71,30 @@ fun WorkspaceFileEditorPage(
     val isHtml = fileName.substringAfterLast('.', "").lowercase() in setOf("html", "htm")
     // HTML 内相对资源（图片/CSS/JS）的解析基准目录；仅 FILES 区可用
     var htmlBaseUrl by remember { mutableStateOf<String?>(null) }
+
+    // 渲染态图片解析：markdown 里的图片引用（/workspace/... 绝对路径或相对当前文件目录的
+    // 相对路径）必须解析成沙箱内真实文件才能加载——与聊天气泡同一约定。resolver 缺失时
+    // 原始 /workspace/... 路径会原样丢给 Coil（那是 Rootfs 虚拟路径，磁盘上不存在），
+    // 图片永远停在「图片加载中」报错框。
+    // cwd 取当前文件所在目录：AI 生成/笔记常相对文件目录引用图片（含 Obsidian wikilink 嵌入）。
+    val workspaceManager = koinInject<WorkspaceManager>()
+    val imageCwd = remember(area, path) {
+        when (area) {
+            WorkspaceStorageArea.FILES -> {
+                val dir = path.substringBeforeLast('/', "")
+                if (dir.isBlank()) "/workspace" else "/workspace/$dir"
+            }
+            // LINUX 区文件在 /workspace 之外，相对路径无解析基准，仅支持 /workspace 绝对引用
+            WorkspaceStorageArea.LINUX -> null
+        }
+    }
+    val imageResolver = remember(workspaceManager, id, imageCwd) {
+        workspaceImageResolver(workspaceManager, root = id, cwd = imageCwd)
+    }
+    // 点击 workspace 图片链接 → 应用内大图预览（与聊天页一致，回调拿到的是已解析的 file:// Uri）；
+    // remember 稳定引用：MarkdownBlock 内部以该回调为 key 缓存 linkHandler，内联 lambda 会让缓存逐帧失效
+    var wsPreviewImage by remember { mutableStateOf<String?>(null) }
+    val openWsPreview = remember { { url: String -> wsPreviewImage = url } }
 
     val textState = rememberTextFieldState()
     var loading by remember { mutableStateOf(true) }
@@ -178,17 +208,29 @@ fun WorkspaceFileEditorPage(
                 )
             }
 
-            else -> MarkdownPreviewSwitcher(
-                state = textState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .imePadding(),
-                sourceEditable = editable,
-                jsonStructure = isJson,
-                htmlMode = isHtml,
-                htmlBaseUrl = htmlBaseUrl,
-            )
+            else -> CompositionLocalProvider(
+                LocalWorkspaceImageResolver provides imageResolver,
+                LocalOpenWorkspaceImagePreview provides openWsPreview,
+            ) {
+                MarkdownPreviewSwitcher(
+                    state = textState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .imePadding(),
+                    sourceEditable = editable,
+                    jsonStructure = isJson,
+                    htmlMode = isHtml,
+                    htmlBaseUrl = htmlBaseUrl,
+                )
+            }
+        }
+    }
+
+    // 渲染态点击 workspace 图片链接弹出的大图预览
+    wsPreviewImage?.let { uri ->
+        ImagePreviewDialog(images = listOf(uri)) {
+            wsPreviewImage = null
         }
     }
 
