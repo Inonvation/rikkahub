@@ -173,6 +173,7 @@ import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 private const val TAG = "RouteActivity"
+private const val ACTION_TRANSLATE = "me.rerere.rikkahub.action.TRANSLATE"
 
 class RouteActivity : ComponentActivity() {
     private val okHttpClient by inject<OkHttpClient>()
@@ -259,6 +260,8 @@ class RouteActivity : ComponentActivity() {
                     val text = shareIntent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString() ?: ""
                     backStack.add(Screen.ShareHandler(text, null))
                 }
+
+                ACTION_TRANSLATE -> backStack.add(Screen.Translator)
             }
         }
     }
@@ -282,6 +285,13 @@ class RouteActivity : ComponentActivity() {
             Intent.ACTION_PROCESS_TEXT -> {
                 val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString() ?: ""
                 navStack?.add(Screen.ShareHandler(text, null))
+            }
+
+            ACTION_TRANSLATE -> {
+                // 顶到栈顶的已是翻译页时不再重复入栈（连续点快捷方式避免叠页）
+                if (navStack?.lastOrNull() != Screen.Translator) {
+                    navStack?.add(Screen.Translator)
+                }
             }
         }
     }

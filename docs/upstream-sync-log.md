@@ -312,3 +312,25 @@
 ### 验证
 
 `:ai:compileDebugKotlin`、`:app:compileDebugKotlin`、`:highlight:compileDebugKotlin` BUILD SUCCESSFUL；`:web:buildWebUi` 产物重建成功（首次失败为 react-router 清理 build 目录偶发占用，重试即过）。真机行为验证（主题图标色恢复/工具详情提前打开/坏 JSON 会话重开）待装机确认。
+
+## 2026-09-13 — 第十一次同步（第十次之后新增 8 提交；全部落地 5 项，无需合并 2 个）
+
+> 清单为 2026-09-13 fetch 快照（至 `d6ba728e`），与第十次边界 `ab07ac1f` 之间的 100 个提交均已在先前同步分类，本次只处理新增 8 个。
+
+### A. 落地（5 项）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `2689e753` | 读取 AGENTS.md（上游读 `/root/.agents`、`/workspace`、cwd 三处，64KB 上限） | **本地化改造**（不照搬）：`.agent/AGENTS.md` 继续作全局层不动；仅补 **cwd 级** `WorkspaceReminderTransformer.readCwdAgentsInstructions`——`resolveCwdAgentsPath` 纯字符串解析（空白 cwd→`/workspace`，相对路径按 `/workspace` 解析，`..` 逃出 workspace 与撞全局层文件返回 null），读取走 `readRootfsTextRange`（64KB 读上限），注入块 `<workspace_cwd_instructions>` 追加在 memory 块后、单文件沿用 4096 字符截断。文件缺失/空白/异常静默跳过（`CancellationException` 重抛），**无该文件时 prompt 与原先逐字节一致**（缓存前缀不受影响）。有意不引入 `/workspace/AGENTS.md` 根级读取，避免与 `.agent` 自生成文件双轨。新增 `WorkspaceReminderTransformerTest` 7 例（路径解析纯函数） |
+| `288a034c`+`d6ba728e`+`bc9d2582` | 依赖更新：compose BOM 2026.09.00 / material3 1.5.0-alpha28 / floatingx 3.0.0 / snakeyaml 2.7（gradle wrapper 本地已在 9.6.0；dom4j 本地没有） | toml 四项版本 + `floatingx` library 改名 `floatingx-app`（io.github.petterpx:floatingx-app）+ common 构建脚本同步；`ReasoningPicker` Slider 迁移 `SliderState`（本地含 `ReasoningScale` onSelect 第三处赋值点，上游只有两处）；`FloatingWindow` 按上游 3.0 API 重写（`install(tag){}` + `appHost` + `anchor(BOTTOM_START)` + `compose{}` DSL + `rememberUpdatedState(content)`），保留本地 `LocalSettings` 透传；`Theme` 补 `getActivity()` 空守卫 + `DisposableEffect` key 加 activity（浮窗 Application Context 无系统栏可更新，否则 `as Activity` 崩溃）。其余代码零连锁改动，编译一次通过 |
+| `513b784c` | 翻译快捷方式 + intent 导航统一 | **按本地机制移植**（不做上游 handleIntent/pendingIntents 全量重构，本地冷启动走 `ShareHandler` composable、热启动走 `onNewIntent`，功能等价）：manifest 加 TRANSLATE intent-filter；shortcuts.xml 加 translator 条目（复用现有 `translator_page_title` 字符串）；`ic_translate.xml` 照抄；`RouteActivity` 两处 when 各加 `ACTION_TRANSLATE` 分支（onNewIntent 侧带 `lastOrNull() != Screen.Translator` 去重防叠页），常量与上游一致 `me.rerere.rikkahub.action.TRANSLATE` |
+| `46cacf2` | ModelRegistry 注册 deepseek-flash（vision+tool+reasoning） | 照抄：`DEEPSEEK_FLASH` 定义（插在 DEEPSEEK_REASONER 与 DEEPSEEK_V4_FLASH 之间，本地多 1 行 contextLength 差异不涉及）+ allModels 注册 |
+| `42b933d` | debug 启动图标加 DEV 角标 | 照抄：新增本地原本不存在的 `app/src/debug/res` 源集 5 文件（badge/foreground/label/monochrome + mipmap-anydpi-v26 overlay），引用的 `ic_launcher_foreground/background/monochrome` PNG 本地齐备 |
+
+### B. 无需合并（1 个）
+
+- `a9b35ba2` bump 2.5.1：版本独立演进。`bc9d2582`（修复误删 toml）并入 deps 落地。
+
+### 验证
+
+`:ai:compileDebugKotlin`、`:ai:testDebugUnitTest`、`:app:compileDebugKotlin` 全部 BUILD SUCCESSFUL（material3 alpha28 / floatingx 3.0 无额外连锁）；`:app:testDebugUnitTest` 全模块通过（含 `WorkspaceReminderTransformerTest` 7/7，test-results XML 确认零失败）。真机验证待装机确认：cwd 级 AGENTS.md 注入与切换 cwd、浮窗显示与系统栏色、推理等级滑条、长按图标翻译快捷方式、debug 图标 DEV 角标、deepseek-flash 模型匹配。

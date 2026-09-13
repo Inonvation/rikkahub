@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import kotlinx.coroutines.CancellationException
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -10,11 +11,19 @@ import me.rerere.workspace.WorkspaceShellStatus
 /** 注入 system prompt 的 AGENTS 内容上限, 防 AI 把文件写大撑爆 context */
 private const val MAX_AGENTS_INJECT_CHARS = 4096
 
+/** cwd 级 AGENTS.md 读取字节上限, 防异常大文件整体载入内存; 注入时再按 [MAX_AGENTS_INJECT_CHARS] 截断 */
+private const val MAX_CWD_AGENTS_READ_BYTES = 64L * 1024
+
+/** Rootfs 内 workspace files 区挂载点, 会话 cwd 的根 */
+private const val ROOTFS_WORKSPACE_DIR = "/workspace"
+
 /**
  * Workspace 系统提示注入转换器
  *
  * 当助手绑定了一个 shell 已就绪的 workspace 时, 在系统提示词中追加一段引导,
  * 让模型了解 workspace 环境与 workspace_* 工具的使用方式。
+ * AGENTS 分两层: /workspace/.agent/AGENTS.md 为全局层(自动生成+自愈),
+ * 会话 cwd 下的 AGENTS.md 为 cwd 级项目指令层, 存在且非空才注入。
  */
 class WorkspaceReminderTransformer(
     private val workspaceRepository: WorkspaceRepository,
@@ -43,7 +52,10 @@ class WorkspaceReminderTransformer(
             memoryContent = workspaceRepository.readMemoryIndex(workspaceId)
         }
 
-        val prompt = buildWorkspacePrompt(workspace, ctx.workspaceCwd, envContent, memoryContent)
+        // cwd 级项目指令: 无此文件时为 null, 注入文本与原先逐字节一致
+        val cwdAgents = readCwdAgentsInstructions(workspaceId, ctx.workspaceCwd)
+
+        val prompt = buildWorkspacePrompt(workspace, ctx.workspaceCwd, envContent, memoryContent, cwdAgents)
 
         // 追加到第一条 system 消息; 若不存在则插入一条
         val systemIndex = messages.indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -57,6 +69,43 @@ class WorkspaceReminderTransformer(
             listOf(UIMessage.system(prompt).copy(isSynthetic = true)) + messages
         }
     }
+
+    /** 读取会话 cwd 下的 AGENTS.md; 路径非法/不存在/空白/异常一律静默返回 null(取消除外) */
+    private suspend fun readCwdAgentsInstructions(
+        workspaceId: String,
+        cwd: String?,
+    ): Pair<String, String>? {
+        val path = resolveCwdAgentsPath(cwd) ?: return null
+        val content = try {
+            workspaceRepository.readRootfsTextRange(workspaceId, path, 0, MAX_CWD_AGENTS_READ_BYTES).text
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }?.takeIf { it.isNotBlank() } ?: return null
+        return path to content
+    }
+}
+
+/**
+ * 由会话 cwd 解析 cwd 级 AGENTS.md 的 Rootfs 绝对路径。
+ * 空白 cwd 视为 /workspace; 相对路径按 /workspace 解析; 规范化后逃出 /workspace,
+ * 或恰好是全局层 /workspace/.agent/AGENTS.md(避免同文件重复注入)时返回 null。
+ */
+internal fun resolveCwdAgentsPath(cwd: String?): String? {
+    val raw = cwd?.takeIf { it.isNotBlank() } ?: ROOTFS_WORKSPACE_DIR
+    val normalized = if (raw.startsWith("/")) raw else "$ROOTFS_WORKSPACE_DIR/$raw"
+    val segments = ArrayDeque<String>()
+    for (segment in normalized.split('/')) {
+        when (segment) {
+            "", "." -> Unit
+            ".." -> if (segments.removeLastOrNull() == null) return null
+            else -> segments.addLast(segment)
+        }
+    }
+    if (segments.firstOrNull() != "workspace") return null
+    val path = "/" + (segments + "AGENTS.md").joinToString("/")
+    return path.takeUnless { it == "/workspace/.agent/AGENTS.md" }
 }
 
 private fun buildWorkspacePrompt(
@@ -64,6 +113,7 @@ private fun buildWorkspacePrompt(
     cwd: String? = null,
     envContent: String? = null,
     memoryContent: String? = null,
+    cwdAgents: Pair<String, String>? = null,
 ): String = buildString {
     appendLine("<workspace>")
     appendLine("Linux workspace \"${workspace.name}\" (PRoot sandbox on Android; not Windows — use Unix commands). Env & installed tools auto-refreshed below.")
@@ -85,5 +135,12 @@ private fun buildWorkspacePrompt(
         appendLine("<workspace_memory>")
         appendLine(memoryContent.take(MAX_AGENTS_INJECT_CHARS))
         append("</workspace_memory>")
+    }
+    if (cwdAgents != null) {
+        appendLine()
+        appendLine("<workspace_cwd_instructions>")
+        appendLine("AGENTS.md at ${cwdAgents.first} (instructions for the current working directory):")
+        appendLine(cwdAgents.second.take(MAX_AGENTS_INJECT_CHARS))
+        append("</workspace_cwd_instructions>")
     }
 }
