@@ -20,8 +20,8 @@ android {
         applicationId = "com.inonvation.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 270
-        versionName = "2.13.2"
+        versionCode = 271
+        versionName = "2.13.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
