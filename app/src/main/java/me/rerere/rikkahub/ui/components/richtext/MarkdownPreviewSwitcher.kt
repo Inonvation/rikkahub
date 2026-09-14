@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalTextStyle
@@ -200,7 +201,9 @@ fun MarkdownPreviewSwitcher(
                     val content = prepared
                     if (content != null) {
                         if (content.length > LARGE_RENDER_CHARS) {
-                            // 超大文本：惰性按行渲染，避免一次性排版整个大文本冻结主线程
+                            // 超大文本：惰性按行渲染，避免一次性排版整个大文本冻结主线程。
+                            // 每行单独 SelectionContainer：LazyColumn 不能整表包选中（跨项选择不可靠），
+                            // 行内长按仍可选中复制。
                             val lines = content.lineSequence().toList()
                             LazyColumn(
                                 modifier = Modifier
@@ -209,11 +212,13 @@ fun MarkdownPreviewSwitcher(
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             ) {
                                 items(count = lines.size) { index ->
-                                    Text(
-                                        text = lines[index],
-                                        style = LocalTextStyle.current,
-                                        modifier = Modifier.padding(vertical = 1.dp),
-                                    )
+                                    SelectionContainer {
+                                        Text(
+                                            text = lines[index],
+                                            style = LocalTextStyle.current,
+                                            modifier = Modifier.padding(vertical = 1.dp),
+                                        )
+                                    }
                                 }
                             }
                         } else {
@@ -229,7 +234,10 @@ fun MarkdownPreviewSwitcher(
                                     PropertiesPanel(preparedFrontmatter)
                                     Spacer(Modifier.height(8.dp))
                                 }
-                                StudyMarkdownBlock(content = content, onLinkClick = onLinkClick, onToggleTask = onToggleTask)
+                                // 长按选中复制：与聊天气泡生成结束后同一策略（见 ChatMessage）
+                                SelectionContainer {
+                                    StudyMarkdownBlock(content = content, onLinkClick = onLinkClick, onToggleTask = onToggleTask)
+                                }
                             }
                         }
                     } else {
@@ -251,7 +259,10 @@ fun MarkdownPreviewSwitcher(
                             .padding(horizontal = 16.dp)
                             .padding(bottom = 16.dp),
                     ) {
-                        StudyMarkdownBlock(content = raw)
+                        // 长按选中复制：与聊天气泡生成结束后同一策略
+                        SelectionContainer {
+                            StudyMarkdownBlock(content = raw)
+                        }
                     }
                 }
             }

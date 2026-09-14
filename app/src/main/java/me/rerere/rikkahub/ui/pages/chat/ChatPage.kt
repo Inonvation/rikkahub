@@ -612,8 +612,10 @@ private fun ChatPageContent(
     val workspaceRepository: WorkspaceRepository = koinInject()
     val todoStorage: TodoStorage = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
-    // 点击助手名称弹出助手选择器（切换助手后新开聊天窗口）
+    // 点击助手名称弹出助手选择器
+    // 顶栏入口：切换当前会话绑定的助手；消息气泡入口：更新全局当前助手并新开聊天窗口
     var showAssistantPicker by remember { mutableStateOf(false) }
+    var assistantPickerFromTopBar by remember { mutableStateOf(false) }
     val hazeState = rememberHazeState()
 
     // 上下文状态浮窗（页内覆盖层，见 ContextStatusOverlay）：
@@ -1025,6 +1027,7 @@ private fun ChatPageContent(
                                 vm.saveConversationAsync()
                             },
                             onAssistantNameClick = {
+                                assistantPickerFromTopBar = false
                                 showAssistantPicker = true
                             },
                             onScrollSnapshot = onScrollSnapshot,
@@ -1046,14 +1049,23 @@ private fun ChatPageContent(
                     }
 
                     if (showAssistantPicker) {
+                        val conversationAssistant = setting.getAssistantById(conversation.assistantId)
+                            ?: assistant
                         AssistantPickerSheet(
                             settings = setting,
-                            currentAssistant = assistant,
+                            currentAssistant = conversationAssistant,
                             onAssistantSelected = { selected ->
                                 showAssistantPicker = false
-                                // 切换助手：更新全局当前助手，再新开聊天窗口（新窗口按全局当前助手绑定会话）
-                                vm.updateSettings(setting.copy(assistantId = selected.id))
-                                navigateToChatPage(navController)
+                                if (assistantPickerFromTopBar) {
+                                    // 顶栏入口：切换当前会话绑定的助手（并同步全局当前助手）
+                                    if (selected.id != conversation.assistantId) {
+                                        vm.moveConversationToAssistant(conversation, selected.id)
+                                    }
+                                } else {
+                                    // 消息气泡入口：更新全局当前助手，再新开聊天窗口（新窗口按全局当前助手绑定会话）
+                                    vm.updateSettings(setting.copy(assistantId = selected.id))
+                                    navigateToChatPage(navController)
+                                }
                             },
                             onDismiss = {
                                 showAssistantPicker = false
@@ -1093,6 +1105,10 @@ private fun ChatPageContent(
                     },
                     onToggleContextPopover = { toggleContextPopover() },
                     onContextAnchorBottom = { contextAnchorBottomPx = it },
+                    onAssistantNameClick = {
+                        assistantPickerFromTopBar = true
+                        showAssistantPicker = true
+                    },
                     hazeState = hazeState,
                     modifier = Modifier
                         .onSizeChanged { topBarHeightPx = it.height }
@@ -1564,6 +1580,7 @@ private fun TopBar(
     onCompressClick: () -> Unit,
     onToggleContextPopover: () -> Unit,
     onContextAnchorBottom: (Int) -> Unit,
+    onAssistantNameClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val toaster = LocalToaster.current
@@ -1617,32 +1634,65 @@ private fun TopBar(
         },
         title = {
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-            Surface(
-                onClick = {
-                    hapticController.lightTap()
-                    if (conversation.messageNodes.isNotEmpty()) {
-                        titleState.open(conversation.title)
-                    } else {
-                        toaster.show(editTitleWarning, type = ToastType.Warning)
+            val conversationAssistant = settings.getAssistantById(conversation.assistantId)
+                ?: settings.getCurrentAssistant()
+            val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
+            Column {
+                Surface(
+                    onClick = {
+                        hapticController.lightTap()
+                        if (conversation.messageNodes.isNotEmpty()) {
+                            titleState.open(conversation.title)
+                        } else {
+                            toaster.show(editTitleWarning, type = ToastType.Warning)
+                        }
+                    },
+                    color = Color.Transparent,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
+                            maxLines = 1,
+                            style = MaterialTheme.typography.bodyMedium,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // 模式切换与显示：自输入框下方栏迁移至会话标题旁（锁定态仅展示）
+                        TopBarModeChip(
+                            conversation = conversation,
+                            settings = settings,
+                            modeSwitchEnabled = modeSwitchEnabled,
+                            onSwitchMode = onSwitchMode,
+                        )
                     }
-                },
-                color = Color.Transparent,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // 模式切换与显示：自输入框下方栏迁移至会话标题旁（锁定态仅展示）
-                    TopBarModeChip(
-                        conversation = conversation,
-                        settings = settings,
-                        modeSwitchEnabled = modeSwitchEnabled,
-                        onSwitchMode = onSwitchMode,
-                    )
+                }
+                // 标题下方：当前会话绑定的助手名，点击弹出切换助手选择器（不显示模型名）
+                Surface(
+                    onClick = {
+                        hapticController.lightTap()
+                        onAssistantNameClick()
+                    },
+                    color = Color.Transparent,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 1.dp),
+                    ) {
+                        Text(
+                            text = conversationAssistant.name.ifBlank { defaultAssistantName },
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Icon(
+                            imageVector = HugeIcons.ArrowDown01,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         },

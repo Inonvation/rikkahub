@@ -1032,7 +1032,6 @@ private fun TextInputRow(
                 CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
                     ActionIconButton(
                         onClick = {
-                            hapticController.lightTap()
                             onMoreClick()
                         }
                     ) {
