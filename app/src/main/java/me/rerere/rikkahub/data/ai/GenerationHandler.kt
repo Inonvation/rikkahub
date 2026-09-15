@@ -34,7 +34,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.Tool
+import me.rerere.ai.core.sum
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -106,6 +108,25 @@ private const val MAX_STREAM_RESUME_ATTEMPTS = 1
 // （toolName + input 均一致）才算死循环；入参有变化即视为模型在试错/推进，绝不中断。
 private const val MAX_IDENTICAL_CALL_ROUNDS = 4
 private const val AUTO_STOP_NOTICE = "\n\n---\n*模型连续多轮重复相同操作且无进展，已自动停止。你可以继续发送消息。*"
+
+/**
+ * 生成中的实时统计（对齐 DeepSeek 风格：流式期间同步显示输入/输出 token 与速率）。
+ *
+ * - [streamMillis] 只累计纯流式输出时长（各步 streamText 的 collect 窗口），
+ *   不含工具执行/审批等待——与最终 [UIMessage.streamDurationMillis] 同口径。
+ * - [completionTokens] 在 usage 未到达前按已流出字符估算（[isEstimate]=true），
+ *   收到 Usage chunk 后切换为真实值。
+ */
+@Serializable
+data class GenerationLiveStats(
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val streamMillis: Long = 0L,
+    val isEstimate: Boolean = false,
+) {
+    val tokensPerSecond: Float
+        get() = if (streamMillis > 0) completionTokens * 1000f / streamMillis else 0f
+}
 
 // ---- 工作区文件工具串行化（并发竞态防护）----
 // 背景：GenerationHandler 一轮内并行执行所有工具；workspace_edit_file / workspace_write_file
@@ -263,6 +284,8 @@ class GenerationHandler(
          *  Codex turn/steer：一次、尾部、append-only），不打断当前流式；其余项排队不消费，
          *  等回合结束后由 ChatService 作为用户消息依次发送。 */
         steeringQueue: kotlinx.coroutines.flow.MutableStateFlow<List<PendingSteering>>? = null,
+        /** 生成中实时统计（token/速率），供 UI 在流式期间同步显示；null = 不上报 */
+        liveStats: MutableStateFlow<GenerationLiveStats?>? = null,
     ): Flow<GenerationChunk> = channelFlow<GenerationChunk> {
         // 工具开始事件由并行的 async 子协程发出；flow 的 emit 不允许跨协程，必须用 channelFlow 的 send。
         val emit: suspend (GenerationChunk) -> Unit = { send(it) }
@@ -281,6 +304,29 @@ class GenerationHandler(
         var generationEnded = false
         var waitingForUser = false
 
+        // 本回合累计：纯流式时长（不含工具执行）+ 跨步 usage 累加。
+        // 每步 StreamChunkHandler 的 merge 是「最新非零覆盖」语义（适配单流内增量 usage），
+        // 工具循环多步之间必须外置累加，否则只剩最后一步的 usage（会话花费被低估）。
+        // 审批等待后的新一轮 generateText：从末条 assistant 恢复基线，避免清零。
+        val lastAssistantBaseline = messages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }
+        var turnStreamMillis = lastAssistantBaseline?.streamDurationMillis ?: 0L
+        var turnUsage: TokenUsage? = lastAssistantBaseline?.usage
+
+        fun flushAssistantUsage() {
+            val last = messages.lastOrNull() ?: return
+            if (last.role != MessageRole.ASSISTANT) return
+            val stepUsage = last.usage ?: return
+            turnUsage = turnUsage.sum(stepUsage)
+            messages = messages.dropLast(1) + last.copy(usage = turnUsage)
+        }
+
+        fun clearAssistantUsageForNextStep() {
+            val last = messages.lastOrNull() ?: return
+            if (last.role != MessageRole.ASSISTANT || last.usage == null) return
+            messages = messages.dropLast(1) + last.copy(usage = null)
+        }
+
+        try {
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
             // 进入新一轮生成前清掉上一轮流式结束时写入的 finishedAt：
@@ -344,46 +390,68 @@ class GenerationHandler(
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
-                generateInternal(
-                    assistant = assistant,
-                    settings = settings,
-                    messages = messages,
-                    onUpdateMessages = {
-                        messages = it.transforms(
-                            transformers = outputTransformers,
-                            context = context,
-                            model = model,
-                            assistant = assistant,
-                            settings = settings,
-                            conversationId = conversationId?.toString(),
-                        )
-                        val visualMessages = messages.visualTransforms(
-                            transformers = outputTransformers,
-                            context = context,
-                            model = model,
-                            assistant = assistant,
-                            settings = settings
-                        ).cleanupLastAssistantBlankLines()
-                        // 流式 chunk 的 Finish 会写入 finishedAt，但工具循环还没结束，
-                        // 这里统一清掉，避免 UI 在回合中途提前显示“完成”。
-                        emit(GenerationChunk.Messages(visualMessages.markLastAssistantFinished(false)))
-                    },
-                    transformers = inputTransformers,
-                    model = model,
-                    providerImpl = providerImpl,
-                    provider = provider,
-                    tools = toolsInternal,
-                    memories = memories ?: emptyList(),
-                    stream = assistant.streamOutput,
-                    processingStatus = processingStatus,
-                    conversationSystemPrompt = conversationSystemPrompt,
-                    conversationId = conversationId,
-                    conversationModeInjectionIds = conversationModeInjectionIds,
-                    conversationLorebookIds = conversationLorebookIds,
-                    workspaceCwd = workspaceCwd,
-                    policy = policy,
-                    resumeContext = effectiveResumeContext,
-                )
+                // 每步流式 usage 独立 merge（最新非零覆盖）；上一步结果已外置累加，先清空
+                clearAssistantUsageForNextStep()
+                try {
+                    generateInternal(
+                        assistant = assistant,
+                        settings = settings,
+                        messages = messages,
+                        onUpdateMessages = {
+                            messages = it.transforms(
+                                transformers = outputTransformers,
+                                context = context,
+                                model = model,
+                                assistant = assistant,
+                                settings = settings,
+                                conversationId = conversationId?.toString(),
+                            )
+                            val visualMessages = messages.visualTransforms(
+                                transformers = outputTransformers,
+                                context = context,
+                                model = model,
+                                assistant = assistant,
+                                settings = settings
+                            ).cleanupLastAssistantBlankLines()
+                            // 流式 chunk 的 Finish 会写入 finishedAt，但工具循环还没结束，
+                            // 这里统一清掉，避免 UI 在回合中途提前显示“完成”。
+                            emit(GenerationChunk.Messages(visualMessages.markLastAssistantFinished(false)))
+                        },
+                        transformers = inputTransformers,
+                        model = model,
+                        providerImpl = providerImpl,
+                        provider = provider,
+                        tools = toolsInternal,
+                        memories = memories ?: emptyList(),
+                        stream = assistant.streamOutput,
+                        processingStatus = processingStatus,
+                        conversationSystemPrompt = conversationSystemPrompt,
+                        conversationId = conversationId,
+                        conversationModeInjectionIds = conversationModeInjectionIds,
+                        conversationLorebookIds = conversationLorebookIds,
+                        workspaceCwd = workspaceCwd,
+                        policy = policy,
+                        resumeContext = effectiveResumeContext,
+                        liveStats = liveStats,
+                        priorStreamMillis = turnStreamMillis,
+                        priorUsage = turnUsage,
+                    )
+                } finally {
+                    // 无论成功/异常/取消，都把本步 usage 与流式时长并入回合累计并写回消息
+                    flushAssistantUsage()
+                    val lastAfterStep = messages.lastOrNull()
+                    if (lastAfterStep?.role == MessageRole.ASSISTANT) {
+                        val stamped = lastAfterStep.streamDurationMillis ?: 0L
+                        val stepStream = stamped - turnStreamMillis
+                        if (stepStream > 0 || lastAfterStep.usage !== turnUsage) {
+                            turnStreamMillis = maxOf(turnStreamMillis, stamped)
+                            messages = messages.dropLast(1) + lastAfterStep.copy(
+                                streamDurationMillis = turnStreamMillis,
+                                usage = turnUsage ?: lastAfterStep.usage,
+                            )
+                        }
+                    }
+                }
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
                     context = context,
@@ -571,6 +639,10 @@ class GenerationHandler(
             messages = messages.markLastAssistantFinished(true)
             emit(GenerationChunk.Messages(messages))
         }
+        } finally {
+            // 无论正常结束/取消/异常，都清掉实时统计，避免残留到下一次生成
+            liveStats?.value = null
+        }
 
     }.flowOn(Dispatchers.IO)
 
@@ -595,6 +667,12 @@ class GenerationHandler(
         /** 能力模式策略，null = 全量（内部调用不受模式裁剪） */
         policy: ChatModePolicy? = null,
         resumeContext: String? = null,
+        /** 生成中实时统计上报；null = 不上报 */
+        liveStats: MutableStateFlow<GenerationLiveStats?>? = null,
+        /** 本回合已累计的纯流式时长（毫秒），用于 liveStats 与 streamDurationMillis 基线 */
+        priorStreamMillis: Long = 0L,
+        /** 本回合已累计的 usage（跨工具步），用于 liveStats 的输入 token 展示 */
+        priorUsage: TokenUsage? = null,
     ) {
         // 捕获最终 system 文本，供下方构成快照使用（buildList lambda 内不可见）
         var builtSystem: String? = null
@@ -759,6 +837,54 @@ class GenerationHandler(
             sessionId = conversationId?.toString(),
         )
         val retryPolicy = RetryPolicy(maxRetries = settings.aiRequestMaxRetries.coerceIn(0, 10))
+        // 本步已累计的纯流式时长（毫秒）：只包 streamText collect 窗口，不含重试等待。
+        // 基线 priorStreamMillis 来自本回合前序工具步的累计。
+        var stepStreamMillis = 0L
+        // 估算输入 token（usage 未到达前）：internalMessages 字符数 / 4 的粗估，收到 Usage 后被真实值覆盖。
+        val estimatedPromptTokens = estimateTokensByChars(
+            internalMessages.joinToString("\n") { msg ->
+                msg.parts.joinToString("\n") { part ->
+                    when (part) {
+                        is UIMessagePart.Text -> part.text
+                        is UIMessagePart.Reasoning -> part.reasoning
+                        else -> ""
+                    }
+                }
+            }
+        )
+
+        fun publishLiveStats(currentMessages: List<UIMessage>, streamMillis: Long) {
+            val stats = liveStats ?: return
+            val last = currentMessages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }
+            val usage = last?.usage
+            val completionTokens = usage?.completionTokens?.takeIf { it > 0 }
+                ?: last?.let { msg ->
+                    msg.parts.sumOf { part ->
+                        when (part) {
+                            is UIMessagePart.Text -> estimateTokensByChars(part.text)
+                            is UIMessagePart.Reasoning -> estimateTokensByChars(part.reasoning)
+                            else -> 0
+                        }
+                    }
+                } ?: 0
+            stats.value = GenerationLiveStats(
+                promptTokens = usage?.promptTokens?.takeIf { it > 0 } ?: priorUsage?.promptTokens
+                    ?: estimatedPromptTokens,
+                completionTokens = completionTokens,
+                streamMillis = priorStreamMillis + streamMillis,
+                isEstimate = usage?.completionTokens?.takeIf { it > 0 } == null,
+            )
+        }
+
+        fun stampStreamDuration(currentMessages: List<UIMessage>, streamMillis: Long): List<UIMessage> {
+            if (streamMillis <= 0) return currentMessages
+            val last = currentMessages.lastOrNull() ?: return currentMessages
+            if (last.role != MessageRole.ASSISTANT) return currentMessages
+            return currentMessages.dropLast(1) + last.copy(
+                streamDurationMillis = priorStreamMillis + streamMillis,
+            )
+        }
+
         if (stream) {
             // 指数退避重试：只重试「还没收到任何内容」的失败（429/5xx/网络错误）。
             // 已开始输出后失败不重试，避免重复输出；重试不丢已保留的内容。
@@ -770,19 +896,29 @@ class GenerationHandler(
                 // 每次尝试（含指数退避重试与续答唤醒）都是独立响应流，必须用新的
                 // StreamChunkHandler——其内部持有本次流的合并索引，不可复用。
                 val streamChunkHandler = StreamChunkHandler(model)
+                val streamStart = SystemClock.elapsedRealtime()
                 try {
+                    // 跨续答尝试累计：attemptStart 只测本尝试窗口，加到 stepStreamMillis
+                    fun currentStepStream(): Long =
+                        stepStreamMillis + (SystemClock.elapsedRealtime() - streamStart)
                     providerImpl.streamText(
                         providerSetting = provider,
                         messages = messagesToSend,
                         params = params
                     ).collect {
                         messages = streamChunkHandler.handle(messages, it)
+                        publishLiveStats(messages, currentStepStream())
                         onUpdateMessages(messages)
                     }
+                    stepStreamMillis = currentStepStream()
+                    messages = stampStreamDuration(messages, stepStreamMillis)
+                    onUpdateMessages(messages)
                     processingStatus.value = null
                     break
                 } catch (e: CancellationException) {
                     // 取消（用户停止生成/切会话）仍要把已生成的流式内容落盘，最后 emit 一次
+                    stepStreamMillis += SystemClock.elapsedRealtime() - streamStart
+                    messages = stampStreamDuration(messages, stepStreamMillis)
                     onUpdateMessages(messages)
                     throw e
                 } catch (e: Exception) {
@@ -820,6 +956,10 @@ class GenerationHandler(
                             TAG,
                             "stream interrupted after output, resuming with continue instruction (attempt #$streamResumeAttempts)"
                         )
+                        // 中断前已流逝的流式时长计入（保留部分输出对应的等待）
+                        stepStreamMillis += SystemClock.elapsedRealtime() - streamStart
+                        messages = stampStreamDuration(messages, stepStreamMillis)
+                        onUpdateMessages(messages)
                         // 重建发送列表：internalMessages(含 system 的完整发送列表) + 本次流式新增的部分输出
                         // + 继续指令。局部 messages 在流式中已被 streamChunkHandler 追加/更新了本次生成的
                         // assistant 内容；模型据此在上文基础上接续。
@@ -859,6 +999,9 @@ class GenerationHandler(
                     // 可重试且尚未产生实质输出（未开始或刚发出空文本就断流）：指数退避后重试整轮请求
                     if (hasMeaningfulOutput || attempt >= retryPolicy.maxRetries || !e.isRetryable()) {
                         processingStatus.value = null
+                        stepStreamMillis += SystemClock.elapsedRealtime() - streamStart
+                        messages = stampStreamDuration(messages, stepStreamMillis)
+                        onUpdateMessages(messages)
                         throw e
                     }
                     attempt++
@@ -878,13 +1021,18 @@ class GenerationHandler(
             var attempt = 0
             while (true) {
                 try {
+                    val nonStreamStart = SystemClock.elapsedRealtime()
                     val result = providerImpl.generateText(
                         providerSetting = provider,
                         messages = messagesToSend,
                         params = params,
                     )
+                    // 非流式：整个 generateText 调用窗口计为「流式时长」（无工具夹杂）
+                    stepStreamMillis += SystemClock.elapsedRealtime() - nonStreamStart
                     messages = messages.handleTextGenerationResult(result = result, model = model)
+                    messages = stampStreamDuration(messages, stepStreamMillis)
                     onUpdateMessages(messages)
+                    publishLiveStats(messages, stepStreamMillis)
                     processingStatus.value = null
                     break
                 } catch (e: CancellationException) {

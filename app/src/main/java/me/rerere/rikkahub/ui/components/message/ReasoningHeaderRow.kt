@@ -37,7 +37,7 @@ import kotlin.time.DurationUnit
  * 保证冻结悬浮状态与普通显示状态的样式、缩进、交互一致，切换时不会水平错位。
  */
 
-/** 主文案：加载中显示轮换趣味文案（标题保留在旁），否则标题优先、无标题显示"思考了n秒" */
+/** 主文案：标题优先，否则"思考了n秒"；loading 时 shimmer 闪烁（上游方案，不显示趣味文案） */
 @Composable
 internal fun ReasoningHeaderLabel(
     title: String?,
@@ -45,15 +45,6 @@ internal fun ReasoningHeaderLabel(
     loading: Boolean,
     chatFontFamily: FontFamily,
 ) {
-    // 加载中（reasoning 流式进行中）→ 主文案轮换趣味文案；有自定义标题时保留在旁
-    if (loading) {
-        RotatingThinkingLabel(
-            enabled = true,
-            primaryTitle = title,
-            chatFontFamily = chatFontFamily,
-        )
-        return
-    }
     val style = MaterialTheme.typography.titleSmall.copy(fontFamily = chatFontFamily)
     val color = MaterialTheme.colorScheme.secondary
     if (title != null) {
@@ -79,30 +70,9 @@ internal fun ReasoningHeaderLabel(
 /**
  * 已思考时长标签（"3.4s"）。
  *
- * 仅在生成中（[loading]）显示：此时主文案是轮换趣味文案，秒数无处展示，
- * 单独放在折叠箭头左侧；生成结束后主文案本身就是"思考了 n 秒"（标题不再保留），
- * 不再重复显示。真实思考头部与悬浮吸顶条共用，保证两处一致。
+ * 上游方案：loading 中主文案本身就是"思考了 n 秒"，无需额外秒数标签。
+ * 本函数已废弃保留占位，调用方应直接删除 extra 插槽。
  */
-@Composable
-internal fun ReasoningElapsedLabel(
-    loading: Boolean,
-    duration: Duration,
-    chatFontFamily: FontFamily,
-) {
-    if (!loading || duration <= Duration.ZERO) return
-    Text(
-        text = duration.toString(DurationUnit.SECONDS, 1),
-        style = MaterialTheme.typography.labelSmall.copy(
-            fontFamily = chatFontFamily,
-            // 等宽数字：秒数递增时文本宽度恒定，避免挤压主文案造成抖动
-            fontFeatureSettings = "tnum",
-        ),
-        color = MaterialTheme.colorScheme.secondary,
-        maxLines = 1,
-    )
-}
-
-/** 折叠/展开箭头：内容可见且未滚动折叠 → 收起箭头；否则 → 展开箭头 */
 @Composable
 internal fun ReasoningFoldArrow(
     contentVisible: Boolean,
@@ -184,11 +154,6 @@ internal fun ReasoningHeaderRow(
         if (extra != null) {
             extra()
         }
-        ReasoningElapsedLabel(
-            loading = loading,
-            duration = duration,
-            chatFontFamily = chatFontFamily,
-        )
         ReasoningFoldArrow(
             contentVisible = contentVisible,
             folded = folded,

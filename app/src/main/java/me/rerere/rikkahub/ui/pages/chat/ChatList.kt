@@ -113,6 +113,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -186,6 +187,7 @@ fun ChatList(
     isUserInteracting: MutableState<Boolean>? = null,
     loading: Boolean,
     processingStatus: String? = null,
+    generationStats: GenerationLiveStats? = null,
     previewMode: Boolean,
     settings: Settings,
     hazeState: HazeState,
@@ -236,6 +238,7 @@ fun ChatList(
                 isUserInteracting = isUserInteracting,
                 loading = loading,
                 processingStatus = processingStatus,
+                generationStats = generationStats,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -271,6 +274,7 @@ private fun ChatListNormal(
     isUserInteracting: MutableState<Boolean>? = null,
     loading: Boolean,
     processingStatus: String? = null,
+    generationStats: GenerationLiveStats? = null,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -673,31 +677,45 @@ private fun ChatListNormal(
         // 换算（预设开场 intro item 占一位）在本函数内唯一可知，故由这里上报锚点，
         // ChatPage 恢复时"锚点优先、index 兜底"。index/offset 保持 LazyColumn 原始
         // item 空间，恢复侧 scrollToItem 同空间直用。
+        //
+        // 锚点必须与 firstVisibleItemIndex 同 item：offset 是相对首可见 item 的，若锚点
+        // 取"视口内第一条真实消息"（可能是第二、第三条可见 item），恢复时把该 offset
+        // 套到锚点 item 上会整体偏移若干 item 高度（预设 intro 占满屏、摘要卡在视口
+        // 上缘时即复现）。首可见 item 不是消息时锚点置 null，走 index 兜底。
+        //
+        // 空布局（visibleItemsInfo 为空）不上报：组合销毁/未完成首帧布局时 LazyColumn
+        // 会短暂清空可见列表，此时上报 (null, index, 0) 会覆盖真实存档——离开会话
+        // （cleanupChatPages 清栈 / 导航到工作区）再切回时位置漂移的根因之一。
         val currentScrollMapping by rememberUpdatedState(presetMessageCount to hasPresetIntroItem)
         LaunchedEffect(state, onScrollSnapshot) {
             val report = onScrollSnapshot ?: return@LaunchedEffect
             snapshotFlow {
                 val info = state.layoutInfo
-                val nodes = conversationUpdated.messageNodes
-                val (presetCount, hasIntro) = currentScrollMapping
-                val introOffset = if (hasIntro) 1 else 0
-                var anchor: Uuid? = null
-                if (nodes.isNotEmpty()) {
-                    // visibleItemsInfo 取首个"真实消息"item 作为锚点（intro/摘要/系统提示/
-                    // 底部占位等不对应消息的 item 跳过，映射公式见 chatMessageItemIndex）。
-                    for (item in info.visibleItemsInfo.sortedBy { it.index }) {
-                        val messageIndex = presetCount + (item.index - introOffset)
-                        if (item.index >= introOffset && messageIndex in presetCount until nodes.size) {
-                            anchor = nodes[messageIndex].id
-                            break
-                        }
+                if (info.visibleItemsInfo.isEmpty()) {
+                    null
+                } else {
+                    val nodes = conversationUpdated.messageNodes
+                    val (presetCount, hasIntro) = currentScrollMapping
+                    val firstVisibleItemIndex = state.firstVisibleItemIndex
+                    val firstVisible = info.visibleItemsInfo
+                        .firstOrNull { it.index == firstVisibleItemIndex }
+                        ?: info.visibleItemsInfo.minByOrNull { it.index }
+                    val anchor = firstVisible?.let { item ->
+                        chatItemMessageIndexOrNull(
+                            itemIndex = item.index,
+                            messageCount = nodes.size,
+                            presetCount = presetCount,
+                            hasPresetIntroItem = hasIntro,
+                        )?.let { messageIndex -> nodes[messageIndex].id }
                     }
+                    Triple(anchor, firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
                 }
-                Triple(anchor, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
             }
                 .distinctUntilChanged()
-                .collect { (anchor, index, offset) ->
-                    report(anchor, index, offset)
+                .collect { snapshot ->
+                    if (snapshot != null) {
+                        report(snapshot.first, snapshot.second, snapshot.third)
+                    }
                 }
         }
 
@@ -911,15 +929,17 @@ private fun ChatListNormal(
                         // index==lastIndex。若不加 finishedAt/role 守卫，已完成消息会吃到
                         // loading=true → 过程区强制展开又折叠（"发第二条时第一条过程闪展闪收"）。
                         val currentMsg = node.currentMessage
+                        val isGeneratingAssistant = loading &&
+                            index == conversation.messageNodes.lastIndex &&
+                            currentMsg.role == MessageRole.ASSISTANT &&
+                            currentMsg.finishedAt == null
                         ChatMessage(
                             node = node,
                             modifier = entranceModifier,
                             model = currentMsg.modelId?.let(modelById::get),
                             assistant = assistant,
-                            loading = loading &&
-                                index == conversation.messageNodes.lastIndex &&
-                                currentMsg.role == MessageRole.ASSISTANT &&
-                                currentMsg.finishedAt == null,
+                            loading = isGeneratingAssistant,
+                            generationStats = if (isGeneratingAssistant) generationStats else null,
                             onRegenerate = regenCb,
                             onEdit = editCb,
                             onFork = forkCb,
@@ -982,10 +1002,17 @@ private fun ChatListNormal(
                     .zIndex(5f)
             )
 
-            // 加载指示器悬浮在列表底部上方，不占用 LazyColumn item 高度，
-            // 避免生成结束后 44dp 常驻空白，也避免收尾时 item 高度变化引发锚点跳动
+            // 加载指示器：优先显示在生成中 assistant 消息的操作栏位置（见 ChatMessage
+            // 的 GeneratingLoadingRow）。仅当「尚无进行中的 assistant 消息」（首 token
+            // 未到/纯处理态）或有 processingStatus（OCR/压缩等）时才悬浮在列表底部。
+            val lastNode = conversation.messageNodes.lastOrNull()
+            val lastMsg = lastNode?.currentMessage
+            val hasGeneratingAssistant = loading &&
+                lastMsg?.role == MessageRole.ASSISTANT &&
+                lastMsg.finishedAt == null
+            val showFloatingLoading = processingStatus != null || (loading && !hasGeneratingAssistant)
             AnimatedVisibility(
-                visible = loading || processingStatus != null,
+                visible = showFloatingLoading,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .offset(y = -(2).dp)

@@ -18,14 +18,23 @@ class CostCalculatorTest {
             .toEpochMilliseconds()
 
     @Test
-    fun `peak time follows Beijing hours`() {
-        assertFalse(CostCalculator.isPeakTime(beijingMillis(8, 59)))
-        assertTrue(CostCalculator.isPeakTime(beijingMillis(9, 0)))
-        assertTrue(CostCalculator.isPeakTime(beijingMillis(11, 59)))
-        assertFalse(CostCalculator.isPeakTime(beijingMillis(12, 0)))
-        assertTrue(CostCalculator.isPeakTime(beijingMillis(14, 0)))
-        assertTrue(CostCalculator.isPeakTime(beijingMillis(17, 59)))
-        assertFalse(CostCalculator.isPeakTime(beijingMillis(18, 0)))
+    fun `peak time follows Beijing off-peak window`() {
+        // 空闲：00:30–08:30；高峰：其余工作日时段。2026-08-20 是周四（工作日）。
+        assertTrue(CostCalculator.isPeakTime(beijingMillis(0, 0)))
+        assertFalse(CostCalculator.isPeakTime(beijingMillis(0, 30)))
+        assertFalse(CostCalculator.isPeakTime(beijingMillis(8, 29)))
+        assertTrue(CostCalculator.isPeakTime(beijingMillis(8, 30)))
+        assertTrue(CostCalculator.isPeakTime(beijingMillis(12, 0)))
+        assertTrue(CostCalculator.isPeakTime(beijingMillis(18, 0)))
+    }
+
+    @Test
+    fun `weekend is always off-peak`() {
+        // 2026-08-22 是周六
+        val saturday = LocalDateTime(2026, 8, 22, 12, 0, 0)
+            .toInstant(TimeZone.of("Asia/Shanghai"))
+            .toEpochMilliseconds()
+        assertFalse(CostCalculator.isPeakTime(saturday))
     }
 
     @Test

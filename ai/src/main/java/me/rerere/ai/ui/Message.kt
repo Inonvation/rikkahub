@@ -28,6 +28,11 @@ data class UIMessage(
     // 模型从配置删除/更换后统计页仍可显示真实名称；旧数据缺省为 null 向后兼容。
     val modelName: String? = null,
     val usage: TokenUsage? = null,
+    /**
+     * 纯流式输出累计时长（毫秒），不含工具执行/审批等待。
+     * 多步工具循环中逐步累加；null = 旧数据或未记录，UI 回退 createdAt→finishedAt 墙钟口径。
+     */
+    val streamDurationMillis: Long? = null,
     val translation: String? = null,
     // 请求期间生成的内部消息（系统提示/注入/提醒等）；仅内存中使用，不参与持久化
     @Transient

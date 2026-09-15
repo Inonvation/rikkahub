@@ -40,6 +40,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -154,6 +155,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.ai.ContextCompositionStore
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.ai.estimateFallbackComposition
 import me.rerere.rikkahub.data.ai.hasRealMessages
 import me.rerere.rikkahub.data.ai.hasStaleCalibrationAnchor
@@ -210,6 +212,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.ChatScrollPosition
 import me.rerere.rikkahub.ui.hooks.ChatScrollStore
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -248,6 +251,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
+    val generationStats by vm.generationStats.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.conversationErrors.collectAsStateWithLifecycle()
@@ -401,6 +405,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     // 否则会话数据加载前（首帧空列表）snapshotFlow 会把 (0,0) 写成假存档，
     // 恢复逻辑读到它就把会话钉在开头（"刚打开软件切历史会话落到最前"bug 根因）。
     var chatPositionReady by remember(conversation.id) { mutableStateOf(false) }
+    // 最近一次合法滚动快照（与存档同结构）：组合销毁时用它回写 store，覆盖/纠正
+    // 销毁过程中空布局 snapshotFlow 可能写入的坏值（visibleItemsInfo 清空后
+    // firstVisibleItemIndex/offset 仍可能被上报，但 anchor 会丢、offset 可能归零）。
+    var lastGoodScroll by remember(conversation.id) {
+        mutableStateOf(scrollStore.load(conversation.id))
+    }
     // 滚动位置存档改由 ChatList 上报（见 ChatList onScrollSnapshot / ChatScrollStore
     // 锚点注释）：只有列表内部知道"LazyColumn item ↔ 真实消息"的换算（预设开场 intro
     // item 占一位），裸 firstVisibleItemIndex 拿不到视口锚点消息 id——会话离开期间列表
@@ -412,6 +422,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     val onScrollSnapshot: (Uuid?, Int, Int) -> Unit = remember(conversation.id) {
         { anchor, index, offset ->
             if (chatPositionReady) {
+                lastGoodScroll = ChatScrollPosition(
+                    firstVisibleItemIndex = index,
+                    firstVisibleItemScrollOffset = offset,
+                    anchorMessageId = anchor,
+                )
                 scrollStore.save(conversation.id, index, offset, anchor)
             }
         }
@@ -424,6 +439,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
     val listInteracting = remember { mutableStateOf(false) }
     DisposableEffect(conversation.id) {
         onDispose {
+            // 销毁前把最近一次合法快照回写 store：离开会话（导航到其它页/切会话清栈）
+            // 时 LazyColumn 卸载可能触发一次空布局上报；即便 ChatList 已过滤空布局，
+            // 仍以 lastGood 为准兜底，保证下次进入读到的是离开时的真实视口。
+            lastGoodScroll?.let { pos ->
+                scrollStore.save(
+                    conversation.id,
+                    pos.firstVisibleItemIndex,
+                    pos.firstVisibleItemScrollOffset,
+                    pos.anchorMessageId,
+                )
+            }
             vm.chatListInitialized = false
         }
     }
@@ -473,31 +499,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
                         chatListState.scrollToItem(itemIndexOf(lastMessageIndex))
                     } else {
                         val saved = scrollStore.load(conversation.id)
-                        // 锚点优先：离开时的视口首条真实消息仍在列表（头部未被压缩/删除）
-                        // → 精确钉回该消息当前位置；锚点失效（消息已被删/压缩合并）→ 回落
-                        // 旧逻辑按存档 index 恢复（item 空间直用）；都不可用 → 定位最后一条。
-                        val anchorTarget = saved?.anchorMessageId?.let { anchorId ->
-                            nodes.indexOfFirst { it.id == anchorId }
-                                .takeIf { it in presetCount..lastMessageIndex }
-                                ?.let(::itemIndexOf)
-                        }
-                        if (anchorTarget != null) {
-                            chatListState.scrollToItem(
-                                anchorTarget,
-                                saved.firstVisibleItemScrollOffset.coerceAtLeast(0),
-                            )
-                        } else if (saved != null &&
-                            saved.firstVisibleItemIndex in 0..itemIndexOf(lastMessageIndex)
-                        ) {
-                            chatListState.scrollToItem(
-                                saved.firstVisibleItemIndex,
-                                saved.firstVisibleItemScrollOffset,
-                            )
-                        } else {
-                            chatListState.scrollToItem(
-                                if (nodes.size > presetCount) itemIndexOf(lastMessageIndex) else 0
-                            )
-                        }
+                        // 锚点优先、index 兜底、都不可用落最后一条：解析收敛到
+                        // resolveChatScrollRestoreTarget（与单测共用同一口径）。
+                        // 锚点=首可见 item 对应的消息（ChatList 上报约定），offset 与之配对；
+                        // 若把"视口内第一条真实消息"当锚点却沿用首可见 item 的 offset，
+                        // 预设 intro / 非消息 item 在视口上缘时会整体偏移（位置漂移根因）。
+                        val fallback = if (nodes.size > presetCount) itemIndexOf(lastMessageIndex) else 0
+                        val target = resolveChatScrollRestoreTarget(
+                            savedIndex = saved?.firstVisibleItemIndex ?: fallback,
+                            savedOffset = saved?.firstVisibleItemScrollOffset ?: 0,
+                            anchorMessageId = saved?.anchorMessageId,
+                            messageNodes = nodes,
+                            presetCount = presetCount,
+                            hasPresetIntroItem = hasPresetIntroItem,
+                            fallbackItemIndex = fallback,
+                        )
+                        chatListState.scrollToItem(target.itemIndex, target.scrollOffset)
                     }
                 }
             }
@@ -532,6 +549,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null, mo
             inputState = inputState,
             loadingJob = loadingJob,
             processingStatus = processingStatus,
+            generationStats = generationStats,
             setting = setting,
             conversation = conversation,
             leftDrawerOpen = leftDrawerOpen,
@@ -555,6 +573,7 @@ private fun ChatPageContent(
     inputState: ChatInputState,
     loadingJob: Job?,
     processingStatus: String? = null,
+    generationStats: GenerationLiveStats? = null,
     setting: Settings,
     conversation: Conversation,
     leftDrawerOpen: Boolean,
@@ -954,6 +973,7 @@ private fun ChatPageContent(
                             isUserInteracting = listInteracting,
                             loading = loadingJob?.isActive == true,
                             processingStatus = effectiveProcessingStatus,
+                            generationStats = generationStats,
                             previewMode = previewMode,
                             settings = setting,
                             hazeState = hazeState,
@@ -1637,19 +1657,30 @@ private fun TopBar(
             val conversationAssistant = settings.getAssistantById(conversation.assistantId)
                 ?: settings.getCurrentAssistant()
             val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
-            Column {
-                Surface(
-                    onClick = {
-                        hapticController.lightTap()
-                        if (conversation.messageNodes.isNotEmpty()) {
-                            titleState.open(conversation.title)
-                        } else {
-                            toaster.show(editTitleWarning, type = ToastType.Warning)
-                        }
-                    },
-                    color = Color.Transparent,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            // 关掉最小触控尺寸：顶栏标题区两行紧排，Surface/clickable 默认 48dp 会把
+            // 标题与副标题撑出大段空白
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                // fillMaxWidth：给标题/副标题固定可用宽度，长文本才能 ellipsis 截断，
+                // 避免未截断的长副标题把标题行撑高、模式 chip 视觉偏上
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {
+                                    hapticController.lightTap()
+                                    if (conversation.messageNodes.isNotEmpty()) {
+                                        titleState.open(conversation.title)
+                                    } else {
+                                        toaster.show(editTitleWarning, type = ToastType.Warning)
+                                    }
+                                },
+                            ),
+                    ) {
                         Text(
                             text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
                             maxLines = 1,
@@ -1657,26 +1688,22 @@ private fun TopBar(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        // 模式切换与显示：自输入框下方栏迁移至会话标题旁（锁定态仅展示）
-                        TopBarModeChip(
-                            conversation = conversation,
-                            settings = settings,
-                            modeSwitchEnabled = modeSwitchEnabled,
-                            onSwitchMode = onSwitchMode,
-                        )
                     }
-                }
-                // 标题下方：当前会话绑定的助手名，点击弹出切换助手选择器（不显示模型名）
-                Surface(
-                    onClick = {
-                        hapticController.lightTap()
-                        onAssistantNameClick()
-                    },
-                    color = Color.Transparent,
-                ) {
+                    // 标题下方：当前会话绑定的助手名（不显示模型名），点击弹出助手选择器
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 1.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {
+                                    hapticController.lightTap()
+                                    onAssistantNameClick()
+                                },
+                            )
+                            .padding(bottom = 1.dp),
                     ) {
                         Text(
                             text = conversationAssistant.name.ifBlank { defaultAssistantName },
@@ -1684,19 +1711,21 @@ private fun TopBar(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        Icon(
-                            imageVector = HugeIcons.ArrowDown01,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
             }
         },
         actions = {
+            // 模式切换：放 actions 开头，与上下文圆圈同高（标题两行整体居中时，
+            // 若挂在标题第一行旁会视觉偏上）
+            TopBarModeChip(
+                conversation = conversation,
+                settings = settings,
+                modeSwitchEnabled = modeSwitchEnabled,
+                onSwitchMode = onSwitchMode,
+            )
             // 上下文用量圆圈：点击从图标位置展开状态浮窗（上下文占用/指标/全会话用量/管理控制台）。
             // toggle 唯一入口收敛在 ChatPageContent（消抖门闩防连点闪烁）；
             // 图标底边（窗口坐标系）上报给覆盖层做锚定（面板顶部 = 图标底边）。
@@ -1807,6 +1836,7 @@ private fun TopBarModeChip(
     settings: Settings,
     modeSwitchEnabled: Boolean,
     onSwitchMode: (String?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val navController = LocalNavController.current
     val hapticController = rememberHaptic()
@@ -1816,7 +1846,7 @@ private fun TopBarModeChip(
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .padding(start = 8.dp)
             .clip(MaterialTheme.shapes.small)
             .combinedClickable(

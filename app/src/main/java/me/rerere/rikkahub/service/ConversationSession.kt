@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.model.Conversation
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,6 +34,9 @@ class ConversationSession(
 
     // 处理状态（如 OCR 识别中）
     val processingStatus = MutableStateFlow<String?>(null)
+
+    // 生成中实时统计（token/速率）；生成结束由 GenerationHandler 的 finally 清空
+    val generationStats = MutableStateFlow<GenerationLiveStats?>(null)
 
     // steering：生成中待注入的引导队列（FIFO）。immediate=true 的项由 GenerationHandler 在
     // 下一轮边界（工具调用完成/输出结束）立即注入；其余项排队不动，等回合结束后由

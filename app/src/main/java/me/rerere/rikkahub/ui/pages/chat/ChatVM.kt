@@ -28,6 +28,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
@@ -97,6 +98,10 @@ class ChatVM(
     val processingStatus: StateFlow<String?> =
         chatService
             .getProcessingStatusFlow(_conversationId)
+
+    val generationStats: StateFlow<GenerationLiveStats?> =
+        chatService
+            .getGenerationStatsFlow(_conversationId)
 
     val conversationJobs = chatService
         .getConversationJobs()

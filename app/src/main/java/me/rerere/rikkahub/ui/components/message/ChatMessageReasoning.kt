@@ -498,13 +498,6 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 chatFontFamily = chatFontFamily ?: FontFamily.Default,
             )
         },
-        extra = {
-            ReasoningElapsedLabel(
-                loading = loading,
-                duration = state.duration,
-                chatFontFamily = chatFontFamily ?: FontFamily.Default,
-            )
-        },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         modifier = stepModifier,
         headerModifier = headerModifier,

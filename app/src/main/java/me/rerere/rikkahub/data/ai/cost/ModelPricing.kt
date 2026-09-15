@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.cost
 
 import kotlinx.serialization.Serializable
+import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.ai.core.TokenUsage
@@ -42,11 +43,20 @@ enum class CostCurrency {
 object CostCalculator {
     private val BEIJING_TIME_ZONE = TimeZone.of("Asia/Shanghai")
 
-    /** 北京时间 09:00-12:00、14:00-18:00 为 DeepSeek 高峰时段，其余为空闲时段。 */
+    /**
+     * DeepSeek 高峰/空闲（北京时间）：
+     * - 空闲：每天 00:30–08:30，以及周六/周日全天；
+     * - 高峰：其余时段（工作日 08:30–次日 00:30）。
+     * 2026-08 查证自 api-docs.deepseek.com/quick_start/pricing。
+     */
     fun isPeakTime(timeMillis: Long? = null): Boolean {
         val instant = timeMillis?.let { Instant.fromEpochMilliseconds(it) } ?: Clock.System.now()
-        val hour = instant.toLocalDateTime(BEIJING_TIME_ZONE).hour
-        return hour in 9..11 || hour in 14..17
+        val dt = instant.toLocalDateTime(BEIJING_TIME_ZONE)
+        // 周末全天空闲
+        if (dt.dayOfWeek == DayOfWeek.SATURDAY || dt.dayOfWeek == DayOfWeek.SUNDAY) return false
+        val minutes = dt.hour * 60 + dt.minute
+        // 空闲窗口 00:30–08:30 → [30, 510)
+        return minutes < 30 || minutes >= 8 * 60 + 30
     }
 
     /**

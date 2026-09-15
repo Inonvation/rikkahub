@@ -76,6 +76,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.ai.PendingSteering
 import me.rerere.rikkahub.data.ai.ContextComposition
 import me.rerere.rikkahub.data.ai.ContextCompositionStore
@@ -1024,6 +1025,10 @@ class ChatService(
         return getOrCreateSession(conversationId).processingStatus
     }
 
+    fun getGenerationStatsFlow(conversationId: Uuid): StateFlow<GenerationLiveStats?> {
+        return getOrCreateSession(conversationId).generationStats
+    }
+
     private fun launchGenerationJob(
         conversationId: Uuid,
         keepAliveInBackground: Boolean = true,
@@ -1869,6 +1874,7 @@ class ChatService(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
+                liveStats = session.generationStats,
                 // 唤醒指令由 GenerationHandler 在续答生成的第一步追加为 provider 看到的
                 // 最后一条 USER 消息（一次性消费，不逐步重复），不写 system、不进持久化
                 // 消息列表：system 前缀稳定 → 缓存命中；持久化尾部保持上一条 ASSISTANT →

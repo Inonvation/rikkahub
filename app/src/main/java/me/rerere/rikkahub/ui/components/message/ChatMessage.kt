@@ -6,8 +6,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,13 +44,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
@@ -81,6 +79,7 @@ import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.ai.GenerationLiveStats
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
@@ -92,6 +91,7 @@ import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.message.LocalConversationId
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.Favicon
+import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -133,6 +133,7 @@ fun ChatMessage(
     node: MessageNode,
     modifier: Modifier = Modifier,
     loading: Boolean = false,
+    generationStats: GenerationLiveStats? = null,
     model: Model? = null,
     assistant: Assistant? = null,
     lastMessage: Boolean = false,
@@ -235,17 +236,29 @@ fun ChatMessage(
 
         // 末条消息的操作按钮行常驻占位高度（生成中也占位）：消除生成结束瞬间
         // 消息高度突变导致的 LazyColumn 锚点重排跳动（无输入时列表自移 ~30px）。
-        Column(
+        // 生成中 → 加载指示器 + 趣味文案；生成完 → 交叉淡入操作按钮。
+        // 两态叠在同一 Box 内交叉淡入淡出，容器高度恒为 max(32dp, 内容)，避免过渡期高度跳变。
+        val showGeneratingRow = loading && lastMessage && message.role == MessageRole.ASSISTANT
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = if (lastMessage) 32.dp else 0.dp),
-            // 用户消息的按钮行保持右对齐（与气泡对齐），助手消息左对齐
-            horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
+            contentAlignment = if (message.role == MessageRole.USER) Alignment.CenterEnd else Alignment.CenterStart,
         ) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showGeneratingRow,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(150)),
+            ) {
+                GeneratingLoadingRow(
+                    chatFontFamily = chatFontFamily,
+                    modifier = Modifier.height(32.dp),
+                )
+            }
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showActions,
-                enter = slideInVertically { it / 2 } + fadeIn(),
-                exit = slideOutVertically { it / 2 } + fadeOut()
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(150))
             ) {
                 Column(
                     modifier = Modifier.animateContentSize()
@@ -280,23 +293,35 @@ fun ChatMessage(
             StudyItemsList(parts = message.parts)
         }
 
-        // 统计行：生成期间隐藏（alpha=0）但用虚拟 finishedAt 渲染出与完成态一致的
-        // 完整行（tokens/tok/s/耗时），生成结束零高度差，LazyColumn 锚点不受影响。
-        if (!loading || (lastMessage && settings.showTokenUsage)) {
-            Box(
-                modifier = Modifier.graphicsLayer { alpha = if (loading) 0f else 1f },
-            ) {
-                ProvideTextStyle(textStyle) {
-                    ChatMessageNerdLine(
-                        message = if (loading) {
-                            message.copy(
-                                finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
-                            )
-                        } else {
-                            message
-                        },
-                    )
+        // 统计行（复制/重试下方第二行）：生成中/完成后复用同一 NerdLine（liveStats 驱动
+        // 生成中数据），渲染完全一致，交叉淡入淡出无样式跳变。
+        if (lastMessage && settings.showTokenUsage) {
+            Box {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = loading,
+                    enter = fadeIn(tween(200)),
+                    exit = fadeOut(tween(150)),
+                ) {
+                    ProvideTextStyle(textStyle) {
+                        ChatMessageNerdLine(
+                            message = message,
+                            liveStats = generationStats,
+                        )
+                    }
                 }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !loading,
+                    enter = fadeIn(tween(200)),
+                    exit = fadeOut(tween(150)),
+                ) {
+                    ProvideTextStyle(textStyle) {
+                        ChatMessageNerdLine(message = message)
+                    }
+                }
+            }
+        } else if (!loading) {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
             }
         }
 
@@ -341,6 +366,32 @@ fun ChatMessage(
             onDismissRequest = {
                 showSelectCopySheet = false
             }
+        )
+    }
+}
+
+/**
+ * 生成中的加载行：加载指示器 + 轮换趣味文案。
+ *
+ * 占据生成结束后操作按钮行的位置（同高 32.dp 容器内交叉淡入淡出），
+ * 避免生成结束瞬间消息高度突变导致列表锚点跳动。
+ * 实时 token/速率统计在下方第二行，复用 ChatMessageNerdLine(liveStats)。
+ */
+@Composable
+private fun GeneratingLoadingRow(
+    chatFontFamily: FontFamily?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        RabbitLoadingIndicator(modifier = Modifier.size(20.dp))
+        RotatingThinkingLabel(
+            enabled = true,
+            primaryTitle = null,
+            chatFontFamily = chatFontFamily ?: FontFamily.Default,
         )
     }
 }
