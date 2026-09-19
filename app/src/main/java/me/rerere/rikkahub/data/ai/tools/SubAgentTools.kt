@@ -29,58 +29,19 @@ import kotlin.uuid.Uuid
  *   resumeAfterSubAgent 自动唤醒母代理续答并注入结果——母代理**无需任何 await 工具**。
  *
  * 占位状态用 "dispatched"（非 queued/succeeded），避免模型误判"子代理瞬间完成"。
+ *
+ * 声明信道划分（对齐 wire 截断契约，改动前先读 WireTool.kt）：
+ * - description 只写"是什么 + 返回什么"（≤300 字符），截断后语义仍完整；
+ * - 子代理清单/何时委派/异步用法/Task 模板走 [SUBAGENT_SPAWN_SYSTEM_PROMPT]（system 信道，
+ *   不裁剪、随工具注册去重注入）。旧实现把清单放 agentId 参数描述、用法放 description 尾部，
+ *   两者都被 wire 截断静默砍掉——模型实际看不到。
  */
 fun createSubAgentTools(
     subAgentRunner: SubAgentRunner,
     parentConversationId: Uuid,
 ): List<Tool> {
-    // 子代理清单放到 agentId 参数描述里（随工具 schema 提供），不注入 system 前缀——
-    // 模型通过参数描述感知各子代理职责，省掉每请求 ~200 token 的常驻提示词
-    val agentIdDescription = buildString {
-        append("Sub-agent id. Available sub-agents:")
-        SubAgentCatalog.all.forEach { def ->
-            append("\n- ${def.id} (${def.name}): ${def.description}")
-        }
-    }
-
-    // 母代理行为引导（异步唤醒模式）：派发后自由继续，可结束回合，完成时自动唤醒注入结果。
-    val spawnBehavior = """
-        ## Usage
-        - After dispatching, **do not wait idle** — continue doing work you can do:
-          analyze the user's deeper needs, clarify direction, plan steps, run base work
-          that doesn't need the sub-agent, or handle parallel tasks with info you already have.
-        - The sub-agent runs in the background. When it completes, you will be **woken up
-          automatically** with its result injected into the context. There is no await tool —
-          you never block waiting for it.
-        - You may end this round whenever you have enough to respond, even if sub-agents are
-          still running — they continue in the background and will wake you when done.
-        - Once you have results, **cross-verify, synthesize and summarize** them into the best
-          possible reply to the user. Do NOT just relay the sub-agent's output verbatim.
-        - Never assume a sub-agent finished: `dispatched` is only a dispatch marker, not a result.
-        - A timed-out or failed sub-agent may be **auto-retried once by the system** (same task,
-          context preserved). If the final status is still `timeout`/`failed`, the sub-agent may
-          still have produced partial work: use `summary`, `partialSteps` and `partialOutput` to
-          answer as best you can. Do not pretend it succeeded — but do not simply tell the user it
-          failed; salvage whatever partial result is available.
-        - If `spawn_subagent` returns `status=limit_reached`, the concurrency cap is full. Do NOT
-          retry spawn immediately; do other independent work first and try again later, or handle
-          the task yourself.
-        - Use sub-agents only when they add clear value (bulk research / long-document analysis /
-          independent execution). Do simple things yourself — don't dispatch for the sake of it.
-
-        ## Task template
-        Compose the `task` argument in this markdown structure (the sub-agent cannot see this
-        conversation — be self-contained, never write "as we discussed above"):
-        # Task
-        ## Background
-        Relevant context and known information.
-        ## Objective
-        What to accomplish, stated clearly.
-        ## Constraints
-        Boundaries, limits, things to avoid.
-        ## Deliverable
-        The expected output form (e.g. a ranked list, a markdown report, a summary).
-    """.trimIndent()
+    // 参数描述必须 ≤ WIRE_PARAM_DESCRIPTION_LIMIT（160），完整清单走 systemPrompt
+    val agentIdDescription = "Sub-agent id (see the Sub-Agents section in system instructions for each sub-agent's role)"
 
     return listOf(
         // ---- spawn_subagent：派发，不阻塞 ----
@@ -89,15 +50,9 @@ fun createSubAgentTools(
             description = """
                 Dispatch a task to a specialized sub-agent that runs in its own isolated context
                 with its own model and tools. Returns a dispatch marker (`status=dispatched`) plus
-                a `taskId` — **not** the execution result.
-
-                $spawnBehavior
-
-                Parameters:
-                - agentId: sub-agent id (available sub-agents are listed in that parameter's description)
-                - task: task description for the sub-agent, composed per the ## Task template above
-                - modelId(optional): override the sub-agent's default model
+                a `taskId` — **not** the execution result. Follow the Sub-Agents instructions.
             """.trimIndent(),
+            systemPrompt = { _, _ -> SUBAGENT_SPAWN_SYSTEM_PROMPT },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -113,21 +68,13 @@ fun createSubAgentTools(
                             put("type", "string")
                             put(
                                 "description",
-                                "Task description for the sub-agent. Compose it with this markdown structure (self-contained; the sub-agent cannot see this conversation):\n" +
-                                    "# Task\n" +
-                                    "## Background\n" +
-                                    "Relevant context and known information.\n" +
-                                    "## Objective\n" +
-                                    "What to accomplish, stated clearly.\n" +
-                                    "## Constraints\n" +
-                                    "Boundaries, limits, things to avoid.\n" +
-                                    "## Deliverable\n" +
-                                    "The expected output form."
+                                "Self-contained task description (the sub-agent cannot see this conversation); " +
+                                    "follow the Task template in the Sub-Agents instructions."
                             )
                         })
                         put("modelId", buildJsonObject {
                             put("type", "string")
-                            put("description", "可选：覆盖子代理默认模型（模型 id）")
+                            put("description", "Optional: override the sub-agent's default model (model id)")
                         })
                     },
                     required = listOf("agentId", "task"),
@@ -188,6 +135,47 @@ fun createSubAgentTools(
             },
         ),
     )
+}
+
+/**
+ * 子代理使用规范（system 信道，随 spawn_subagent 注册去重注入）。
+ *
+ * 为什么整体放 system 而不是 description：wire 层把工具描述截到 300 字符
+ * （见 WireTool.kt），以下三段的完整语义放不进 description——
+ * 旧布局下它们全部在截断点之后，模型实际从未看到（清单在参数描述 80 字符外同理）。
+ * 本段是子代理用法与清单的**单一来源**：AgentBehaviorPrompt 只保留一行指针，不再重复叙述。
+ * 文本变化需同步 [me.rerere.rikkahub.data.ai.PROMPT_REVISION]。
+ */
+internal val SUBAGENT_SPAWN_SYSTEM_PROMPT: String = buildString {
+    appendLine("**Sub-Agents**")
+    appendLine("Sub-agents run in isolated contexts with their own models and tools. Available sub-agents:")
+    SubAgentCatalog.all.forEach { def ->
+        appendLine("- `${def.id}` (${def.name}): ${def.description}")
+    }
+    appendLine()
+    appendLine("When to delegate:")
+    appendLine("- The task splits into several **independent** workstreams (bulk research, long-document analysis, parallel verification, comparing options) whose combined output is more than you should load here.")
+    appendLine("- Otherwise do it yourself — do not delegate single-file reads or simple lookups.")
+    appendLine("How to run them:")
+    appendLine("- Call `spawn_subagent` once per sub-agent **in the same reply** — each call dispatches one worker, so multiple calls in one reply run concurrently. Record every returned `taskId`.")
+    appendLine("- After dispatching, **do not wait idle** — continue your own work: plan, analyze, run base steps that need no sub-agent result.")
+    appendLine("Getting results:")
+    appendLine("- Sub-agents wake you **automatically** when they complete — their result is injected into your context, so you never block waiting for them. There is no await tool.")
+    appendLine("- You may end this round even while sub-agents run; they finish in the background and wake you.")
+    appendLine("- `dispatched` is only a dispatch marker, never a result. A timed-out or failed task may be auto-retried once by the system (same task, context preserved); if the final status is still timeout/failed, salvage `summary`/`partialSteps`/`partialOutput` and answer from what you have — do not respawn yourself.")
+    appendLine("- Cross-verify, synthesize and summarize their results into the best answer. Do not relay sub-agent output verbatim — you know the user's needs best.")
+    appendLine("- When a sub-agent result corresponds to an item you track in the todo list, update that item (in_progress / completed) in your synthesis round.")
+    appendLine("- If `spawn_subagent` returns `status=limit_reached`, the concurrency cap is full. Do not retry immediately; do other independent work first, or handle the task yourself.")
+    appendLine()
+    appendLine("Task template — compose the `task` argument in this markdown structure (the sub-agent cannot see this conversation; be self-contained, never write \"as we discussed above\"):")
+    appendLine("# Task")
+    appendLine("## Background")
+    appendLine("Relevant context and known information.")
+    appendLine("## Objective")
+    appendLine("What to accomplish, stated clearly.")
+    appendLine("## Constraints")
+    appendLine("Boundaries, limits, things to avoid.")
+    append("## Deliverable\nThe expected output form (e.g. a ranked list, a markdown report, a summary).")
 }
 
 /** 子代理终态结果 payload（spawn 占位回填、backfill 复用）。

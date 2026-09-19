@@ -29,6 +29,22 @@ data class UIMessage(
     val modelName: String? = null,
     val usage: TokenUsage? = null,
     /**
+     * 最近一次真实请求的输入 token（单步口径）。
+     *
+     * 多步工具循环中 [usage].promptTokens 是各步输入的**账单累计**（计费用），
+     * 数值可数倍于真实上下文窗口占用；顶栏占用校准、生成中实时「输入 token」
+     * 必须用本字段（最后一步 provider 实测 prompt）。null = 旧数据或未记录。
+     */
+    val contextPromptTokens: Int? = null,
+    /**
+     * 最近一次真实请求的命中缓存输入 token（单步口径，与 [contextPromptTokens] 同语义）。
+     *
+     * [usage].cachedTokens 是各步账单累计，多步循环下会大于单步输入；消息下方
+     * 「输入 (cached)」展示必须用本字段保证 cached ≤ prompt。null = 旧数据或未记录
+     * （读方回退 [usage].cachedTokens，与 contextPromptTokens 缺失时回退 usage 同口径）。
+     */
+    val contextCachedTokens: Int? = null,
+    /**
      * 纯流式输出累计时长（毫秒），不含工具执行/审批等待。
      * 多步工具循环中逐步累加；null = 旧数据或未记录，UI 回退 createdAt→finishedAt 墙钟口径。
      */

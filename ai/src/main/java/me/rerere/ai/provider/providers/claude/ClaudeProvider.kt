@@ -36,6 +36,7 @@ import me.rerere.ai.core.WIRE_DESCRIPTION_LIMIT
 import me.rerere.ai.core.trimDescription
 import me.rerere.ai.core.trimmed
 import me.rerere.ai.core.merge
+import me.rerere.ai.core.sum
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
@@ -112,7 +113,7 @@ internal suspend fun generateClaudeWithPauseTurn(
         combinedMessage = listOf(combinedMessage)
             .handleTextGenerationResult(result, model)
             .last()
-        combinedUsage = combinedUsage.sum(result.usage)
+        combinedUsage = combinedUsage.sumOrNull(result.usage)
 
         if (result.finishReason != CLAUDE_PAUSE_TURN || continuationCount == maxContinuations) {
             return result.copy(
@@ -156,7 +157,7 @@ internal fun streamClaudeWithPauseTurn(
             when (chunk) {
                 is StreamChunk.Usage -> {
                     passUsage = passUsage.merge(chunk.usage)
-                    completedUsage.sum(passUsage)?.let { emit(StreamChunk.Usage(it)) }
+                    completedUsage.sumOrNull(passUsage)?.let { emit(StreamChunk.Usage(it)) }
                 }
 
                 is StreamChunk.Finish -> {
@@ -176,7 +177,7 @@ internal fun streamClaudeWithPauseTurn(
             return@flow
         }
 
-        completedUsage = completedUsage.sum(passUsage)
+        completedUsage = completedUsage.sumOrNull(passUsage)
         requestMessages = responseMessages
     }
 }
@@ -235,15 +236,11 @@ private fun StreamChunk.maxClaudeServerToolIndex(): Int? {
 
 private fun ServerToolMetadata.maxIndex(): Int? = listOfNotNull(callIndex, resultIndex).maxOrNull()
 
-private fun TokenUsage?.sum(other: TokenUsage?): TokenUsage? {
-    if (this == null) return other
-    if (other == null) return this
-    return TokenUsage(
-        promptTokens = promptTokens + other.promptTokens,
-        completionTokens = completionTokens + other.completionTokens,
-        cachedTokens = cachedTokens + other.cachedTokens,
-        totalTokens = totalTokens + other.totalTokens,
-    )
+/** 可空累加：复用全局 [sum]（含 cacheWriteTokens；totalTokens 恒为 prompt+completion）。 */
+private fun TokenUsage?.sumOrNull(other: TokenUsage?): TokenUsage? = when {
+    this == null -> other
+    other == null -> this
+    else -> sum(other)
 }
 
 class ClaudeProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Claude> {

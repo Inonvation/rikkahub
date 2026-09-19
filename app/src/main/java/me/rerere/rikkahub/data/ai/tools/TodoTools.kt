@@ -76,15 +76,8 @@ fun createTodoTool(
     name = "todo_write",
     description = """
         Create and manage a structured task list for planning and tracking complex multi-step work.
-
         Always create a todolist before starting tasks that involve 3+ distinct steps.
-        Update item status as you work: mark as in_progress before starting, completed when done, cancelled if irrelevant.
-        Pass the FULL todolist each time, not just the delta.
-
-        IMPORTANT: Update the todo list one step at a time, immediately after each step finishes.
-        Before starting a step, call todo_write to mark it in_progress; when the step finishes,
-        call todo_write right away to mark it completed. Do NOT defer updates and do NOT batch
-        several status changes into one update at the end.
+        Pass the FULL todolist each time, not just the delta; mark items in_progress / completed as you work.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

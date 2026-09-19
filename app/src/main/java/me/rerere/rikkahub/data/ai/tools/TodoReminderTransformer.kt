@@ -7,11 +7,22 @@ import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.TransformerContext
 import me.rerere.rikkahub.data.ai.transformers.appendText
 
-/** 超过 N 轮用户消息没有更新 todo，就注入提醒 */
-private const val TURNS_BEFORE_REMINDER = 5
+/**
+ * 超过 N 轮用户消息没有更新 todo，就注入提醒。
+ *
+ * 降噪（2026-09）：5 → 8。跨轮提醒不查冷却，阈值本身就是节奏；8 轮对应"模型确实聊了很久
+ * 都没碰 todo"，比 5 轮更接近真实的"忘了"。提醒要稀缺才有分量（与下方冷却同一原则）。
+ */
+private const val TURNS_BEFORE_REMINDER = 8
 
-/** 超过 N 个已执行工具步没更新 todo，就注入提醒（治"单轮内攒一堆再批量更新"） */
-private const val TOOLS_BEFORE_REMINDER = 3
+/**
+ * 超过 N 个已执行工具步没更新 todo，就注入提醒（治"单轮内攒一堆再批量更新"）。
+ *
+ * 降噪（2026-09）：3 → 6。3 步就催在正常的多步任务里几乎每一步都触发，
+ * 叠加 desc/systemPrompt 里已有的"一步一更"要求，同一诉求在上下文里出现三次以上。
+ * 6 步对应"模型明显在攒批量更新"的情形，保留纠偏能力而不再日常刷屏。
+ */
+private const val TOOLS_BEFORE_REMINDER = 6
 
 /** 两次工具步提醒之间至少间隔的工具步数（提醒冷却，防提醒贬值）。
  *  与 Claude Code 的 turnsSinceLastReminder 语义一致：提醒要"稀缺"，太密会被模型当噪声忽略。 */
@@ -88,11 +99,12 @@ class TodoReminderTransformer(
                 appendLine("$statusMark ${item.content}")
             }
             when {
-                // 单轮内连续干了好几个活没更新：明确要求"做完一步更新一步，别攒着"
+                // 单轮内连续干了好几个活没更新：提示同步进度。
+                // 降噪（2026-09）：删掉"Do NOT batch all updates at the end"——同一条纪律
+                // 已由 todo_write 的 systemPrompt 承载，提醒只负责给状态与一句动作指引。
                 isFallbehindTools && !isFallbehindTurns -> appendLine(
                     "You have completed ${executedToolsSinceLastTodo} steps since the last todo_write. " +
-                        "Call todo_write NOW to mark the completed items, one update per finished step. " +
-                        "Do NOT batch all updates at the end."
+                        "Call todo_write now to sync item status with your actual progress."
                 )
 
                 // 跨轮忘了更新

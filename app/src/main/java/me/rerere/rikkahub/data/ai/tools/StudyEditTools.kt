@@ -543,9 +543,9 @@ fun createDeleteWrongQuestionTool(
 ): Tool = Tool(
     name = "delete_wrong_question",
     description = """
-        Delete an EXISTING wrong question. Pass id from study_search result, or search_hint to resolve by title/question.
-        You MUST provide confirm_title which exactly matches the question title to delete.
-        By default the question is archived (recoverable in the wrong question panel). Set permanent=true to delete permanently.
+        Delete an EXISTING wrong question. Pass id from study_search result, or search_hint to resolve it by title/question.
+        You MUST provide confirm_title exactly matching the question title.
+        By default the question is archived (recoverable in the panel); permanent=true deletes it for good.
     """.trimIndent().replace("\n", " "),
     parameters = { deleteToolParameters("wrong_question") },
     needsApproval = { permissions.needsApproval("delete_wrong_question") },

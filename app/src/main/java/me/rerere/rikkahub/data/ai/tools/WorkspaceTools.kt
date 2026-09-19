@@ -162,10 +162,7 @@ private fun createReadFileTool(
     name = "workspace_read_file",
     description = """
         Read a file (UTF-8 text or image) from the assistant's bound workspace Rootfs.
-        path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
-        Cannot list a directory - use workspace_list_files instead.
-        Supports ranged reads: pass start (byte offset) and/or maxBytes to read any part of a file; for files larger than the single-read limit, read successive ranges (start = previous start + bytes read).
-        Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
+        Cannot list a directory - use workspace_list_files. For files larger than one read, pass start/maxBytes for successive ranges.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -179,8 +176,8 @@ private fun createReadFileTool(
                     put("type", "integer")
                     put(
                         "description",
-                        "Maximum bytes to read (defaults to the single-read limit ${WorkspaceManager.MAX_RANGE_READ_BYTES / 1024 / 1024}MB). " +
-                            "For large files pass a smaller value and read successive ranges."
+                        "Max bytes to read (default ${WorkspaceManager.MAX_RANGE_READ_BYTES / 1024 / 1024}MB); " +
+                            "for large files pass a smaller value and read successive ranges."
                     )
                 })
             },
@@ -296,10 +293,8 @@ private fun createEditFileTool(
     name = "workspace_edit_file",
     description = """
         Edit a UTF-8 text file in the assistant's bound workspace Rootfs.
-        path is relative to the current working directory ${cwdDisplay(cwd)} unless it starts with '/'.
-        Writing files under /workspace but outside the current working directory requires user approval.
-        Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
-        If no exact match is found, whitespace-tolerant line matching is attempted automatically.
+        Writing outside the current working directory requires approval.
+        old_text must match exactly once unless replace_all=true; if no exact match, whitespace-tolerant line matching is tried automatically.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -372,19 +367,12 @@ private fun createShellTool(
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
-        append("Run a shell command in the workspace's Linux rootfs (bash — not Windows; use Unix commands). /workspace = persistent files. ")
+        append("Run a shell command in the workspace's Linux rootfs (bash — not Windows; use Unix commands). ")
         append("Each call is a fresh process: cd/export don't persist; use absolute paths or 'cd /path && cmd'. ")
-        append("cwd must be under /workspace. ")
-        if (!defaultCwd.isNullOrBlank()) {
-            append("Defaults to '$defaultCwd'. ")
-        }
-        append("Output capped: each of stdout/stderr keeps first ~7KB + last ~3KB; for large outputs use head/tail/grep to read specific parts. ")
-        append("Optional stdin text (UTF-8, max ${STDIN_MAX_BYTES / 1024}KB) is piped to the command's stdin, then closed — e.g. {\"command\":\"cat > config.json\",\"stdin\":\"...\"}. ")
+        append("Output capped: stdout/stderr keep first ~7KB + last ~3KB; use head/tail/grep for more. ")
         append("Timeout default 30s, max $SHELL_TIMEOUT_MAX_SECONDS s. Changed files under /workspace are reported. ")
         if (githubTokenHint) {
-            append("GITHUB_TOKEN/GH_TOKEN env vars hold the bound GitHub account token (git HTTPS clones from github.com are authenticated via extraheader too). " +
-                "For api.github.com requests use the env var instead of a literal, e.g. curl -H \"Authorization: Bearer ${'$'}GITHUB_TOKEN\". " +
-                "Never print the token value; it is masked in outputs. ")
+            append("GITHUB_TOKEN env var holds the bound GitHub token; never print it (masked). ")
         }
     },
     parameters = {
@@ -525,9 +513,7 @@ private fun createGlobTool(
     name = "workspace_glob",
     description = """
         Glob-match files under a directory in the assistant's bound workspace Rootfs.
-        path defaults to the current working directory ${cwdDisplay(cwd)}; relative paths resolve against it, absolute Rootfs paths are also accepted.
-        pattern is relative to the search path: e.g. with path /workspace use "ai-output/txt/*.txt" or "**/*.txt".
-        A leading /workspace prefix in pattern is tolerated and stripped. Returns matching entries with absolute Rootfs paths.
+        pattern is relative to the search path, e.g. "**/*.txt"; a leading /workspace prefix is tolerated and stripped.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -572,9 +558,7 @@ private fun createGrepTool(
     name = "workspace_grep",
     description = """
         Search file contents under a directory in the assistant's bound workspace Rootfs.
-        path defaults to the current working directory ${cwdDisplay(cwd)}; relative paths resolve against it, absolute Rootfs paths are also accepted.
-        Returns matching lines with absolute Rootfs path, line number and text.
-        Searching large directories (e.g. the whole rootfs) can be slow.
+        Returns matching lines with absolute Rootfs path, line number and text. Searching large directories can be slow.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -640,9 +624,8 @@ private fun createMoveFileTool(
     name = "workspace_move",
     description = """
         Move or rename a file/directory inside the assistant's bound workspace (/workspace).
-        Paths are relative to the current working directory ${cwdDisplay(cwd)} unless they start with '/'.
-        Moving to a location outside the current working directory requires user approval.
-        An existing target is only overwritten when overwrite=true. Only /workspace paths are supported — use shell mv for other rootfs locations.
+        Moving outside the current working directory requires approval. An existing target is only overwritten when overwrite=true.
+        Only /workspace paths are supported — use shell mv for other rootfs locations.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -706,8 +689,7 @@ private fun createDeleteFileTool(
     name = "workspace_delete",
     description = """
         Move a file or directory into the workspace trash (/workspace/.trash) — recoverable via workspace_restore, NOT a permanent delete.
-        Directories require recursive=true. Deleting outside the current working directory requires user approval.
-        Only /workspace paths are supported — use shell rm for other rootfs locations.
+        Directories require recursive=true; deleting outside the current working directory requires approval. Only /workspace paths — use shell rm elsewhere.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -753,8 +735,7 @@ private fun createRestoreFileTool(
     name = "workspace_restore",
     description = """
         Restore a previously deleted file or directory from the workspace trash back to its original path.
-        path is the original path of the deleted item (relative to the current working directory ${cwdDisplay(cwd)} or absolute /workspace path).
-        Restoring outside the current working directory requires user approval.
+        path is the original path of the deleted item; restoring outside the current working directory requires approval.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -792,13 +773,9 @@ private fun createShellAsyncTool(
 ) = Tool(
     name = "workspace_shell_async",
     description = buildString {
-        append("Run a shell command in the workspace rootfs in the background; returns an id immediately. ")
-        append("Poll with workspace_task_status. Intended for long jobs (install/build/long scripts) that would exceed the normal 30s timeout. ")
-        append("cwd must be under /workspace. ")
-        if (!defaultCwd.isNullOrBlank()) {
-            append("Defaults to '$defaultCwd'. ")
-        }
-        append("Timeout default $SHELL_TIMEOUT_MAX_SECONDS s (max $SHELL_TIMEOUT_MAX_SECONDS s). Full output is saved to /tool_outputs/<taskId>.txt (24h retention). No file-change diff is reported.")
+        append("Run a shell command in the workspace rootfs in the background; returns a taskId immediately. ")
+        append("Poll with workspace_task_status. For long jobs (install/build) that would exceed the normal 30s timeout. ")
+        append("Full output is saved to /tool_outputs/<taskId>.txt (24h retention). No file-change diff is reported.")
     },
     parameters = {
         InputSchema.Obj(
@@ -861,8 +838,8 @@ private fun createTaskStatusTool(
     name = "workspace_task_status",
     description = """
         Check the status of a background task started with workspace_shell_async.
-        Returns running/succeeded/failed/timed_out; for terminal states also exitCode and the bounded stdout/stderr.
-        Tasks live for the current app session (restart loses them); output files persist in /tool_outputs for 24h and can be read with shell.
+        Returns running/succeeded/failed/timed_out; for terminal states also exitCode and bounded stdout/stderr.
+        Tasks live for this app session; output files stay in /tool_outputs for 24h and can be read with shell.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -905,9 +882,9 @@ private fun createSetEnvTool(
 ) = Tool(
     name = "workspace_set_env",
     description = """
-        Persist an environment variable for all future workspace_shell calls (every shell call is a fresh process; exports don't carry over).
-        Stored in the rootfs profile.d and loaded by each login shell. Name must match [A-Za-z_][A-Za-z0-9_]*; omit value to remove the variable.
-        Values are literal (no shell substitution or expansion). Caution: setting PATH to a broken value will break subsequent shell commands until you reset it.
+        Persist an environment variable for all future workspace_shell calls (each call is fresh, so exports don't carry over).
+        Stored in profile.d, loaded by each login shell. Name must match [A-Za-z_][A-Za-z0-9_]*; omit value to remove.
+        Values are literal; a broken PATH breaks subsequent shells.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

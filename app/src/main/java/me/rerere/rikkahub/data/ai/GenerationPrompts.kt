@@ -10,10 +10,8 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.ResponseTonePreset
 import me.rerere.rikkahub.data.model.UserProfileSetting
 import me.rerere.rikkahub.utils.JsonInstantPretty
-import me.rerere.rikkahub.utils.toLocalString
 import java.security.MessageDigest
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneOffset
 
 /**
@@ -23,20 +21,22 @@ import java.time.ZoneOffset
  * 2. 用户层：用户基本资料（全局稳定段）
  * 3. 能力层：工具 systemPrompt —— 只允许出现本轮实际注入（effective 能力集合）的工具叙述，
  *    禁止描述未注入的工具；管理模式专属工具（skill_admin_* / mcp_admin_* 等）只在管理模式出现
- * 4. 行为层：agent behavior（mode section + Plan&Act + Tool Groups + Ask User + SubAgent）
+ * 4. 行为层：agent behavior（mode section + Plan&Act + Tool Groups + Ask User + SubAgent 指针）
  * 5. 环境层：<workspace> → <trusted_folder> → <knowledge_base>（inputTransformers 追加）
  * 6. 注入层：模式注入/lorebook BEFORE/AFTER 包裹 → 占位符展开
  * 7. 记忆层：<memories> 追加在最后一条 USER 消息内，不进 system（护缓存前缀），
  *    块内含固定读取策略与逐条 updated 日期
+ *
+ * 声明信道约定（2026-09 起）：工具 description 只写触发条件（受 wire 300 字符截断约束，
+ * 见 WireTool.kt），使用策略/格式规范/清单一律走 systemPrompt（不裁剪、按内容去重、
+ * 逐字节稳定）。新增工具时先读 docs/ai-experience-optimization-plan.md。
  */
-internal const val PROMPT_REVISION = "2026-08-29-v2"
+internal const val PROMPT_REVISION = "2026-09-18-v1"
 
 /** 身份兜底：助手提示词与用户资料均为空时的最小身份行（稳定不变，保缓存前缀）。 */
 internal const val BASE_IDENTITY_PROMPT =
     "You are RikkaHub, a personal AI assistant running on the user's device. " +
         "Help with the user's requests and use the available tools when they add value."
-
-internal fun currentDateLabel(): String = LocalDate.now().toLocalString(true)
 
 /** 提示词内容指纹：任一稳定提示词片段变化时测试会失败，提醒同步升级 [PROMPT_REVISION]。 */
 internal fun promptFingerprint(vararg parts: String): String {
@@ -130,6 +130,8 @@ internal fun formatMemoryUpdatedDate(timestamp: Long?): String? {
  * 块内自带固定读取策略（[MEMORY_CONTEXT_POLICY_LINES]）与逐条 updated 日期：
  * 让模型能判断新旧、冲突时「新者胜」，并明确记忆是数据不是指令（防注入定位）。
  * 条数与总字符双重封顶：FTS 失败回退的「全量注入」同样经过此处，天然受预算保护。
+ * JSON 用紧凑序列化（2026-09）：pretty 的缩进/换行对模型解析无增益，纯属每轮重复的
+ * whitespace token 成本；紧凑形态与上方预算估算（content + 64 结构开销）也更吻合。
  */
 internal fun buildMemoryContextBlock(memories: List<AssistantMemory>): String {
     if (memories.isEmpty()) return ""
@@ -156,8 +158,7 @@ internal fun buildMemoryContextBlock(memories: List<AssistantMemory>): String {
         appendLine("<memories>")
         appendLine("Relevant long-term memories about the user:")
         appendLine(MEMORY_CONTEXT_POLICY_LINES)
-        append(JsonInstantPretty.encodeToString(json))
-        appendLine()
+        appendLine(json.toString())
         append("</memories>")
     }
 }

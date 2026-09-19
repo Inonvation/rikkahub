@@ -63,7 +63,9 @@ import me.rerere.rikkahub.data.repository.ContextCompositionRepository
 import me.rerere.rikkahub.data.ai.buildContextComposition
 import me.rerere.rikkahub.data.ai.estimateTokensByChars
 import me.rerere.rikkahub.data.ai.prompts.buildAgentBehaviorPrompt
+import me.rerere.rikkahub.data.ai.subagent.BoundBudget
 import me.rerere.rikkahub.data.ai.subagent.boundToolOutput
+import me.rerere.rikkahub.data.ai.subagent.pickBoundedJsonBudget
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -91,6 +93,9 @@ private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 
+/** 工具异常反馈给模型的错误摘要上限（完整堆栈只进 Logcat）。 */
+private const val MAX_ERROR_MESSAGE_CHARS = 500
+
 // ---- 生成重试 ----
 // 重试策略（429 / 5xx / 网络错误的有界指数退避 + jitter + 尊重 Retry-After）
 // 已抽到 me.rerere.ai.util.RetryPolicy，默认最多重试 5 次（对齐 DSH/Codex 做法）。
@@ -114,12 +119,17 @@ private const val AUTO_STOP_NOTICE = "\n\n---\n*模型连续多轮重复相同�
  *
  * - [streamMillis] 只累计纯流式输出时长（各步 streamText 的 collect 窗口），
  *   不含工具执行/审批等待——与最终 [UIMessage.streamDurationMillis] 同口径。
- * - [completionTokens] 在 usage 未到达前按已流出字符估算（[isEstimate]=true），
- *   收到 Usage chunk 后切换为真实值。
+ * - [promptTokens] 为**单步口径**（最后一步实测/估算输入，= 当前上下文占用）；
+ *   与完成态 NerdLine 读 [UIMessage.contextPromptTokens] 的口径一致，避免生成中/完成后跳变。
+ *   注意：这是上下文占用，不是计费输入（多步循环的账单累计见 [UIMessage.usage]）。
+ * - [cachedTokens] 单步命中缓存（usage 到达后才有，null = 本步缓存不可知/未到齐）。
+ * - [completionTokens] 为跨步账单累计（前序步 + 本步实测/估算），计费与完成态同口径。
+ *   在 usage 未到达前按已流出字符估算（[isEstimate]=true），收到 Usage chunk 后切换为真实值。
  */
 @Serializable
 data class GenerationLiveStats(
     val promptTokens: Int = 0,
+    val cachedTokens: Int? = null,
     val completionTokens: Int = 0,
     val streamMillis: Long = 0L,
     val isEstimate: Boolean = false,
@@ -310,19 +320,36 @@ class GenerationHandler(
         // 审批等待后的新一轮 generateText：从末条 assistant 恢复基线，避免清零。
         val lastAssistantBaseline = messages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }
         var turnStreamMillis = lastAssistantBaseline?.streamDurationMillis ?: 0L
+        // 账单累计（各步 prompt/output 之和）：计费/消息 NerdLine 完成态用
         var turnUsage: TokenUsage? = lastAssistantBaseline?.usage
+        // 单步实测输入（最后一步 provider prompt）：上下文占用校准、生成中实时输入用。
+        // 不能拿 turnUsage.promptTokens 当上下文——多步工具循环会虚高数倍。
+        var lastStepPromptTokens: Int? = lastAssistantBaseline?.contextPromptTokens
+        // 单步实测命中缓存（最后一步 provider cached）：NerdLine「输入 (cached)」展示用。
+        // 与 lastStepPromptTokens 配对保证单步口径下 cached ≤ prompt（账单累计的 cached 无此保证）。
+        var lastStepCachedTokens: Int? = lastAssistantBaseline?.contextCachedTokens
 
         fun flushAssistantUsage() {
             val last = messages.lastOrNull() ?: return
             if (last.role != MessageRole.ASSISTANT) return
             val stepUsage = last.usage ?: return
             turnUsage = turnUsage.sum(stepUsage)
-            messages = messages.dropLast(1) + last.copy(usage = turnUsage)
+            if (stepUsage.promptTokens > 0) {
+                lastStepPromptTokens = stepUsage.promptTokens
+                lastStepCachedTokens = stepUsage.cachedTokens
+            }
+            messages = messages.dropLast(1) + last.copy(
+                usage = turnUsage,
+                contextPromptTokens = lastStepPromptTokens,
+                contextCachedTokens = lastStepCachedTokens,
+            )
         }
 
         fun clearAssistantUsageForNextStep() {
             val last = messages.lastOrNull() ?: return
             if (last.role != MessageRole.ASSISTANT || last.usage == null) return
+            // 只清本步待 merge 的 usage；contextPromptTokens/contextCachedTokens 保留
+            // （单步校准锚在步间仍有效）
             messages = messages.dropLast(1) + last.copy(usage = null)
         }
 
@@ -804,15 +831,17 @@ class GenerationHandler(
         // 共用一个数据源；同写入落库，app 重启后按会话恢复（见 ContextCompositionRepository）。
         // 纯估算（schema 复用上方的单次序列化结果 + 全量文本字符统计）放到后台线程，
         // 避免主线程在工具多/消息长时出现可感知的停顿；快照写回仍在调用协程（主线程）执行。
+        // 构成总量同时作为生成中「输入 token」在 usage 到达前的估算源（含工具 schema，
+        // 比只估文本更接近真实；旧实现漏掉工具结果导致生成中输入严重偏低）。
+        val composition = withContext(Dispatchers.Default) {
+            buildContextComposition(
+                systemText = builtSystem.orEmpty(),
+                tools = tools,
+                messages = messagesToSend,
+                schemaTokensByName = toolSchemaStats.mapValues { it.value.tokens },
+            )
+        }
         if (conversationId != null) {
-            val composition = withContext(Dispatchers.Default) {
-                buildContextComposition(
-                    systemText = builtSystem.orEmpty(),
-                    tools = tools,
-                    messages = messagesToSend,
-                    schemaTokensByName = toolSchemaStats.mapValues { it.value.tokens },
-                )
-            }
             contextCompositionRepository.save(conversationId.toString(), composition)
         }
 
@@ -840,24 +869,14 @@ class GenerationHandler(
         // 本步已累计的纯流式时长（毫秒）：只包 streamText collect 窗口，不含重试等待。
         // 基线 priorStreamMillis 来自本回合前序工具步的累计。
         var stepStreamMillis = 0L
-        // 估算输入 token（usage 未到达前）：internalMessages 字符数 / 4 的粗估，收到 Usage 后被真实值覆盖。
-        val estimatedPromptTokens = estimateTokensByChars(
-            internalMessages.joinToString("\n") { msg ->
-                msg.parts.joinToString("\n") { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> part.text
-                        is UIMessagePart.Reasoning -> part.reasoning
-                        else -> ""
-                    }
-                }
-            }
-        )
+        // 本步输入估算（usage 未到达前）：构成总量（含 system/工具 schema/消息），收到 Usage 后被真实值覆盖。
+        val estimatedPromptTokens = composition.totalTokens
 
         fun publishLiveStats(currentMessages: List<UIMessage>, streamMillis: Long) {
             val stats = liveStats ?: return
             val last = currentMessages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }
             val usage = last?.usage
-            val completionTokens = usage?.completionTokens?.takeIf { it > 0 }
+            val stepCompletion = usage?.completionTokens?.takeIf { it > 0 }
                 ?: last?.let { msg ->
                     msg.parts.sumOf { part ->
                         when (part) {
@@ -867,10 +886,15 @@ class GenerationHandler(
                         }
                     }
                 } ?: 0
+            // 输入为**单步口径**（= 上下文占用，对齐 Codex last_token_usage / Claude Code
+            // most-recent-response）：usage 到达后 = 本步实测 prompt，未到达 = 构成总量估算；
+            // 输出保持跨步账单累计（前序步 completion + 本步实测/估算），与完成态 usage 一致。
+            // 旧实现输入用「前序步累计 + 本步」，多步循环下与上下文占用对不上。
+            val stepPrompt = usage?.promptTokens?.takeIf { it > 0 } ?: estimatedPromptTokens
             stats.value = GenerationLiveStats(
-                promptTokens = usage?.promptTokens?.takeIf { it > 0 } ?: priorUsage?.promptTokens
-                    ?: estimatedPromptTokens,
-                completionTokens = completionTokens,
+                promptTokens = stepPrompt,
+                cachedTokens = usage?.cachedTokens?.takeIf { it > 0 },
+                completionTokens = (priorUsage?.completionTokens ?: 0) + stepCompletion,
                 streamMillis = priorStreamMillis + streamMillis,
                 isEstimate = usage?.completionTokens?.takeIf { it > 0 } == null,
             )
@@ -1068,41 +1092,64 @@ class GenerationHandler(
         val nonTextParts = output.filter { it !is UIMessagePart.Text }
         val totalChars = textParts.sumOf { it.text.length }
 
-        if (totalChars <= MAX_TOOL_OUTPUT_CHARS || !hasShellAccess) return output
+        // 上限对所有工具生效（2026-09 前仅在存在 workspace_shell 时生效，
+        // 无 shell 的会话里 MCP/搜索大结果会整段进上下文）。有无 shell 只改变
+        // 「超限后怎么找回全文」的提示：有 shell 落盘可 cat/grep，无 shell 引导收窄查询。
+        if (totalChars <= MAX_TOOL_OUTPUT_CHARS) return output
 
         Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
 
         val fullText = textParts.joinToString("\n") { it.text }
 
-        val fileName = "${toolCallId}.txt"
-        val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
-        File(outputDir, fileName).writeText(fullText)
-        val fullOutputPath = "/tool_outputs/$fileName"
+        val fullOutputPath = if (hasShellAccess) {
+            val fileName = "${toolCallId}.txt"
+            val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
+            File(outputDir, fileName).writeText(fullText)
+            "/tool_outputs/$fileName"
+        } else {
+            null
+        }
 
         // 结构安全截断：JSON 工具输出（搜索/抓取等）重编码为合法 JSON——渲染器仍能读到
         // items/urls 渲染卡片（否则 ChatMessageToolStep 解析失败 → 内容为空 map → 无卡片），
         // 同时注入文件路径与截断标记，模型仍能 cat 完整结果。非 JSON（shell 等）回退纯文本截断。
         // 对象输出注入 truncated/full_output_path；数组输出（conversation_search 等按数组读）
         // 只做有界裁剪、保持数组形状，避免渲染器读到意外结构。
-        val safeJson = runCatching {
+        fun boundedJsonOrNull(budget: BoundBudget): String? = runCatching {
             val elem = json.parseToJsonElement(fullText)
             when (elem) {
                 is JsonObject -> {
-                    val bounded = boundToolOutput(elem).jsonObject.toMutableMap()
+                    val bounded = boundToolOutput(elem, budget).jsonObject.toMutableMap()
                     bounded["truncated"] = JsonPrimitive(true)
-                    bounded["full_output_path"] = JsonPrimitive(fullOutputPath)
+                    fullOutputPath?.let { bounded["full_output_path"] = JsonPrimitive(it) }
                     json.encodeToString(JsonObject(bounded))
                 }
 
-                else -> json.encodeToString(boundToolOutput(elem))
+                else -> json.encodeToString(boundToolOutput(elem, budget))
             }
         }.getOrNull()
 
+        // 预算按有无 shell 分档（2026-09）：
+        // - 有 shell：全文已落盘可 cat 找回，用 DEFAULT（字符串 500 / 数组 6）激进裁剪无损失，
+        //   且与旧行为一致（产物不再设二次长度闸——head+tail 后的 shell 产物本就可能有界地偏大）；
+        // - 无 shell：没有找回通道，按 WIDE → MEDIUM 降档挑首个不超上限的预算
+        //   （pickBoundedJsonBudget），否则 trusted_folder_read 的长笔记、搜索的 10 条结果、
+        //   knowledge 分块会被静默砍成 500 字符 / 6 条（能力性倒退）。不能 WIDE 一步降 DEFAULT：
+        //   多块内容（kb_search 10 块 × 5KB，WIDE 产物 ≈41K）会砍回 6×500，复现分档要修的问题；
+        //   MEDIUM（2000/20）先收紧一档，全部超限才落 DEFAULT 保证产物有界。
+        val safeJson = boundedJsonOrNull(
+            pickBoundedJsonBudget(fullText, json, MAX_TOOL_OUTPUT_CHARS, hasShellAccess)
+        )
+
         val truncatedText = safeJson ?: buildString {
             appendLine("[Tool output truncated: $totalChars characters total]")
-            appendLine("Full output saved to: $fullOutputPath")
-            appendLine("Use shell to read: `cat $fullOutputPath`")
-            appendLine("Use shell to search: `grep \"pattern\" $fullOutputPath`")
+            if (fullOutputPath != null) {
+                appendLine("Full output saved to: $fullOutputPath")
+                appendLine("Use shell to read: `cat $fullOutputPath`")
+                appendLine("Use shell to search: `grep \"pattern\" $fullOutputPath`")
+            } else {
+                appendLine("Narrow the request (more specific query/parameters) to see the rest.")
+            }
             appendLine()
             append(fullText.take(TOOL_OUTPUT_PREVIEW_CHARS))
         }
@@ -1204,10 +1251,14 @@ class GenerationHandler(
                                     buildJsonObject {
                                         put(
                                             "error",
-                                            JsonPrimitive(buildString {
-                                                append("[${it.javaClass.name}] ${it.message}")
-                                                append("\n${it.stackTraceToString()}")
-                                            })
+                                            JsonPrimitive(
+                                                // 反馈给模型的只有一行可读摘要——堆栈对模型无信息量、
+                                                // 耗 token，且真实堆栈已在上面写入 Logcat。错误消息本身
+                                                // 常带"下一步怎么做"的指引（如 old_text 未命中时的提示），
+                                                // 截断到合理长度以保留它、挡住异常对象里的超长内容。
+                                                "[${it.javaClass.simpleName}] " +
+                                                    it.message.orEmpty().take(MAX_ERROR_MESSAGE_CHARS)
+                                            )
                                         )
                                     }
                                 )

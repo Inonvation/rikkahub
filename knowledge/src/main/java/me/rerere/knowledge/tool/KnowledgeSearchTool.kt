@@ -71,10 +71,8 @@ class KnowledgeSearchTool(
                         })
                         put("mode", buildJsonObject {
                             put("type", "string")
-                            put("description", "Retrieval mode: \"hybrid\" (semantic+keyword, default), " +
-                                    "\"semantic\" (concept/meaning search), " +
-                                    "\"keyword\" (exact term search), " +
-                                    "\"scan\" (line-by-line match for counting/listing).")
+                            put("description", "Mode: hybrid (semantic+keyword, default), semantic (concept), " +
+                                    "keyword (exact terms), scan (line-by-line for counting/listing).")
                         })
                         put("topK", buildJsonObject {
                             put("type", "integer")

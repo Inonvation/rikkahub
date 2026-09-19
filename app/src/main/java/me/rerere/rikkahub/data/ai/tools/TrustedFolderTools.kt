@@ -223,9 +223,8 @@ private fun createEditTool(
 ) = Tool(
     name = "trusted_folder_edit",
     description = """
-        Edit a UTF-8 text file inside the trusted folder bound to this assistant. Path is RELATIVE to the trusted folder root.
-        Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
-        If no exact match is found, whitespace-tolerant line matching is attempted automatically.
+        Edit a UTF-8 text file inside the trusted folder bound to this assistant (path relative to the folder root).
+        old_text must occur exactly once unless replace_all=true; if no exact match, whitespace-tolerant line matching is attempted automatically.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

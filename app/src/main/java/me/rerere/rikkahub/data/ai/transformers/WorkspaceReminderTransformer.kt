@@ -9,7 +9,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
 
 /** 注入 system prompt 的 AGENTS 内容上限, 防 AI 把文件写大撑爆 context */
-private const val MAX_AGENTS_INJECT_CHARS = 4096
+internal const val MAX_AGENTS_INJECT_CHARS = 4096
 
 /** cwd 级 AGENTS.md 读取字节上限, 防异常大文件整体载入内存; 注入时再按 [MAX_AGENTS_INJECT_CHARS] 截断 */
 private const val MAX_CWD_AGENTS_READ_BYTES = 64L * 1024
@@ -108,6 +108,35 @@ internal fun resolveCwdAgentsPath(cwd: String?): String? {
     return path.takeUnless { it == "/workspace/.agent/AGENTS.md" }
 }
 
+/**
+ * 环境块总预算：三段 AGENTS/MEMORY 文本合计上限，超出时按
+ * cwd 指令 > 环境探测 > 记忆索引 的优先级裁剪（越靠近当前工作目录越重要）。
+ * 各段仍各自受 [MAX_AGENTS_INJECT_CHARS] 约束；本预算防止三段同时打满（≈12KB）。
+ */
+internal const val MAX_ENV_TOTAL_CHARS = 6 * 1024
+
+/**
+ * 按优先级把 [MAX_ENV_TOTAL_CHARS] 的总额度分给三段文本（cwd 指令最先占额）。
+ * 返回 (cwd, env, memory) 三段各自可分到的字符数，纯函数便于单测。
+ */
+internal fun allocateEnvBudget(
+    cwdChars: Int,
+    envChars: Int,
+    memoryChars: Int,
+    total: Int = MAX_ENV_TOTAL_CHARS,
+): Triple<Int, Int, Int> {
+    var budget = total
+    fun grant(requested: Int): Int {
+        val clipped = requested.coerceAtMost(MAX_AGENTS_INJECT_CHARS).coerceAtMost(budget.coerceAtLeast(0))
+        budget -= clipped
+        return clipped
+    }
+    val cwd = grant(cwdChars)
+    val env = grant(envChars)
+    val memory = grant(memoryChars)
+    return Triple(cwd, env, memory)
+}
+
 private fun buildWorkspacePrompt(
     workspace: WorkspaceEntity,
     cwd: String? = null,
@@ -117,30 +146,42 @@ private fun buildWorkspacePrompt(
 ): String = buildString {
     appendLine("<workspace>")
     appendLine("Linux workspace \"${workspace.name}\" (PRoot sandbox on Android; not Windows — use Unix commands). Env & installed tools auto-refreshed below.")
-    appendLine("- cwd: ${cwd ?: "/workspace"} · workspace_* tools resolve relative paths against it; use absolute paths to reach other directories (writes under /workspace outside cwd require approval).")
-    appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout).")
-    appendLine("- Prefer workspace_shell / workspace_edit_file / workspace_list_files / workspace_grep.")
-    appendLine("- To show workspace images to the user: use Markdown image syntax ![alt](/workspace/<relative-path>) in your reply body (animated .gif included; the UI loads them automatically). Use the EXACT path as reported by workspace tools (write results include a ready-to-copy \"markdown\" field) — never guess or invent paths; if unsure, run workspace_list_files first. Relative paths resolve against cwd, but absolute /workspace/... paths are preferred.")
-    appendLine("- To link a workspace file the user can open: use Markdown link syntax [文件名](/workspace/<relative-path>) in your reply body (path is relative under /workspace; tapping opens the file in the app — text files open the editor, folders locate the directory). Do not use image syntax for non-image files.")
-    appendLine("- Skills: /skills/<skill>/SKILL.md; /upload is read-only.")
+    appendLine("- cwd: ${cwd ?: "/workspace"} · workspace_* tools resolve relative paths against it (writes outside it require approval).")
+    appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout). Skills: /skills/<skill>/SKILL.md; /upload is read-only.")
+    appendLine("- Reply with workspace images using ![alt](/workspace/<relative-path>) and file links using [name](/workspace/<relative-path>); use the exact paths workspace tools report (write results carry a ready-to-copy \"markdown\" field), never guess paths.")
     append("</workspace>")
-    if (!envContent.isNullOrBlank()) {
-        appendLine()
-        appendLine("<workspace_environment>")
-        appendLine(envContent.take(MAX_AGENTS_INJECT_CHARS))
-        append("</workspace_environment>")
+    // 三段文本按优先级共享总预算：cwd 指令最先占额，余量依次给环境探测与记忆索引
+    val (cwdBudget, envBudget, memoryBudget) = allocateEnvBudget(
+        cwdChars = cwdAgents?.second?.length ?: 0,
+        envChars = envContent?.length ?: 0,
+        memoryChars = memoryContent?.length ?: 0,
+    )
+    if (cwdAgents != null && cwdBudget > 0) {
+        val body = cwdAgents.second.take(cwdBudget)
+        if (body.isNotBlank()) {
+            appendLine()
+            appendLine("<workspace_cwd_instructions>")
+            appendLine("AGENTS.md at ${cwdAgents.first} (instructions for the current working directory):")
+            appendLine(body)
+            append("</workspace_cwd_instructions>")
+        }
     }
-    if (!memoryContent.isNullOrBlank()) {
-        appendLine()
-        appendLine("<workspace_memory>")
-        appendLine(memoryContent.take(MAX_AGENTS_INJECT_CHARS))
-        append("</workspace_memory>")
+    if (!envContent.isNullOrBlank() && envBudget > 0) {
+        val body = envContent.take(envBudget)
+        if (body.isNotBlank()) {
+            appendLine()
+            appendLine("<workspace_environment>")
+            appendLine(body)
+            append("</workspace_environment>")
+        }
     }
-    if (cwdAgents != null) {
-        appendLine()
-        appendLine("<workspace_cwd_instructions>")
-        appendLine("AGENTS.md at ${cwdAgents.first} (instructions for the current working directory):")
-        appendLine(cwdAgents.second.take(MAX_AGENTS_INJECT_CHARS))
-        append("</workspace_cwd_instructions>")
+    if (!memoryContent.isNullOrBlank() && memoryBudget > 0) {
+        val body = memoryContent.take(memoryBudget)
+        if (body.isNotBlank()) {
+            appendLine()
+            appendLine("<workspace_memory>")
+            appendLine(body)
+            append("</workspace_memory>")
+        }
     }
 }

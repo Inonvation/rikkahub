@@ -89,6 +89,6 @@ class MemoryToolsTest {
         assertTrue(prompt.contains("memory_tool"))
         assertTrue(prompt.contains("<memories>"))
         assertTrue(prompt.contains("When to save"))
-        assertTrue(prompt.contains("When not to save"))
+        assertTrue(prompt.contains("Guardrails"))
     }
 }

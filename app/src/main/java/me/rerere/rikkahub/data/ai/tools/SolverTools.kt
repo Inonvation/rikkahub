@@ -43,35 +43,8 @@ fun createQuestionSolverTools(
         Tool(
             name = "solve_question",
             description = """
-                Dispatch the problem to a specialized tutor sub-agent that solves subject problems
-                (math, physics, chemistry, biology, English, etc.) step by step and returns a full
-                worked solution plus a refined, exam-ready final answer.
-
-                Use when the user's message contains a concrete academic problem to be solved — a
-                homework/exam/textbook question, with or without an attached image. Call it even if
-                you can solve the problem yourself: the sub-agent works the problem independently in
-                its own context, letting you cross-verify each step before answering, which is the
-                whole point of this tool.
-
-                Use when:
-                - "请解这道题/这道题怎么做/solve this problem" with any concrete question
-                - an image of a worksheet/exam/textbook problem is attached
-                - the user asks you to check or verify an answer to a concrete problem
-
-                Avoid: general concept explanations ("what is Newton's second law"), casual chat,
-                or problems the user explicitly wants you to solve WITHOUT verification.
-
-                The sub-agent cannot see this conversation. When the image is attached via
-                `image_paths`, you do NOT need to transcribe the problem: the sub-agent reads the
-                image itself (it may be a stronger reader than you). Put into `question` only the
-                context you have: which problem to solve if the image holds several, any text you
-                can read, and the subject if known. A full transcription in `question` is required
-                only when you cannot attach the image.
-                After receiving the result, cross-verify it against your own analysis step by step,
-                point out any discrepancy, and give the user your final judgment — do not relay the
-                result verbatim without checking. If you have no vision and cannot independently
-                verify image-based work, relay the sub-agent's steps faithfully instead of rewriting
-                them from your own (possibly wrong) reading of the image.
+                Dispatch a concrete academic problem (math, physics, chemistry, etc.) to a tutor sub-agent that returns a full worked solution plus an exam-ready final answer.
+                Use when the message contains a problem to solve or verify — even if you can solve it yourself; avoid concept questions and casual chat.
             """.trimIndent(),
             // 行为强引导（随 system 注入）：解题类消息必须先派发解题子代理再作答。
             // 根因：模型默认倾向"自己会做就不调工具"，且行为层提示词有"简单事自己做"的反派发倾向，
@@ -85,6 +58,12 @@ fun createQuestionSolverTools(
                   solve result is required for cross-verification.
                 - This policy overrides the general "do simple things yourself" guidance: for
                   problems, calling `solve_question` IS the simple and expected path.
+                - The sub-agent cannot see this conversation. When the image is attached via
+                  `image_paths`, you do NOT need to transcribe the problem: the sub-agent reads the
+                  image itself (it may be a stronger reader than you). Put into `question` only the
+                  context you have: which problem to solve if the image holds several, any text you
+                  can read, and the subject if known. A full transcription is required only when
+                  you cannot attach the image.
                 - You may (and should) form your own preliminary analysis before or while waiting,
                   but your final answer must reconcile your analysis with the sub-agent's result:
                   agree → answer confidently; disagree → point out the divergent step and justify
@@ -103,13 +82,8 @@ fun createQuestionSolverTools(
                             put("type", "string")
                             put(
                                 "description",
-                                "The problem statement in text form. When images are attached via " +
-                                    "image_paths, this does NOT need to be a full transcription — " +
-                                    "the sub-agent reads the image itself. Provide only the context " +
-                                    "you have: which problem to solve if the image contains several " +
-                                    "(e.g. \"the 2nd question\"), any text you can read, and the " +
-                                    "subject if known (e.g. \"[physics] ...\"). A full transcription " +
-                                    "is required only when you cannot attach the image."
+                                "The problem in text form. With image_paths attached a full transcription is not " +
+                                    "needed — give which problem, any readable text, and the subject."
                             )
                         })
                         put("image_paths", buildJsonObject {
@@ -117,11 +91,8 @@ fun createQuestionSolverTools(
                             put("items", buildJsonObject { put("type", "string") })
                             put(
                                 "description",
-                                "Optional: local file paths of the problem image(s) taken from the " +
-                                    "user messages in this conversation (file:// paths). The sub-agent " +
-                                    "supports vision when the configured solve model does. If an image " +
-                                    "contains several problems and the user did not point to one, " +
-                                    "keep the crop to the intended problem when possible."
+                                "Optional: file:// paths of the problem image(s) copied from the user " +
+                                    "message; the sub-agent reads them when its model supports vision."
                             )
                         })
                         put("subject", buildJsonObject {

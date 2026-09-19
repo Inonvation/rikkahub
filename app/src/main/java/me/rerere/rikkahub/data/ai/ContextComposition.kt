@@ -131,12 +131,22 @@ data class ContextComposition(
 
 /**
  * 最近一次请求的实测输入总量（provider 返回的 promptTokens），作为构成估算的
- * 校准锚点。取 [messages] 中最后一条带 usage 的消息——它对应最近一次生成时的
+ * 校准锚点。取 [messages] 中最后一条带单步锚点的消息——它对应最近一次生成时的
  * 实际发送快照（与快照同一构造源：[effectiveMessages] 的压缩感知列表）。
- * 无任何生成记录时返回 null。
+ *
+ * 只认单步口径的 [UIMessage.contextPromptTokens]：多步工具循环中 `usage.promptTokens`
+ * 是各步账单累计，会数倍于真实上下文占用，用它校准会把占用虚高数倍（旧回退分支已删）。
+ * 旧数据（该字段缺失，升级前生成）返回 null → 占用降级为纯估算（UI 标「估算」），
+ * 诚实降级优于虚高实测。无任何生成记录时同样返回 null。
  */
 fun List<UIMessage>.lastRealPromptTokens(): Int? =
-    lastOrNull { (it.usage?.promptTokens ?: 0) > 0 }?.usage?.promptTokens
+    asReversed().firstNotNullOfOrNull { msg ->
+        msg.contextPromptTokens?.takeIf { it > 0 }
+    }
+
+/** 消息是否携带可用于上下文校准的单步实测输入量。 */
+private fun UIMessage.hasRealPromptAnchor(): Boolean =
+    (contextPromptTokens ?: 0) > 0
 
 /**
  * 会话是否已产生真实消息（扣除预设开场展示）。
@@ -161,7 +171,7 @@ fun Conversation.hasRealMessages(presetMessages: List<UIMessage>): Boolean =
 fun Conversation.hasStaleCalibrationAnchor(): Boolean {
     val compressed = compressedHistory ?: return false
     val lastOriginalMessageId = compressed.lastOriginalMessageId ?: return false
-    val anchorIndex = currentMessages.indexOfLast { (it.usage?.promptTokens ?: 0) > 0 }
+    val anchorIndex = currentMessages.indexOfLast { it.hasRealPromptAnchor() }
     val compressIndex = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }
     if (anchorIndex < 0 || compressIndex < 0) return false
     return anchorIndex <= compressIndex

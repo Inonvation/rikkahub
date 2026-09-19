@@ -33,7 +33,7 @@ fun createWrongQuestionTool(
             properties = buildJsonObject {
                 put("title", buildJsonObject {
                     put("type", "string")
-                    put("description", "A short concise plain-text title for this problem without any LaTeX or formulas (under 30 characters), e.g. 对数不等式. If the question contains formulas, describe the topic in plain text instead.")
+                    put("description", "Short plain-text topic title, no LaTeX/formulas, under 30 chars (e.g. 对数不等式).")
                 })
                 put("question", buildJsonObject {
                     put("type", "string")

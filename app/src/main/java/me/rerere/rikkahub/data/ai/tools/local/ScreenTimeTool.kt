@@ -30,12 +30,13 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
     description = """
         Get the user's app screen usage (screen time) over a time range.
         Specify a custom interval with 'begin'/'end', or use the 'range' preset (today/week).
-        Returns the total foreground time and a per-app breakdown sorted by usage time (descending).
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Usage access' special permission; if it is not granted, the device's usage
-        access settings page is opened automatically and an error is returned.
+        Returns total foreground time and a per-app breakdown sorted by usage time descending.
     """.trimIndent().replace("\n", " "),
+    systemPrompt = { _, _ ->
+        "**Screen Time**\n" +
+            "- Device timezone: '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset}); times without an explicit offset are interpreted in this timezone.\n" +
+            "- Requires the 'Usage access' special permission; if it is not granted, the device's usage access settings page is opened automatically and an error is returned."
+    },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -43,9 +44,7 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
                     put("type", "string")
                     put(
                         "description",
-                        "Start time (inclusive). Accepts an ISO-8601 date 'yyyy-MM-dd', a local " +
-                            "date-time 'yyyy-MM-ddTHH:mm:ss', an offset date-time, or epoch milliseconds. " +
-                            "When provided, 'range' is ignored."
+                        "Start time (inclusive): ISO-8601 date/datetime, offset datetime, or epoch ms. When set, 'range' is ignored."
                     )
                 })
                 put("end", buildJsonObject {

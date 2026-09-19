@@ -45,6 +45,21 @@ private val AI_VISIBLE_BEHAVIOR_PROFILES = listOf(
     AgentBehaviorProfile.MINIMAL,
 )
 
+/**
+ * 能力模式工具族共享规范（system 信道，四个 mode_* 工具按内容去重注入一次）。
+ *
+ * capability 名单原先在 mode_create/mode_update 两个 description 里各写一份，
+ * 且都远超 wire 的 300 字符上限（被截断后模型拿不到完整名单）。名单由 [Capability] 枚举
+ * 动态生成，新增能力项自动同步，不再依赖两处手工维护。
+ */
+internal fun modeToolsSystemPrompt(): String = buildString {
+    appendLine("**Capability Modes**")
+    appendLine("Capability names accepted by mode_create/mode_update:")
+    appendLine(Capability.entries.joinToString(", ") { it.name })
+    appendLine("Behavior profiles: ${AI_VISIBLE_BEHAVIOR_PROFILES.joinToString(", ") { it.name }}.")
+    append("Modes are applied per conversation; editing a mode affects conversations that reference its id.")
+}
+
 /** 日志/环境文本中的密钥类字段脱敏：值替换为 [REDACTED]。 */
 private val SECRET_PATTERN = Regex(
     """(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|private[_-]?key|bearer)\s*[:=]\s*["']?[^\s"',;]+"""
@@ -203,7 +218,8 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_list",
-            description = "Read-only: list all capability modes, including the implicit follow-assistant mode. Built-in modes show their effective capabilities and whether they have a user override; custom modes show their stored capabilities. Returns ref values usable with mode_update/mode_delete. Set brief=true to return only ref, name and override status.",
+            description = "Read-only: list all capability modes, including the implicit follow-assistant mode. Built-in modes show their effective capabilities and override status; custom modes show stored capabilities. Returns ref values usable with mode_update/mode_delete. Set brief=true for ref/name/override only.",
+            systemPrompt = { _, _ -> modeToolsSystemPrompt() },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -267,7 +283,8 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_create",
-            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode (built-in name or custom mode id). Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS, PROVIDER_ADMIN, ASSISTANT_ADMIN, SETTINGS_ADMIN, DATA_ADMIN. Omit everything to start from the standard base. Requires user approval. The new mode appears at the end of the mode picker and in Settings.",
+            description = "Create a custom capability mode. Required: name. Provide capabilities (full list) OR base + add/remove to derive from an existing mode. Optional behavior profile. Capability names and behavior values are listed in the Capability Modes instructions. Requires user approval.",
+            systemPrompt = { _, _ -> modeToolsSystemPrompt() },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -398,7 +415,8 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_update",
-            description = "Update an existing capability mode. id can be a custom mode id, custom:<id>, or built-in name (STANDARD/PTC/MINIMAL/CREATIVE). For custom modes: name, description, capabilities (full list) OR add/remove. For built-in modes: only capabilities/add/remove/behavior; name and description are fixed. Optional behavior: STANDARD/WORKSPACE/MANAGEMENT/MINIMAL. Capability names: LOCAL_TOOLS, SEARCH, DOCUMENT, WORKSPACE, TRUSTED_FOLDER, SKILL_USE, SKILL_ADMIN, MCP_USE, MCP_ADMIN, MEMORY, TODO, SUBAGENT, STUDY, HISTORY, KNOWLEDGE, PROMPT_INJECTION, REMINDERS, TOOL_SYSTEM_PROMPT, AGENT_BEHAVIOR_PROMPT, CREATIVE_TOOLS, PROVIDER_ADMIN, ASSISTANT_ADMIN, SETTINGS_ADMIN, DATA_ADMIN. Requires user approval. Existing conversations keep referencing this mode id.",
+            description = "Update an existing capability mode. id can be a custom mode id, custom:<id>, or built-in name (STANDARD/PTC/MINIMAL/CREATIVE). Custom modes: name, description, capabilities OR add/remove. Built-in modes: only capabilities/add/remove/behavior (name and description are fixed). Requires user approval.",
+            systemPrompt = { _, _ -> modeToolsSystemPrompt() },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {
@@ -547,7 +565,8 @@ fun createCreativeTools(
         ),
         Tool(
             name = "mode_delete",
-            description = "Delete an existing custom capability mode, or remove the user override of a built-in mode. Required: id (custom mode id, custom:<id>, or built-in name). For custom modes: counts conversations referencing the mode first; those conversations fall back to the standard mode after deletion, and global/assistant defaults pointing to this mode are cleared. For built-in modes: restores the factory default. Requires user approval.",
+            description = "Delete an existing custom capability mode, or remove the user override of a built-in mode. Required: id. Custom modes: conversations referencing the mode fall back to standard, and defaults pointing to it are cleared. Built-in modes: restores the factory default. Requires user approval.",
+            systemPrompt = { _, _ -> modeToolsSystemPrompt() },
             parameters = {
                 InputSchema.Obj(
                     properties = buildJsonObject {

@@ -10,11 +10,9 @@ import me.rerere.ai.core.Tool
 internal fun buildAskUserTool(): Tool = Tool(
     name = "ask_user",
     description = """
-        Ask the user one or more questions when you need clarification, additional information, or confirmation.
-        Each question has a type: text (free input with optional suggestion chips), single (pick exactly one option),
-        multi (pick multiple options), or confirmation (yes/no).
-        You can optionally provide a title for the question sheet and a rationale for each question to explain why you're asking.
-        The answers will be returned as a JSON object mapping question IDs to the user's responses.
+        Ask the user one or more questions when you need clarification, confirmation, or additional information.
+        Question types: text (free input, optional suggestion chips), single (one option), multi (several), confirmation (yes/no).
+        Answers come back as JSON mapping question IDs to the user's responses.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -39,7 +37,7 @@ internal fun buildAskUserTool(): Tool = Tool(
                             })
                             put("rationale", buildJsonObject {
                                 put("type", "string")
-                                put("description", "Optional explanation of why this question is being asked, shown as hint text below the question")
+                                put("description", "Optional explanation of why this question is asked, shown as hint text below it")
                             })
                             put("selection_type", buildJsonObject {
                                 put("type", "string")
@@ -54,14 +52,14 @@ internal fun buildAskUserTool(): Tool = Tool(
                                 )
                                 put(
                                     "description",
-                                    "Answer type: text (free text input with optional suggestion chips, default), single (select exactly one option), multi (select one or more options), confirmation (yes/no)"
+                                    "Answer type: text (free input + suggestion chips, default), single (exactly one), multi (several), confirmation (yes/no)"
                                 )
                             })
                             put("options", buildJsonObject {
                                 put("type", "array")
                                 put(
                                     "description",
-                                    "Optional list of suggested options. For 'text' type, shown as quick-fill chips. For 'single'/'multi', the selectable choices."
+                                    "Optional suggested options: quick-fill chips for 'text', the selectable choices for 'single'/'multi'."
                                 )
                                 put("items", buildJsonObject {
                                     put("type", "string")

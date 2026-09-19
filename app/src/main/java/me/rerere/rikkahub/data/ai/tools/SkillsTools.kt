@@ -105,7 +105,7 @@ fun createSkillTools(
                             put("type", "string")
                             put(
                                 "description",
-                                "Optional relative path to a file inside the skill directory. Omit to read the default SKILL.md instructions. Only use paths extracted from Markdown links in the SKILL.md content. Do NOT guess or infer paths."
+                                "Optional relative path inside the skill directory. Omit to read the SKILL.md instructions. Only paths extracted from SKILL.md Markdown links; never guess paths."
                             )
                         })
                     },

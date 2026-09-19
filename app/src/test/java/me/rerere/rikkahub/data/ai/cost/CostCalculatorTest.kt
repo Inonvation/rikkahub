@@ -105,4 +105,23 @@ class CostCalculatorTest {
         )
         assertEquals(0.5, CostCalculator.cacheHitRate(usages)!!, 1e-9)
     }
+
+    @Test
+    fun `cache write is priced at input premium`() {
+        // Anthropic cache_creation 按 input 价 ×1.25 单列：uncached = prompt - cached - write
+        val usage = TokenUsage(
+            promptTokens = 1_000_000,
+            completionTokens = 0,
+            cachedTokens = 0,
+            cacheWriteTokens = 400_000,
+        )
+        // deepseek-v4-flash input 价 0.22，空闲时段（8:00）无高峰加倍：
+        // withWrite = 600k×0.22 + 400k×0.22×1.25 = 0.132 + 0.11 = 0.242
+        // noWrite   = 1M×0.22（全部按普通输入）= 0.22
+        val noWrite = usage.copy(cacheWriteTokens = 0)
+        val withWrite = CostCalculator.costUsd("deepseek-v4-flash", usage, emptyList(), beijingMillis(8, 0))
+        val withoutWrite = CostCalculator.costUsd("deepseek-v4-flash", noWrite, emptyList(), beijingMillis(8, 0))
+        assertEquals(0.242, withWrite, 1e-9)
+        assertEquals(0.22, withoutWrite, 1e-9)
+    }
 }

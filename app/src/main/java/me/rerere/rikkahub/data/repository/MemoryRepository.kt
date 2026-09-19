@@ -22,11 +22,14 @@ class MemoryRepository(
         /** 相关记忆检索的 top-K 条数 */
         const val MEMORY_SEARCH_TOP_K = 5
 
-        /** 恒兜底的最近 N 条记忆 */
-        const val MEMORY_FALLBACK_RECENT_N = 2
-
-        /** 记忆总量 ≤ 该值直接全量注入，不做检索（避免过度设计） */
-        const val MEMORY_FULL_INJECTION_THRESHOLD = 6
+        /**
+         * 记忆总量 ≤ 该值直接全量注入，不做检索。
+         *
+         * 降敏（2026-09）：旧值 6 意味着「记忆少 = 每轮全量出现」，恰是记忆感知最敏感的时期
+         * （用户刚启用记忆、每条都跟当前话题无关却持续出现在上下文里）。降到 2 只保留
+         * "只有一两条记忆时检索无意义"的工程收益，不再让少量无关记忆每轮刷存在感。
+         */
+        const val MEMORY_FULL_INJECTION_THRESHOLD = 2
 
         /** 记忆检索词最长字符数，控制 jieba 分词成本 */
         const val MEMORY_QUERY_MAX_CHARS = 200
@@ -36,12 +39,14 @@ class MemoryRepository(
             content.trim().replace(Regex("\\s+"), " ").lowercase()
 
         /**
-         * 记忆检索词提取（多查询，纯函数）：
-         * - 主查询 = 最新一条 USER 消息文本；太短/无实词（如「那这个呢？」）则回退拼接
-         *   最近 3 条 USER 消息，给 FTS 更多检索面；
-         * - 副查询 = 最新一条 ASSISTANT 回答文本：回答对话题的展开通常比单条用户输入更宽，
-         *   两路并集提升召回（FTS 本地检索，零额外成本）。
-         * 返回空列表 → 注入侧仅走「最近记忆」兜底。
+         * 记忆检索词提取（纯函数）：
+         * 主查询 = 最新一条 USER 消息文本；太短/无实词（如「那这个呢？」）则回退拼接
+         * 最近 3 条 USER 消息，给 FTS 更多检索面。
+         *
+         * 降敏（2026-09）：移除「副查询 = 最新 ASSISTANT 回答文本」。该设计是想提升召回，
+         * 实际形成自我强化回路——模型上一轮展开过的话题（无论与用户事实是否相关）都会成为
+         * 下一轮的检索词，把该话题的记忆持续拉回上下文，表现为"AI 总在提记忆"。
+         * 用户消息才是记忆需求的唯一可靠信号。
          */
         fun extractMemoryQueries(messages: List<UIMessage>): List<String> {
             val userMessages = messages.filter { it.role == MessageRole.USER }
@@ -55,11 +60,7 @@ class MemoryRepository(
             } else {
                 latest.take(MEMORY_QUERY_MAX_CHARS)
             }
-            val secondary = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
-                ?.toText()?.trim()
-                ?.takeIf { it.isNotBlank() && it != primary }
-                ?.take(MEMORY_QUERY_MAX_CHARS)
-            return listOfNotNull(primary, secondary)
+            return listOfNotNull(primary)
         }
     }
 
@@ -189,33 +190,28 @@ class MemoryRepository(
     /**
      * 生成时的记忆注入入口：
      * - 记忆 ≤ MEMORY_FULL_INJECTION_THRESHOLD → 全量注入，不检索；
-     * - 否则：多查询并集检索（每个查询各自 top-K，按查询优先级合并，主查询命中排前）+
-     *   恒带最近 N 条兜底；检索不足 topK 用最近记忆补齐；
-     * - FTS 任何失败都降级为「最近记忆」，绝不崩、绝不空。
+     * - 否则：按 USER 查询做 FTS 检索（BM25 相关度序）；
+     * - **无命中 → 返回空列表，本轮不注入任何记忆块**（降敏 2026-09）。
+     *
+     * 降敏变更（原实现见 git 历史）：
+     * 1. 删「恒兜底最近 2 条」——把与当前话题无关的最新记忆每轮塞进上下文，
+     *    是"AI 总在提记忆"的直接来源；
+     * 2. 删「检索不足 topK 用最新补齐」——原注释写着"保证 system prompt 始终有记忆"，
+     *    与「相关才注入」的产品意图相反；
+     * 3. FTS 失败 → 空列表（不再降级全量）：宁可不注入，也不要让无关记忆刷屏。
+     * 调用侧 ChatService.loadMemoriesForGeneration 的全量兜底同步移除。
      */
     suspend fun getRelevantMemories(assistantId: String, queries: List<String>): List<AssistantMemory> {
         val all = getMemoriesOfAssistant(assistantId)
         if (all.size <= MEMORY_FULL_INJECTION_THRESHOLD) return all
+        if (queries.none { it.isNotBlank() }) return emptyList()
 
-        val recent = all.sortedByDescending { it.updatedAt ?: it.createdAt ?: 0L }
         val result = LinkedHashMap<Int, AssistantMemory>()
-
-        // 多查询并集：副查询只补新 id（保持主查询的 BM25 优先序），扩大检索面零额外成本
         queries.filter { it.isNotBlank() }.forEach { query ->
             searchMemories(assistantId, query, MEMORY_SEARCH_TOP_K).forEach { memory ->
                 result.putIfAbsent(memory.id, memory)
             }
         }
-        // 兜底：最近 N 条恒在
-        recent.take(MEMORY_FALLBACK_RECENT_N).forEach { result[it.id] = it }
-        // 检索不足 topK → 用最新记忆补齐，保证 system prompt 始终有记忆
-        if (result.size < MEMORY_SEARCH_TOP_K) {
-            for (m in recent) {
-                if (result.size >= MEMORY_SEARCH_TOP_K) break
-                result.putIfAbsent(m.id, m)
-            }
-        }
-        // 总量封顶 topK + fallbackN
-        return result.values.take(MEMORY_SEARCH_TOP_K + MEMORY_FALLBACK_RECENT_N)
+        return result.values.take(MEMORY_SEARCH_TOP_K)
     }
 }

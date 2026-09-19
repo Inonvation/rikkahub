@@ -175,7 +175,7 @@ fun createAgentConfigTools(
     ),
     Tool(
         name = "config_write",
-        description = "Write a config file under agent/ (e.g. \"config/providers.json\", \"config/mcp.json\", \"config/assistants/<id>.json\", \"manifest.json\"). The file is written atomically with a backup snapshot and a revision record; JSON files are syntax-checked before writing. When applyToSettings=true the change is also merged back into the app settings (secret fields always keep their local values). Requires user approval.",
+        description = "Write a config file under agent/ (e.g. \"config/providers.json\", \"config/mcp.json\", \"config/assistants/<id>.json\", \"manifest.json\"). Written atomically with a backup snapshot; JSON is syntax-checked. applyToSettings=true also merges it into app settings. Requires approval.",
         needsApproval = { true },
         parameters = {
             InputSchema.Obj(

@@ -39,6 +39,9 @@ enum class CostCurrency {
  *
  * 费用口径：`uncached_input × inPrice + cached × cachedPrice + output × outPrice`，
  * 其中 uncached_input = promptTokens - cachedTokens（各家 provider 的 promptTokens 都已含缓存部分）。
+ * cache write（写缓存，如 Anthropic cache_creation）按 input 价 ×1.25 单列——写缓存那次
+ * 输入按溢价计费（Anthropic 5min 缓存官方价 1.25×），不能混进普通未缓存输入（对齐 ccusage
+ * / LiteLLM 的逐 token 类型计价公式）。
  */
 object CostCalculator {
     private val BEIJING_TIME_ZONE = TimeZone.of("Asia/Shanghai")
@@ -137,6 +140,9 @@ object CostCalculator {
 
     private const val DEFAULT_CNY_RATE = 7.2
 
+    /** cache write（写缓存）相对 input 价的溢价系数：Anthropic 5min 缓存官方价 1.25×。 */
+    private const val CACHE_WRITE_PREMIUM = 1.25
+
     /** 用户覆盖优先（精确 modelId 匹配），其次内置预置（子串匹配，取第一个命中）。未命中返回 null。 */
     fun resolve(modelId: String?, overrides: List<ModelPricingConfig>): ModelPricingConfig? {
         if (modelId.isNullOrBlank()) return null
@@ -155,10 +161,14 @@ object CostCalculator {
         val pricing = resolve(modelId, overrides) ?: return 0.0
         val factor = if (pricing.timeAware && isPeakTime(timeMillis)) 2.0 else 1.0
         val cached = usage.cachedTokens.toDouble()
-        val uncachedInput = (usage.promptTokens.toDouble() - cached).coerceAtLeast(0.0)
+        // cache write 按 input 价 ×1.25 溢价单列（Anthropic cache_creation 官方计价），
+        // 从普通未缓存输入中拆出；cacheWriteTokens 仅 Anthropic 系 provider 非 0
+        val cacheWrite = usage.cacheWriteTokens.toDouble()
+        val uncachedInput = (usage.promptTokens.toDouble() - cached - cacheWrite).coerceAtLeast(0.0)
         val output = usage.completionTokens.toDouble()
         val usd = (uncachedInput * pricing.inputPriceUsd +
             cached * pricing.cachedInputPriceUsd +
+            cacheWrite * pricing.inputPriceUsd * CACHE_WRITE_PREMIUM +
             output * pricing.outputPriceUsd) / 1_000_000.0
         return usd * pricing.multiplier * factor
     }
@@ -197,10 +207,13 @@ object CostCalculator {
         val factor = if (pricing.timeAware && isPeakTime(timeMillis)) 2.0 else 1.0
         val effectiveRate = if (rate > 0) rate else DEFAULT_CNY_RATE
         val cached = usage.cachedTokens.toDouble()
-        val uncachedInput = (usage.promptTokens.toDouble() - cached).coerceAtLeast(0.0)
+        // cache write 按 input 价 ×1.25 溢价单列（同 costUsd，Anthropic cache_creation 计价）
+        val cacheWrite = usage.cacheWriteTokens.toDouble()
+        val uncachedInput = (usage.promptTokens.toDouble() - cached - cacheWrite).coerceAtLeast(0.0)
         val output = usage.completionTokens.toDouble()
         val cny = (uncachedInput * cnyUnit(pricing.inputPriceCny, pricing.inputPriceUsd, effectiveRate) +
             cached * cnyUnit(pricing.cachedInputPriceCny, pricing.cachedInputPriceUsd, effectiveRate) +
+            cacheWrite * cnyUnit(pricing.inputPriceCny, pricing.inputPriceUsd, effectiveRate) * CACHE_WRITE_PREMIUM +
             output * cnyUnit(pricing.outputPriceCny, pricing.outputPriceUsd, effectiveRate)) / 1_000_000.0
         return cny * pricing.multiplier * factor
     }

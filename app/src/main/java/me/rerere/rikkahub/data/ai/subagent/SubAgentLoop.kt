@@ -357,7 +357,7 @@ private fun truncateParts(parts: List<UIMessagePart>, json: Json): List<UIMessag
     }
 }
 
-/** 有界重编码 JSON：字符串截断、数组保留前 6 个元素，保证产物合法。
+/** 有界重编码 JSON：字符串截断、数组保留前 N 个元素，保证产物合法。
  *  internal：供主聊天 [me.rerere.rikkahub.data.ai.GenerationHandler] 复用同一结构安全截断，
  *  避免主聊天截断破坏 JSON 导致搜索等工具详情/渲染失效。 */
 internal fun truncateSafely(text: String, json: Json): String {
@@ -366,19 +366,76 @@ internal fun truncateSafely(text: String, json: Json): String {
     return json.encodeToString(boundToolOutput(elem))
 }
 
-internal fun boundJson(elem: JsonElement): JsonElement = when (elem) {
+/**
+ * 有界重编码的预算档位。
+ *
+ * [DEFAULT]（子代理 + 有 shell 的主聊天）：字符串 500 字符、数组前 6 项。
+ * 子代理上下文小；有 shell 时全文已落盘、可 cat/grep 找回——激进裁剪的收益大于损失。
+ * [WIDE]（无 shell 的主聊天首选）：字符串 4000 字符、数组 50 项。
+ * 这些会话**没有找回通道**（无 workspace_shell 可读 /tool_outputs），沿用 500 字符
+ * 会把笔记正文、搜索命中、知识库分块直接砍成半截且无任何标记——属能力性倒退。
+ * [MEDIUM]（无 shell 的降档中档）：字符串 2000 字符、数组 20 项。
+ * WIDE 产物仍超上限时先降到这里，而不是一步跳到 DEFAULT——多块内容（如 kb_search
+ * 10 块 × 5KB：WIDE 产物 ≈41K）一步降 DEFAULT 会砍回 6×500，恰好复现分档要修的
+ * "10 块 → 6 块"；降 MEDIUM 后 10 × 2000 ≈ 21K，全部块保留、内容减半。
+ * 所有档位都保证产物是合法 JSON（渲染器/UI 的 parseToJsonElement 依赖此性质）。
+ */
+internal enum class BoundBudget(val stringLimit: Int, val arrayLimit: Int) {
+    DEFAULT(500, 6),
+    MEDIUM(2000, 20),
+    WIDE(4000, 50),
+}
+
+/** 无 shell 主聊天的降档序列（从宽到严）：WIDE 保内容 → MEDIUM 收紧 → DEFAULT 兜底。 */
+internal val NON_SHELL_BUDGET_LADDER: List<BoundBudget> =
+    listOf(BoundBudget.WIDE, BoundBudget.MEDIUM)
+
+/**
+ * 为一次 JSON 有界重编码挑选预算档位（纯函数，供单测）。
+ *
+ * 有 shell 固定 [BoundBudget.DEFAULT]（全文可从 /tool_outputs 找回，对齐旧行为）；
+ * 无 shell 按 [NON_SHELL_LADDER] 从宽到严试算产物，取首个不超 [cap] 的档位，
+ * 全部超限（或文本不是合法 JSON）落 [BoundBudget.DEFAULT]——产物长度最终仍由
+ * 调用方（GenerationHandler.boundedJsonOrNull）实测，此处只选档不产码。
+ *
+ * 试算用裸 boundToolOutput 编码测量，不含调用方后注入的 truncated/full_output_path
+ * 字段（合计 <100 字符），边界情形允许 ≤cap 有同量级误差。
+ */
+internal fun pickBoundedJsonBudget(
+    fullText: String,
+    json: Json,
+    cap: Int,
+    hasShellAccess: Boolean,
+): BoundBudget {
+    if (hasShellAccess) return BoundBudget.DEFAULT
+    NON_SHELL_BUDGET_LADDER.forEach { budget ->
+        val product = runCatching {
+            json.encodeToString(boundToolOutput(json.parseToJsonElement(fullText), budget))
+        }.getOrNull() ?: return@forEach
+        if (product.length <= cap) return budget
+    }
+    return BoundBudget.DEFAULT
+}
+
+internal fun boundJson(elem: JsonElement, budget: BoundBudget = BoundBudget.DEFAULT): JsonElement = when (elem) {
     is JsonPrimitive -> if (elem.toString().startsWith('"')) {
-        JsonPrimitive(if (elem.content.length > 500) elem.content.take(500) + "…[截断]" else elem.content)
+        JsonPrimitive(
+            if (elem.content.length > budget.stringLimit) {
+                elem.content.take(budget.stringLimit) + "…[截断]"
+            } else {
+                elem.content
+            }
+        )
     } else {
         elem
     }
 
     is JsonArray -> buildJsonArray {
-        elem.take(6).forEach { add(boundJson(it)) }
+        elem.take(budget.arrayLimit).forEach { add(boundJson(it, budget)) }
     }
 
     is JsonObject -> buildJsonObject {
-        elem.forEach { (k, v) -> put(k, boundJson(v)) }
+        elem.forEach { (k, v) -> put(k, boundJson(v, budget)) }
     }
 }
 
@@ -397,10 +454,17 @@ internal fun headTailText(text: String): String? {
 
 /**
  * 工具输出的有界重编码：含 stdout/stderr 字符串字段（shell 类）的对象走专用 head+tail 预算，
- * 其余字段沿用 [boundJson] 的通用预算（字符串 500、数组前 6）——避免长命令输出被压到
- * 500 字符的断崖。产物保证合法 JSON，渲染器/UI 不受影响。
+ * 其余字段沿用 [boundJson] 的通用预算——避免长命令输出被压到
+ * 字符串断崖。产物保证合法 JSON，渲染器/UI 不受影响。
+ *
+ * [budget] 决定通用字段的裁剪力度：有 shell 的主聊天与子代理用 [BoundBudget.DEFAULT]
+ * （全文可从 /tool_outputs 找回），无 shell 的主聊天按 [NON_SHELL_BUDGET_LADDER] 降档
+ * （WIDE → MEDIUM，无找回通道，尽量多保内容），档位由 [pickBoundedJsonBudget] 按上限挑选。
  */
-internal fun boundToolOutput(elem: JsonElement): JsonElement = when (elem) {
+internal fun boundToolOutput(
+    elem: JsonElement,
+    budget: BoundBudget = BoundBudget.DEFAULT,
+): JsonElement = when (elem) {
     is JsonObject -> buildJsonObject {
         elem.forEach { (key, value) ->
             val shellStream = (key == "stdout" || key == "stderr") &&
@@ -408,12 +472,12 @@ internal fun boundToolOutput(elem: JsonElement): JsonElement = when (elem) {
             put(
                 key,
                 if (shellStream) JsonPrimitive(headTailText(value.content) ?: value.content)
-                else boundJson(value)
+                else boundJson(value, budget)
             )
         }
     }
 
-    else -> boundJson(elem)
+    else -> boundJson(elem, budget)
 }
 
 private fun UIMessage.toText(): String = parts.joinToString(separator = "\n") { part ->

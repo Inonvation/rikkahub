@@ -180,16 +180,48 @@ class ContextCompositionTest {
 
     @Test
     fun `last real prompt tokens takes the last usage carrying message`() {
-        fun msg(prompt: Int?): UIMessage = UIMessage(
+        fun msg(contextPrompt: Int?): UIMessage = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Text("x")),
-            usage = prompt?.let { TokenUsage(promptTokens = it) },
+            contextPromptTokens = contextPrompt,
         )
         assertEquals(800, listOf(msg(500), msg(800)).lastRealPromptTokens())
-        // 末条无 usage 时回退到上一条带 usage 的消息
+        // 末条无锚点时回退到上一条带锚点的消息
         assertEquals(500, listOf(msg(500), msg(null)).lastRealPromptTokens())
         assertNull(listOf(msg(null), msg(null)).lastRealPromptTokens())
         assertNull(emptyList<UIMessage>().lastRealPromptTokens())
+    }
+
+    @Test
+    fun `last real prompt prefers single-step contextPromptTokens over summed usage`() {
+        // 多步工具循环：usage.promptTokens 是账单累计（虚高），contextPromptTokens 是单步实测
+        val multiStep = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("x")),
+            usage = TokenUsage(promptTokens = 9000, completionTokens = 300),
+            contextPromptTokens = 3000,
+        )
+        val older = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("y")),
+            usage = TokenUsage(promptTokens = 1200),
+            contextPromptTokens = 1200,
+        )
+        assertEquals(3000, listOf(older, multiStep).lastRealPromptTokens())
+        // 旧数据无 contextPromptTokens：不再回退 usage（账单累计会虚高校准），诚实降级为估算
+        val legacy = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("z")),
+            usage = TokenUsage(promptTokens = 800),
+        )
+        assertNull(listOf(legacy).lastRealPromptTokens())
+        // 混合：旧数据消息被跳过，取最近一条带单步锚点的消息
+        val anchored = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("w")),
+            contextPromptTokens = 2500,
+        )
+        assertEquals(2500, listOf(legacy, anchored).lastRealPromptTokens())
     }
 
     // ---- dropPresetMessages ----
@@ -303,12 +335,8 @@ class ContextCompositionTest {
     ): UIMessage = UIMessage(
         role = role,
         parts = listOf(UIMessagePart.Text(text)),
-        usage = TokenUsage(
-            promptTokens = promptTokens,
-            completionTokens = 0,
-            cachedTokens = 0,
-            cacheWriteTokens = 0,
-        ),
+        // 锚点只认单步口径 contextPromptTokens（usage.promptTokens 是账单累计，不再回退）
+        contextPromptTokens = promptTokens.takeIf { it > 0 },
     )
 
     @Test
@@ -385,7 +413,7 @@ class ContextCompositionTest {
         // 无压缩快照 → 不视为过时
         assertFalse(plain.hasStaleCalibrationAnchor())
 
-        // 有压缩但没有任何带 usage 的消息 → 无可定位锚点，保持可校准（fallback 路径自行兜底）
+        // 有压缩但没有任何带单步锚点的消息 → 无可定位锚点，保持可校准（fallback 路径自行兜底）
         val noAnchor = Conversation(
             assistantId = Uuid.random(),
             messageNodes = listOf(MessageNode.of(usageMessage(MessageRole.USER, "无 usage"))),

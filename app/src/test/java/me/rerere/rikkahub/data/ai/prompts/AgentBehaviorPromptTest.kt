@@ -59,12 +59,24 @@ class AgentBehaviorPromptTest {
 
     @Test
     fun legacyProfileOmitsModeSectionsAndKeepsToolGroups() {
-        val prompt = buildAgentBehaviorPrompt(
-            tools = listOf(Tool(name = "get_time", description = "get time", execute = { emptyList() })),
-            profile = AgentBehaviorProfile.LEGACY,
-        )
+        // 小集合（<12）跳过分组是 2026-09 的降噪约定：这里用足量工具验证分组仍会生成
+        val tools = (1..12).map { Tool(name = "tool_$it", description = "d", execute = { emptyList() }) }
+        val prompt = buildAgentBehaviorPrompt(tools = tools, profile = AgentBehaviorProfile.LEGACY)
         assertFalse(prompt.contains("## Mode:"))
         assertTrue(prompt.contains("## Plan & Act"))
         assertTrue(prompt.contains("## Tool Groups"))
+    }
+
+    @Test
+    fun smallToolSetsSkipToolGroups() {
+        // 三四个工具的清单模型一眼扫得完，分组多占版面又把工具名重复一遍
+        val prompt = buildAgentBehaviorPrompt(
+            tools = listOf(
+                Tool(name = "get_time", description = "d", execute = { emptyList() }),
+                Tool(name = "ask_user", description = "d", execute = { emptyList() }),
+            ),
+            profile = AgentBehaviorProfile.STANDARD,
+        )
+        assertFalse(prompt.contains("## Tool Groups"))
     }
 }

@@ -130,7 +130,7 @@ class MemoryContextBlockTest {
             listOf(AssistantMemory(id = 7, content = "fact", updatedAt = ts))
         )
         // 23:30Z 属 UTC 当天；若误用本地时区（东八区）会渲染成 2026-08-30
-        assertTrue(block.contains("\"updated\": \"2026-08-29\""))
+        assertTrue(block.contains("\"updated\":\"2026-08-29\""))
     }
 
     @Test
@@ -146,13 +146,13 @@ class MemoryContextBlockTest {
         val block = buildMemoryContextBlock(
             listOf(AssistantMemory(id = 3, content = "fact", createdAt = ts))
         )
-        assertTrue(block.contains("\"updated\": \"2025-01-02\""))
+        assertTrue(block.contains("\"updated\":\"2025-01-02\""))
     }
 
     @Test
     fun `category name included when set`() {
         val block = buildMemoryContextBlock(listOf(memory(1, "goal fact", 100, MemoryCategory.GOAL)))
-        assertTrue(block.contains("\"category\": \"GOAL\""))
+        assertTrue(block.contains("\"category\":\"GOAL\""))
         val noCategory = buildMemoryContextBlock(listOf(memory(1, "legacy", 100)))
         assertFalse(noCategory.contains("category"))
     }
@@ -178,5 +178,13 @@ class MemoryContextBlockTest {
         assertTrue(block.contains("[fact-10]")) // 最新条目必然保留
         assertFalse(block.contains("[fact-7]")) // 第 4 新的条目超预算
         assertFalse(block.contains("[fact-5]")) // 更旧条目被裁掉
+    }
+
+    @Test
+    fun `json is compact not pretty printed`() {
+        // 2026-09 降本：pretty 缩进/换行对模型无增益，纯属每轮重复的 whitespace token
+        val block = buildMemoryContextBlock(listOf(memory(1, "User likes tea", 100)))
+        assertFalse("记忆块 JSON 不应含 pretty 缩进", block.contains("\"content\": \""))
+        assertFalse("记忆块不应出现 pretty 换行缩进", block.contains("\n  "))
     }
 }

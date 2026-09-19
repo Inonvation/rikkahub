@@ -419,6 +419,26 @@ internal suspend fun audited(
     }
 }
 
+/**
+ * 提供商管理规范（system 信道，provider_create/provider_update/model_add 等按内容去重注入一次）。
+ *
+ * 高级字段清单原先写在 provider_update 的 description 尾部，超出 wire 的 300 字符截断点，
+ * 模型从未看到——真正的"改这些字段"能力实际不可发现。放到 system 信道后完整送达。
+ */
+internal const val PROVIDER_ADMIN_SYSTEM_PROMPT =
+    "**Provider Admin**\n" +
+        "- Supported types: openai, google, claude. Setting `type` converts the provider type.\n" +
+        "- Advanced settings per type: OpenAI `useResponseApi`/`includeHistoryReasoning`/`chatCompletionsPath`/`embeddingsPath`/`rerankPath`; Claude `promptCaching`/`promptCacheTtl`; Google `vertexAI`/`useServiceAccount`/`location`/`projectId`; `balance` works for all types.\n" +
+        "- Model fields: `contextLength` (tokens), abilities (tool/reasoning), input/output modalities (text/image), built-in tools (search/url_context/image_generation), custom headers; omitted type/abilities/modalities are inferred from the modelId (e.g. *-vision → image input, o1/thinking → reasoning)."
+
+/**
+ * 助手管理规范（system 信道，assistant_update 等按内容去重注入一次）。
+ * settable 字段清单原先在 description 尾部被截断，模型无法得知全部可改字段。
+ */
+internal const val ASSISTANT_ADMIN_SYSTEM_PROMPT =
+    "**Assistant Admin**\n" +
+        "- Settable fields: name, chatModelId, systemPrompt, temperature, topP, maxTokens, contextMessageLimit, contextTokenLimit, streamOutput, enableMemory, useGlobalMemory, enableRecentChatsReference, enableWebSearch, knowledgeBaseIds, enabledStudyTools, defaultMode."
+
 fun createProviderAdminTools(
     settingsStore: SettingsStore,
     providerManager: ProviderManager,
@@ -569,7 +589,8 @@ fun createProviderAdminTools(
         ),
         Tool(
             name = "provider_update",
-            description = "Update an existing provider. Supported types: openai, google, claude. type converts the provider type; omitted fields keep their current value. models replaces the whole list; addModels/removeModels adjust it. Advanced settings per type: OpenAI useResponseApi/includeHistoryReasoning/chatCompletionsPath/embeddingsPath/rerankPath, Claude promptCaching/promptCacheTtl, Google vertexAI/useServiceAccount/location/projectId; balance works for all types. Removing a model used by any assistant or global model setting is rejected. Requires user approval.",
+            description = "Update an existing provider. type converts between openai/google/claude; omitted fields keep current values. models replaces the whole list; addModels/removeModels adjust it. Removing a model used by any assistant or global model setting is rejected. Requires user approval.",
+            systemPrompt = { _, _ -> PROVIDER_ADMIN_SYSTEM_PROMPT },
             needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
@@ -784,7 +805,8 @@ fun createProviderAdminTools(
         ),
         Tool(
             name = "model_add",
-            description = "Add a model with full basic settings to a provider: type (chat/image/embedding/reranking), contextLength (tokens), abilities (tool/reasoning), input/output modalities (text/image), built-in tools (search/url_context/image_generation) and optional custom headers. When type/abilities/modalities are omitted they are inferred from the modelId (e.g. *-vision → image input, o1/thinking → reasoning). Requires user approval.",
+            description = "Add a model to a provider. Fields: type (chat/image/embedding/reranking), contextLength, abilities (tool/reasoning), input/output modalities, built-in tools, optional headers. Omitted type/abilities/modalities are inferred from the modelId. Requires user approval.",
+            systemPrompt = { _, _ -> PROVIDER_ADMIN_SYSTEM_PROMPT },
             needsApproval = { true },
             parameters = {
                 InputSchema.Obj(
@@ -1073,7 +1095,8 @@ fun createAssistantAdminTools(
         ),
         Tool(
             name = "assistant_update",
-            description = "Update assistant fields. Omit id to update the current assistant. The update is approval-free only for the current assistant; other assistants require approval. Fields: name, chatModelId, systemPrompt, temperature, topP, maxTokens, contextMessageLimit, contextTokenLimit, streamOutput, enableMemory, useGlobalMemory, enableRecentChatsReference, enableWebSearch, knowledgeBaseIds, enabledStudyTools, defaultMode.",
+            description = "Update assistant fields (omit id = current assistant; approval-free only for the current assistant). Settable fields are listed in the Assistant Admin instructions. Requires user approval when targeting another assistant.",
+            systemPrompt = { _, _ -> ASSISTANT_ADMIN_SYSTEM_PROMPT },
             needsApproval = { args ->
                 val currentId = settingsStore.settingsFlow.value.getCurrentAssistant().id
                 val targetId = args.jsonObject.uuid("id") ?: currentId

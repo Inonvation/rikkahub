@@ -23,11 +23,9 @@ fun createStudyQuizTool(
 ): Tool = Tool(
     name = "study_quiz",
     description = """
-        Fetch random saved study items to quiz the user.
-        Call this when the user wants to review or be quizzed on saved content (e.g. "考考我", "抽背", "测验").
-        type "vocabulary" returns random saved words (English tutor), type "wrong_question" returns random saved
-        wrong problems for redo. Use the returned material to formulate questions, ask one at a time, and wait
-        for the user's answer before continuing.
+        Fetch random saved study items to quiz the user (e.g. "考考我", "抽背", "测验").
+        type "vocabulary" returns saved words; type "wrong_question" returns saved problems for redo.
+        Formulate questions from the result; ask one at a time and wait for the answer before continuing.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

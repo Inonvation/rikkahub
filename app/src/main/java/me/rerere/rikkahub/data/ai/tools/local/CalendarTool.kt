@@ -28,18 +28,25 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 
+/**
+ * 日历工具族共享的使用规范（system 信道，四工具内容相同 → 自动去重注入一次）。
+ *
+ * 时区/权限语义原先在每个描述尾部重复四遍，且都在 wire 的 300 字符截断点之外（从未送达模型）。
+ * 时区值是运行期插值（随系统时区变化），两个工具描述里含相同文本时仍需各自计算——去重按最终文本相等判定。
+ */
+internal fun calendarSystemPrompt(): String =
+    "**Calendar**\n" +
+        "- Device timezone: '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset}); times without an explicit offset are interpreted in this timezone.\n" +
+        "- Requires the 'Calendar' permission; if it is not granted, an error is returned and the permission request is triggered automatically."
+
 internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
     name = "calendar_query",
     description = """
         Query calendar events on the user's device within a time range.
         Specify a custom interval with 'begin'/'end', or use the 'range' preset (today/week/month).
-        Returns a list of events with title, description, location, start/end times, calendar info,
-        recurrence rule ('rrule'), and reminders (minutes before start) when present.
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        Returns events with title, description, location, start/end, calendar info, recurrence rule and reminders.
     """.trimIndent().replace("\n", " "),
+    systemPrompt = { _, _ -> calendarSystemPrompt() },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -47,9 +54,7 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                     put("type", "string")
                     put(
                         "description",
-                        "Start time (inclusive). Accepts an ISO-8601 date 'yyyy-MM-dd', a local " +
-                            "date-time 'yyyy-MM-ddTHH:mm:ss', an offset date-time, or epoch milliseconds. " +
-                            "When provided, 'range' is ignored."
+                        "Start time (inclusive): ISO-8601 date/datetime, offset datetime, or epoch ms. When set, 'range' is ignored."
                     )
                 })
                 put("end", buildJsonObject {
@@ -236,17 +241,10 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
 internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
     name = "calendar_create",
     description = """
-        Create a new calendar event on the user's device.
-        Requires title and start time at minimum. End time defaults to 1 hour after start.
-        A system reminder is added by default (10 minutes before); pass 'reminder'=false to skip,
-        'reminder_minutes' to adjust the lead time, or 'reminders' for multiple lead times. Recurring
-        events are supported via the 'recurrence' preset (daily/weekly/monthly/yearly) or a raw
-        'rrule' (RFC 5545) string.
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        Create a new calendar event. Requires title and start time; end defaults to start + 1 hour. A reminder 10 minutes before start is added by default ('reminder'=false skips, 'reminder_minutes'/'reminders' adjust).
+        Recurrence: 'recurrence' preset (daily/weekly/monthly/yearly) or a raw 'rrule'.
     """.trimIndent().replace("\n", " "),
+    systemPrompt = { _, _ -> calendarSystemPrompt() },
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -294,17 +292,16 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
                     put("type", "integer")
                     put(
                         "description",
-                        "Minutes before the event start to trigger a single reminder. Default 10. " +
-                            "Common values: 0 (at event start), 5, 10, 15, 30, 60, 1440 (1 day). Range 0-10080. " +
-                            "Ignored when 'reminders' (multiple) is provided."
+                        "Minutes before start for a single reminder. Default 10, range 0-10080 " +
+                            "(common: 5/15/30/60/1440). Ignored when 'reminders' is set."
                     )
                 })
                 put("reminders", buildJsonObject {
                     put("type", "array")
                     put(
                         "description",
-                        "Multiple reminders (minutes before start). Takes precedence over 'reminder_minutes'. " +
-                            "Example: [10, 1440] = 10 minutes before and 1 day before. Each value range 0-10080."
+                        "Multiple reminders (minutes before start); takes precedence over 'reminder_minutes'. " +
+                            "Each value 0-10080, e.g. [10, 1440]."
                     )
                     put("items", buildJsonObject {
                         put("type", "integer")
@@ -536,15 +533,10 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
 internal fun buildCalendarUpdateTool(context: Context): Tool = Tool(
     name = "calendar_update",
     description = """
-        Update an existing calendar event on the user's device by 'event_id'.
-        Only the provided fields are changed: title, description, location, start, end, all_day,
-        recurrence/'rrule'. Reminders are rebuilt from scratch when any of 'reminder'/'reminders'/
-        'reminder_minutes' is provided (pass 'reminder'=false to remove all reminders).
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        Update an existing calendar event by 'event_id'. Only provided fields change: title, description, location, start, end, all_day, recurrence/'rrule'.
+        Reminders are rebuilt when any of 'reminder'/'reminders'/'reminder_minutes' is given ('reminder'=false removes all).
     """.trimIndent().replace("\n", " "),
+    systemPrompt = { _, _ -> calendarSystemPrompt() },
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -589,9 +581,8 @@ internal fun buildCalendarUpdateTool(context: Context): Tool = Tool(
                     put("type", "object")
                     put(
                         "description",
-                        "New recurrence preset. Ignored when a raw 'rrule' is provided. " +
-                            "Pass empty object {\"freq\":\"NONE\"} to clear recurrence. " +
-                            "Example: {\"freq\": \"WEEKLY\", \"interval\": 1, \"count\": 5}."
+                        "New recurrence preset; ignored when a raw 'rrule' is given. " +
+                            "{\"freq\":\"NONE\"} clears it. Example: {\"freq\":\"WEEKLY\",\"interval\":1,\"count\":5}."
                     )
                     put("properties", buildJsonObject {
                         put("freq", buildJsonObject {
@@ -821,11 +812,10 @@ internal fun buildCalendarUpdateTool(context: Context): Tool = Tool(
 internal fun buildCalendarDeleteTool(context: Context): Tool = Tool(
     name = "calendar_delete",
     description = """
-        Delete a calendar event on the user's device by 'event_id'. Removing the master event
-        also removes its recurring occurrences and reminders.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        Delete a calendar event on the user's device by 'event_id'.
+        Removing the master event also removes its recurring occurrences and reminders.
     """.trimIndent().replace("\n", " "),
+    systemPrompt = { _, _ -> calendarSystemPrompt() },
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -838,9 +828,7 @@ internal fun buildCalendarDeleteTool(context: Context): Tool = Tool(
                     put("type", "boolean")
                     put(
                         "description",
-                        "Only meaningful for recurring events. When true, only this and future " +
-                            "occurrences are removed (creates an exception); when false (default), " +
-                            "the whole series is deleted."
+                        "Recurring events only: true removes this and future occurrences (exception); false (default) deletes the series."
                     )
                 })
             },

@@ -33,7 +33,7 @@ internal fun buildAgentBehaviorPrompt(
         appendLine(ASK_USER_SECTION)
         if (tools.any { it.name == "spawn_subagent" }) {
             appendLine()
-            append(SUB_AGENT_DELEGATION_SECTION)
+            appendLine(SUB_AGENT_POINTER_SECTION)
         }
     }
 }
@@ -107,41 +107,31 @@ private val ASK_USER_SECTION = """
     - Do not ask what you can determine yourself through tools or reasoning.
 """.trimIndent()
 
-private val SUB_AGENT_DELEGATION_SECTION = """
-    ## Sub-Agent Delegation
-    Sub-agents run in isolated contexts with their own models and tools. They are for work you should
-    not inline into your own context.
-
-    When to delegate:
-    - The task splits into several **independent** workstreams (bulk research, long-document analysis,
-      parallel verification, comparing options) whose combined output is more than you should load here.
-    - Otherwise do it yourself — do not delegate single-file reads or simple lookups.
-
-    How to run them in parallel:
-    - Call `spawn_subagent` once per sub-agent **in the same reply** — each call dispatches one worker,
-      so multiple calls in one reply run them concurrently. Record every returned `taskId`.
-    - Do not sit idle after spawning. Continue your own work: plan, analyze, run base steps that need no
-      sub-agent result.
-
-    Getting results:
-    - Sub-agents wake you **automatically** when they complete — their result is injected into your
-      context, so you never block waiting for them. There is no await tool.
-    - You may end this round even while sub-agents run; they finish in the background and wake you.
-    - Cross-verify, synthesize and summarize their results into the best answer. Do not relay sub-agent
-      output verbatim — you know the user's needs best.
-    - `dispatched` is only a dispatch marker, never a result. A timed-out or failed task may be
-      auto-retried by the system (same task, context preserved); if the final status is still
-      timeout/failed, answer from what you already have — do not respawn yourself.
-    - When a sub-agent result corresponds to an item you track in the todo list, update that item
-      (in_progress / completed) in your synthesis round.
+/**
+ * 子代理指针段：完整用法与清单的唯一来源是 spawn_subagent 的 systemPrompt
+ * （SubAgentTools.SUBAGENT_SPAWN_SYSTEM_PROMPT，随工具注册去重注入）。
+ * 这里只保留一行指针，避免同一组规则两处叙述——旧实现在这里重复整段，
+ * 与 spawn 工具描述里的 Usage 块内容重叠、互相稀释。
+ */
+private val SUB_AGENT_POINTER_SECTION = """
+    ## Sub-Agents
+    Use `spawn_subagent` for independent workstreams. Follow the **Sub-Agents** instructions
+    attached to that tool — they cover when to delegate, parallel dispatch, and how results arrive.
 """.trimIndent()
 
 /**
  * 工具分组清单：按 [classifyToolFamily] 把工具聚成 <group> → 用途 的一行，帮模型建立"工具地图"。
  * 只分组、不展开单工具——单工具细节在其自身 description 里，避免重复占 token。
  * 判定与调试统计共用同一份 [classifyToolFamily]，新增工具族只需改这一处。
+ *
+ * 小集合直接跳过（2026-09）：工具总数 ≤ [TOOL_GROUPS_MIN_TOOLS] 时分组纯属噪声
+ * ——三四个工具的清单模型一眼扫得完，分组反而多占版面、又把工具名重复一遍。
  */
+private const val TOOL_GROUPS_MIN_TOOLS = 12
+
 private fun groupToolsForPrompt(tools: List<Tool>): String {
+    if (tools.size < TOOL_GROUPS_MIN_TOOLS) return ""
+
     val groups = linkedMapOf<String, MutableList<String>>()
     tools.forEach { tool ->
         val family = classifyToolFamily(tool.name)

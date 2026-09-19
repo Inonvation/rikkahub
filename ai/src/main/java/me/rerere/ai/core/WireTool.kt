@@ -19,8 +19,15 @@ import kotlinx.serialization.json.put
 /** 工具级 description 的默认 wire 长度上限。 */
 const val WIRE_DESCRIPTION_LIMIT: Int = 300
 
-/** 参数内嵌 description 的默认 wire 长度上限。 */
-const val WIRE_PARAM_DESCRIPTION_LIMIT: Int = 80
+/**
+ * 参数内嵌 description 的默认 wire 长度上限。
+ *
+ * 参数描述没有 systemPrompt 逃生通道（schema 绑定，无法上移），且 enum/required 之外的
+ * 语义（默认值、互斥关系、取值约定）只能写在描述里。实测内置工具参数描述集中在 84–207 字符，
+ * 80 的上限会把「省略时读默认 SKILL.md」「30 字符纯文本标题」这类可执行约束静默砍掉。
+ * 取 160 并在 ToolDescriptionBudgetTest 中固化：超限即测试失败，要求写的时候就控制长度。
+ */
+const val WIRE_PARAM_DESCRIPTION_LIMIT: Int = 160
 
 /** 截断一段说明，保留开头语义；超长时截到 [limit] 并追加省略号。 */
 fun String.trimDescription(limit: Int): String {

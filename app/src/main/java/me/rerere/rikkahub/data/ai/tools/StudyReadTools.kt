@@ -30,9 +30,7 @@ fun createStudyReadTool(
     name = "study_read",
     description = """
         Read the full content of one study item (note / wrong_question / knowledge_card / vocabulary) by id.
-        Use study_search first to find the id, then call this to get the complete text (note content, question and
-        answer, explanation, translations and examples). Use this when the user asks you to review, summarize,
-        explain, or reference their existing notes.
+        Use study_search first to find the id. Call this when the user asks you to review, summarize, explain, or reference their saved material.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -172,8 +170,8 @@ fun createStudyListTool(
     name = "study_list",
     description = """
         List the user's saved study content (vocabulary/note/wrong_question/knowledge_card) in the study panel.
-        Use this when the user wants to review, browse, or get an overview of what has been saved so far.
-        Returns a paginated list of {id, type, title, subject}. Call study_read with an id to open the full content.
+        Use when the user wants to review, browse, or get an overview of what has been saved so far.
+        Returns a paginated list of {id, type, title, subject}; call study_read with an id for the content.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

@@ -28,9 +28,8 @@ fun createConversationTools(
         name = "recent_chats",
         description = """
             List the user's recent conversations with you to understand their preferences and ongoing topics.
-            Returns conversation titles and the date of last activity, ordered by pinned first then most recently updated.
-            Use this when you need quick context about what the user has been discussing lately.
-            Only titles and dates are returned; use `conversation_search` to look up the actual content.
+            Returns titles and last-activity dates (pinned first); for actual content use `conversation_search`.
+            Call this when you need quick context about what the user has been discussing lately.
         """.trimIndent(),
         parameters = {
             InputSchema.Obj(
