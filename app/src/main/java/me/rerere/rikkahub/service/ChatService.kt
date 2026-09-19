@@ -2072,9 +2072,11 @@ class ChatService(
                 queries = MemoryRepository.extractMemoryQueries(messages),
             )
         }.getOrElse { e ->
-            Log.w(TAG, "memory retrieval failed, fall back to full memories", e)
-            if (assistant.useGlobalMemory) memoryRepository.getGlobalMemories()
-            else memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
+            // 降敏（2026-09）：检索失败不再降级为全量记忆注入——宁可本轮无记忆，
+            // 也不要让全部（可能与本轮无关的）记忆刷进上下文，与 getRelevantMemories
+            // 「无命中即空」的语义保持一致。
+            Log.w(TAG, "memory retrieval failed, skipping memory injection this turn", e)
+            emptyList()
         }
     }
 

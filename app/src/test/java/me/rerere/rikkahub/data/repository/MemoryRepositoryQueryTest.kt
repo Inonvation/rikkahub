@@ -8,7 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 记忆检索多查询提取（纯函数）：主查询（最新 USER）+ 副查询（最新 ASSISTANT 回答）。
+ * 记忆检索查询提取（纯函数）：主查询 = 最新 USER，短消息回退最近 3 条 USER。
+ *
+ * 降敏（2026-09）：副查询（最新 ASSISTANT 回答）已移除——它会形成自我强化回路，
+ * 让模型上一轮展开过的话题持续把相关记忆拉回上下文。用户消息才是唯一信号源。
  */
 class MemoryRepositoryQueryTest {
 
@@ -18,7 +21,7 @@ class MemoryRepositoryQueryTest {
     )
 
     @Test
-    fun `primary is latest user text and secondary is latest assistant answer`() {
+    fun `primary is latest user text and assistant answer is ignored`() {
         val queries = MemoryRepository.extractMemoryQueries(
             listOf(
                 message(MessageRole.USER, "old question"),
@@ -27,7 +30,7 @@ class MemoryRepositoryQueryTest {
                 message(MessageRole.ASSISTANT, "Tea brewing needs 80°C water"),
             )
         )
-        assertEquals(listOf("what about tea brewing?", "Tea brewing needs 80°C water"), queries)
+        assertEquals(listOf("what about tea brewing?"), queries)
     }
 
     @Test
@@ -40,11 +43,10 @@ class MemoryRepositoryQueryTest {
                 message(MessageRole.ASSISTANT, "answer text"),
             )
         )
-        // 主查询 = 最近 3 条 USER 拼接；副查询 = 最新 ASSISTANT
-        assertEquals(2, queries.size)
+        // 单查询 = 最近 3 条 USER 拼接；ASSISTANT 文本不参与
+        assertEquals(1, queries.size)
         assertTrue(queries[0].contains("I like oolong tea"))
         assertTrue(queries[0].contains("嗯？"))
-        assertEquals("answer text", queries[1])
     }
 
     @Test
@@ -56,26 +58,18 @@ class MemoryRepositoryQueryTest {
     }
 
     @Test
-    fun `secondary dropped when identical to primary`() {
+    fun `query capped at max chars`() {
+        val long = "长".repeat(500)
         val queries = MemoryRepository.extractMemoryQueries(
-            listOf(
-                message(MessageRole.USER, "same text"),
-                message(MessageRole.ASSISTANT, "same text"),
-            )
+            listOf(message(MessageRole.USER, long))
         )
-        assertEquals(listOf("same text"), queries)
+        assertEquals(1, queries.size)
+        queries.forEach { assertTrue(it.length <= MemoryRepository.MEMORY_QUERY_MAX_CHARS) }
     }
 
     @Test
-    fun `queries capped at max chars`() {
-        val long = "长".repeat(500)
-        val queries = MemoryRepository.extractMemoryQueries(
-            listOf(
-                message(MessageRole.USER, long),
-                message(MessageRole.ASSISTANT, long),
-            )
-        )
-        assertEquals(2, queries.size)
-        queries.forEach { assertTrue(it.length <= MemoryRepository.MEMORY_QUERY_MAX_CHARS) }
+    fun `full injection threshold stays at two`() {
+        // 降敏回归锚点：阈值调大意味着"少量记忆每轮全量出现"的旧行为回归
+        assertEquals(2, MemoryRepository.MEMORY_FULL_INJECTION_THRESHOLD)
     }
 }
