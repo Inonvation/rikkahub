@@ -126,4 +126,24 @@ class GitHubOAuthClientTest {
         assertTrue(GitHubOAuthClient("abc").isConfigured())
         assertTrue(!GitHubOAuthClient("").isConfigured())
     }
+
+    // ---- classifyVerifyHttpCode：401 才算凭据失效 ----
+
+    @Test
+    fun `only http 401 marks token rejected`() {
+        assertEquals(GitHubOAuthClient.TokenCheck.Rejected, client.classifyVerifyHttpCode(401))
+    }
+
+    @Test
+    fun `http 403 is inconclusive not rejected`() {
+        // secondary rate limit / abuse detection 也返回 403，不能误杀有效 token
+        assertEquals(GitHubOAuthClient.TokenCheck.Inconclusive, client.classifyVerifyHttpCode(403))
+    }
+
+    @Test
+    fun `other error codes are inconclusive`() {
+        assertEquals(GitHubOAuthClient.TokenCheck.Inconclusive, client.classifyVerifyHttpCode(429))
+        assertEquals(GitHubOAuthClient.TokenCheck.Inconclusive, client.classifyVerifyHttpCode(500))
+        assertEquals(GitHubOAuthClient.TokenCheck.Inconclusive, client.classifyVerifyHttpCode(502))
+    }
 }

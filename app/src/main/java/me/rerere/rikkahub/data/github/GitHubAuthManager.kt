@@ -39,7 +39,7 @@ internal data class GitHubAuthBlob(
     val invalid: Boolean = false,
 )
 
-/** 绑定状态。[invalid] 为 true 表示凭据已被 GitHub 侧判定失效（401），需重新绑定 */
+/** 绑定状态。[invalid] 为 true 表示凭据已被 GitHub 侧判定失效（API 401 复核确认），需重新绑定 */
 data class GitHubAuthState(
     val account: GitHubAccount? = null,
     val invalid: Boolean = false,
@@ -77,8 +77,9 @@ sealed interface DeviceFlowPhase {
  * - Keystore 密钥不随备份/换机迁移，密文换机后解不开即视为未绑定（token 低价值可重取）。
  *
  * 失效语义：GitHub OAuth token 无 refresh 流程；API 401 时先用 GET /user 复核——
- * 仅当复核明确 Rejected 才置 invalid 并清内存 token（Valid/网络失败均保留绑定），
- * UI 引导重新绑定。解绑只删本地凭据，撤销授权走 github.com/settings/connections 外链。
+ * 仅当复核明确 Rejected（HTTP 401）才置 invalid 并清内存 token（Valid/网络失败/403 限流均保留绑定），
+ * UI 引导重新绑定。Keystore 解密失败按未绑定处理（不是 GitHub 撤销，不显示「已失效」）。
+ * 解绑只删本地凭据，撤销授权走 github.com/settings/connections 外链。
  */
 class GitHubAuthManager(
     context: Context,
@@ -89,6 +90,9 @@ class GitHubAuthManager(
     companion object {
         private const val TAG = "GitHubAuthManager"
         private val KEY_BLOB = stringPreferencesKey("github_auth_blob")
+
+        /** 并发/连发 401 的复核冷却，避免批量技能请求把 GET /user 打爆 */
+        private const val AUTH_RECHECK_COOLDOWN_MS = 30_000L
     }
 
     private val dataStore = context.githubAuthDataStore
@@ -109,6 +113,10 @@ class GitHubAuthManager(
 
     @Volatile
     private var cachedCipher: String? = null
+
+    /** onAuthInvalid 防抖：并发 401 / 短时间重复触发时只复核一次 */
+    @Volatile
+    private var lastAuthCheckAt = 0L
 
     init {
         scope.launch { load() }
@@ -133,15 +141,19 @@ class GitHubAuthManager(
      *
      * 不立即永久失效：先用 GET /user 复核当前 token——
      * - 复核 Valid：401 是瞬时误报，保持绑定；
-     * - 复核 Rejected（HTTP 401/403）：确认失效，置 invalid 并清内存 token；
-     * - 复核 Inconclusive（网络失败等）：无法判定，保持绑定（避免网络抖动误杀）。
+     * - 复核 Rejected（仅 HTTP 401）：确认失效，置 invalid 并清内存 token；
+     * - 复核 Inconclusive（网络失败/403 限流等）：无法判定，保持绑定（避免网络抖动误杀）。
      *
+     * 短时间内重复触发（批量技能请求同时 401）只复核一次，避免打爆 GET /user。
      * OAuth 用户 token 本身不过期，真正失效只发生在用户撤销授权/改密码触发全局撤销。
      */
     fun onAuthInvalid() {
         val cipher = cachedCipher ?: return
         val token = cachedToken ?: return
         if (_state.value.invalid) return
+        val now = System.currentTimeMillis()
+        if (now - lastAuthCheckAt < AUTH_RECHECK_COOLDOWN_MS) return
+        lastAuthCheckAt = now
         scope.launch {
             when (oauthClient.verifyToken(token)) {
                 is GitHubOAuthClient.TokenCheck.Valid -> {
@@ -155,6 +167,8 @@ class GitHubAuthManager(
                 }
                 GitHubOAuthClient.TokenCheck.Inconclusive -> {
                     Log.w(TAG, "401 re-check inconclusive, keep token")
+                    // 允许稍后再次复核（例如 secondary rate limit 过后的下一轮 401）
+                    lastAuthCheckAt = 0L
                 }
             }
         }
@@ -280,12 +294,22 @@ class GitHubAuthManager(
             return
         }
         val token = if (blob.invalid) null else secretStore.decrypt(blob.tokenCipher)
+        if (token == null && !blob.invalid && blob.account != null) {
+            // 解密失败 = Keystore 密钥不可用（备份恢复/换机/系统重置）。
+            // 不是 GitHub 撤销，按「未绑定」处理：Settings 里的 lastAccount 会引导重绑，
+            // 避免 UI 显示「已失效」误导用户去 GitHub 检查授权。不落盘 invalid，
+            // Keystore 短暂不可用时下次启动仍可恢复。
+            Log.w(TAG, "github auth decrypt failed, treat as unbound (keystore unavailable)")
+            cachedToken = null
+            cachedCipher = blob.tokenCipher
+            _state.value = GitHubAuthState(loaded = true)
+            return
+        }
         cachedCipher = blob.tokenCipher
         cachedToken = token
-        // 解密失败 = Keystore 密钥不可用（换机恢复/系统重置），等价于已失效
         _state.value = GitHubAuthState(
             account = blob.account,
-            invalid = blob.invalid || (token == null && blob.account != null),
+            invalid = blob.invalid,
             loaded = true,
         )
     }

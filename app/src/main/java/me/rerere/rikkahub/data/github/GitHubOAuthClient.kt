@@ -60,15 +60,15 @@ class GitHubOAuthClient(private val clientId: String) {
 
     /**
      * token 复核结果。区分「明确被拒」与「无法判定」——onAuthInvalid 只应在
-     * [Rejected] 时永久失效；网络失败（[Inconclusive]）保留绑定，避免误杀。
+     * [Rejected] 时永久失效；网络失败/限流（[Inconclusive]）保留绑定，避免误杀。
      */
     sealed interface TokenCheck {
         data class Valid(val profile: GitHubUserProfile) : TokenCheck
 
-        /** GitHub 明确拒绝该 token（HTTP 401/403），可安全判定失效 */
+        /** GitHub 明确拒绝该 token（仅 HTTP 401 = 凭据无效/已撤销），可安全判定失效 */
         data object Rejected : TokenCheck
 
-        /** 网络失败或非 401/403 错误码，无法判定 token 是否有效 */
+        /** 网络失败、403 限流/滥用检测、5xx 等，无法判定 token 是否有效 */
         data object Inconclusive : TokenCheck
     }
 
@@ -117,8 +117,9 @@ class GitHubOAuthClient(private val clientId: String) {
 
     /**
      * 复核 token 是否仍被 GitHub 接受。
-     * 供 401 后的「二次确认」使用：只有 [TokenCheck.Rejected]（HTTP 401/403）才应永久失效凭据；
-     * 网络失败/超时/5xx 返回 [TokenCheck.Inconclusive]，调用方应保留现有绑定。
+     * 供 401 后的「二次确认」使用：只有 [TokenCheck.Rejected]（HTTP 401）才应永久失效凭据；
+     * 403 多为 secondary rate limit / abuse detection（token 本身仍有效），与网络失败/超时/5xx
+     * 一并返回 [TokenCheck.Inconclusive]，调用方应保留现有绑定。
      */
     fun verifyToken(token: String): TokenCheck {
         val connection = (URL(USER_URL).openConnection() as HttpURLConnection).apply {
@@ -150,8 +151,7 @@ class GitHubOAuthClient(private val clientId: String) {
                         TokenCheck.Inconclusive
                     }
                 }
-                401, 403 -> TokenCheck.Rejected
-                else -> TokenCheck.Inconclusive
+                else -> classifyVerifyHttpCode(code)
             }
             if (result is TokenCheck.Inconclusive) {
                 Log.w(TAG, "verifyToken inconclusive, http=$code")
@@ -163,6 +163,15 @@ class GitHubOAuthClient(private val clientId: String) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * GET /user 非 200 状态码分类。抽成纯函数便于单测。
+     * 仅 401 = 凭据被拒；403/429/5xx 一律 Inconclusive，避免 secondary rate limit 误杀有效 token。
+     */
+    internal fun classifyVerifyHttpCode(code: Int): TokenCheck = when (code) {
+        401 -> TokenCheck.Rejected
+        else -> TokenCheck.Inconclusive
     }
 
     internal fun parseDeviceCodeResponse(json: String): DeviceCodeStart? {

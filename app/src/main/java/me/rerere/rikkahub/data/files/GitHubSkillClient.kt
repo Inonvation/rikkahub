@@ -337,6 +337,7 @@ class GitHubSkillClient(
         }
         return try {
             val code = connection.responseCode
+            reportRateLimit(connection)
             // 仅 API 主机的 401 才视为凭据失效；raw/其他主机的 401 只是资源访问问题
             if (code == 401 && attachAuth && url.startsWith(API_BASE)) onAuthInvalid()
             val body = if (code == 200) connection.inputStream.use { it.readBytes() } else null
