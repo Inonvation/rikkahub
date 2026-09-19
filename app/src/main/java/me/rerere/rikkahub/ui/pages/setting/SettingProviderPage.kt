@@ -67,6 +67,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.RECOMMENDED_PROVIDERS
+import me.rerere.rikkahub.data.datastore.generateUniqueProviderName
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.SettingScaffold
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -89,21 +90,20 @@ import sh.calvin.reorderable.ReorderableItem
 import kotlin.uuid.Uuid
 
 /**
- * 生成供应商的"独立副本"：供应商与全部模型都换新 id。
+ * 生成供应商的"独立副本"：供应商与全部模型都换新 id，名称自动加「副本」后缀。
  *
  * 根因：模型选择弹窗（ModelListSheet）把多个供应商的模型渲染进同一个 LazyColumn，
- * 行 key 用模型 id；旧的复制/导入只对 provider 换新 id（copyProvider(Uuid.random())），
- * 模型 UUID 原样共享 → 原供应商与副本出现同 id 模型，打开弹窗即抛
- * "Key ... was already used"。且收藏、会话选中模型、余额定位都按 model.id 全局
- * 首中即返回（Settings.findModelById / Model.findProvider），id 被两个供应商共享时
- * 模型无法区分归属，属于数据层不变量破坏。
+ * 选中态按 model.id 全局比较；旧的复制/导入只对 provider 换新 id，模型 UUID 原样
+ * 共享 → 原供应商与副本出现同 id 模型，选择其中一个会把两边同时高亮，且
+ * findModelById 首中即返回，可能打到错误供应商的 apiKey/baseUrl。
  *
- * 方案：复制时给每个模型重新生成 id。原供应商一侧的收藏/会话/历史引用不受影响
- * （它们指向原模型的旧 id，仍能解析到原供应商）。
+ * 方案：复制时重生成全部模型 id，并给名称加隔离后缀（原名 副本 / 副本 2…）。
+ * 原供应商一侧的收藏/会话/历史引用不受影响（它们指向原模型的旧 id）。
  */
-private fun ProviderSetting.duplicated(): ProviderSetting =
+private fun ProviderSetting.duplicated(existingNames: Collection<String>): ProviderSetting =
     copyProvider(
         id = Uuid.random(),
+        name = generateUniqueProviderName(name, existingNames),
         models = models.map { it.copy(id = Uuid.random()) },
     )
 
@@ -141,14 +141,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             RecommendProviderButton { provider ->
                 vm.updateSettings(
                     settings.copy(
-                        providers = listOf(provider.duplicated()) + settings.providers
+                        providers = listOf(provider.duplicated(settings.providers.map { it.name })) + settings.providers
                     )
                 )
             }
             ImportProviderButton {
                 vm.updateSettings(
                     settings.copy(
-                        providers = listOf(it.duplicated()) + settings.providers
+                        providers = listOf(it.duplicated(settings.providers.map { it.name })) + settings.providers
                     )
                 )
             }
@@ -228,7 +228,9 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                                 hapticController.tap()
                                 vm.updateSettings(
                                     settings.copy(
-                                        providers = listOf(provider.duplicated()) + settings.providers
+                                        providers = listOf(
+                                            provider.duplicated(settings.providers.map { it.name })
+                                        ) + settings.providers
                                     )
                                 )
                                 toaster.show(

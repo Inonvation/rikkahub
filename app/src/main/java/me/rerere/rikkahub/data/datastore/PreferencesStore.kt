@@ -52,6 +52,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV5Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV7Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV8Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
@@ -95,7 +96,8 @@ private val Context.settingsStore by preferencesDataStore(
             PreferenceStoreV4Migration(),
             PreferenceStoreV5Migration(),
             PreferenceStoreV6Migration(),
-            PreferenceStoreV7Migration()
+            PreferenceStoreV7Migration(),
+            PreferenceStoreV8Migration()
         )
     }
 )
@@ -107,7 +109,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
-        const val CURRENT_DATA_VERSION = 7
+        const val CURRENT_DATA_VERSION = 8
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 
@@ -444,22 +446,26 @@ class SettingsStore(
             val validLorebookIds = settings.lorebooks.map { it.id }.toSet()
             val validQuickMessageIds = settings.quickMessages.map { it.id }.toSet()
             val asrProviders = settings.asrProviders.distinctBy { it.id }
+            // 跨供应商隔离兜底：历史复制/导入可能共享 Model.id 或同名。
+            // 默认 idFactory 用确定性 UUID，未落盘时反复加载结果稳定。
+            val providers = settings.providers.withProviderIsolation().distinctBy { it.id }.map { provider ->
+                when (provider) {
+                    is ProviderSetting.OpenAI -> provider.copy(
+                        models = provider.models.distinctBy { model -> model.id }
+                    )
+
+                    is ProviderSetting.Google -> provider.copy(
+                        models = provider.models.distinctBy { model -> model.id }
+                    )
+
+                    is ProviderSetting.Claude -> provider.copy(
+                        models = provider.models.distinctBy { model -> model.id }
+                    )
+                }
+            }
+            val validModelIds = providers.flatMap { it.models }.mapTo(mutableSetOf()) { it.id }
             settings.copy(
-                providers = settings.providers.distinctBy { it.id }.map { provider ->
-                    when (provider) {
-                        is ProviderSetting.OpenAI -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
-                        )
-
-                        is ProviderSetting.Google -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
-                        )
-
-                        is ProviderSetting.Claude -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
-                        )
-                    }
-                },
+                providers = providers,
                 assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
                     assistant.copy(
                         // 单分类迁移：旧多分类数据取第一个归属落到 category，并清空遗留字段后随下次更新落盘
@@ -488,9 +494,7 @@ class SettingsStore(
                 selectedASRProviderId = settings.selectedASRProviderId
                     ?.takeIf { id -> asrProviders.any { provider -> provider.id == id } }
                     ?: asrProviders.firstOrNull()?.id,
-                favoriteModels = settings.favoriteModels.filter { uuid ->
-                    settings.providers.flatMap { it.models }.any { it.id == uuid }
-                },
+                favoriteModels = settings.favoriteModels.filter { uuid -> uuid in validModelIds },
                 modeInjections = settings.modeInjections.distinctBy { it.id },
                 lorebooks = settings.lorebooks.distinctBy { it.id },
                 quickMessages = settings.quickMessages.distinctBy { it.id },
@@ -1346,7 +1350,6 @@ internal val DEFAULT_ASSISTANTS = listOf(
             - Use occasional emoji, but don't overdo it
             - Keep responses concise (2-4 sentences usually)
             - Feel free to use humor when appropriate
-            - Remember details about the user (via memory) to build rapport
         """.trimIndent(),
         temperature = 0.8f,
         enableMemory = true,

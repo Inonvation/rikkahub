@@ -83,6 +83,12 @@ object SettingsJsonMigrator {
                 root["displaySetting"] = JsonObject(migrated)
             }
 
+            // V8: 跨供应商共享 Model.id / 同名供应商隔离（历史复制未重生成模型 uuid）
+            root["providers"]?.let { element ->
+                val migrated = migrateProvidersJson(JsonInstant.encodeToString(element))
+                root["providers"] = JsonInstant.parseToJsonElement(migrated)
+            }
+
             JsonInstant.encodeToString(JsonObject(root))
         }.onFailure {
             Log.e(TAG, "migrate: Failed to migrate settings JSON, using original", it)
