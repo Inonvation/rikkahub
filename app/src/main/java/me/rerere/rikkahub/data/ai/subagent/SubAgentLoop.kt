@@ -394,7 +394,7 @@ internal val NON_SHELL_BUDGET_LADDER: List<BoundBudget> =
  * 为一次 JSON 有界重编码挑选预算档位（纯函数，供单测）。
  *
  * 有 shell 固定 [BoundBudget.DEFAULT]（全文可从 /tool_outputs 找回，对齐旧行为）；
- * 无 shell 按 [NON_SHELL_LADDER] 从宽到严试算产物，取首个不超 [cap] 的档位，
+ * 无 shell 按 [NON_SHELL_BUDGET_LADDER] 从宽到严试算产物，取首个不超 [cap] 的档位，
  * 全部超限（或文本不是合法 JSON）落 [BoundBudget.DEFAULT]——产物长度最终仍由
  * 调用方（GenerationHandler.boundedJsonOrNull）实测，此处只选档不产码。
  *
