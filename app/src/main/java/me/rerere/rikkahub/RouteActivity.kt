@@ -180,6 +180,14 @@ class RouteActivity : ComponentActivity() {
     private val settingsStore by inject<SettingsStore>()
     private var navStack: MutableList<NavKey>? = null
 
+    /**
+     * true = 系统重建 Activity（配置变更 / 后台被回收后恢复，savedInstanceState 非空）。
+     * 此时不应再按 createNewConversationOnStart 新建会话：导航栈应由
+     * rememberNavBackStack 的 saved state 恢复；即使恢复失败，也应回落到 lastConversationId，
+     * 而不是再随机开一个空对话。
+     */
+    private var isActivityRecreated = false
+
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
 
@@ -199,6 +207,7 @@ class RouteActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         disableNavigationBarContrast()
+        isActivityRecreated = savedInstanceState != null
         super.onCreate(savedInstanceState)
         if (CrashHandler.hasCrashed(this)) {
             startActivity(Intent(this, SafeModeActivity::class.java))
@@ -333,11 +342,14 @@ class RouteActivity : ComponentActivity() {
         }
 
         // remember：避免每次重组都同步读 SharedPreferences + 生成 UUID（主线程磁盘读）
-        // 冷启动 / 进程被杀后重建：按 createNewConversationOnStart 决定新建会话或恢复上次会话。
-        // 短暂退后台（进程活着）不走这里——导航栈由 rememberNavBackStack 的 saved state 保留原界面。
+        // 冷启动（savedInstanceState == null）：按 createNewConversationOnStart 决定新建会话或恢复上次会话。
+        // Activity 重建（配置变更 / 后台被系统回收后恢复）：不再走「启动新建对话」——否则
+        // remember(Unit) 会再生成一个随机 UUID；若 rememberNavBackStack 的 saved state 恢复失败
+        // （例如 settings.init 占位期导致组合位次变化），就会误开新会话。重建时一律回落 lastConversationId，
+        // 导航栈本身由 rememberNavBackStack 的 saved state 恢复。
         val startScreen = remember(Unit) {
             Screen.Chat(
-                id = if (settings.displaySetting.createNewConversationOnStart) {
+                id = if (!isActivityRecreated && settings.displaySetting.createNewConversationOnStart) {
                     Uuid.random().toString()
                 } else {
                     readStringPreference(
