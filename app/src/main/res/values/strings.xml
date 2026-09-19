@@ -1112,7 +1112,7 @@
   <string name="setting_page_console_footer_cost">会话计费</string>
   <string name="setting_page_console_footer_cost_desc">显示本会话费用，点击可配置单价</string>
   <string name="setting_page_console_footer_tokens">会话 Tokens</string>
-  <string name="setting_page_console_footer_tokens_desc">显示本会话输入/输出/缓存 token</string>
+  <string name="setting_page_console_footer_tokens_desc">显示本会话累计输入/输出/缓存 token（计费口径）</string>
   <string name="setting_page_console_footer_messages">消息数</string>
   <string name="setting_page_console_footer_messages_desc">显示当前会话消息总数</string>
   <string name="setting_page_console_footer_limit">同时显示数量上限</string>

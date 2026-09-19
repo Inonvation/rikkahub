@@ -197,10 +197,12 @@ private fun ContextStatusPanel(
     val trustedFolderRepository: TrustedFolderRepository = koinInject()
     val trustedSettings by trustedFolderRepository.settingsFlow.collectAsState(initial = TrustedFolderSettings())
 
-    // 会话级统计：主模型消息 + 当前会话子代理用量（任务终态落库后并入）合并计算
+    // 会话级统计：主模型消息 + 当前会话子代理用量（任务终态落库后并入）合并计算。
+    // remember 键同 totalCost 的考量：不拿整个 conversation 当键（流式期间每帧重建）。
     val subAgentUsages by conversationRepository.observeSubAgentUsage(conversation.id.toString())
         .collectAsState(initial = emptyList())
-    val cacheHitRate = remember(conversation, subAgentUsages) {
+    val lastMessageUsage = conversation.currentMessages.lastOrNull()?.usage
+    val cacheHitRate = remember(conversation.currentMessages.size, lastMessageUsage, subAgentUsages) {
         val usages = conversation.currentMessages.map { it.usage } + subAgentUsages.map {
             TokenUsage(
                 promptTokens = it.promptTokens.toInt(),
@@ -211,8 +213,13 @@ private fun ContextStatusPanel(
         }
         CostCalculator.cacheHitRate(usages)
     }
+    // remember 键取「会话消息数 + 最后一条 usage 引用」而非整个 conversation：
+    // 流式期间 conversation 每 chunk 重建，整对象当键会每帧全量重算（逐消息定价表线性扫）；
+    // 消息数 + 最后 usage 的组合键只在「新消息落库 / 最后一条用量更新」时才失效重算，
+    // 已落库历史在流式期间保持缓存。定价/汇率变化仍由 settings 相关键覆盖。
     val totalCost = remember(
-        conversation, subAgentUsages,
+        conversation.id, conversation.currentMessages.size, conversation.currentMessages.lastOrNull()?.usage,
+        subAgentUsages,
         settings.costCurrency, settings.costUsdCnyRate, settings.modelPricingOverrides,
     ) {
         val messages = conversation.currentMessages
@@ -254,7 +261,7 @@ private fun ContextStatusPanel(
     val currentProviderForBalance = currentModel?.findProvider(settings.providers)
     val balanceSupported = currentProviderForBalance?.balanceOption?.enabled == true &&
         currentProviderForBalance is ProviderSetting.OpenAI
-    val sessionTokenUsages = remember(conversation, subAgentUsages) {
+    val sessionTokenUsages = remember(conversation.currentMessages.size, lastMessageUsage, subAgentUsages) {
         conversation.currentMessages.map { it.usage } + subAgentUsages.map {
             TokenUsage(
                 promptTokens = it.promptTokens.toInt(),
@@ -268,7 +275,7 @@ private fun ContextStatusPanel(
     val sessionCompletionTokens = sessionTokenUsages.sumOf { (it?.completionTokens ?: 0).toLong() }
     val sessionCachedTokens = sessionTokenUsages.sumOf { (it?.cachedTokens ?: 0).toLong() }
     // 会话轮数：以助手完成回复的消息数计（一次问答 = 一轮）；预设消息（开场展示）不计
-    val sessionRounds = remember(conversation, settings) {
+    val sessionRounds = remember(conversation.currentMessages.size, settings) {
         conversation.currentMessages
             .dropPresetMessages(
                 settings.getAssistantById(conversation.assistantId)?.presetMessages.orEmpty(),
@@ -276,7 +283,7 @@ private fun ContextStatusPanel(
             .count { it.role == MessageRole.ASSISTANT }
     }
     // 会话中使用过的模型（按出现顺序去重；modelName 为生成时快照，缺失回退配置解析）
-    val modelHistory = remember(conversation, settings) {
+    val modelHistory = remember(conversation.currentMessages.size, settings) {
         conversation.currentMessages.mapNotNull { msg ->
             msg.modelName?.takeIf { it.isNotBlank() }
                 ?: msg.modelId?.let { settings.findModelById(it)?.displayName }

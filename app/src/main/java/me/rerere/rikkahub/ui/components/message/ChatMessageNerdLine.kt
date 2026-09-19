@@ -34,7 +34,13 @@ import java.time.Duration
  *
  * 生成中传入 [liveStats] 走实时数据（与完成后同一渲染，保证前后一致）；
  * 完成后从 [message.usage] / [UIMessage.streamDurationMillis] 读取。
- * 速率一律为累计平均：completionTokens ÷ 纯流式时长（不含工具执行）。
+ *
+ * token 口径（对齐 Codex last/total 双字段）：
+ * - 输入 + cached = **单步口径**（最后一步 provider 实测，= 当前上下文占用），读
+ *   [UIMessage.contextPromptTokens] / [UIMessage.contextCachedTokens]；旧数据缺失时
+ *   回退 usage 累计值（显示偏大，诚实降级）。
+ * - 输出 = 回合账单累计（usage.completionTokens），多步工具循环每步输出都计入。
+ * - 速率一律为累计平均：completionTokens ÷ 纯流式时长（不含工具执行）。
  */
 @Composable
 fun ChatMessageNerdLine(
@@ -61,9 +67,18 @@ fun ChatMessageNerdLine(
                     settings.showTokenUsage && usage != null
                 }
                 if (hasContent) {
-                    val promptTokens = live?.promptTokens ?: usage?.promptTokens ?: 0
+                    // 完成态：输入/cached 用单步锚点（旧数据回退 usage 累计）；输出用账单累计。
+                    // 生成中：liveStats 已是单步输入口径 + 累计输出（见 publishLiveStats），
+                    // cached 在本步 usage 到达前不可知（null → 不显示）。
+                    val promptTokens = live?.promptTokens
+                        ?: message.contextPromptTokens?.takeIf { it > 0 }
+                        ?: usage?.promptTokens ?: 0
+                    val cachedTokens = when {
+                        live != null -> live.cachedTokens ?: 0
+                        else -> message.contextCachedTokens?.takeIf { it > 0 }
+                            ?: usage?.cachedTokens ?: 0
+                    }
                     val completionTokens = live?.completionTokens ?: usage?.completionTokens ?: 0
-                    val cachedTokens = live?.let { 0 } ?: usage?.cachedTokens ?: 0
                     // 速率时长：生成中用累计纯流式时长；完成后优先 streamDurationMillis，旧数据回退墙钟
                     val durationMillis: Long? = when {
                         live != null -> live.streamMillis.takeIf { it > 0 }

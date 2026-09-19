@@ -408,17 +408,27 @@ class ChatVM(
 
     fun moveConversationToAssistant(conversation: Conversation, targetAssistantId: Uuid) {
         viewModelScope.launch {
-            val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
-            // 文件夹是助手内分组，切换助手后原文件夹在新助手下不可见，需清空归属避免会话丢失
-            val updatedConversation = conversationFull.copy(
-                assistantId = targetAssistantId,
-                folderId = null,
-            )
             if (conversation.id == _conversationId) {
-                chatService.saveConversation(_conversationId, updatedConversation)
+                // 当前会话：先改内存。未落库的空新会话 getConversationById 为 null，
+                // 不能依赖 DB 快照，否则顶栏切换助手会静默 no-op（弹层已关、绑定未变）。
+                // 文件夹是助手内分组，切换助手后原文件夹在新助手下不可见，需清空归属避免会话丢失。
+                chatService.updateConversationState(_conversationId) {
+                    it.copy(assistantId = targetAssistantId, folderId = null)
+                }
+                // 已落库则同步持久化；未落库空会话等首次发送时落库（届时已带新 assistantId）
+                if (conversationRepo.existsConversationById(_conversationId)) {
+                    chatService.saveConversation(
+                        _conversationId,
+                        chatService.getConversationFlow(_conversationId).value,
+                    )
+                }
                 settingsStore.updateAssistant(targetAssistantId)
             } else {
-                conversationRepo.updateConversation(updatedConversation)
+                // 其它会话（抽屉「移动到助手」）：仅落库
+                val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
+                conversationRepo.updateConversation(
+                    conversationFull.copy(assistantId = targetAssistantId, folderId = null),
+                )
             }
         }
     }

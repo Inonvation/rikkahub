@@ -501,6 +501,11 @@ internal fun FilesPicker(
                     onDismiss()
                     navController.navigate(Screen.WorkspaceDetail(workspaceId))
                 },
+                onTerminal = { workspaceId ->
+                    showWorkspaceSheet = false
+                    onDismiss()
+                    navController.navigate(Screen.WorkspaceTerminal(workspaceId))
+                },
             )
         }
         if (showCwdSheet && workspaceReady) {

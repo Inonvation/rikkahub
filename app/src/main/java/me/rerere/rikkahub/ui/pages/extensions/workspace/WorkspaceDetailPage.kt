@@ -1241,7 +1241,8 @@ private fun WorkspacePathBar(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             // 根目录 crumb: 非当前路径时点击回根
-            item(key = "crumb-root") {
+            // key 与路径段的 "seg-*" 命名空间隔离，避免路径含 "root" 等段时撞 key
+            item(key = "home") {
                 PathCrumb(
                     text = "根目录",
                     active = segments.isEmpty(),
@@ -1259,8 +1260,7 @@ private fun WorkspacePathBar(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
                 }
-                // 前缀加 crumb- 命名空间，避免与固定 key "crumb-root" 冲突（如路径含 root 段）
-                item(key = "crumb-$prefix") {
+                item(key = "seg-$index") {
                     PathCrumb(
                         text = seg,
                         active = isLast,

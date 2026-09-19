@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -354,6 +356,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // docs/chat-session-view-state-plan.md 4.1-3）
     val isChatListAtBottom = LocalIsChatListAtBottom.current
     val isUserControlled = LocalIsChatListUserControlled.current
+    // 审批提交后补贴底用（组合期捕获，回调/协程中按调用时刻读当前布局）
+    val scrollChatToBottom = LocalScrollChatToBottom.current
     // 用户手动展开/收起工具气泡时通知列表取消自动跟随（主聊天列表加载中生效）
     val onManualContentToggle = LocalOnManualContentToggle.current
     val settings = LocalSettings.current
@@ -410,8 +414,36 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         onManualContentToggle?.invoke()
     }
     val hapticController = rememberHaptic()
+    val approvalScope = rememberCoroutineScope()
     val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
+    // 审批提交统一出口：批准 / 拒绝（含填理由）/ 同意全部都会让本步骤高度骤减——
+    // 调用点所在的 extra 审批按钮行与 label 里的「目的说明」文本（maxLines=3）随
+    // isPending 翻 false 同时消失，而此刻 loading 尚未翻转（审批等待期生成 job 已
+    // 结束）。高度收缩使 LazyColumn 的 offset 上限变小，贴底观看时 offset 被钳制，
+    // 内容整体下移、视口退回更早历史（"批准后列表往下跳"根因）。故与 ask_user 提交、
+    // 手动展开/收起走同一门控：先通知列表（贴底则解锁跟随逐帧重锚、离底则武装闩锁），
+    // 再在高度动画落定后补一次贴底——与过程区折叠（ChatMessage）/思考卡
+    // （ChatMessageReasoning）同一处置：这两处高度收缩都有"贴底则重锚"兜底，审批漏了。
+    // 必须补这一发的原因：同批还有其它 pending 工具时（ChatService.handleToolApproval 的
+    // hasPendingTools 分支）本批不续答 → loading 保持 false → 自动跟随不运行，无人重锚，
+    // 收缩后的视口回退就裸露出来（"同意全部"因清空全部 pending 立刻续答、被跟随盖住，
+    // 故表现为"只有单点批准会跳"）。
+    // 三个入口必须都过这里——只补其中一个正是本 bug 的成因。
+    val submitApproval: (Boolean, String) -> Unit = { approved, reason ->
+        val wasAtBottom = isChatListAtBottom?.invoke() == true
+        onManualContentToggle?.invoke()
+        onToolApproval?.invoke(tool.toolCallId, approved, reason)
+        if (wasAtBottom) {
+            approvalScope.launch {
+                // 等高度动画（extra 行/目的说明的 animateContentSize ~200ms）落定再贴底，
+                // 赶在动画中途纠正会与正在收缩的高度互相拉扯。贴底内部自带用户接管守卫
+                // （离底/滚动中/刚滚动过则放弃），不会把翻历史的用户拽回。
+                delay(250)
+                scrollChatToBottom?.invoke()
+            }
+        }
+    }
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     // 加载态由渲染器决定（如子代理用任务真实状态，避免并行时已完成仍闪烁）
     val rendererLoading = renderer.isLoading(context, loading)
@@ -509,7 +541,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             )
                         }
                         FilledTonalIconButton(
-                            onClick = { hapticController.lightTap(); onToolApproval(tool.toolCallId, true, "") },
+                            onClick = { hapticController.lightTap(); submitApproval(true, "") },
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
@@ -546,7 +578,20 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                     },
                                     onClick = {
                                         approvalMenuExpanded = false
+                                        // 走统一出口（同批准/拒绝）：本步骤高度同样会骤减，
+                                        // 需通知列表并在贴底时重锚。仅当同节点内还有其它
+                                        // pending 时 approveAll 才不立刻续答（跨节点 pending
+                                        // 仍会走 hasPendingTools 等待）——那种情况下没有自动
+                                        // 跟随兜底，这里的重锚就是唯一保护。
+                                        val wasAtBottom = isChatListAtBottom?.invoke() == true
+                                        onManualContentToggle?.invoke()
                                         onApproveAllRelated?.invoke(tool.toolCallId)
+                                        if (wasAtBottom) {
+                                            approvalScope.launch {
+                                                delay(250)
+                                                scrollChatToBottom?.invoke()
+                                            }
+                                        }
                                     },
                                 )
                                 DropdownMenuItem(
@@ -684,7 +729,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             onDismiss = { showDenyDialog = false },
             onConfirm = { reason ->
                 showDenyDialog = false
-                onToolApproval(tool.toolCallId, false, reason)
+                submitApproval(false, reason)
             }
         )
     }
@@ -861,6 +906,11 @@ private fun ChainOfThoughtScope.AskUserToolStep(
             skippedIds = skippedIds,
             onSubmit = { answer ->
                 showSheet = false
+                // 提交后工具步骤高度会变（按钮消失、作答内容出现），且续答立刻把
+                // loading 置 true。若不通知列表，自动跟随会在钉底时把视口从刚作答的
+                // 提问步骤硬拽到底部（视觉上"消息跳到上方"）。与手动展开/收起同一
+                // 门控：贴底则解锁跟随平滑追底，不在底部则武装闩锁保持当前视口。
+                onManualContentToggle?.invoke()
                 onToolAnswer(tool.toolCallId, answer)
             },
             onDismiss = { showSheet = false },

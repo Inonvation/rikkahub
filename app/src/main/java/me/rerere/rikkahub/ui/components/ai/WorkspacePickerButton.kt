@@ -113,6 +113,10 @@ fun WorkspacePickerButton(
                 showSheet = false
                 navController.navigate(Screen.WorkspaceDetail(workspaceId))
             },
+            onTerminal = { workspaceId ->
+                showSheet = false
+                navController.navigate(Screen.WorkspaceTerminal(workspaceId))
+            },
         )
     }
 }

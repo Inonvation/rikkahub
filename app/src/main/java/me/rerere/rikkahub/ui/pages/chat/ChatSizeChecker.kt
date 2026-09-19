@@ -38,11 +38,14 @@ private val DefaultSizeInfo = ConversationSizeInfo(
 fun rememberConversationSizeInfo(conversation: Conversation): ConversationSizeInfo {
     return remember(conversation.messageNodes) {
         val nodeCount = conversation.messageNodes.size
+        // 单步口径（最后一步实测输入 = 真实上下文占用）：usage.promptTokens 是多步工具
+        // 循环的账单累计会虚高数倍，不能当上下文判断。旧数据无该字段视为 0 不警告
+        // （误报比漏报烦人；此类会话顶栏占用也走估算口径）。
         val lastAssistantInputTokens = conversation.messageNodes.asReversed()
             .map { it.currentMessage }
             .firstOrNull { it.role == MessageRole.ASSISTANT }
-            ?.usage
-            ?.promptTokens
+            ?.contextPromptTokens
+            ?.takeIf { it > 0 }
             ?: 0
         val exceedNodeCountThreshold = nodeCount > MESSAGE_NODE_WARNING_THRESHOLD
         val exceedInputTokenThreshold = lastAssistantInputTokens > LAST_ASSISTANT_INPUT_TOKEN_WARNING_THRESHOLD

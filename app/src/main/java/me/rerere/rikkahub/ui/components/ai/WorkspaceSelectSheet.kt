@@ -29,12 +29,14 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Codesandbox
+import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
 import me.rerere.rikkahub.ui.pages.extensions.workspace.toShellStatusLabel
+import me.rerere.workspace.WorkspaceShellStatus
 
 @Composable
 internal fun WorkspaceSelectSheet(
@@ -44,6 +46,7 @@ internal fun WorkspaceSelectSheet(
     onManage: () -> Unit,
     onDismiss: () -> Unit,
     onSettings: (String) -> Unit = {},
+    onTerminal: (String) -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -86,6 +89,11 @@ internal fun WorkspaceSelectSheet(
                         selected = workspace.id == assistant.workspaceId?.toString(),
                         onClick = { onSelect(workspace.id) },
                         onSettings = { onSettings(workspace.id) },
+                        onTerminal = if (workspace.shellStatus != WorkspaceShellStatus.DISABLED.name) {
+                            { onTerminal(workspace.id) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }
@@ -123,6 +131,7 @@ private fun WorkspaceSelectRow(
     onClick: () -> Unit,
     status: String? = null,
     onSettings: (() -> Unit)? = null,
+    onTerminal: (() -> Unit)? = null,
 ) {
     val hapticController = rememberHaptic()
     ListItem(
@@ -147,12 +156,26 @@ private fun WorkspaceSelectRow(
                 )
             }
         },
-        trailingContent = onSettings?.let {
-            {
+        trailingContent = {
+            if (onTerminal != null) {
                 IconButton(
                     onClick = {
                         hapticController.lightTap()
-                        it()
+                        onTerminal()
+                    },
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.ComputerTerminal01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (onSettings != null) {
+                IconButton(
+                    onClick = {
+                        hapticController.lightTap()
+                        onSettings()
                     },
                 ) {
                     Icon(
