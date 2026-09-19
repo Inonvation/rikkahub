@@ -8,6 +8,7 @@ import kotlin.uuid.Uuid
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChatScrollUtilsTest {
@@ -152,4 +153,125 @@ class ChatScrollUtilsTest {
         assertEquals(1, chatMessageItemIndex(messageIndex = 0, presetCount = 0, hasPresetIntroItem = true))
     }
 
+    // ---------- chatItemMessageIndexOrNull / resolveChatScrollRestoreTarget ----------
+
+    private fun msgNode() = singleMsgNode(Uuid.random())
+
+    @Test
+    fun `item mapping skips intro item and trailing placeholders`() {
+        // intro item（index 0）不是消息
+        assertNull(chatItemMessageIndexOrNull(itemIndex = 0, messageCount = 3, presetCount = 0, hasPresetIntroItem = true))
+        // intro 之后第一条真实消息
+        assertEquals(0, chatItemMessageIndexOrNull(itemIndex = 1, messageCount = 3, presetCount = 0, hasPresetIntroItem = true))
+        // 无 intro 时 index 0 即消息
+        assertEquals(0, chatItemMessageIndexOrNull(itemIndex = 0, messageCount = 3, presetCount = 0, hasPresetIntroItem = false))
+        // 越过消息区（摘要/系统提示/底部占位）
+        assertNull(chatItemMessageIndexOrNull(itemIndex = 3, messageCount = 3, presetCount = 0, hasPresetIntroItem = false))
+        // 无 intro 但仍有 preset 前缀：item 0 = 首条真实消息（preset 已 drop，不占 item）
+        assertEquals(2, chatItemMessageIndexOrNull(itemIndex = 0, messageCount = 4, presetCount = 2, hasPresetIntroItem = false))
+        // intro 之后 item 1 = 全列表下标 presetCount（真实消息区起点）
+        assertEquals(2, chatItemMessageIndexOrNull(itemIndex = 1, messageCount = 4, presetCount = 2, hasPresetIntroItem = true))
+    }
+
+    @Test
+    fun `restore prefers anchor over stale index`() {
+        val nodes = List(10) { msgNode() }
+        val anchor = nodes[4].id
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 1,
+            savedOffset = 30,
+            anchorMessageId = anchor,
+            messageNodes = nodes,
+            presetCount = 0,
+            hasPresetIntroItem = false,
+            fallbackItemIndex = 9,
+        )
+        // 存档 index 过期（头部曾增删），锚点仍在 → 落到锚点当前下标 + 原 offset
+        assertEquals(4, target.itemIndex)
+        assertEquals(30, target.scrollOffset)
+    }
+
+    @Test
+    fun `restore maps anchor through preset intro offset`() {
+        val preset = List(2) { msgNode() }
+        val real = List(5) { msgNode() }
+        val nodes = preset + real
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 0,
+            savedOffset = 0,
+            anchorMessageId = real[0].id,
+            messageNodes = nodes,
+            presetCount = 2,
+            hasPresetIntroItem = true,
+            fallbackItemIndex = 6,
+        )
+        // real[0] 全列表下标 2 → intro 占一位后 item = 2-2+1 = 1
+        assertEquals(1, target.itemIndex)
+        assertEquals(0, target.scrollOffset)
+    }
+
+    @Test
+    fun `restore falls back to index when anchor deleted`() {
+        val nodes = List(6) { msgNode() }
+        val deletedAnchor = Uuid.random()
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 3,
+            savedOffset = 12,
+            anchorMessageId = deletedAnchor,
+            messageNodes = nodes,
+            presetCount = 0,
+            hasPresetIntroItem = false,
+            fallbackItemIndex = 5,
+        )
+        assertEquals(3, target.itemIndex)
+        assertEquals(12, target.scrollOffset)
+    }
+
+    @Test
+    fun `restore clamps out-of-range index to fallback`() {
+        val nodes = List(4) { msgNode() }
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 99,
+            savedOffset = 80,
+            anchorMessageId = null,
+            messageNodes = nodes,
+            presetCount = 0,
+            hasPresetIntroItem = false,
+            fallbackItemIndex = 3,
+        )
+        assertEquals(3, target.itemIndex)
+        assertEquals(0, target.scrollOffset)
+    }
+
+    @Test
+    fun `restore uses fallback when no saved and empty-safe last index`() {
+        val nodes = List(3) { msgNode() }
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 2,
+            savedOffset = 0,
+            anchorMessageId = null,
+            messageNodes = nodes,
+            presetCount = 0,
+            hasPresetIntroItem = false,
+            fallbackItemIndex = 2,
+        )
+        assertEquals(2, target.itemIndex)
+        assertEquals(0, target.scrollOffset)
+    }
+
+    @Test
+    fun `restore coerces negative offset to zero`() {
+        val nodes = List(5) { msgNode() }
+        val target = resolveChatScrollRestoreTarget(
+            savedIndex = 2,
+            savedOffset = -40,
+            anchorMessageId = null,
+            messageNodes = nodes,
+            presetCount = 0,
+            hasPresetIntroItem = false,
+            fallbackItemIndex = 4,
+        )
+        assertEquals(2, target.itemIndex)
+        assertEquals(0, target.scrollOffset)
+    }
 }

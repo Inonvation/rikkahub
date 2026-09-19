@@ -36,6 +36,13 @@ fun ImeLazyListAutoScroller(
                 }
                 imeHeigh = keyboardHeight
             } else {
+                // 键盘收起：撤销弹出时的补偿滚动。此前只清 imeHeigh 不回滚 offset，
+                // 而父级 imePadding 同步释放会把视口撑高——同一 offset 下原贴底内容
+                // 整体上移（约等于键盘高度），表现为"提交/收键盘后列表跳到消息上方"。
+                // 仅回滚我们加过的量；用户在键盘期间若已手动滚动则跳过，避免抢手势。
+                if (imeHeigh > 0 && !lazyListState.isScrollInProgress) {
+                    lazyListState.scrollBy(-imeHeigh.toFloat())
+                }
                 imeHeigh = 0
             }
         }
