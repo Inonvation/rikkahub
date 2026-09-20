@@ -89,7 +89,14 @@ class GitHubSkillClient(
         /** 条件请求命中 304：自上次 etag 以来该路径无新提交 */
         data object NotModified : CommitCheck()
 
-        data class Head(val sha: String, val etag: String?) : CommitCheck()
+        data class Head(
+            val sha: String,
+            val etag: String?,
+            /** commit 首行 message（解析失败为 null），供更新预览展示 */
+            val message: String? = null,
+            /** commit 时间（epoch ms，解析失败为 null） */
+            val timeEpochMs: Long? = null,
+        ) : CommitCheck()
 
         data class Failed(val code: Int, val reason: String) : CommitCheck()
     }
@@ -99,6 +106,13 @@ class GitHubSkillClient(
         data class Success(val paths: List<String>) : ListResult()
 
         data class Failed(val reason: String) : ListResult()
+    }
+
+    /** 列树结果（带每文件 git blob SHA）。[blobs] 为相对 [GitHubRepoInfo.path] 的路径 -> blob SHA */
+    sealed class TreeResult {
+        data class Success(val blobs: Map<String, String>) : TreeResult()
+
+        data class Failed(val reason: String) : TreeResult()
     }
 
     /** 批量下载结果。[files] 的 key 为仓库内绝对路径 */
@@ -152,26 +166,41 @@ class GitHubSkillClient(
      * 返回相对 [info.path] 的路径列表。1 个 API 请求，替代逐目录递归的 N 请求。
      */
     fun listTreeFiles(info: GitHubRepoInfo): ListResult {
+        return when (val listed = listTreeWithBlobs(info)) {
+            is TreeResult.Success -> ListResult.Success(listed.blobs.keys.toList())
+            is TreeResult.Failed -> ListResult.Failed(listed.reason)
+        }
+    }
+
+    /**
+     * 列树并保留每个 blob 的 git SHA：增量更新用它做零下载变更检测
+     * （与注册表 [SkillSource.fileHashes] 的 blob SHA 直接比对）。
+     */
+    fun listTreeWithBlobs(info: GitHubRepoInfo): TreeResult {
         val ref = if (info.branch.isBlank()) "HEAD" else info.branch
         val url = "$API_BASE/repos/${info.owner}/${info.repo}/git/trees/${encodeSegment(ref)}?recursive=1"
         val (code, body, _) = request(url, etag = null)
-        if (code != 200) return ListResult.Failed(describeHttpError(code))
+        if (code != 200) return TreeResult.Failed(describeHttpError(code))
         return runCatching {
             val obj = JsonInstant.parseToJsonElement(body!!.decodeToString()).jsonObject
             if (obj["truncated"]?.jsonPrimitive?.booleanOrNull == true) {
-                return ListResult.Failed("仓库文件过多，无法列出目录")
+                return TreeResult.Failed("仓库文件过多，无法列出目录")
             }
             val prefix = if (info.path.isBlank()) "" else "${info.path}/"
-            val paths = obj["tree"]?.jsonArray.orEmpty().mapNotNull { element ->
+            val blobs = LinkedHashMap<String, String>()
+            for (element in obj["tree"]?.jsonArray.orEmpty()) {
                 val item = element.jsonObject
-                val absPath = item["path"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                if (item["type"]?.jsonPrimitive?.content != "blob") return@mapNotNull null
-                if (info.path.isBlank()) absPath else absPath.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)
+                val absPath = item["path"]?.jsonPrimitive?.content ?: continue
+                if (item["type"]?.jsonPrimitive?.content != "blob") continue
+                val relPath = if (info.path.isBlank()) absPath else absPath.removePrefix(prefix)
+                if (relPath == absPath && info.path.isNotBlank()) continue
+                val sha = item["sha"]?.jsonPrimitive?.content ?: continue
+                blobs[relPath] = sha
             }
-            ListResult.Success(paths)
+            TreeResult.Success(blobs)
         }.getOrElse { e ->
-            Log.w(TAG, "listTreeFiles: parse failed", e)
-            ListResult.Failed("解析 GitHub 响应失败")
+            Log.w(TAG, "listTreeWithBlobs: parse failed", e)
+            TreeResult.Failed("解析 GitHub 响应失败")
         }
     }
 
@@ -211,19 +240,6 @@ class GitHubSkillClient(
             files[absPath] = content
         }
         return FetchResult.Success(files)
-    }
-
-    /** 拉取 [info.path] 下全部文件（相对路径 key）。更新应用路径使用。 */
-    suspend fun fetchSkillFiles(info: GitHubRepoInfo): FetchResult {
-        val listed = listTreeFiles(info)
-        if (listed is ListResult.Failed) return FetchResult.Failed(listed.reason)
-        val relPaths = (listed as ListResult.Success).paths
-        val prefix = if (info.path.isBlank()) "" else "${info.path}/"
-        val fetched = downloadFilesByAbsPath(info, relPaths.map { prefix + it })
-        return when (fetched) {
-            is FetchResult.Failed -> fetched
-            is FetchResult.Success -> FetchResult.Success(fetched.files.mapKeys { it.key.removePrefix(prefix) })
-        }
     }
 
     /** 单文件获取：raw 优先（冷却期内直接跳过），失败回退 contents API base64。 */
@@ -296,14 +312,36 @@ class GitHubSkillClient(
         }
     }
 
-    /** 解析 commits API 响应（数组取第一条的 sha）。供单元测试直接验证。 */
-    internal fun parseCommitsResponse(json: String?): String? {
+    /** 解析 commits API 响应（数组取第一条：sha + message 首行 + 提交时间）。供单元测试直接验证。 */
+    internal fun parseCommitsResponse(json: String?): String? = parseCommitInfo(json)?.sha
+
+    /** commit 信息解析结果 */
+    data class CommitInfo(
+        val sha: String,
+        val message: String?,
+        val timeEpochMs: Long?,
+    )
+
+    /**
+     * 解析 commits API 响应的完整 commit 信息。
+     * message 取首行；date 为 ISO 8601（如 2026-09-01T12:34:56Z），解析失败记 null。
+     */
+    internal fun parseCommitInfo(json: String?): CommitInfo? {
         if (json.isNullOrBlank()) return null
         // 用 kotlinx 而非 org.json：本方法被 JVM 单测直接调用，org.json 在 JVM 是抛异常的 stub
         return runCatching {
             val array = JsonInstant.parseToJsonElement(json).jsonArray
-            val sha = array.firstOrNull()?.jsonObject?.get("sha")?.jsonPrimitive?.content
-            sha?.takeIf { it.isNotBlank() }
+            val first = array.firstOrNull()?.jsonObject ?: return null
+            val sha = first["sha"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return null
+            val commit = first["commit"]?.jsonObject
+            val message = commit?.get("message")?.jsonPrimitive?.content
+                ?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+                ?.take(80)
+            val date = commit?.get("committer")?.jsonObject?.get("date")?.jsonPrimitive?.content
+            val time = date?.let {
+                runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+            }
+            CommitInfo(sha = sha, message = message, timeEpochMs = time)
         }.getOrNull()
     }
 

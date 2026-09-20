@@ -28,6 +28,16 @@ data class SkillSource(
     val etag: String? = null,
     /** 安装时的内容指纹，用于识别本地改动（指纹不一致 = 本地已修改） */
     val contentHash: String,
+    /**
+     * 安装/最近更新时的每文件指纹（相对路径 -> git blob SHA），增量更新与本地改动定位的依据。
+     * 用 git blob SHA 而非内容 sha256：与 GitHub git trees API 返回的 blob SHA 同源，
+     * 检查变更集时无需下载文件内容即可对比；本地文件也能用同算法重算出可比对的值。
+     * 旧版本注册表无此字段（空 map），此时回退整目录 contentHash 判断。
+     */
+    val fileHashes: Map<String, String> = emptyMap(),
+    /** 最近一次检测到的更新对应的 commit 信息（展示用），应用更新后清空 */
+    val remoteCommitMessage: String? = null,
+    val remoteCommitTime: Long? = null,
     /** 自动更新：检测到更新且本地未修改时，后台检查中直接应用 */
     val autoUpdate: Boolean = false,
     /** 本地文件相对安装内容有改动（重新计算而非缓存，检查/应用时刷新） */
@@ -96,6 +106,31 @@ object SkillContentHash {
             files[file.toRelativeString(dir).replace(File.separatorChar, '/')] = file.readBytes()
         }
         return computeFilesHash(files)
+    }
+
+    /**
+     * git blob SHA（`git hash-object` 同算法）：SHA-1("blob <size>\\0" + content)。
+     * 与 GitHub git trees API 返回的 blob SHA 一致，因此远端清单无需下载内容即可获得，
+     * 本地文件重算后可与注册表/远端直接比对。
+     */
+    fun computeBlobSha(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-1")
+        digest.update("blob ${bytes.size}".toByteArray(Charsets.UTF_8))
+        digest.update(0)
+        digest.update(bytes)
+        return digest.digest().toHexString()
+    }
+
+    /** 逐文件计算 git blob SHA（路径 -> blob SHA），供安装/更新时构建清单。 */
+    fun computeFilesBlobShas(files: Map<String, ByteArray>): Map<String, String> =
+        files.mapValues { (_, bytes) -> computeBlobSha(bytes) }
+
+    /** 逐文件计算目录下所有文件的 blob SHA；目录不存在返回 null。 */
+    fun computeDirBlobShas(dir: File): Map<String, String>? {
+        if (!dir.exists()) return null
+        return dir.walkTopDown().filter { it.isFile }.associate {
+            file -> file.toRelativeString(dir).replace(File.separatorChar, '/') to computeBlobSha(file.readBytes())
+        }
     }
 
     private fun ByteArray.toHexString(): String =

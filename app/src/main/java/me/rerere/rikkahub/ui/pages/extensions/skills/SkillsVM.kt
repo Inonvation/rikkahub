@@ -57,6 +57,26 @@ class SkillsVM(
     private val _busySkills = MutableStateFlow<Set<String>>(emptySet())
     val busySkills = _busySkills.asStateFlow()
 
+    /** 已准备好的增量更新（预览弹窗数据源），null 表示无进行中的更新确认 */
+    private val _pendingPrepared = MutableStateFlow<SkillUpdateManager.PreparedUpdate?>(null)
+    val pendingPrepared = _pendingPrepared.asStateFlow()
+
+    /** 更新相关进度文案（增量下载/批量更新），null 表示无进行中的更新任务 */
+    private val _updateProgress = MutableStateFlow<String?>(null)
+    val updateProgress = _updateProgress.asStateFlow()
+
+    /** 批量更新进行中标记（进度弹窗展示依据） */
+    private val _batchUpdating = MutableStateFlow(false)
+    val batchUpdating = _batchUpdating.asStateFlow()
+
+    /** 全量检查进行中标记（顶栏按钮转圈） */
+    private val _checkingAll = MutableStateFlow(false)
+    val checkingAll = _checkingAll.asStateFlow()
+
+    /** 批量更新取消标记 */
+    @Volatile
+    private var batchCancelled = false
+
     /** GitHub 导入进度文案（"正在下载 x/y"），null 表示无进行中的导入；对话框实时展示 */
     private val _importProgress = MutableStateFlow<String?>(null)
     val importProgress = _importProgress.asStateFlow()
@@ -125,22 +145,152 @@ class SkillsVM(
         }
     }
 
+    /** 顶栏「检查全部」：force 批量检查全部来源并刷新列表。 */
+    fun checkAllNow() {
+        if (_checkingAll.value) return
+        _checkingAll.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { skillUpdateManager.checkAll(force = true) }
+            _skills.value = skillManager.listSkills()
+            _checkingAll.value = false
+        }
+    }
+
+    /** 批量检查选中的技能（force）。回调返回有更新数与失败数。 */
+    fun checkSkills(names: List<String>, onResult: (available: Int, failed: Int) -> Unit) {
+        if (names.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            var available = 0
+            var failed = 0
+            for (name in names) {
+                setBusy(name, true)
+                val result = runCatching { skillUpdateManager.checkForUpdate(name, force = true) }
+                    .getOrElse { SkillUpdateManager.CheckResult.Failed(it.message ?: "unknown") }
+                setBusy(name, false)
+                when (result) {
+                    is SkillUpdateManager.CheckResult.UpdateAvailable -> available++
+                    is SkillUpdateManager.CheckResult.Failed -> failed++
+                    else -> {}
+                }
+            }
+            withContext(Dispatchers.Main) { onResult(available, failed) }
+        }
+    }
+
     /**
-     * 手动应用更新。返回 [SkillUpdateManager.ApplyResult.SkippedLocalModified] 时
-     * UI 应弹确认框，用户确认后带 overwriteLocal=true 重试。
+     * 手动更新第一步：增量准备（列树比对 + 只下载变更文件），完成后弹出预览。
+     * 无实质变化时回调 NoChange（注册表已刷新、徽标消除）。
      */
-    fun applyUpdate(
-        name: String,
-        overwriteLocal: Boolean,
-        onResult: (SkillUpdateManager.ApplyResult) -> Unit,
-    ) {
+    fun prepareUpdate(name: String, onResult: (SkillUpdateManager.PrepareResult) -> Unit) {
         setBusy(name, true)
         viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching { skillUpdateManager.applyUpdate(name, overwriteLocal) }
+            val result = runCatching {
+                skillUpdateManager.prepareUpdate(name) { done, total ->
+                    throttledProgressEmit("正在获取变更 $done/$total")
+                }
+            }.getOrElse {
+                Log.w(TAG, "prepareUpdate failed: $name", it)
+                SkillUpdateManager.PrepareResult.Failed(it.message ?: "unknown")
+            }
+            _updateProgress.value = null
+            setBusy(name, false)
+            _skills.value = skillManager.listSkills()
+            if (result is SkillUpdateManager.PrepareResult.Prepared) {
+                _pendingPrepared.value = result.update
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    /** 预览确认后应用增量更新。 */
+    fun applyPrepared(onResult: (SkillUpdateManager.ApplyResult) -> Unit) {
+        val prepared = _pendingPrepared.value ?: return
+        val name = prepared.skillName
+        setBusy(name, true)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { skillUpdateManager.applyPrepared(prepared) }
                 .getOrElse { SkillUpdateManager.ApplyResult.Failed(it.message ?: "unknown") }
             _skills.value = skillManager.listSkills()
             setBusy(name, false)
+            _pendingPrepared.value = null
             withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    /** 取消预览（释放已下载内容，不落盘）。 */
+    fun dismissPrepared() {
+        _pendingPrepared.value = null
+    }
+
+    /**
+     * 批量更新：对 updateAvailable 且本地未修改的技能逐个「准备→应用」（无需逐个预览，
+     * 未改动过的技能应用远端内容没有覆盖风险）；本地已修改的准备阶段发现覆盖冲突时跳过。
+     */
+    fun updateSkills(names: List<String>, onResult: (updated: Int, skipped: Int, failed: Int) -> Unit) {
+        if (names.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            batchCancelled = false
+            _batchUpdating.value = true
+            var updated = 0
+            var skipped = 0
+            var failed = 0
+            val targets = names.filter { skillUpdateManager.sources.value[it]?.updateAvailable == true }
+            for ((index, name) in targets.withIndex()) {
+                if (batchCancelled) break
+                _updateProgress.value = "正在更新 $name（${index + 1}/${targets.size}）"
+                val source = skillUpdateManager.sources.value[name]
+                if (source == null || source.localModified) {
+                    skipped++
+                    continue
+                }
+                setBusy(name, true)
+                val prepared = runCatching { skillUpdateManager.prepareUpdate(name) }
+                    .getOrElse {
+                        Log.w(TAG, "updateSkills: prepare $name failed", it)
+                        null
+                    }
+                when (prepared) {
+                    is SkillUpdateManager.PrepareResult.Prepared ->
+                        if (prepared.update.overwriteFiles.isEmpty()) {
+                            when (runCatching { skillUpdateManager.applyPrepared(prepared.update) }
+                                .getOrElse {
+                                    Log.w(TAG, "updateSkills: apply $name failed", it)
+                                    null
+                                }) {
+                                is SkillUpdateManager.ApplyResult.Updated -> updated++
+                                else -> failed++
+                            }
+                        } else {
+                            skipped++
+                        }
+
+                    is SkillUpdateManager.PrepareResult.NoChange -> updated++
+                    else -> failed++
+                }
+                setBusy(name, false)
+            }
+            _updateProgress.value = null
+            _batchUpdating.value = false
+            _skills.value = skillManager.listSkills()
+            withContext(Dispatchers.Main) { onResult(updated, skipped, failed) }
+        }
+    }
+
+    /** 更新横幅「全部更新」：更新所有有更新的技能。 */
+    fun updateAllAvailable(onResult: (updated: Int, skipped: Int, failed: Int) -> Unit) {
+        updateSkills(skillUpdateManager.sources.value.keys.toList(), onResult)
+    }
+
+    /** 取消批量更新（当前技能完成后停止）。 */
+    fun cancelBatchUpdate() {
+        batchCancelled = true
+    }
+
+    private fun throttledProgressEmit(text: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastProgressEmit >= PROGRESS_EMIT_INTERVAL_MS) {
+            lastProgressEmit = now
+            _updateProgress.value = text
         }
     }
 

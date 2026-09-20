@@ -156,4 +156,41 @@ class SkillSourceRegistryTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun legacyJsonWithoutFileHashesDecodesWithDefaults() {
+        // 旧版本注册表（无 fileHashes/remoteCommit* 字段）解码后取默认值，不丢来源
+        val dir = Files.createTempDirectory("skill-registry-legacy").toFile()
+        try {
+            val file = File(dir, ".sources.json")
+            file.writeText(
+                """[{"skillName":"a","repoOwner":"o","repoName":"r","branch":"main","path":"",
+                   "commitSha":"s","contentHash":"h"}]""",
+            )
+            val loaded = SkillSourceRegistry(file).load()
+            val source = loaded["a"]!!
+            assertEquals(emptyMap<String, String>(), source.fileHashes)
+            assertEquals(null, source.remoteCommitMessage)
+            assertEquals(null, source.remoteCommitTime)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun roundTripPreservesFileHashesAndCommitInfo() {
+        val dir = Files.createTempDirectory("skill-registry-manifest").toFile()
+        try {
+            val registry = SkillSourceRegistry(File(dir, ".sources.json"))
+            val source = sampleSource().copy(
+                fileHashes = mapOf("SKILL.md" to "sha1", "assets/a.png" to "sha2"),
+                remoteCommitMessage = "fix: x",
+                remoteCommitTime = 1725148496000L,
+            )
+            registry.save(mapOf(source.skillName to source))
+            assertEquals(source, registry.load()[source.skillName])
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

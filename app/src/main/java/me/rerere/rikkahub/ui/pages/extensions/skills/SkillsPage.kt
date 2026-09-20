@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.extensions.skills
 
+import android.content.Context
+import android.net.Uri
+import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.StateFlow
@@ -107,6 +111,10 @@ fun SkillsPage() {
     val skillSources by vm.skillSources.collectAsStateWithLifecycle()
     val busySkills by vm.busySkills.collectAsStateWithLifecycle()
     val autoUpdateGloballyEnabled by vm.autoUpdateGloballyEnabled.collectAsStateWithLifecycle()
+    val pendingPrepared by vm.pendingPrepared.collectAsStateWithLifecycle()
+    val updateProgress by vm.updateProgress.collectAsStateWithLifecycle()
+    val batchUpdating by vm.batchUpdating.collectAsStateWithLifecycle()
+    val checkingAll by vm.checkingAll.collectAsStateWithLifecycle()
     val githubAccount by koinInject<GitHubAuthManager>().state.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
@@ -117,23 +125,24 @@ fun SkillsPage() {
     // 导入对话框当前是「GitHub 导入」还是「绑定 GitHub 仓库」（给已存在技能补登记来源）模式
     var bindMode by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
-    // 更新流程：本地已修改时的覆盖确认弹窗目标
-    var overwriteTarget by remember { mutableStateOf<String?>(null) }
     // 自动更新总开关设置对话框
     var showAutoUpdateDialog by rememberSaveable { mutableStateOf(false) }
 
-    fun showUpdateResult(result: SkillUpdateManager.ApplyResult, name: String) {
+    fun showApplyResult(result: SkillUpdateManager.ApplyResult) {
         when (result) {
             is SkillUpdateManager.ApplyResult.Updated ->
                 toaster.show(context.getString(R.string.skills_page_update_success))
             is SkillUpdateManager.ApplyResult.NoChange ->
-                toaster.show(context.getString(R.string.skills_page_up_to_date))
-            is SkillUpdateManager.ApplyResult.SkippedLocalModified ->
-                overwriteTarget = name
+                toaster.show(context.getString(R.string.skills_page_no_remote_change))
             is SkillUpdateManager.ApplyResult.Failed ->
                 toaster.show(context.getString(R.string.skills_page_update_failed, result.reason))
         }
     }
+
+    fun batchResultMessage(updated: Int, skipped: Int, failed: Int): String =
+        context.getString(R.string.skills_page_batch_updated, updated) +
+            (if (skipped > 0) context.getString(R.string.skills_page_batch_skipped, skipped) else "") +
+            (if (failed > 0) context.getString(R.string.skills_page_batch_failed, failed) else "")
     // 批量选择删除
     val selectedItems = remember { mutableStateListOf<String>() }
     var selecting by rememberSaveable { mutableStateOf(false) }
@@ -189,6 +198,19 @@ fun SkillsPage() {
                             )
                         }
                     } else {
+                        IconButton(onClick = { vm.checkAllNow() }, enabled = !checkingAll) {
+                            if (checkingAll) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    HugeIcons.Refresh01,
+                                    contentDescription = stringResource(R.string.skills_page_check_all),
+                                )
+                            }
+                        }
                         IconButton(onClick = { showAutoUpdateDialog = true }) {
                             Icon(
                                 HugeIcons.Settings03,
@@ -235,6 +257,32 @@ fun SkillsPage() {
                             leadingContent = { Icon(HugeIcons.Github, null) },
                             headlineContent = { Text("绑定 GitHub") },
                             supportingContent = { Text("解除 API 限流，支持私有仓库") },
+                            trailingContent = {
+                                Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                        )
+                    }
+                }
+            }
+
+            // 更新横幅：有可更新的技能时置顶提示，一键全部更新
+            val updatableCount = skills.count { skillSources[it.name]?.updateAvailable == true }
+            if (updatableCount > 0) {
+                item(key = "update_banner") {
+                    IosGroup {
+                        item(
+                            onClick = {
+                                vm.updateAllAvailable { updated, skipped, failed ->
+                                    toaster.show(batchResultMessage(updated, skipped, failed))
+                                }
+                            },
+                            leadingContent = {
+                                Icon(HugeIcons.Download01, null, tint = MaterialTheme.colorScheme.primary)
+                            },
+                            headlineContent = {
+                                Text(stringResource(R.string.skills_page_update_banner_title, updatableCount))
+                            },
+                            supportingContent = { Text(stringResource(R.string.skills_page_update_all)) },
                             trailingContent = {
                                 Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             },
@@ -317,8 +365,17 @@ fun SkillsPage() {
                                 }
                             },
                             onUpdate = {
-                                vm.applyUpdate(skill.name, overwriteLocal = false) { result ->
-                                    showUpdateResult(result, skill.name)
+                                // 增量准备完成后自动弹出预览（pendingPrepared 驱动）
+                                vm.prepareUpdate(skill.name) { result ->
+                                    when (result) {
+                                        is SkillUpdateManager.PrepareResult.NoChange ->
+                                            toaster.show(context.getString(R.string.skills_page_no_remote_change))
+                                        is SkillUpdateManager.PrepareResult.Failed ->
+                                            toaster.show(
+                                                context.getString(R.string.skills_page_update_failed, result.reason)
+                                            )
+                                        else -> {}
+                                    }
                                 }
                             },
                             onToggleAutoUpdate = { enabled -> vm.setAutoUpdate(skill.name, enabled) },
@@ -389,6 +446,42 @@ fun SkillsPage() {
                     }
                 ) {
                     Icon(HugeIcons.CursorPointer01, null)
+                }
+            }
+            Tooltip(
+                tooltip = {
+                    Text(stringResource(R.string.skills_page_batch_check))
+                }
+            ) {
+                IconButton(
+                    onClick = {
+                        vm.checkSkills(selectedItems.toList()) { available, failed ->
+                            toaster.show(
+                                context.getString(R.string.skills_page_update_banner_title, available) +
+                                    (if (failed > 0) {
+                                        context.getString(R.string.skills_page_batch_failed, failed)
+                                    } else "")
+                            )
+                        }
+                    }
+                ) {
+                    Icon(HugeIcons.Refresh01, stringResource(R.string.skills_page_batch_check))
+                }
+            }
+            Tooltip(
+                tooltip = {
+                    Text(stringResource(R.string.skills_page_batch_update))
+                }
+            ) {
+                FilledIconButton(
+                    onClick = {
+                        vm.updateSkills(selectedItems.toList()) { updated, skipped, failed ->
+                            toaster.show(batchResultMessage(updated, skipped, failed))
+                        }
+                    },
+                    enabled = selectedItems.isNotEmpty(),
+                ) {
+                    Icon(HugeIcons.Download01, stringResource(R.string.skills_page_batch_update))
                 }
             }
             Tooltip(
@@ -503,23 +596,20 @@ fun SkillsPage() {
         )
     }
 
-    RikkaConfirmDialog(
-        show = overwriteTarget != null,
-        title = stringResource(R.string.skills_page_update_title),
-        confirmText = stringResource(R.string.skills_page_update_now),
-        dismissText = stringResource(R.string.cancel),
-        onConfirm = {
-            val target = overwriteTarget
-            overwriteTarget = null
-            if (target != null) {
-                vm.applyUpdate(target, overwriteLocal = true) { result ->
-                    showUpdateResult(result, target)
-                }
-            }
-        },
-        onDismiss = { overwriteTarget = null },
-    ) {
-        Text(stringResource(R.string.skills_page_update_overwrite_confirm))
+    // 增量更新预览弹窗：确认后落盘
+    pendingPrepared?.let { prepared ->
+        SkillUpdatePreviewDialog(
+            prepared = prepared,
+            onDismiss = { vm.dismissPrepared() },
+            onConfirm = { vm.applyPrepared { result -> showApplyResult(result) } },
+        )
+    }
+
+    if (batchUpdating) {
+        SkillBatchUpdateProgressDialog(
+            progress = updateProgress,
+            onCancel = { vm.cancelBatchUpdate() },
+        )
     }
 
     RikkaConfirmDialog(
@@ -591,10 +681,30 @@ private fun SkillCard(
                 if (source != null && (source.updateAvailable || source.localModified)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (source.updateAvailable) {
-                            SkillStateChip(
-                                text = stringResource(R.string.skills_page_update_available),
-                                color = MaterialTheme.colorScheme.tertiary,
-                            )
+                            // 有更新：chip 升级为可点击按钮，直接进入增量更新预览流程
+                            Surface(
+                                onClick = onUpdate,
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Refresh01,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(11.dp),
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.skills_page_update_now),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                }
+                            }
                         }
                         if (source.localModified) {
                             SkillStateChip(
@@ -610,6 +720,35 @@ private fun SkillCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                 )
+                // 来源仓库 + 上次更新时间（有来源的技能才显示）
+                if (source != null) {
+                    val repoLine = buildString {
+                        append(source.repoOwner)
+                        append("/")
+                        append(source.repoName)
+                        if (source.path.isNotBlank()) {
+                            append("/")
+                            append(source.path)
+                        }
+                    }
+                    Text(
+                        text = repoLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (source.installedAt > 0) {
+                        Text(
+                            text = stringResource(
+                                R.string.skills_page_last_updated,
+                                DateUtils.getRelativeTimeSpanString(source.installedAt).toString(),
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (!skill.compatibility.isNullOrBlank()) {
                     Text(
                         text = skill.compatibility,
@@ -619,11 +758,21 @@ private fun SkillCard(
                 }
             }
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(
-                        imageVector = HugeIcons.MoreVertical,
-                        contentDescription = stringResource(R.string.skills_page_more_actions),
+                if (busy) {
+                    // 忙碌态：菜单入口替换为内联转圈，禁用期间重复操作
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .padding(6.dp),
+                        strokeWidth = 2.dp,
                     )
+                } else {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(
+                            imageVector = HugeIcons.MoreVertical,
+                            contentDescription = stringResource(R.string.skills_page_more_actions),
+                        )
+                    }
                 }
                 DropdownMenu(
                     expanded = menuExpanded,

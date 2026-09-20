@@ -92,6 +92,36 @@ class GitHubSkillClientTest {
     }
 
     @Test
+    fun parsesCommitInfoWithMessageAndTime() {
+        val json = """
+            [{"sha":"abc123","commit":{
+               "message":"fix: ppt template path\n\nlong body ignored",
+               "committer":{"date":"2026-09-01T12:34:56Z"}
+            }}]
+        """.trimIndent()
+        val info = client.parseCommitInfo(json)!!
+        assertEquals("abc123", info.sha)
+        assertEquals("fix: ppt template path", info.message)
+        // 2026-09-01T12:34:56Z → epoch ms
+        assertEquals(java.time.OffsetDateTime.parse("2026-09-01T12:34:56Z").toInstant().toEpochMilli(), info.timeEpochMs)
+    }
+
+    @Test
+    fun commitInfoSurvivesMissingMessageAndDate() {
+        val info = client.parseCommitInfo("""[{"sha":"abc"}]""")!!
+        assertEquals("abc", info.sha)
+        assertNull(info.message)
+        assertNull(info.timeEpochMs)
+    }
+
+    @Test
+    fun commitMessageTruncatedTo80Chars() {
+        val long = "x".repeat(200)
+        val info = client.parseCommitInfo("""[{"sha":"s","commit":{"message":"$long"}}]""")!!
+        assertEquals(80, info.message!!.length)
+    }
+
+    @Test
     fun findSkillRootsAtRepoRoot() {
         val paths = listOf("SKILL.md", "assets/a.png", "refs.md")
         assertEquals(listOf(""), client.findSkillRoots(paths))

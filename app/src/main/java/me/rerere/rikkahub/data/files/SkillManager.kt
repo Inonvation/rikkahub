@@ -211,7 +211,6 @@ class SkillManager(
         val skillsDir = getSkillsDir()
         val targetDir = resolveSkillDir(skillName) ?: return false
         val stagingDir = createTempSkillDir(skillsDir, skillName, "staging") ?: return false
-        var backupDir: File? = null
 
         try {
             for ((relativePath, content) in files) {
@@ -222,34 +221,88 @@ class SkillManager(
 
             if (!stagingDir.resolve("SKILL.md").exists()) return false
 
-            if (targetDir.exists()) {
-                backupDir = createTempSkillDir(skillsDir, skillName, "backup") ?: return false
-                if (!targetDir.renameTo(backupDir)) return false
-            }
-
-            if (!stagingDir.renameTo(targetDir)) {
-                if (backupDir != null && !targetDir.exists()) {
-                    backupDir.renameTo(targetDir)
-                }
-                return false
-            }
-
-            backupDir?.deleteRecursively()
-            return true
+            return swapStagingIntoPlace(skillsDir, skillName, stagingDir, targetDir)
         } catch (e: Exception) {
             Log.w(TAG, "saveSkillFilesAtomically: Failed to save $skillName", e)
-            if (backupDir != null && !targetDir.exists()) {
-                backupDir.renameTo(targetDir)
-            }
             return false
         } finally {
             if (stagingDir.exists()) {
                 stagingDir.deleteRecursively()
             }
-            if (backupDir?.exists() == true && targetDir.exists()) {
-                backupDir.deleteRecursively()
+            val backup = skillsDir.resolve(".$skillName.backup.0.tmp")
+            if (backup.exists() && targetDir.exists()) {
+                backup.deleteRecursively()
             }
         }
+    }
+
+    /**
+     * 增量应用更新：[toWrite] 为远端有变化的文件（新内容），[toCopy] 为需要从本地目录原样
+     * 保留的相对路径（未变化的 tracked 文件 + 用户新增文件）。整体仍是 staging + rename
+     * 原子替换，与 [saveSkillFileBytesAtomically] 共用同一段落盘语义。
+     */
+    fun applySkillFilesUpdate(skillName: String, toWrite: Map<String, ByteArray>, toCopy: Set<String>): Boolean {
+        val skillsDir = getSkillsDir()
+        val targetDir = resolveSkillDir(skillName) ?: return false
+        val stagingDir = createTempSkillDir(skillsDir, skillName, "staging") ?: return false
+
+        try {
+            for ((relativePath, content) in toWrite) {
+                val target = SkillPaths.resolveSkillFile(stagingDir, relativePath) ?: return false
+                target.parentFile?.mkdirs()
+                target.writeBytes(content)
+            }
+            for (relativePath in toCopy) {
+                val source = SkillPaths.resolveSkillFile(targetDir, relativePath) ?: return false
+                if (!source.isFile) return false
+                val target = SkillPaths.resolveSkillFile(stagingDir, relativePath) ?: return false
+                target.parentFile?.mkdirs()
+                source.copyTo(target, overwrite = false)
+            }
+
+            if (!stagingDir.resolve("SKILL.md").exists()) return false
+
+            return swapStagingIntoPlace(skillsDir, skillName, stagingDir, targetDir)
+        } catch (e: Exception) {
+            Log.w(TAG, "applySkillFilesUpdate: Failed to apply update for $skillName", e)
+            return false
+        } finally {
+            if (stagingDir.exists()) {
+                stagingDir.deleteRecursively()
+            }
+            val backup = skillsDir.resolve(".$skillName.backup.0.tmp")
+            if (backup.exists() && targetDir.exists()) {
+                backup.deleteRecursively()
+            }
+        }
+    }
+
+    /**
+     * 把已组装完成的 staging 目录原子替换到目标位置：先备份旧目录，rename 成功后删备份；
+     * rename 失败回滚。须在调用方的 try 内执行，[stagingDir] 的清理由调用方 finally 负责。
+     */
+    private fun swapStagingIntoPlace(
+        skillsDir: File,
+        skillName: String,
+        stagingDir: File,
+        targetDir: File,
+    ): Boolean {
+        val backupDir = if (targetDir.exists()) {
+            createTempSkillDir(skillsDir, skillName, "backup") ?: return false
+        } else {
+            null
+        }
+        if (backupDir != null && !targetDir.renameTo(backupDir)) return false
+
+        if (!stagingDir.renameTo(targetDir)) {
+            if (backupDir != null && !targetDir.exists()) {
+                backupDir.renameTo(targetDir)
+            }
+            return false
+        }
+
+        backupDir?.deleteRecursively()
+        return true
     }
 
     fun deleteSkillFile(skillName: String, relativePath: String): Boolean {
