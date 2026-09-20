@@ -564,7 +564,7 @@
   <string name="reasoning_picker_title">調整模型思考深度</string>
   <string name="reasoning_xhigh">超高</string>
   <string name="regenerate">重新生成</string>
-  <string name="regenerate_confirm_message">您確定要重新產生這則訊息嗎？</string>
+  <string name="regenerate_confirm_message">您確定要重新產生這則訊息嗎？此訊息下方的所有訊息都會被刪除。</string>
   <string name="render_with_webview">網頁視圖渲染</string>
   <string name="rikkahub_provider_description">官方免費 AI 服務，使用用戶贊助資金為新用戶提供部分免費模型作為備用，無需 API 金鑰。具有嚴格速率限制，若您已購買自己的提供者，請盡量使用自有提供者。</string>
   <string name="safe_mode_assistants">助理</string>
@@ -675,6 +675,11 @@
   <string name="setting_display_page_enable_auto_scroll_desc">AI 正在產生內容時，自動捲動至底部</string>
   <string name="setting_display_page_enable_auto_scroll_title">自動滾動</string>
   <string name="setting_display_page_enable_blur_effect_desc">在聊天輸入列啟用模糊效果</string>
+  <string name="setting_display_page_background_effect_title">輸入列背景效果</string>
+  <string name="setting_display_page_background_effect_desc">在聊天輸入列上啟用模糊或玻璃效果</string>
+  <string name="setting_display_page_background_effect_type">背景效果類型</string>
+  <string name="setting_display_page_background_effect_blur">模糊</string>
+  <string name="setting_display_page_background_effect_glass">玻璃</string>
   <string name="setting_display_page_enable_blur_effect_title">啟用模糊效果</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 語法呈現數學表達式與公式</string>
   <string name="setting_display_page_enable_latex_rendering_title">啟用 LaTeX 渲染</string>

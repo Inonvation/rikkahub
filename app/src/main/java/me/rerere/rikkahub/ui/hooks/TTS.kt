@@ -45,6 +45,8 @@ fun englishWordVoiceFor(provider: TTSProviderSetting?): String? = when (provider
     is TTSProviderSetting.Step -> provider.voice.ifBlank { null }
     is TTSProviderSetting.ElevenLabs -> provider.voiceId.ifBlank { null }
     is TTSProviderSetting.FishAudio -> provider.referenceId.ifBlank { null }
+    // Volcengine seed-tts-2.0 为多语言音色（中英混读），用配置的 speaker 即可，不覆盖
+    is TTSProviderSetting.Volcengine -> null
     is TTSProviderSetting.SystemTTS -> null // SystemTTS 用语言引擎，不走 voice 字段
     null -> null
 }

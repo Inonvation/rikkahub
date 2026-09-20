@@ -203,12 +203,15 @@ private fun workspaceInitInstruction(task: String): String = buildString {
  */
 internal fun backgroundTextGenerationParams(
     model: Model,
+    conversationId: Uuid? = null,
     reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
 ): TextGenerationParams = TextGenerationParams(
     model = model,
     reasoningLevel = reasoningLevel,
     customHeaders = model.customHeaders,
     customBody = model.customBodies,
+    // 辅助请求（标题/建议/压缩等）同样携带会话标识；无会话上下文的工具类请求退化为随机 session id
+    sessionId = (conversationId ?: Uuid.random()).toString(),
 )
 
 /**
@@ -251,9 +254,15 @@ internal fun displayMessagesForChunk(
 internal fun createForkConversation(
     source: Conversation,
     messageNodes: List<MessageNode>,
+    existingTitles: Set<String> = emptySet(),
 ): Conversation = Conversation(
     id = Uuid.random(),
     assistantId = source.assistantId,
+    // fork 标题取「原会话标题(序号)」：同一助手内从 1 递增到首个未占用标题，
+    // 避免镜像分支重名互相覆盖观感（列表按标题展示）。
+    title = generateSequence(1) { it + 1 }
+        .map { "${source.title}($it)" }
+        .first { it !in existingTitles },
     messageNodes = messageNodes,
     customSystemPrompt = source.customSystemPrompt,
     modeInjectionIds = source.modeInjectionIds,
@@ -2111,7 +2120,7 @@ class ChatService(
                 providerHandler.generateText(
                     providerSetting = provider,
                     messages = listOf(UIMessage.user(prompt = prompt)),
-                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
+                    params = backgroundTextGenerationParams(model, conversation.id, backgroundReasoningLevel(settings, model)),
                 )
             }
             val operations = parseMemoryOperations(
@@ -2203,17 +2212,17 @@ class ChatService(
 
         val rewrite: suspend (String) -> String =
             if (assistant.enableKnowledgeQueryRewrite) {
-                { query -> rewriteQueryForSearch(query, historyText, settings, assistant) }
+                { query -> rewriteQueryForSearch(query, historyText, settings, assistant, conversation.id) }
             } else {
                 { it }
             }
 
         val hyde: suspend (String) -> String? = { query ->
-            generateHydeText(query, settings, assistant)
+            generateHydeText(query, settings, assistant, conversation.id)
         }
 
         val multiQuery: suspend (String) -> List<String> = { query ->
-            generateMultiQueries(query, settings, assistant)
+            generateMultiQueries(query, settings, assistant, conversation.id)
         }
 
         val tool = KnowledgeSearchTool(
@@ -2255,6 +2264,7 @@ class ChatService(
         history: String,
         settings: Settings,
         assistant: Assistant,
+        conversationId: Uuid? = null,
     ): String {
         if (query.isBlank()) return query
         if (history.isBlank()) return query  // 首轮无历史，改写=原样，省一次 LLM 调用
@@ -2276,6 +2286,7 @@ class ChatService(
                     ),
                     params = backgroundTextGenerationParams(
                         model = model,
+                        conversationId = conversationId,
                         reasoningLevel = ReasoningLevel.OFF,  // 改写不需要推理，省 token/延迟
                     ),
                 )
@@ -2297,6 +2308,7 @@ class ChatService(
         query: String,
         settings: Settings,
         assistant: Assistant,
+        conversationId: Uuid? = null,
     ): String? {
         if (query.isBlank()) return null
         return try {
@@ -2316,6 +2328,7 @@ class ChatService(
                     ),
                     params = backgroundTextGenerationParams(
                         model = model,
+                        conversationId = conversationId,
                         reasoningLevel = ReasoningLevel.OFF,
                     ),
                 )
@@ -2336,6 +2349,7 @@ class ChatService(
         query: String,
         settings: Settings,
         assistant: Assistant,
+        conversationId: Uuid? = null,
     ): List<String> {
         if (query.isBlank()) return emptyList()
         return try {
@@ -2353,6 +2367,7 @@ class ChatService(
                     ),
                     params = backgroundTextGenerationParams(
                         model = model,
+                        conversationId = conversationId,
                         reasoningLevel = ReasoningLevel.OFF,
                     ),
                 )
@@ -2502,7 +2517,7 @@ class ChatService(
                                     .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
                         ),
                     ),
-                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
+                    params = backgroundTextGenerationParams(model, conversationId, backgroundReasoningLevel(settings, model)),
                 )
             }
 
@@ -2606,7 +2621,7 @@ class ChatService(
                                     .takeLast(8).joinToString("\n\n") { it.summaryAsText(maxLength = 500) }),
                         )
                     ),
-                    params = backgroundTextGenerationParams(model, backgroundReasoningLevel(settings, model)),
+                    params = backgroundTextGenerationParams(model, conversationId, backgroundReasoningLevel(settings, model)),
                 )
             }
             val suggestions =
@@ -2696,6 +2711,7 @@ class ChatService(
                         serializedChunk = chunk,
                         targetTokens = chunkTarget,
                         additionalPrompt = additionalPrompt,
+                        conversationId = conversationId,
                     )
                 }
             }
@@ -2748,6 +2764,7 @@ class ChatService(
         serializedChunk: List<String>,
         targetTokens: Int,
         additionalPrompt: String,
+        conversationId: Uuid? = null,
     ): String {
         val contentToCompress = serializedChunk.joinToString("\n\n")
         val prompt = settings.compressPrompt.applyPlaceholders(
@@ -2763,7 +2780,7 @@ class ChatService(
             providerHandler.generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
-                params = backgroundTextGenerationParams(model),
+                params = backgroundTextGenerationParams(model, conversationId),
             )
         }
 
@@ -2787,6 +2804,54 @@ class ChatService(
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
         val current = getConversationFlow(conversationId).value
         updateConversation(conversationId, update(current))
+    }
+
+    /**
+     * 元数据（置顶/助手归属）更新的统一入口：先改内存态，再按单列落库。
+     *
+     * 关键：不能「读 DB 快照 → 整对象 saveConversation」。生成中的会话消息只存内存、尚未
+     * 落库，用 DB 旧快照整对象覆盖会把正在流式的回复/工具气泡抹掉（回退到更早版本）。
+     * 单列 UPDATE 只动元数据列，与内存消息互不干扰。
+     *
+     * - 会话已在内存：直接改内存态（权威版本），再落库单列。
+     * - 会话不在内存：先按需从 DB 加载（未落库的新会话不存在则跳过落库），再改内存态。
+     */
+    private suspend fun updateConversationMetadata(
+        conversationId: Uuid,
+        update: (Conversation) -> Conversation,
+        persist: suspend (Conversation) -> Unit,
+    ) {
+        val session = sessions[conversationId]
+        if (session == null) {
+            val loaded = conversationRepo.getConversationById(conversationId) ?: return
+            val updated = update(loaded)
+            persist(updated)
+            return
+        }
+        val updated = synchronized(session) {
+            update(session.state.value).also {
+                updateConversation(conversationId, it)
+            }
+        }
+        persist(updated)
+    }
+
+    /** 置顶/取消置顶：内存优先，单列落库（见 [updateConversationMetadata]）。 */
+    suspend fun toggleConversationPinned(conversationId: Uuid) {
+        updateConversationMetadata(
+            conversationId = conversationId,
+            update = { it.copy(isPinned = !it.isPinned) },
+            persist = { conversationRepo.updatePinStatus(conversationId, it.isPinned) },
+        )
+    }
+
+    /** 移动会话到另一助手：内存优先，单列落库（文件夹是助手内分组，一并清空归属）。 */
+    suspend fun moveConversationToAssistant(conversationId: Uuid, assistantId: Uuid) {
+        updateConversationMetadata(
+            conversationId = conversationId,
+            update = { it.copy(assistantId = assistantId, folderId = null) },
+            persist = { conversationRepo.updateConversationAssistant(conversationId, it.assistantId) },
+        )
     }
 
     /**
@@ -3027,7 +3092,11 @@ class ChatService(
                 )
             }
 
-        val forkConversation = createForkConversation(currentConversation, copiedNodes)
+        val existingTitles = conversationRepo
+            .getConversationsOfAssistant(currentConversation.assistantId)
+            .first()
+            .mapTo(mutableSetOf()) { it.title }
+        val forkConversation = createForkConversation(currentConversation, copiedNodes, existingTitles)
 
         saveConversation(forkConversation.id, forkConversation)
         return forkConversation

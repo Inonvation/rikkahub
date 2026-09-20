@@ -410,6 +410,7 @@ private fun processElementNodes(
                         builder.addStyle(
                             SpanStyle(
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0",
                                 background = Color.Gray.copy(alpha = 0.2f)
                             ),
                             start,

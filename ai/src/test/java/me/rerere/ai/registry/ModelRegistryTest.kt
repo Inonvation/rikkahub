@@ -145,6 +145,16 @@ class ModelRegistryTest {
     }
 
     @Test
+    fun testStep5() {
+        val visionInput = listOf(Modality.TEXT, Modality.IMAGE)
+        val toolReasoning = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
+        assertEquals(visionInput, ModelRegistry.MODEL_INPUT_MODALITIES.getData("step-5"))
+        assertEquals(visionInput, ModelRegistry.MODEL_INPUT_MODALITIES.getData("step-5-preview"))
+        assertEquals(toolReasoning, ModelRegistry.MODEL_ABILITIES.getData("step-5"))
+        assertEquals(visionInput, ModelRegistry.MODEL_INPUT_MODALITIES.getData("step-3"))
+    }
+
+    @Test
     fun testContextLengthOrDefault() {
         assertEquals(1_000_000, ModelRegistry.contextLengthOrDefault("deepseek-v4-flash"))
         assertEquals(128_000, ModelRegistry.contextLengthOrDefault("unknown-model-xyz"))

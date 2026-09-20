@@ -52,7 +52,9 @@ class ConversationSession(
     private val activeJobs = mutableSetOf<Job>()
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
-    val isInUse: Boolean get() = refCount.get() > 0 || isGenerating
+    // 排队中的待发消息也算在用：否则 idle 回收会把队列连同附件引用一起丢掉
+    val isInUse: Boolean
+        get() = refCount.get() > 0 || isGenerating || pendingSendQueue.value.isNotEmpty()
 
     /**
      * 最近一次生成活动时间（单调时钟，ms）：流式输出落地时由 ChatService 更新。

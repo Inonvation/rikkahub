@@ -334,3 +334,43 @@
 ### 验证
 
 `:ai:compileDebugKotlin`、`:ai:testDebugUnitTest`、`:app:compileDebugKotlin` 全部 BUILD SUCCESSFUL（material3 alpha28 / floatingx 3.0 无额外连锁）；`:app:testDebugUnitTest` 全模块通过（含 `WorkspaceReminderTransformerTest` 7/7，test-results XML 确认零失败）。真机验证待装机确认：cwd 级 AGENTS.md 注入与切换 cwd、浮窗显示与系统栏色、推理等级滑条、长按图标翻译快捷方式、debug 图标 DEV 角标、deepseek-flash 模型匹配。
+
+## 2026-09-20 — 第十二次同步（09-13 晚 ~ 09-20 上午上游新增 17 提交；落地 15，跳过 1，部分吸收 1）
+
+> 本地 git 全局代理（127.0.0.1:19191）已失效；本次用 `git -c http.proxy= -c https.proxy= fetch upstream` 直连成功。清单范围 `d6ba728e..c3d6867c`（至 09-20 11:30）。
+
+### A. 落地（15 项）
+
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `6e98691c` | 移除 ChatCompletionsAPI tool 消息多余的 `name` 属性 | `ChatCompletionsAPI.kt` 删 1 行；测试文件与上游父版本逐字节一致 → 直接 checkout |
+| `7c1629d0` | 图片裁剪确认提速（PNG→JPEG q90） | `CropLauncher.kt` 与父版本一致 → 直接 checkout |
+| `445341e9` | 收藏撤销后能正确恢复（swipe reset + VM 改 suspend） | 两文件与父版本一致 → 直接 checkout |
+| `c3d6867c` | 注册 step-5 模型（vision+tool+reasoning） | `STEP_5` 定义 + allModels 注册 + 测试 1 例（本地 ModelRegistryTest 有分歧，手工加） |
+| `a7850967` | 内联代码禁用连字（calt/liga/clig 0） | 本地 4 处同构点：`Markdown.kt` 两处（Text 调用点 + appendMarkdownNodeContent）、`MarkdownNew.kt`、`SimpleHtmlBlock.kt` |
+| `64319122` | 移除「小马算力」默认提供商 | 删 16 行默认条目（`AIIconMatcher` 的 tokenpony 图标匹配上游保留，同样不动） |
+| `5078ce19` | MiniMax 默认模型/占位符刷新 | `speech-2.6-turbo`→`speech-2.8-hd`（speech 模块直接 checkout）+ `TTSProviderConfigure` 占位符同步 |
+| `d47d13a6` | 重新生成确认提示补全 6 语言 | 6 个 strings.xml 各替换 1 条（脚本按 key 定位替换正文，避免与本地新增 key 冲突） |
+| `8e304bb1` | 火山引擎 TTS 支持 | speech 4 文件与父版本一致（含 provider 120 行 + 测试 92 行）→ 直接 checkout；app 侧：`SettingSpeechPage` 标签分支、`TTSProviderConfigure` 三处（列表名/类名/构造 when + `VolcengineTTSConfiguration` 面板）、本地独有 `englishWordVoiceFor` 补 Volcengine→null 分支（多语言音色不覆盖 voice） |
+| `bd936caa` | 非聊天请求也带 session id 头 | `TextGenerationParams.sessionId` 默认值改 `Uuid.random().toString()`；`GenerationHandler` 主参数 `(conversationId ?: Uuid.random())`；本地 `backgroundTextGenerationParams` 加 `conversationId: Uuid? = null` 形参并接线上全部有会话上下文的调用点（记忆整理/标题/建议/知识库三改写/压缩分块 8 处；上游只有 3 处调用点） |
+| `458c16df` | fork 会话标题自动「原名+序号」 | `createForkConversation` 加 `existingTitles` 形参 + 调用点查同助手会话标题集合 + 本地测试断言适配 |
+| `9a35e3f2`+`51a33198`+`7ee13f2a` | haze rc02 + blur/glass 两种输入栏效果 | toml 加 `haze-glass`/`haze-glass-material3`、版本 beta01→rc02；app 依赖 +2；`BackgroundEffectType` 枚举 + `DisplaySetting.backgroundEffectType`；`ChatInput` glass 分支（`containerShape` 由 theme shape 拆解，blur 分支保留本地 `barHazeBlurStyle`）；设置项**按本地结构**落 `SettingDisplayGroupPage`（上游在 SettingPreferencesGeneralPage）；`SettingAboutPage` 彩蛋音效（2 个 mp3 + 随机播放）；5 键 × 6 语言字符串。**跳过**上游的 `compileSdk { minorApiLevel = 2 }` DSL（haze rc02 只要求 minor 0，本地 AGP 9.3.1 不动；rc01 才要求 minor 2） |
+| `c8853531` | quickjs 迁移到 quickjs-kt（修资源泄露） | `QuickJSFetch.kt`/`CustomJsSearchService.kt`/`search/build.gradle.kts`/两个新测试文件/2 个 baseline-prof 与父版本一致 → 直接 checkout；`JavascriptTool.kt` 用上游重写版但**保留本地精简描述**（工具声明预算）；toml quickjs 3.2.3→1.0.15 换坐标；app + search 加 unit-test 依赖替换（JVM 测试用 desktop native）；`RikkaHubApp` 删 `QuickJSLoader.init()` 与 import（本地 autostart 改动保留） |
+
+### B. 无需合并（1）
+
+- `3428c60b` bump 2.5.2：版本独立演进（本地 2.14.0/272）。
+
+### C. 部分吸收（1 项，用户未答复 → 按推荐方案执行）
+
+`4a3eefc1` 会话状态跨切换保留（+722/-200，新增 `ConversationSessionManager`）：上游把 sessions 抽成独立 Manager 并引入 initialize/updateMetadata/finishGeneration 三原语。本地 ChatService 高度重构（~25 个 `getOrCreateSession` 调用点），**不整体移植**，只吸收真实缺陷修复：
+
+1. **pin/移动助手的陈旧快照覆盖（核心 bug）**：原实现读 DB 快照 → 整对象 `saveConversation` 覆盖；生成中的会话消息只存内存、尚未落库，会被旧快照抹掉。新增 `DAO.updateAssistantId`（含 folder_id 清空）+ `Repo.updatePinStatus(id, isPinned)`（旧 `togglePinStatus` 删除）/`updateConversationAssistant`；ChatService 新增 `updateConversationMetadata`（内存优先：session 在内存改内存态并落单列；不在内存则加载→落单列；未落库新会话跳过落库）+ `toggleConversationPinned`/`moveConversationToAssistant`；ChatVM/HistoryVM/`ConversationRoutes`（pin 与 move 两个路由）全部改走新入口。HistoryVM 注入 ChatService（构造器 +3 行）。
+2. **isInUse 计入待发队列**：`isInUse` 加 `pendingSendQueue.value.isNotEmpty()`，避免 idle 回收把排队消息连同附件引用丢掉。
+3. **SSE 路由顺序**：`addConversationReference` 提前到 `initializeConversation` 之前，heartbeat 移入 try（上游同语义；本地 SSE 测试缺失，行为靠代码审查）。
+
+未吸收：SessionManager 抽取、`Session.initialize/updateMetadata/finishGeneration`、`ConversationSessionTest`/`ConversationSessionManagerTest`（依赖其新 API）。本地等价的既有能力：`initializeConversation` 内存守卫、`moveConversationToFolder` 内存优先、取消时 NonCancellable 落库兜底。
+
+### 验证
+
+`:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:app:assembleDebug` 打包成功（APK 91.7MB，`lib/arm64-v8a/libquickjs.so` 为 quickjs-kt 产物）。单元测试 5 模块 1272 例全绿（test-results XML 确认零失败），含新增 `VolcengineTTSProviderTest` 8/8、`JavascriptToolTest` 5/5、`CustomJsSearchServiceTest` 4/4、`ChatServiceTest` 13/13、`ModelRegistryTest` 12/12（含 testStep5）。真机验证待装机确认：blur/glass 输入栏切换与观感、火山 TTS 合成、JS 工具与自定义 JS 搜索脚本、置顶/移动助手在生成中的会话上不丢消息、导入旧版本配置文件后 backgroundEffectType 默认 BLUR。

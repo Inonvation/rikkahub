@@ -558,7 +558,7 @@
   <string name="reasoning_picker_title">モデルの思考深度を調整</string>
   <string name="reasoning_xhigh">XHigh</string>
   <string name="regenerate">再生成</string>
-  <string name="regenerate_confirm_message">このメッセージを再生成してもよろしいですか？</string>
+  <string name="regenerate_confirm_message">このメッセージを再生成してもよろしいですか？このメッセージより下のメッセージはすべて削除されます。</string>
   <string name="render_with_webview">WebViewで表示</string>
   <string name="rikkahub_provider_description">公式の無料AIサービスです。ユーザーのスポンサー資金を使い、新規ユーザーのためのフォールバック用の一部無料モデルを提供します。APIキーは不要です。厳しいレート制限があります。独自のプロバイダーを購入済みの場合は、可能な限りそちらをご利用ください。</string>
   <string name="safe_mode_assistants">アシスタント</string>
@@ -669,6 +669,11 @@
   <string name="setting_display_page_enable_auto_scroll_desc">AIがコンテンツを生成中に自動で下までスクロールする</string>
   <string name="setting_display_page_enable_auto_scroll_title">自動スクロール</string>
   <string name="setting_display_page_enable_blur_effect_desc">チャット入力バーにぼかし効果を有効にする</string>
+  <string name="setting_display_page_background_effect_title">入力バーの背景エフェクト</string>
+  <string name="setting_display_page_background_effect_desc">チャット入力バーのぼかしまたはガラス効果を有効にします</string>
+  <string name="setting_display_page_background_effect_type">背景効果の種類</string>
+  <string name="setting_display_page_background_effect_blur">ぼかし</string>
+  <string name="setting_display_page_background_effect_glass">ガラス</string>
   <string name="setting_display_page_enable_blur_effect_title">ぼかし効果を有効にする</string>
   <string name="setting_display_page_enable_latex_rendering_desc">LaTeX構文を使用して数式や数値表現をレンダリングする</string>
   <string name="setting_display_page_enable_latex_rendering_title">LaTeXレンダリングを有効にする</string>

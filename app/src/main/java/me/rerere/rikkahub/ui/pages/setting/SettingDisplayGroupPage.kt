@@ -37,6 +37,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
@@ -526,8 +527,8 @@ private fun IosGroupScope.RenderGroupItems(
         },
     )
     item(
-        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
-        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
+        headlineContent = { Text(stringResource(R.string.setting_display_page_background_effect_title)) },
+        supportingContent = { Text(stringResource(R.string.setting_display_page_background_effect_desc)) },
         trailingContent = {
             Switch(
                 checked = displaySetting.enableBlurEffect,
@@ -537,6 +538,27 @@ private fun IosGroupScope.RenderGroupItems(
             )
         },
     )
+    if (displaySetting.enableBlurEffect) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_page_background_effect_type)) },
+            supportingContent = {
+                Select(
+                    options = BackgroundEffectType.entries,
+                    selectedOption = displaySetting.backgroundEffectType,
+                    onOptionSelected = {
+                        updateDisplaySetting(displaySetting.copy(backgroundEffectType = it))
+                    },
+                    modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                    optionToString = {
+                        when (it) {
+                            BackgroundEffectType.BLUR -> stringResource(R.string.setting_display_page_background_effect_blur)
+                            BackgroundEffectType.GLASS -> stringResource(R.string.setting_display_page_background_effect_glass)
+                        }
+                    },
+                )
+            },
+        )
+    }
 }
 
 private fun IosGroupScope.CodeGroupItems(

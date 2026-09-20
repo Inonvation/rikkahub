@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import coil3.compose.AsyncImage
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.github.GitHubReleaseChecker
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.utils.SoundEffectPlayer
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.easteregg.EmojiBurstHost
 import me.rerere.rikkahub.ui.components.ui.IosGroup
@@ -59,6 +61,14 @@ fun SettingAboutPage() {
     val navController = LocalNavController.current
     val releaseChecker: GitHubReleaseChecker = koinInject()
     val scope = rememberCoroutineScope()
+    val soundOptions = remember { listOf(R.raw.bingbingbing, R.raw.gangguan) }
+    val soundEffectPlayer = remember(context) { SoundEffectPlayer(context) }
+    DisposableEffect(soundEffectPlayer) {
+        soundEffectPlayer.preload(*soundOptions.toIntArray())
+        onDispose {
+            soundEffectPlayer.release()
+        }
+    }
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateResult by remember { mutableStateOf<GitHubReleaseChecker.CheckResult?>(null) }
     val emojiOptions = remember {
@@ -110,6 +120,7 @@ fun SettingAboutPage() {
                                 }
                                 .clickable {
                                     onBurst(logoCenterPx)
+                                    soundEffectPlayer.play(soundOptions.random())
                                 }
                         )
 

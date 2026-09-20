@@ -796,11 +796,16 @@ class ConversationRepository(
             }
     }
 
-    suspend fun togglePinStatus(conversationId: Uuid) {
+    suspend fun updatePinStatus(conversationId: Uuid, isPinned: Boolean) {
         conversationDAO.updatePinStatus(
             id = conversationId.toString(),
-            isPinned = !(getConversationById(conversationId)?.isPinned ?: false)
+            isPinned = isPinned,
         )
+    }
+
+    /** 单列更新会话所属助手并清空文件夹归属（文件夹是助手内分组，移动后在新助手下不可见）。 */
+    suspend fun updateConversationAssistant(conversationId: Uuid, assistantId: Uuid) {
+        conversationDAO.updateAssistantId(conversationId.toString(), assistantId.toString())
     }
 
     /**

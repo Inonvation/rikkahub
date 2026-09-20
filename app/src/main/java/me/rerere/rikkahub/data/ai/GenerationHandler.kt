@@ -863,7 +863,7 @@ class GenerationHandler(
                 addAll(assistant.customBodies)
                 addAll(model.customBodies)
             },
-            sessionId = conversationId?.toString(),
+            sessionId = (conversationId ?: Uuid.random()).toString(),
         )
         val retryPolicy = RetryPolicy(maxRetries = settings.aiRequestMaxRetries.coerceIn(0, 10))
         // 本步已累计的纯流式时长（毫秒）：只包 streamText collect 窗口，不含重试等待。

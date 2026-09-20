@@ -1032,6 +1032,15 @@ data class NetworkSetting(
 )
 
 @Serializable
+enum class BackgroundEffectType {
+    @SerialName("blur")
+    BLUR,
+
+    @SerialName("glass")
+    GLASS,
+}
+
+@Serializable
 enum class ChatFontFamily {
     @SerialName("default")
     DEFAULT,
@@ -1098,6 +1107,7 @@ data class DisplaySetting(
     val enableAutoScroll: Boolean = true,
     val enableLatexRendering: Boolean = true,
     val enableBlurEffect: Boolean = false,
+    val backgroundEffectType: BackgroundEffectType = BackgroundEffectType.BLUR,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val chatCustomFontPath: String = "",
     val chatCustomFontName: String = "",

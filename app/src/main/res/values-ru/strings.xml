@@ -558,7 +558,7 @@
   <string name="reasoning_picker_title">Настроить глубину мышления модели</string>
   <string name="reasoning_xhigh">Очень высокий</string>
   <string name="regenerate">Сгенерировать заново</string>
-  <string name="regenerate_confirm_message">Вы уверены, что хотите перегенерировать это сообщение?</string>
+  <string name="regenerate_confirm_message">Вы уверены, что хотите заново сгенерировать это сообщение? Все сообщения ниже этого будут удалены.</string>
   <string name="render_with_webview">Отображать в WebView</string>
   <string name="rikkahub_provider_description">Официальный бесплатный AI-сервис, использующий средства спонсоров для предоставления новым пользователям бесплатных моделей в качестве резерва; API-ключ не требуется. Действуют строгие ограничения по частоте запросов. Если у вас есть собственный провайдер, используйте его по возможности.</string>
   <string name="safe_mode_assistants">Помощники</string>
@@ -669,6 +669,11 @@
   <string name="setting_display_page_enable_auto_scroll_desc">Автоматически прокручивать вниз при генерации контента ИИ</string>
   <string name="setting_display_page_enable_auto_scroll_title">Автопрокрутка</string>
   <string name="setting_display_page_enable_blur_effect_desc">Включить эффект размытия на панели ввода чата</string>
+  <string name="setting_display_page_background_effect_title">Эффект фона панели ввода</string>
+  <string name="setting_display_page_background_effect_desc">Включить эффект размытия или стекла на панели ввода чата</string>
+  <string name="setting_display_page_background_effect_type">Тип фонового эффекта</string>
+  <string name="setting_display_page_background_effect_blur">Размытие</string>
+  <string name="setting_display_page_background_effect_glass">Стекло</string>
   <string name="setting_display_page_enable_blur_effect_title">Включить эффект размытия</string>
   <string name="setting_display_page_enable_latex_rendering_desc">Отображать математические выражения и формулы с использованием синтаксиса LaTeX</string>
   <string name="setting_display_page_enable_latex_rendering_title">Включить рендеринг LaTeX</string>
