@@ -187,6 +187,14 @@ fun ChatInput(
     onCancelPendingSend: ((PendingSendItem) -> Unit)? = null,
     /** 点击气泡文本编辑：取消排队并把文本回填输入框 */
     onEditPendingGuidance: ((PendingGuidanceItem) -> Unit)? = null,
+    /**
+     * 排队气泡与输入框之间的内容插槽（聊天页传入 todolist 卡片、知识库徽章等状态区）。
+     *
+     * 顺序语义（自消息列表向输入框）：排队气泡 → 本插槽 → 输入框。排队气泡是用户刚发出、
+     * 等待投递的真实消息（与消息列表同属"会话内容"），必须排在 todolist 这类状态卡之上；
+     * 否则状态卡一出现就把气泡挤到下方、与输入框抢视觉锚点。
+     */
+    aboveInputContent: @Composable () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -312,6 +320,11 @@ fun ChatInput(
                     }
                 }
             }
+
+            // 状态区插槽（todolist 卡片 / 知识库徽章等）：排在排队气泡之下、输入框之上。
+            // 气泡是"待投递的会话内容"，状态卡是"当前会话的辅助状态"——状态卡出现/刷新
+            // 时不应挤动气泡位置。
+            aboveInputContent()
 
             Surface(
                 modifier = Modifier

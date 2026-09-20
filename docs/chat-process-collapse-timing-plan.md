@@ -294,3 +294,60 @@ val processActive = parts.any {
 
 `:app:compileDebugKotlin` BUILD SUCCESSFUL（22s，无新 warning）。真机回归：待验收
 （第 6 节清单 + 第 7 节会话切换矩阵）。
+
+## 10. 后续修订（2026-09-20）：审批交互不再改写折叠形态
+
+真机反馈两处与"折叠形态被系统动作改写"相关的体验问题，本次收敛：
+
+### 10.1 点击审批时折叠卡被强制展开（本次修复）
+
+**现象**：已收卡的消息（"已处理 n秒"折叠态）上出现新的审批气泡 → 用户点"同意" →
+折叠卡在点击瞬间展开（内容全部铺开），用户需要再手动点一次折回去。
+
+**根因**：`MessagePartsBlock` 的完成兜底 effect 里有 `if (loading) chainCollapsed = false`
+分支（"生成中强制展开"）。审批提交后 `ChatService.handleToolApproval` →
+`handleMessageComplete` 续答，`loading` 由 false 翻 true；该分支把折叠态无条件翻成展开。
+但这条消息**不是新一轮生成**——它只是同一助手消息的工具循环续接（`updateCurrentMessages`
+原地续写）。同理受影响：ask_user 回答、子代理完成唤醒续答。
+
+**修复**（三处，均在 `ChatMessage.kt`）：
+
+1. **init 形态推导改为记忆优先**：`if (loading) false else remembered?.let{!it} ?: derived`
+   → `remembered?.let{!it} ?: derived`。生成中的形态同样以 store 记忆为准，重建（滚出
+   视口回收 / 切走切回）保持用户所见，不再"生成中恒展开"。无记忆（新消息）时按开关
+   推导：生成中 → 展开，与旧行为一致。
+2. **删除"生成中强制展开"分支**：完成兜底 effect 只保留 `loading` true→false 的完成
+   折叠；`if (loading) chainCollapsed = false` 整支删除。
+3. **`manualOverride` 不再随 loading 翻 true 复位**：删除其复位 effect。否则用户手动
+   展开过程区后点审批，`manualOverride` 一复位，完成兜底就会把过程区收掉——同一类
+   "点一下无关按钮、形态被改写"。新生成周期总是新节点（新 nodeId，状态天然全新）。
+4. **补充 `awaitingUserInteraction` 守卫**：完成兜底与补折叠两条路径都加
+   `!awaitingUserInteraction`（`parts.any { it is Tool && it.isPending }`）——
+   审批/ask_user 等待期 `loading` 已翻 false（生成以 `waitingForUser` 结束），不加守卫
+   时用户停手就会把待审批气泡连同过程区一起收进折叠卡（**审批动作恰恰把要审的东西
+   藏起来**，且无正文块时 `finalOutputStart < 0`，气泡确实在过程区内）。交互解决后
+   `isPending` 翻 false，effect 重启并正常落地折叠。
+   **为何不复用 `processActive`**：它含"工具执行中被用户停止"这类不会再翻转的终态
+   （`stopGeneration` → `finishInterruptedPendingTools` 回填终态但 `output` 语义上已
+   结束），用它做守卫会让那类消息在开关语义下永不收卡；`isPending` 只覆盖真正等待
+   用户操作的工具，与需求精确对齐。
+
+### 10.2 引导气泡被 todolist 卡片挤到下方（本次修复）
+
+**现象**：生成中发送引导消息，气泡显示在 todolist 卡片**下方**（紧贴输入框），
+视觉上像是"排队等输入框"，与"引导消息属于会话内容、等待投递"的语义不符。
+
+**修复**：底部堆叠顺序改为 排队气泡 → 状态区 → 输入框。
+
+- `ChatInput` 新增 `aboveInputContent: @Composable () -> Unit` 插槽，位置在
+  `pendingGuidance`/`pendingSends` 两组气泡之后、输入框 `Surface` 之前；
+- `ChatPage` 把 `TodolistBanner` 与 `KnowledgeBaseChips` 从 ChatInput 外层移入该插槽；
+- 插槽位于 ChatInput 的 8dp 横向内边距内，两张卡的水平内边距由 12dp 改为 4dp
+  （距屏幕边仍为 12dp，左右基准线与排队气泡一致，视觉位置不变）。
+
+`.gitignore` 无关；`:app:compileDebugKotlin` BUILD SUCCESSFUL。真机验收清单：
+1. 消息折叠后点审批同意 → 折叠卡形态不动；
+2. 审批等待中（气泡 pending）用户停手 → 过程区不被自动收起；
+3. 有 todolist 时发引导 → 气泡在卡片上方、紧贴输入框排序为"气泡 → 卡片 → 输入框"；
+4. 无 todolist 时：引导气泡位置与改动前一致；
+5. 新消息生成中 → 过程区从展开态开始流式（行为不变）。

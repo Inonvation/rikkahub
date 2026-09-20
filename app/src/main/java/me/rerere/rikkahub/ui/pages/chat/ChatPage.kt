@@ -1040,40 +1040,6 @@ private fun ChatPageContent(
                 .navigationBarsPadding()
                 .onSizeChanged { inputBarHeightPx = it.height },
         ) {
-            // TodolistBanner - 显示在聊天输入框上方（订阅 TodoStorage 实时刷新）
-            // 空列表不展示（模型可能传空 items，渲染 0/0 空卡无意义）
-            if (todolist != null && todolist!!.items.isNotEmpty()) {
-                TodolistBanner(
-                    todolist = todolist!!,
-                    onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
-                    stateKey = "todo:${conversation.id}",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-            if (assistant.knowledgeBaseIds.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    KnowledgeBaseChips(
-                        assistant = assistant,
-                        onUpdateAssistant = { updatedAssistant ->
-                            vm.updateSettings(
-                                setting.copy(
-                                    assistants = setting.assistants.map { a ->
-                                        if (a.id == updatedAssistant.id) updatedAssistant else a
-                                    }
-                                )
-                            )
-                        },
-                    )
-                }
-            }
-
             ChatInput(
                 modifier = Modifier.fillMaxWidth(),
                 state = inputState,
@@ -1082,6 +1048,46 @@ private fun ChatPageContent(
                 hazeState = hazeState,
                 conversation = conversation,
                 completionProviders = completionProviders,
+                // TodolistBanner / 知识库徽章经插槽排在排队气泡之下、输入框之上：
+                // 气泡是待投递的会话内容（与消息列表同层），状态卡只是辅助信息，
+                // 不能让状态卡把气泡挤到下方（顺序见 ChatInput.aboveInputContent 注释）。
+                aboveInputContent = {
+                    // TodolistBanner - 订阅 TodoStorage 实时刷新；空列表不展示
+                    // （模型可能传空 items，渲染 0/0 空卡无意义）
+                    if (todolist != null && todolist!!.items.isNotEmpty()) {
+                        TodolistBanner(
+                            todolist = todolist!!,
+                            onDismiss = { todoStorage.saveDismissedFingerprint(conversation.id.toString(), todolist!!.fingerprint()) },
+                            stateKey = "todo:${conversation.id}",
+                            // 插槽在 ChatInput 的 8dp 横向内边距内：此处 4dp → 距屏幕边 12dp，
+                            // 与排队气泡同一条左右基准线（此前直接放外层时是 12dp，视觉不变）
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                        )
+                    }
+                    if (assistant.knowledgeBaseIds.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            KnowledgeBaseChips(
+                                assistant = assistant,
+                                onUpdateAssistant = { updatedAssistant ->
+                                    vm.updateSettings(
+                                        setting.copy(
+                                            assistants = setting.assistants.map { a ->
+                                                if (a.id == updatedAssistant.id) updatedAssistant else a
+                                            }
+                                        )
+                                    )
+                                },
+                            )
+                        }
+                    }
+                },
                 onCancelClick = {
                     vm.stopGeneration()
                 },

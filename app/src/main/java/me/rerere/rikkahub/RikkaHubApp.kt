@@ -69,6 +69,9 @@ class RikkaHubApp : Application() {
         // install crash handler
         CrashHandler.install(this)
 
+        // 打开 app 即执行工作区自启动脚本/服务（普通脚本跑一遍, *.service.sh 常驻到 app 退出）
+        bootWorkspaceAutostart()
+
         // Init Shizuku (device capability layer)
         ShizukuService.initialize(this)
 
@@ -336,6 +339,20 @@ class RikkaHubApp : Application() {
         get<AppScope>().cancel()
         stopService(Intent(this, WebServerService::class.java))
     }
+    /**
+     * 打开 app 即触发工作区自启动引导：普通脚本执行一遍，*.service.sh 服务常驻到 app 退出。
+     * 与 shell/终端首访的触达钩子幂等共存（booted 旗标防双跑）；rootfs 未就绪的工作区自动跳过。
+     */
+    private fun bootWorkspaceAutostart() {
+        get<AppScope>().launch {
+            runCatching {
+                get<WorkspaceRepository>().autostartBootAll()
+            }.onFailure {
+                Log.w(TAG, "bootWorkspaceAutostart failed", it)
+            }
+        }
+    }
+
 }
 
 class AppScope : CoroutineScope by CoroutineScope(
