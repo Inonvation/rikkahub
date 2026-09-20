@@ -646,6 +646,7 @@ private val PURPOSE_MAP = mapOf(
     "workspace_write_file" to "写入工作区文件",
     "workspace_edit_file" to "编辑工作区文件",
     "workspace_shell" to "在工作区执行命令",
+    "workspace_autostart" to "管理工作区自启动脚本",
     "subagent_spawn" to "派发子代理任务",
 )
 

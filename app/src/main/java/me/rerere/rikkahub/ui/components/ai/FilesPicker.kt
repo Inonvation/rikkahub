@@ -60,6 +60,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Codesandbox
+import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderLocked
@@ -314,18 +315,35 @@ internal fun FilesPicker(
                 )
             },
             trailingContent = {
-                if (boundWorkspace != null) {
-                    IconButton(
-                        onClick = {
-                            hapticController.lightTap()
-                            onDismiss()
-                            navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
-                        },
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Settings03,
-                            contentDescription = stringResource(R.string.assistant_page_workspace_settings),
-                        )
+                // 两个图标按钮必须显式横排：ListItem 的 trailing 是单槽 Box，直接放两个会重叠
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (boundWorkspace != null && boundWorkspace.shellStatus != WorkspaceShellStatus.DISABLED.name) {
+                        IconButton(
+                            onClick = {
+                                hapticController.lightTap()
+                                onDismiss()
+                                navController.navigate(Screen.WorkspaceTerminal(boundWorkspace.id))
+                            },
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.ComputerTerminal01,
+                                contentDescription = stringResource(R.string.assistant_page_workspace),
+                            )
+                        }
+                    }
+                    if (boundWorkspace != null) {
+                        IconButton(
+                            onClick = {
+                                hapticController.lightTap()
+                                onDismiss()
+                                navController.navigate(Screen.WorkspaceDetail(boundWorkspace.id))
+                            },
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Settings03,
+                                contentDescription = stringResource(R.string.assistant_page_workspace_settings),
+                            )
+                        }
                     }
                 }
             },

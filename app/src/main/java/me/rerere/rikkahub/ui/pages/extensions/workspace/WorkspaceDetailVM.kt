@@ -13,6 +13,7 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.repository.AutostartState
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
@@ -42,6 +43,10 @@ class WorkspaceDetailVM(
     private val _installToolsState = MutableStateFlow(InstallToolsState())
     val installToolsState = _installToolsState.asStateFlow()
 
+    /** 自启动脚本状态（由 WorkspaceAutostartRunner 单一数据源驱动） */
+    private val _autostartState = MutableStateFlow(AutostartState())
+    val autostartState = _autostartState.asStateFlow()
+
     /** 目录缓存：进入过的目录条目快照（key = 存储区/路径），返回上级时秒开、不重复请求 */
     private val dirCache = mutableMapOf<String, List<WorkspaceFileEntry>>()
 
@@ -60,6 +65,11 @@ class WorkspaceDetailVM(
                 clearHighlight()
             }
         }
+        // 自启动脚本：订阅 runner 状态 + 首次扫描目录
+        viewModelScope.launch {
+            repository.observeAutostart(id).collect { _autostartState.value = it }
+        }
+        viewModelScope.launch { runCatching { repository.autostartRefresh(id) } }
     }
 
     fun selectArea(area: WorkspaceStorageArea) {
@@ -94,9 +104,55 @@ class WorkspaceDetailVM(
         }
     }
 
-    /** 强制刷新当前目录（顶栏刷新/从编辑器返回）：重新请求并更新缓存 */
+    /** 强制刷新当前目录（顶栏刷新/从编辑器返回）：重新请求并更新缓存；自启动脚本列表同步重扫 */
     fun refresh() {
         load(state.value.path, state.value.area)
+        viewModelScope.launch { runCatching { repository.autostartRefresh(id) } }
+    }
+
+    // ===== 自启动脚本管理 =====
+
+    fun createAutostartScript(name: String) {
+        viewModelScope.launch {
+            runCatching {
+                repository.autostartCreateScript(
+                    id = id,
+                    name = name,
+                    content = "#!/bin/bash\n# 自启动脚本：每次 app 启动后工作区首次使用时自动执行\ncd /workspace\n",
+                )
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "新建脚本失败") }
+            }
+        }
+    }
+
+    fun toggleAutostartScript(fileName: String, enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching {
+                repository.autostartSetEnabled(id, fileName, enabled)
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "切换失败") }
+            }
+        }
+    }
+
+    fun deleteAutostartScript(fileName: String) {
+        viewModelScope.launch {
+            runCatching {
+                repository.autostartDeleteScript(id, fileName)
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "删除脚本失败") }
+            }
+        }
+    }
+
+    /** 手动执行一轮全部启用脚本（结果经 autostartState.results 刷新） */
+    fun runAutostartScripts() {
+        viewModelScope.launch {
+            runCatching { repository.autostartRunAll(id) }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "执行失败") }
+            }
+        }
     }
 
     /** 文件变更后：清空目录缓存保证一致性，再刷新当前目录 */

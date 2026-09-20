@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.repository.WorkspaceAutostartRunner
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong
 class WorkspaceTerminalSessionManager internal constructor(
     context: Context,
     private val appScope: AppScope,
+    private val autostartRunner: WorkspaceAutostartRunner,
 ) {
     private val appContext = context.applicationContext
     private val workspaceStates = MutableStateFlow<Map<String, WorkspaceTerminalTabsState>>(emptyMap())
@@ -151,6 +153,8 @@ class WorkspaceTerminalSessionManager internal constructor(
         }
 
         val tabId = nextTabId.getAndIncrement()
+        // 终端首访与 AI shell 一样算「开机」触达：确保自启动脚本已引导（幂等）
+        autostartRunner.ensureBooted(root)
         val tabNumber = currentState(root).nextTabNumber
         val client = WorkspaceTerminalSessionClient(
             context = appContext,

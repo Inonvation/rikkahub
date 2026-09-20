@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
@@ -25,6 +26,7 @@ import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.GroupRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceAsyncTaskRunner
+import me.rerere.rikkahub.data.repository.WorkspaceAutostartRunner
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderRepository
 import me.rerere.rikkahub.data.trustedfolders.TrustedFolderStore
@@ -113,8 +115,17 @@ val repositoryModule = module {
         }
     }
 
+    // 自启动脚本引导器：只依赖 DAO + WorkspaceManager，shell 执行不经 WorkspaceRepository（避免递归触发引导）
     single {
-        WorkspaceRepository(get(), get(), get(), get(), get(), get())
+        WorkspaceAutostartRunner(
+            dao = get(),
+            manager = get(),
+            appScope = get<AppScope>(),
+        )
+    }
+
+    single {
+        WorkspaceRepository(get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

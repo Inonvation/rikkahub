@@ -35,6 +35,7 @@ class WorkspaceRepository(
     private val settingsStore: SettingsStore,
     private val asyncTaskRunner: WorkspaceAsyncTaskRunner,
     private val githubAuthManager: GitHubAuthManager,
+    private val autostartRunner: WorkspaceAutostartRunner,
 ) {
     fun listFlow(): Flow<List<WorkspaceEntity>> = dao.listFlow()
 
@@ -122,6 +123,8 @@ class WorkspaceRepository(
         onProgress: (RootfsInstallProgress) -> Unit = {},
     ): Boolean {
         val workspace = dao.getById(id) ?: return false
+        // 重装会替换 rootfs：先停掉自启动服务进程并清状态，避免进程持有已删除的旧文件；装完由下次引导重跑
+        autostartRunner.clearWorkspace(workspace.id)
         updateShellState(workspace, WorkspaceShellStatus.INSTALLING.name)
         try {
             // runInterruptible 让协程取消转成线程中断, 打断 install 内阻塞的下载/解压循环
@@ -389,14 +392,17 @@ class WorkspaceRepository(
         command: String,
         cwd: String,
         timeoutMillis: Long,
-    ): String = asyncTaskRunner.launch(
-        workspaceId = id,
-        command = command,
-        cwd = cwd,
-        timeoutMillis = timeoutMillis,
-        extraEnv = currentGithubShellEnv(),
-        maskSecrets = githubAuthManager.maskableSecrets(),
-    )
+    ): String {
+        autostartRunner.ensureBooted(id)
+        return asyncTaskRunner.launch(
+            workspaceId = id,
+            command = command,
+            cwd = cwd,
+            timeoutMillis = timeoutMillis,
+            extraEnv = currentGithubShellEnv(),
+            maskSecrets = githubAuthManager.maskableSecrets(),
+        )
+    }
 
     fun asyncTaskStatus(taskId: String): AsyncTaskStatus? = asyncTaskRunner.status(taskId)
 
@@ -513,6 +519,8 @@ class WorkspaceRepository(
         stdin: ByteArray? = null,
     ): WorkspaceCommandResult {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        // 首次 shell 触达 = 「开机」：异步执行自启动脚本，不阻塞当前命令
+        autostartRunner.ensureBooted(id)
         // 凭据注入（总闸开 + 已绑定才生效）与输出脱敏统一收敛在此，覆盖同步/异步两条 shell 路径
         val extraEnv = currentGithubShellEnv()
         val secrets = githubAuthManager.maskableSecrets()
@@ -651,6 +659,8 @@ class WorkspaceRepository(
         val workspace = dao.getById(id) ?: return false
         dao.deleteById(id)
         withContext(Dispatchers.IO) {
+            // 先停掉该工作区的自启动服务进程，再删文件，避免进程持有已删除的 rootfs
+            autostartRunner.clearWorkspace(workspace.root)
             manager.deleteWorkspace(workspace.root)
         }
         cleanupAssistantReferences(id)
@@ -659,6 +669,40 @@ class WorkspaceRepository(
 
     suspend fun updateTimestamp(id: String, timestamp: Long) {
         dao.updateTimestamp(id, timestamp)
+    }
+
+    // ===== 自启动脚本（详见 WorkspaceAutostartRunner，UI 与 workspace_autostart 工具的入口） =====
+
+    fun observeAutostart(id: String) = autostartRunner.observe(id)
+
+    fun autostartRunState(id: String) = autostartRunner.state(id)
+
+    fun autostartEnsureBooted(id: String) = autostartRunner.ensureBooted(id)
+
+    suspend fun autostartRefresh(id: String) = autostartRunner.refreshScripts(id)
+
+    suspend fun autostartRunAll(id: String) = autostartRunner.runAll(id)
+
+    suspend fun autostartCreateScript(id: String, name: String, content: String) =
+        autostartRunner.createScript(id, name, content)
+
+    suspend fun autostartSetEnabled(id: String, fileName: String, enabled: Boolean) =
+        autostartRunner.setEnabled(id, fileName, enabled)
+
+    suspend fun autostartDeleteScript(id: String, fileName: String) =
+        autostartRunner.deleteScript(id, fileName)
+
+    suspend fun autostartStartService(id: String, fileName: String) =
+        autostartRunner.startService(id, fileName)
+
+    suspend fun autostartStopService(id: String, fileName: String) =
+        autostartRunner.stopService(id, fileName)
+
+    /** app 启动即触发全部就绪工作区的开机引导（「打开软件就自动运行」） */
+    suspend fun autostartBootAll() {
+        dao.getAll()
+            .filter { it.shellStatus == WorkspaceShellStatus.READY.name }
+            .forEach { autostartRunner.ensureBooted(it.id) }
     }
 
     private suspend fun cleanupAssistantReferences(workspaceId: String) {

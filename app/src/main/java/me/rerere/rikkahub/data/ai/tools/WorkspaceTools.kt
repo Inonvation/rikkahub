@@ -60,6 +60,7 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_shell_async" to true,
     "workspace_task_status" to false,
     "workspace_set_env" to false,
+    "workspace_autostart" to false,
 )
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
@@ -140,6 +141,7 @@ suspend fun createWorkspaceTools(
         createShellAsyncTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
         createTaskStatusTool(workspaceId, workspaceRepository),
         createSetEnvTool(workspaceId, workspaceRepository),
+        createAutostartTool(workspaceId, ::needsApproval, workspaceRepository),
     )
 }
 
@@ -875,6 +877,183 @@ private fun createTaskStatusTool(
 )
 
 private val ENV_NAME_REGEX = Regex("[A-Za-z_][A-Za-z0-9_]*")
+
+/**
+ * 自启动脚本管理：约定目录 /workspace/.rikka/startup/，每次 app 进程启动算一次「开机」，
+ * 工作区首次 shell/终端触达时按文件名顺序后台执行（bash -l, cwd=/workspace, 单脚本 120s 超时）。
+ * 脚本内容本身可用 workspace_write_file 编辑（目录在 /workspace 子树内）。
+ */
+private fun createAutostartTool(
+    workspaceId: String,
+    needsApproval: (String) -> Boolean,
+    workspaceRepository: WorkspaceRepository,
+) = Tool(
+    name = "workspace_autostart",
+    description = buildString {
+        append("Manage the workspace's autostart scripts in /workspace/.rikka/startup/. ")
+        append("Autostart semantics: every time the app opens, scripts run in filename order — ")
+        append("regular *.sh scripts run once via 'bash -l' (cwd=/workspace, 120s timeout); ")
+        append("*.service.sh scripts are long-running services held by the app with NO timeout (they die when the app exits) — ")
+        append("put a foreground server command in them, do NOT background with '&'. ")
+        append("Actions: list (script inventory + run/service states), add (name like 'mirror.sh' or 'web.service.sh' + content; fails if the file exists), ")
+        append("remove (file), enable/disable (file; also starts/stops services), ")
+        append("start/stop (file; only for *.service.sh), ")
+        append("run (execute all regular scripts now and ensure services are started, returns per-script results). ")
+        append("To edit a script's content, write /workspace/.rikka/startup/<file> with workspace_write_file.")
+    },
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("action", buildJsonObject {
+                    put("type", "string")
+                    put("description", "One of: list, add, remove, enable, disable, start, stop, run")
+                })
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Script name for 'add', e.g. mirror.sh or web.service.sh (letters/digits/dot/underscore/hyphen)")
+                })
+                put("content", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Bash script content for 'add'")
+                })
+                put("file", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Script file name for 'remove'/'enable'/'disable'/'start'/'stop', e.g. web.service.sh")
+                })
+            },
+            required = listOf("action"),
+        )
+    },
+    needsApproval = { input ->
+        val action = runCatching { input.jsonObject.string("action") }.getOrNull()
+        when (action) {
+            // run/start 等价于执行 shell，跟随 shell 的审批开关；list 只读；其余为脚本文件管理
+            "run", "start", "stop" -> needsApproval("workspace_shell")
+            "list", null -> false
+            else -> needsApproval("workspace_autostart")
+        }
+    },
+    execute = {
+        val params = it.jsonObject
+        when (params.string("action")) {
+            "list", null -> {
+                workspaceRepository.autostartRefresh(workspaceId)
+                val state = workspaceRepository.autostartRunState(workspaceId)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    putJsonArray("scripts") {
+                        state.scripts.forEach { script ->
+                            add(buildJsonObject {
+                                put("file", script.fileName)
+                                put("name", script.displayName)
+                                put("enabled", script.enabled)
+                                if (script.service) put("type", "service")
+                                put("sizeBytes", script.sizeBytes)
+                                state.results[script.fileName]?.let { r ->
+                                    put("lastRun", buildJsonObject {
+                                        put("succeeded", r.succeeded)
+                                        put("exitCode", r.exitCode)
+                                        if (r.timedOut) put("timedOut", true)
+                                    })
+                                }
+                                state.services[script.fileName]?.let { s ->
+                                    put("service", buildJsonObject {
+                                        put("running", s.running)
+                                        s.startedAt?.let { put("startedAt", it) }
+                                        s.exitCode?.let { put("exitCode", it) }
+                                        if (s.outputTail.isNotBlank()) put("outputTail", s.outputTail.takeLast(2048))
+                                    })
+                                }
+                            })
+                        }
+                    }
+                    if (!state.booted) put("booted", false)
+                }.toString()))
+            }
+
+            "add" -> {
+                val name = params.string("name") ?: error("name is required for add")
+                val content = params.string("content") ?: error("content is required for add")
+                val script = workspaceRepository.autostartCreateScript(workspaceId, name, content)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("added", true)
+                    put("file", script.fileName)
+                    put("enabled", script.enabled)
+                    put("note", "Will run on the workspace's next boot (first shell use after app restart), or run now via action=run")
+                }.toString()))
+            }
+
+            "remove" -> {
+                val file = params.string("file") ?: error("file is required for remove")
+                val deleted = workspaceRepository.autostartDeleteScript(workspaceId, file)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("removed", deleted)
+                    put("file", file)
+                }.toString()))
+            }
+
+            "enable", "disable" -> {
+                val file = params.string("file") ?: error("file is required for ${params.string("action")}")
+                val enabled = params.string("action") == "enable"
+                workspaceRepository.autostartSetEnabled(workspaceId, file, enabled)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("file", file)
+                    put("enabled", enabled)
+                }.toString()))
+            }
+
+            "start", "stop" -> {
+                val file = params.string("file") ?: error("file is required for ${params.string("action")}")
+                require(file.endsWith(".service.sh")) { "start/stop only applies to *.service.sh scripts: $file" }
+                if (params.string("action") == "start") {
+                    workspaceRepository.autostartStartService(workspaceId, file)
+                } else {
+                    workspaceRepository.autostartStopService(workspaceId, file)
+                }
+                val running = workspaceRepository.autostartRunState(workspaceId).services[file]?.running ?: false
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("file", file)
+                    put("running", running)
+                }.toString()))
+            }
+
+            "run" -> {
+                val state = workspaceRepository.autostartRunAll(workspaceId)
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    putJsonArray("results") {
+                        state.scripts.filter { it.enabled }.forEach { script ->
+                            if (script.service) {
+                                val s = state.services[script.fileName]
+                                add(buildJsonObject {
+                                    put("file", script.fileName)
+                                    put("type", "service")
+                                    put("running", s?.running ?: false)
+                                    s?.exitCode?.let { put("exitCode", it) }
+                                    if (s?.outputTail?.isNotBlank() == true) put("outputTail", s.outputTail.takeLast(2048))
+                                })
+                            } else {
+                                val r = state.results[script.fileName]
+                                add(buildJsonObject {
+                                    put("file", script.fileName)
+                                    if (r == null) {
+                                        put("skipped", true)
+                                    } else {
+                                        put("succeeded", r.succeeded)
+                                        put("exitCode", r.exitCode)
+                                        if (r.timedOut) put("timedOut", true)
+                                        put("durationMs", r.durationMs)
+                                        if (r.outputTail.isNotBlank()) put("outputTail", r.outputTail.takeLast(2048))
+                                    }
+                                })
+                            }
+                        }
+                    }
+                }.toString()))
+            }
+
+            else -> error("Unknown action: ${params.string("action")}; use list/add/remove/enable/disable/start/stop/run")
+        }
+    },
+)
 
 private fun createSetEnvTool(
     workspaceId: String,

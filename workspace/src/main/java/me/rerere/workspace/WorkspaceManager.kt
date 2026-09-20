@@ -418,6 +418,38 @@ class WorkspaceManager(
         )
     }
 
+    /**
+     * 启动长驻命令（自启动服务脚本用）：不等待、不设超时，返回原始 [Process] 由调用方持有。
+     * 调用方负责收集输出与销毁；销毁 proot 主进程时 --kill-on-exit 会连带清理 rootfs 内全部子进程。
+     * 环境类错误（rootfs/proot 缺失）抛 [IllegalStateException]。
+     */
+    fun spawnCommand(
+        root: String,
+        command: String,
+        cwd: String = "",
+        extraEnv: Map<String, String> = emptyMap(),
+    ): Process {
+        require(command.isNotBlank()) { "Command is required" }
+        val workingDir = fileSystem.resolve(filesDir(root), cwd)
+        require(workingDir.exists()) { "Working directory does not exist: $cwd" }
+        require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
+
+        return shellRunner.spawn(
+            WorkspaceShellContext(
+                root = root,
+                command = command,
+                cwd = cwd,
+                filesDir = filesDir(root),
+                linuxDir = linuxDir(root),
+                tempDir = tempDir(root),
+                workingDir = workingDir,
+                timeoutMillis = 0,
+                bindMounts = bindMounts,
+                extraEnv = extraEnv,
+            )
+        )
+    }
+
     private fun requireValidRoot(root: String) {
         require(root.matches(ROOT_NAME_REGEX)) {
             "Invalid workspace root name: $root"

@@ -15,35 +15,31 @@ class ProotShellRunner(
     private val nativeLibraryDir: File,
     private val patcher: RootfsPatcher = RootfsPatcher(),
 ) : WorkspaceShellRunner {
-    override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
+    override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult =
+        try {
+            spawn(context).readResult(context.timeoutMillis, context.stdin)
+        } catch (e: IllegalStateException) {
+            // spawn 阶段的环境错误（rootfs/proot 缺失）在 execute 语义下以 exit 127 返回, 保持原有行为
+            WorkspaceCommandResult(exitCode = 127, stdout = "", stderr = e.message ?: e.javaClass.simpleName)
+        }
+
+    override fun spawn(context: WorkspaceShellContext): Process {
         if (!context.linuxDir.hasUsableRootfs()) {
-            return WorkspaceCommandResult(
-                exitCode = 127,
-                stdout = "",
-                stderr = "Rootfs is not installed",
-            )
+            throw IllegalStateException("Rootfs is not installed")
         }
 
         val proot = File(nativeLibraryDir, PROOT_EXEC)
         val loader = File(nativeLibraryDir, PROOT_LOADER)
         if (!proot.isFile) {
-            return WorkspaceCommandResult(
-                exitCode = 127,
-                stdout = "",
-                stderr = "proot executable not found: ${proot.absolutePath}",
-            )
+            throw IllegalStateException("proot executable not found: ${proot.absolutePath}")
         }
         if (!loader.isFile) {
-            return WorkspaceCommandResult(
-                exitCode = 127,
-                stdout = "",
-                stderr = "proot loader not found: ${loader.absolutePath}",
-            )
+            throw IllegalStateException("proot loader not found: ${loader.absolutePath}")
         }
 
         context.tempDir.mkdirs()
         patcher.patch(context.linuxDir)
-        val process = ProcessBuilder(buildCommand(context, proot))
+        return ProcessBuilder(buildCommand(context, proot))
             .directory(context.filesDir)
             .redirectErrorStream(false)
             .apply {
@@ -52,8 +48,6 @@ class ProotShellRunner(
                 environment()["TMPDIR"] = context.tempDir.absolutePath
             }
             .start()
-
-        return process.readResult(context.timeoutMillis, context.stdin)
     }
 
     private fun buildCommand(

@@ -144,7 +144,8 @@ val appModule = module {
     }
 
     single {
-        WorkspaceTerminalSessionManager(get(), get())
+        // 注入自启动引导器：终端首访与 AI shell 一样算「开机」触达
+        WorkspaceTerminalSessionManager(get(), get(), get())
     }
 
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；

@@ -15,6 +15,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,6 +109,9 @@ import me.rerere.hugeicons.stroke.Upload02
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.repository.AutostartScript
+import me.rerere.rikkahub.data.repository.AutostartState
+import me.rerere.rikkahub.data.repository.WORKSPACE_AUTOSTART_DIR as AUTOSTART_DIR
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -148,6 +153,7 @@ fun WorkspaceDetailPage(
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
     val installToolsState by vm.installToolsState.collectAsStateWithLifecycle()
+    val autostartState by vm.autostartState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
@@ -167,6 +173,10 @@ fun WorkspaceDetailPage(
     var renameTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
+    // 自启动脚本弹窗状态：新建命名 / 删除确认 / 运行日志查看
+    var showAutostartCreateDialog by remember { mutableStateOf(false) }
+    var autostartDeleteTarget by remember { mutableStateOf<String?>(null) }
+    var showAutostartLogDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     /**
@@ -479,6 +489,21 @@ fun WorkspaceDetailPage(
                     onRestore = { restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
                     onOpenTrash = { navController.navigate(Screen.WorkspaceTrash(id)) },
                     onToolApprovalChange = vm::setToolApproval,
+                    autostartState = autostartState,
+                    onCreateAutostartScript = { showAutostartCreateDialog = true },
+                    onToggleAutostartScript = vm::toggleAutostartScript,
+                    onDeleteAutostartScript = { autostartDeleteTarget = it },
+                    onRunAutostartScripts = vm::runAutostartScripts,
+                    onShowAutostartLog = { showAutostartLogDialog = true },
+                    onOpenAutostartScript = { script ->
+                        navController.navigate(
+                            Screen.WorkspaceFileEditor(
+                                id = id,
+                                area = WorkspaceStorageArea.FILES.name,
+                                path = "$AUTOSTART_DIR/${script.fileName}",
+                            )
+                        )
+                    },
                 )
             }
         }
@@ -571,6 +596,39 @@ fun WorkspaceDetailPage(
                     Text(stringResource(R.string.common_cancel))
                 }
             },
+        )
+    }
+
+    if (showAutostartCreateDialog) {
+        AutostartCreateDialog(
+            onDismiss = { showAutostartCreateDialog = false },
+            onConfirm = { name ->
+                vm.createAutostartScript(name)
+                showAutostartCreateDialog = false
+            },
+        )
+    }
+
+    autostartDeleteTarget?.let { fileName ->
+        RikkaConfirmDialog(
+            show = true,
+            title = "删除自启动脚本",
+            confirmText = "删除",
+            dismissText = stringResource(R.string.common_cancel),
+            onConfirm = {
+                vm.deleteAutostartScript(fileName)
+                autostartDeleteTarget = null
+            },
+            onDismiss = { autostartDeleteTarget = null },
+        ) {
+            Text("将删除脚本 $fileName，此操作不经过回收站。")
+        }
+    }
+
+    if (showAutostartLogDialog) {
+        AutostartLogDialog(
+            state = autostartState,
+            onDismiss = { showAutostartLogDialog = false },
         )
     }
 
@@ -673,6 +731,13 @@ private fun WorkspaceBasicPage(
     onRestore: () -> Unit,
     onOpenTrash: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
+    autostartState: AutostartState,
+    onCreateAutostartScript: () -> Unit,
+    onToggleAutostartScript: (String, Boolean) -> Unit,
+    onDeleteAutostartScript: (String) -> Unit,
+    onRunAutostartScripts: () -> Unit,
+    onShowAutostartLog: () -> Unit,
+    onOpenAutostartScript: (AutostartScript) -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
     val installing = installProgress != null || shellStatus == WorkspaceShellStatus.INSTALLING.name
@@ -776,6 +841,19 @@ private fun WorkspaceBasicPage(
         }
 
         item {
+            WorkspaceAutostartCard(
+                state = autostartState,
+                rootfsReady = rootfsReady,
+                onCreate = onCreateAutostartScript,
+                onToggle = onToggleAutostartScript,
+                onDelete = onDeleteAutostartScript,
+                onRun = onRunAutostartScripts,
+                onShowLog = onShowAutostartLog,
+                onOpen = onOpenAutostartScript,
+            )
+        }
+
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CustomColors.cardColorsOnSurfaceContainer,
@@ -856,6 +934,220 @@ private fun WorkspaceBasicPage(
 }
 
 @Composable
+private fun WorkspaceAutostartCard(
+    state: AutostartState,
+    rootfsReady: Boolean,
+    onCreate: () -> Unit,
+    onToggle: (String, Boolean) -> Unit,
+    onDelete: (String) -> Unit,
+    onRun: () -> Unit,
+    onShowLog: () -> Unit,
+    onOpen: (AutostartScript) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "自启动脚本",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "「$AUTOSTART_DIR」目录下的脚本每次打开 app 时按文件名顺序自动执行（bash，工作目录 /workspace）：普通 *.sh 跑一遍即退（单脚本最长 2 分钟）；*.service.sh 是常驻服务，app 会一直运行它直到退出或手动关闭。点击脚本名可编辑内容。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!rootfsReady) {
+                Text(
+                    text = "rootfs 未就绪，脚本不会执行",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (state.scripts.isEmpty()) {
+                Text(
+                    text = "暂无自启动脚本",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.scripts.forEach { script ->
+                val result = state.results[script.fileName]
+                val service = state.services[script.fileName]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onOpen(script) },
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = script.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            if (script.service) {
+                                Text(
+                                    text = "服务",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        val (statusText, statusColor) = when {
+                            script.service && service?.running == true -> "运行中" to MaterialTheme.colorScheme.primary
+                            script.service && service?.exitCode != null ->
+                                "已退出 (exit ${service.exitCode})" to MaterialTheme.colorScheme.error
+
+                            script.service -> "未运行" to MaterialTheme.colorScheme.onSurfaceVariant
+                            result == null -> "未运行" to MaterialTheme.colorScheme.onSurfaceVariant
+                            result.timedOut -> "超时" to MaterialTheme.colorScheme.error
+                            result.succeeded -> "上次执行成功" to MaterialTheme.colorScheme.primary
+                            else -> "上次执行失败 (exit ${result.exitCode})" to MaterialTheme.colorScheme.error
+                        }
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusColor,
+                        )
+                    }
+                    Switch(
+                        checked = script.enabled,
+                        onCheckedChange = { onToggle(script.fileName, it) },
+                    )
+                    IconButton(onClick = { onDelete(script.fileName) }) {
+                        Icon(HugeIcons.Delete02, contentDescription = "删除脚本")
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilledTonalButton(
+                    onClick = onCreate,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Add01, contentDescription = null)
+                    Text("新建", modifier = Modifier.padding(start = 6.dp))
+                }
+                FilledTonalButton(
+                    onClick = onRun,
+                    enabled = rootfsReady && !state.running,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Bash, contentDescription = null)
+                    Text(
+                        if (state.running) "执行中…" else "立即执行",
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+                FilledTonalButton(
+                    onClick = onShowLog,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.File02, contentDescription = null)
+                    Text("日志", modifier = Modifier.padding(start = 6.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutostartCreateDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建自启动脚本") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "将在「$AUTOSTART_DIR」下创建 <名称>.sh（默认启用），创建后点击脚本名编辑内容。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("脚本名（如 mirror）") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name) },
+                enabled = name.isNotBlank(),
+            ) {
+                Text(stringResource(R.string.common_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun AutostartLogDialog(
+    state: AutostartState,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自启动运行日志") },
+        text = {
+            val content = if (state.results.isEmpty()) {
+                "本进程内尚未执行过自启动脚本。"
+            } else {
+                state.results.entries
+                    .sortedByDescending { it.value.finishedAt }
+                    .joinToString("\n\n") { (file, result) ->
+                        buildString {
+                            appendLine("── $file ──")
+                            appendLine(
+                                "exit=${result.exitCode}${if (result.timedOut) " (超时)" else ""}" +
+                                    " · ${"%.1f".format(result.durationMs / 1000.0)}s"
+                            )
+                            append(result.outputTail.ifBlank { "(无输出)" })
+                        }
+                    }
+            }
+            Text(
+                text = content,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_confirm))
+            }
+        },
+    )
+}
+
+@Composable
 private fun WorkspaceToolApprovalCard(
     workspace: WorkspaceEntity?,
     onToolApprovalChange: (String, Boolean) -> Unit,
@@ -923,6 +1215,7 @@ private fun workspaceToolApprovalItems() = listOf(
     "workspace_write_file" to stringResource(R.string.workspace_detail_tool_write_file),
     "workspace_edit_file" to stringResource(R.string.workspace_detail_tool_edit_file),
     "workspace_shell" to stringResource(R.string.workspace_detail_tool_shell),
+    "workspace_autostart" to "自启动脚本管理",
 )
 
 @Composable

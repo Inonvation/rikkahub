@@ -7,6 +7,12 @@ import java.util.concurrent.TimeUnit
 
 interface WorkspaceShellRunner {
     fun execute(context: WorkspaceShellContext): WorkspaceCommandResult
+
+    /**
+     * 启动进程但不等待（长驻服务脚本用）：调用方自行持有 [Process]、收集输出并负责销毁。
+     * context.timeoutMillis 在此路径下无意义。
+     */
+    fun spawn(context: WorkspaceShellContext): Process
 }
 
 data class WorkspaceShellContext(
@@ -25,16 +31,17 @@ data class WorkspaceShellContext(
 )
 
 class HostShellRunner : WorkspaceShellRunner {
-    override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
-        val process = ProcessBuilder(defaultShell(), "-c", context.command)
+    override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult =
+        spawn(context).readResult(context.timeoutMillis, context.stdin)
+
+    override fun spawn(context: WorkspaceShellContext): Process =
+        ProcessBuilder(defaultShell(), "-c", context.command)
             .directory(context.workingDir)
             .redirectErrorStream(false)
             .apply {
                 environment().putAll(context.extraEnv)
             }
             .start()
-        return process.readResult(context.timeoutMillis, context.stdin)
-    }
 
     private fun defaultShell(): String =
         if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
