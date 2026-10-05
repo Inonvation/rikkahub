@@ -3,11 +3,8 @@ package me.rerere.rikkahub.ui.pages.setting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.StopCircle
-import me.rerere.hugeicons.stroke.DragDropHorizontal
-import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Mic01
-import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.VolumeHigh
 import androidx.compose.foundation.layout.Arrangement
@@ -54,8 +51,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -67,11 +62,14 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.SettingsLoadingIndicator
+import me.rerere.rikkahub.ui.components.ui.ItemAction
+import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import me.rerere.rikkahub.ui.components.ui.longPressReorder
 import me.rerere.rikkahub.ui.context.LocalTTSState
-import me.rerere.rikkahub.ui.hooks.rememberHaptic
-import me.rerere.rikkahub.ui.hooks.rememberReorderUiState
 import me.rerere.rikkahub.ui.pages.setting.components.ASRProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.TTSProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -305,14 +303,13 @@ private fun TTSProviderList(
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
-    // 拖动排序：本地同步更新顺序，松手后一次性落盘
-    val reorderableState = rememberReorderUiState(
-        lazyListState = lazyListState,
-        items = settings.ttsProviders,
-        persist = { newProviders ->
-            onUpdateSettings(settings.copy(ttsProviders = newProviders))
-        },
-    )
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val newProviders = settings.ttsProviders.toMutableList().apply {
+            add(to.index, removeAt(from.index))
+        }
+        onUpdateSettings(settings.copy(ttsProviders = newProviders))
+    }
+    var deleteTarget by remember { mutableStateOf<TTSProviderSetting?>(null) }
 
     LazyColumn(
         modifier = modifier
@@ -322,37 +319,16 @@ private fun TTSProviderList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
-        items(reorderableState.items, key = { it.id }) { provider ->
+        items(settings.ttsProviders, key = { it.id }) { provider ->
             ReorderableItem(
-                state = reorderableState.reorderableState,
+                state = reorderableState,
                 key = provider.id
             ) { isDragging ->
                 TTSProviderItem(
                     modifier = Modifier
-                        .scale(if (isDragging) 0.95f else 1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .then(longPressReorder(isDragging)),
                     provider = provider,
-                    dragHandle = {
-                        val hapticController = rememberHaptic()
-                        IconButton(
-                            onClick = {},
-                            modifier = Modifier
-                                .draggableHandle(
-                                    onDragStarted = {
-                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        hapticController.perform(HapticFeedbackType.GestureEnd)
-                                        reorderableState.persistNow()
-                                    }
-                                )
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.DragDropHorizontal,
-                                contentDescription = null
-                            )
-                        }
-                    },
                     isSelected = settings.selectedTTSProviderId == provider.id,
                     onSelect = {
                         onUpdateSettings(settings.copy(selectedTTSProviderId = provider.id))
@@ -361,19 +337,35 @@ private fun TTSProviderList(
                         onEdit(provider)
                     },
                     onDelete = {
-                        val newProviders = settings.ttsProviders - provider
-                        val newSelectedId =
-                            if (settings.selectedTTSProviderId == provider.id) DEFAULT_SYSTEM_TTS_ID else settings.selectedTTSProviderId
-                        onUpdateSettings(
-                            settings.copy(
-                                ttsProviders = newProviders,
-                                selectedTTSProviderId = newSelectedId
-                            )
-                        )
+                        deleteTarget = provider
                     }
                 )
             }
         }
+    }
+
+    RikkaConfirmDialog(
+        show = deleteTarget != null,
+        title = stringResource(R.string.confirm_delete),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            deleteTarget?.let { target ->
+                val newProviders = settings.ttsProviders.filter { it.id != target.id }
+                val newSelectedId =
+                    if (settings.selectedTTSProviderId == target.id) DEFAULT_SYSTEM_TTS_ID else settings.selectedTTSProviderId
+                onUpdateSettings(
+                    settings.copy(
+                        ttsProviders = newProviders,
+                        selectedTTSProviderId = newSelectedId
+                    )
+                )
+            }
+            deleteTarget = null
+        },
+        onDismiss = { deleteTarget = null },
+    ) {
+        Text(stringResource(R.string.common_delete_confirm_message, deleteTarget?.name.orEmpty()))
     }
 }
 
@@ -385,14 +377,13 @@ private fun ASRProviderList(
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
-    // 拖动排序：本地同步更新顺序，松手后一次性落盘
-    val reorderableState = rememberReorderUiState(
-        lazyListState = lazyListState,
-        items = settings.asrProviders,
-        persist = { newProviders ->
-            onUpdateSettings(settings.copy(asrProviders = newProviders))
-        },
-    )
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val newProviders = settings.asrProviders.toMutableList().apply {
+            add(to.index, removeAt(from.index))
+        }
+        onUpdateSettings(settings.copy(asrProviders = newProviders))
+    }
+    var deleteTarget by remember { mutableStateOf<ASRProviderSetting?>(null) }
 
     LazyColumn(
         modifier = modifier
@@ -402,37 +393,16 @@ private fun ASRProviderList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         state = lazyListState
     ) {
-        items(reorderableState.items, key = { it.id }) { provider ->
+        items(settings.asrProviders, key = { it.id }) { provider ->
             ReorderableItem(
-                state = reorderableState.reorderableState,
+                state = reorderableState,
                 key = provider.id
             ) { isDragging ->
                 ASRProviderItem(
                     modifier = Modifier
-                        .scale(if (isDragging) 0.95f else 1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .then(longPressReorder(isDragging)),
                     provider = provider,
-                    dragHandle = {
-                        val hapticController = rememberHaptic()
-                        IconButton(
-                            onClick = {},
-                            modifier = Modifier
-                                .draggableHandle(
-                                    onDragStarted = {
-                                        hapticController.perform(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        hapticController.perform(HapticFeedbackType.GestureEnd)
-                                        reorderableState.persistNow()
-                                    }
-                                )
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.DragDropHorizontal,
-                                contentDescription = null
-                            )
-                        }
-                    },
                     isSelected = settings.selectedASRProviderId == provider.id,
                     onSelect = {
                         onUpdateSettings(settings.copy(selectedASRProviderId = provider.id))
@@ -441,23 +411,39 @@ private fun ASRProviderList(
                         onEdit(provider)
                     },
                     onDelete = {
-                        val newProviders = settings.asrProviders - provider
-                        val newSelectedId =
-                            if (settings.selectedASRProviderId == provider.id) {
-                                newProviders.firstOrNull()?.id
-                            } else {
-                                settings.selectedASRProviderId
-                            }
-                        onUpdateSettings(
-                            settings.copy(
-                                asrProviders = newProviders,
-                                selectedASRProviderId = newSelectedId
-                            )
-                        )
+                        deleteTarget = provider
                     }
                 )
             }
         }
+    }
+
+    RikkaConfirmDialog(
+        show = deleteTarget != null,
+        title = stringResource(R.string.confirm_delete),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            deleteTarget?.let { target ->
+                val newProviders = settings.asrProviders.filter { it.id != target.id }
+                val newSelectedId =
+                    if (settings.selectedASRProviderId == target.id) {
+                        newProviders.firstOrNull()?.id
+                    } else {
+                        settings.selectedASRProviderId
+                    }
+                onUpdateSettings(
+                    settings.copy(
+                        asrProviders = newProviders,
+                        selectedASRProviderId = newSelectedId
+                    )
+                )
+            }
+            deleteTarget = null
+        },
+        onDismiss = { deleteTarget = null },
+    ) {
+        Text(stringResource(R.string.common_delete_confirm_message, deleteTarget?.name.orEmpty()))
     }
 }
 
@@ -657,17 +643,16 @@ private fun TTSProviderItem(
     provider: TTSProviderSetting,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
-    dragHandle: @Composable () -> Unit,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    var showDropdownMenu by remember { mutableStateOf(false) }
     val tts = LocalTTSState.current
     val isSpeaking by tts.isSpeaking.collectAsState()
     val isAvailable by tts.isAvailable.collectAsState()
 
     Card(
+        onClick = onEdit,
         modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) {
@@ -728,74 +713,49 @@ private fun TTSProviderItem(
                     onClick = onSelect
                 )
 
-                dragHandle()
+                ItemActionMenu(
+                    actions = listOf(
+                        ItemAction(
+                            text = stringResource(R.string.delete),
+                            icon = HugeIcons.Delete01,
+                            destructive = true,
+                            enabled = provider.id != DEFAULT_SYSTEM_TTS_ID,
+                            onClick = onDelete,
+                        ),
+                    )
+                )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 状态标签
-                if (isSelected) {
+            if (isSelected) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 状态标签
                     Tag(type = TagType.SUCCESS) {
                         Text(stringResource(R.string.setting_tts_page_selected))
                     }
-                }
 
-                Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
 
-                // TTS测试播放按钮
-                if (isSelected && isAvailable) {
-                    val testText = stringResource(R.string.setting_tts_page_test_text)
-                    IconButton(
-                        onClick = {
-                            if (!isSpeaking) {
-                                tts.speak(testText)
-                            } else {
-                                tts.stop()
+                    // TTS测试播放按钮
+                    if (isAvailable) {
+                        val testText = stringResource(R.string.setting_tts_page_test_text)
+                        IconButton(
+                            onClick = {
+                                if (!isSpeaking) {
+                                    tts.speak(testText)
+                                } else {
+                                    tts.stop()
+                                }
                             }
+                        ) {
+                            Icon(
+                                imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                                contentDescription = if (isSpeaking) stringResource(R.string.stop) else stringResource(R.string.test_tts),
+                                tint = if (isSpeaking) MaterialTheme.colorScheme.error else LocalContentColor.current
+                            )
                         }
-                    ) {
-                        Icon(
-                            imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                            contentDescription = if (isSpeaking) stringResource(R.string.stop) else stringResource(R.string.test_tts),
-                            tint = if (isSpeaking) MaterialTheme.colorScheme.error else LocalContentColor.current
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = { showDropdownMenu = true }
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Tools,
-                        contentDescription = stringResource(R.string.setting_tts_page_more_options_content_description)
-                    )
-                    DropdownMenu(
-                        expanded = showDropdownMenu,
-                        onDismissRequest = { showDropdownMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit)) },
-                            onClick = {
-                                showDropdownMenu = false
-                                onEdit()
-                            },
-                            leadingIcon = {
-                                Icon(HugeIcons.PencilEdit01, contentDescription = null)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete)) },
-                            onClick = {
-                                showDropdownMenu = false
-                                onDelete()
-                            },
-                            leadingIcon = {
-                                Icon(HugeIcons.Delete01, contentDescription = null)
-                            },
-                            enabled = provider.id != DEFAULT_SYSTEM_TTS_ID
-                        )
                     }
                 }
             }
@@ -808,14 +768,12 @@ private fun ASRProviderItem(
     provider: ASRProviderSetting,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
-    dragHandle: @Composable () -> Unit,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    var showDropdownMenu by remember { mutableStateOf(false) }
-
     Card(
+        onClick = onEdit,
         modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) {
@@ -869,53 +827,20 @@ private fun ASRProviderItem(
                     onClick = onSelect
                 )
 
-                dragHandle()
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isSelected) {
-                    Tag(type = TagType.SUCCESS) {
-                        Text(stringResource(R.string.setting_tts_page_selected))
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                IconButton(
-                    onClick = { showDropdownMenu = true }
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Tools,
-                        contentDescription = stringResource(R.string.setting_tts_page_more_options_content_description)
+                ItemActionMenu(
+                    actions = listOf(
+                        ItemAction(
+                            text = stringResource(R.string.delete),
+                            icon = HugeIcons.Delete01,
+                            destructive = true,
+                            onClick = onDelete,
+                        ),
                     )
-                    DropdownMenu(
-                        expanded = showDropdownMenu,
-                        onDismissRequest = { showDropdownMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit)) },
-                            onClick = {
-                                showDropdownMenu = false
-                                onEdit()
-                            },
-                            leadingIcon = {
-                                Icon(HugeIcons.PencilEdit01, contentDescription = null)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete)) },
-                            onClick = {
-                                showDropdownMenu = false
-                                onDelete()
-                            },
-                            leadingIcon = {
-                                Icon(HugeIcons.Delete01, contentDescription = null)
-                            }
-                        )
-                    }
+                )
+            }
+            if (isSelected) {
+                Tag(type = TagType.SUCCESS) {
+                    Text(stringResource(R.string.setting_tts_page_selected))
                 }
             }
         }

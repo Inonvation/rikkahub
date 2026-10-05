@@ -105,7 +105,6 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
-import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
 import me.rerere.rikkahub.data.ai.mcp.McpManager
@@ -116,6 +115,9 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.SettingsLoadingIndicator
+import me.rerere.rikkahub.ui.components.ui.ItemAction
+import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Switch
 import me.rerere.rikkahub.ui.components.ui.SwitchSize
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -133,6 +135,7 @@ import me.rerere.rikkahub.utils.writeClipboardText
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
+import me.rerere.hugeicons.stroke.Settings03
 
 @Composable
 fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
@@ -328,6 +331,11 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                             McpServerCard(
                                 item = mcpConfig,
                                 onEdit = { editState.open(mcpConfig) },
+                                onDelete = {
+                                    vm.updateSettings(
+                                        settings.copy(mcpServers = mcpConfigs.filter { it.id != mcpConfig.id })
+                                    )
+                                },
                                 modifier = Modifier
                                     .longPressDraggableHandle(
                                         onDragStarted = {
@@ -459,9 +467,11 @@ private fun McpServerCard(
     item: McpServerConfig,
     modifier: Modifier = Modifier,
     onEdit: (McpServerConfig) -> Unit,
+    onDelete: () -> Unit,
 ) {
     val mcpManager = koinInject<McpManager>()
     val status by mcpManager.getStatus(item).collectAsStateWithLifecycle(McpStatus.Idle)
+    var showDeleteDialog by remember { mutableStateOf(false) }
     var errorDetail by remember { mutableStateOf<McpStatus.Error?>(null) }
 
     errorDetail?.let { error ->
@@ -498,12 +508,12 @@ private fun McpServerCard(
             },
         )
     }
-
     Card(
+        onClick = { onEdit(item) },
+        modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = CustomColors.listItemColors.containerColor
-        ),
-        modifier = modifier,
+        )
     ) {
         Row(
             modifier = Modifier
@@ -597,10 +607,31 @@ private fun McpServerCard(
                 }
             }
 
-            IconButton(onClick = { onEdit(item) }) {
-                Icon(HugeIcons.Settings03, null, modifier = Modifier.size(20.dp))
-            }
+            ItemActionMenu(
+                actions = listOf(
+                    ItemAction(
+                        text = stringResource(R.string.delete),
+                        icon = HugeIcons.Delete01,
+                        destructive = true,
+                        onClick = { showDeleteDialog = true },
+                    ),
+                )
+            )
         }
+    }
+
+    RikkaConfirmDialog(
+        show = showDeleteDialog,
+        title = stringResource(R.string.confirm_delete),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            showDeleteDialog = false
+            onDelete()
+        },
+        onDismiss = { showDeleteDialog = false },
+    ) {
+        Text(stringResource(R.string.common_delete_confirm_message, item.commonOptions.name))
     }
 }
 

@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.foundation.horizontalScroll
@@ -50,6 +49,8 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.MemoryCategory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.ItemAction
+import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.hooks.EditStateContent
@@ -383,6 +384,7 @@ private fun MemoryItem(
     onDeleteMemory: (AssistantMemory) -> Unit
 ) {
     Card(
+        onClick = { onEditMemory(memory) },
         modifier = Modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer
     ) {
@@ -414,19 +416,16 @@ private fun MemoryItem(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
             }
-            IconButton(
-                onClick = { onEditMemory(memory) }
-            ) {
-                Icon(HugeIcons.PencilEdit01, null)
-            }
-            IconButton(
-                onClick = { onDeleteMemory(memory) }
-            ) {
-                Icon(
-                    HugeIcons.Delete01,
-                    stringResource(R.string.assistant_page_delete)
+            ItemActionMenu(
+                actions = listOf(
+                    ItemAction(
+                        text = stringResource(R.string.delete),
+                        icon = HugeIcons.Delete01,
+                        destructive = true,
+                        onClick = { onDeleteMemory(memory) },
+                    ),
                 )
-            }
+            )
         }
     }
 }

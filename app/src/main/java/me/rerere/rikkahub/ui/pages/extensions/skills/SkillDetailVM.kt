@@ -46,6 +46,10 @@ class SkillDetailVM(
     private val _meta = MutableStateFlow<SkillMetadata?>(null)
     val meta = _meta.asStateFlow()
 
+    /** 内置技能只读：文件查看不受限，但编辑/新增/删除全部禁用 */
+    val readOnly = _meta.map { it?.builtin == true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     /** 来源注册表快照（skillName -> 来源），页面按技能名取用 */
     val sources = skillUpdateManager.sources
 

@@ -25,17 +25,60 @@ class SkillManager(
         return dir
     }
 
+    private val builtinLock = Any()
+
+    @Volatile
+    private var builtinExtracted = false
+
+    fun getBuiltinSkillsDir(): File {
+        val dir = context.filesDir.resolve(FileFolders.BUILTIN_SKILLS)
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    /**
+     * 确保内置技能已从 assets 解压到 [getBuiltinSkillsDir]，每个进程只检查一次。
+     */
+    fun ensureBuiltinSkillsExtracted() {
+        if (builtinExtracted) return
+        synchronized(builtinLock) {
+            if (builtinExtracted) return
+            runCatching {
+                BuiltinSkills.extractIfNeeded(context, getBuiltinSkillsDir())
+            }.onFailure {
+                Log.w(TAG, "ensureBuiltinSkillsExtracted: Failed to extract builtin skills", it)
+            }
+            builtinExtracted = true
+        }
+    }
+
+    /**
+     * 列出所有可用技能：用户技能 + 内置技能，同名时用户技能覆盖内置技能。
+     */
     fun listSkills(): List<SkillMetadata> {
-        val skillsDir = getSkillsDir()
-        val skills = skillsDir.listFiles()
-            ?.filter { it.isDirectory }
+        val skills = listSkillsIn(getSkillsDir(), builtin = false)
+        val localNames = skills.mapTo(HashSet()) { it.name }
+        val builtin = listBuiltinSkills().filter { it.name !in localNames }
+        return applySkillOrder(skills + builtin)
+    }
+
+    fun findSkill(name: String): SkillMetadata? = listSkills().firstOrNull { it.name == name }
+
+    private fun listBuiltinSkills(): List<SkillMetadata> {
+        ensureBuiltinSkillsExtracted()
+        return listSkillsIn(getBuiltinSkillsDir(), builtin = true)
+    }
+
+    private fun listSkillsIn(root: File, builtin: Boolean): List<SkillMetadata> {
+        return root.listFiles()
+            // 跳过隐藏目录，如原子写入残留的 .<name>.staging.N.tmp
+            ?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.mapNotNull { dir ->
                 val skillFile = dir.resolve("SKILL.md")
                 if (!skillFile.exists()) return@mapNotNull null
-                parseSkillFile(skillFile, dir)
+                parseSkillFile(skillFile, dir, builtin)
             }
             ?: emptyList()
-        return applySkillOrder(skills)
     }
 
     /**
@@ -126,8 +169,11 @@ class SkillManager(
 
     suspend fun deleteSkill(name: String): Boolean = withContext(Dispatchers.IO) {
         val skillDir = resolveSkillDir(name) ?: return@withContext false
+        // 目录不存在时 deleteRecursively 也返回 true，需提前拦截，避免误清理内置技能的启用状态
+        if (!skillDir.exists()) return@withContext false
         val deleted = skillDir.deleteRecursively()
-        if (deleted) {
+        // 删除的是覆盖内置技能的同名用户技能时，内置技能会重新生效，保留启用状态
+        if (deleted && listBuiltinSkills().none { it.name == name }) {
             settingsStore.update { settings ->
                 settings.copy(
                     assistants = settings.assistants.map { assistant ->
@@ -330,7 +376,7 @@ class SkillManager(
         return null
     }
 
-    private fun parseSkillFile(skillFile: File, skillDir: File): SkillMetadata? {
+    private fun parseSkillFile(skillFile: File, skillDir: File, builtin: Boolean = false): SkillMetadata? {
         return runCatching {
             val content = skillFile.readText()
             val frontmatter = SkillFrontmatterParser.parse(content)
@@ -351,6 +397,7 @@ class SkillManager(
                 // Anthropic Agent Skills 规范的可选字段：技能可用的工具白名单
                 allowedTools = frontmatter.getStringList("allowed-tools") ?: emptyList(),
                 skillDir = skillDir,
+                builtin = builtin,
             )
         }.getOrElse {
             Log.w(TAG, "parseSkillFile: Failed to parse ${skillFile.absolutePath}", it)
@@ -366,6 +413,8 @@ data class SkillMetadata(
     /** 技能可用的工具白名单（Anthropic Agent Skills allowed-tools，可空） */
     val allowedTools: List<String> = emptyList(),
     val skillDir: File,
+    /** 内置技能，来自 assets 解压，只读 */
+    val builtin: Boolean = false,
 ) {
     val skillFile: File get() = skillDir.resolve("SKILL.md")
 }

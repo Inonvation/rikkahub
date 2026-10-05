@@ -31,6 +31,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import me.rerere.rikkahub.ui.components.charts.ChartCard
+import me.rerere.rikkahub.ui.components.charts.ChartSpec
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -319,6 +321,15 @@ fun SubAgentDetailPage(taskId: String, conversationId: String?) {
                         val blocks = remember(msg.parts) { msg.parts.groupMessageParts() }
                         blocks.forEach { block ->
                             when (block) {
+                                is MessagePartBlock.ChartBlock -> {
+                    key(block.index) {
+                        val spec = remember(block.tool.input) { ChartSpec.fromJson(block.tool.inputAsJson()) }
+                        spec?.let { ChartCard(spec = it) }
+                        }
+
+                }
+
+
                                 is MessagePartBlock.ThinkingBlock -> {
                                     if (block.steps.isNotEmpty()) {
                                         ChainOfThought(

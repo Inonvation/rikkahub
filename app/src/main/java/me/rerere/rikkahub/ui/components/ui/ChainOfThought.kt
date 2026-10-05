@@ -40,7 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -179,24 +179,20 @@ fun <T> ChainOfThought(
                 }
 
                 val lineColor = MaterialTheme.colorScheme.outlineVariant
-                val scope = remember { ChainOfThoughtScopeImpl() }
-                Box(
-                    modifier = Modifier.drawBehind {
-                        val x = 12.dp.toPx()
-                        val offsetPx = 18.dp.toPx()
-                        drawLine(
-                            color = lineColor,
-                            start = Offset(x, offsetPx),
-                            end = Offset(x, size.height - offsetPx),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-                ) {
-                    Column {
-                        // 对齐上游：直接渲染可见步骤，无逐步骤垂直动画
-                        visibleSteps.fastForEach { step ->
-                            scope.content(step)
+                // 对齐上游：每个步骤只绘制自己的连线分段并在节点处留空，
+                // 避免使用离屏合成 + BlendMode.Clear（离屏层过大时部分设备会退化，节点区域被清成黑块）。
+                Column {
+                    visibleSteps.fastForEachIndexed { index, step ->
+                        val isFirst = index == 0
+                        val isLast = index == visibleSteps.lastIndex
+                        val scope = remember(isFirst, isLast, lineColor) {
+                            ChainOfThoughtScopeImpl(
+                                isFirst = isFirst,
+                                isLast = isLast,
+                                lineColor = lineColor,
+                            )
                         }
+                        scope.content(step)
                     }
                 }
             }
@@ -266,7 +262,11 @@ interface ChainOfThoughtScope {
     )
 }
 
-private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
+private class ChainOfThoughtScopeImpl(
+    private val isFirst: Boolean,
+    private val isLast: Boolean,
+    private val lineColor: Color,
+) : ChainOfThoughtScope {
     @Composable
     override fun ChainOfThoughtStep(
         icon: @Composable (() -> Unit)?,
@@ -354,6 +354,29 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             Row(
                 modifier = headerModifier.then(
                     Modifier
+                    .drawBehind {
+                        // 节点上下的连线分段，节点（20.dp）区域留空
+                        val x = 12.dp.toPx()
+                        val centerY = size.height / 2
+                        val gap = 10.dp.toPx()
+                        val strokeWidth = 1.dp.toPx()
+                        if (!isFirst) {
+                            drawLine(
+                                color = lineColor,
+                                start = Offset(x, 0f),
+                                end = Offset(x, centerY - gap),
+                                strokeWidth = strokeWidth,
+                            )
+                        }
+                        if (!isLast) {
+                            drawLine(
+                                color = lineColor,
+                                start = Offset(x, centerY + gap),
+                                end = Offset(x, size.height),
+                                strokeWidth = strokeWidth,
+                            )
+                        }
+                    }
                     .then(
                         if (shouldFillMaxWidth) {
                             Modifier.fillMaxWidth()
@@ -448,6 +471,17 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                                 Modifier
                             }
                         )
+                        .drawBehind {
+                            if (!isLast) {
+                                val x = 12.dp.toPx()
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, size.height),
+                                    strokeWidth = 1.dp.toPx(),
+                                )
+                            }
+                        }
                         .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
                 ) {
                     content?.invoke()

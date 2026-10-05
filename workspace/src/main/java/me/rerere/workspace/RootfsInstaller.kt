@@ -9,6 +9,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
 import java.util.Locale
+import java.util.logging.Logger
 import java.util.zip.GZIPInputStream
 import org.tukaani.xz.XZInputStream
 
@@ -190,7 +191,13 @@ class RootfsInstaller(
             (target.parentFile ?: root).toPath().relativize(resolved.toPath()).toFile()
         }
         target.delete()
-        Files.createSymbolicLink(target.toPath(), linkTarget.toPath())
+        try {
+            Files.createSymbolicLink(target.toPath(), linkTarget.toPath())
+        } catch (e: IOException) {
+            // Windows 未开启开发者模式/无特权时创建软链会失败: 跳过该条目而不是中断整个解压,
+            // 宿主 JVM 测试环境用 Assume 跳过依赖软链的断言; Android 上软链始终可用, 不走此分支
+            Logger.getLogger("RootfsInstaller").warning("Failed to create symlink ${target.name} -> $linkName, skipping: $e")
+        }
     }
 
     private fun createHardLink(root: File, target: File, linkName: String) {
@@ -332,16 +339,16 @@ class RootfsInstaller(
         setExecutable(mode and 0b001_000_000 != 0, false)
     }
 
+    // 根目录条目 (如 Alpine minirootfs 开头的 "./") 规范化后为空串, 由调用方跳过
     private fun normalizeTarPath(path: String): String {
-        val normalized = path
+        require(!path.contains('\u0000')) { "Rootfs entry path contains invalid character" }
+        val segments = path
             .replace('\\', '/')
             .trim()
-            .trimStart('/')
-            .removePrefix("./")
-        require(normalized.isNotBlank()) { "Rootfs entry path is blank" }
-        require(!normalized.contains('\u0000')) { "Rootfs entry path contains invalid character" }
-        require(normalized.split('/').none { it == ".." }) { "Rootfs entry escapes target directory: $path" }
-        return normalized
+            .split('/')
+            .filter { it.isNotEmpty() && it != "." }
+        require(segments.none { it == ".." }) { "Rootfs entry escapes target directory: $path" }
+        return segments.joinToString("/")
     }
 
     private fun ByteArray.string(offset: Int, length: Int): String {

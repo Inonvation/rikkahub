@@ -157,6 +157,14 @@ class MemoryRepository(
         ftsManager.invalidate(assistantId)
     }
 
+    suspend fun copyMemories(fromAssistantId: String, toAssistantId: String) {
+        val memories = memoryDAO.getMemoriesOfAssistant(fromAssistantId)
+        if (memories.isEmpty()) return
+        memoryDAO.insertMemories(
+            memories.map { MemoryEntity(assistantId = toAssistantId, content = it.content) }
+        )
+    }
+
     suspend fun deleteMemory(id: Int) {
         val memory = memoryDAO.getMemoryById(id)
         memoryDAO.deleteMemory(id)

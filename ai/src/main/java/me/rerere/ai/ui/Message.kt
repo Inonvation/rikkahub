@@ -240,7 +240,8 @@ fun UIMessage.cleanupBlankParts(): UIMessage {
             is UIMessagePart.Reasoning -> {
                 val cleaned = part.reasoning.trimBlankLines()
                 when {
-                    cleaned.isBlank() -> {
+                    // 空正文但携带元数据（如 Interactions 的 thought 签名）时保留，避免丢签名
+                    cleaned.isBlank() && part.metadata == null -> {
                         changed = true
                         null
                     }

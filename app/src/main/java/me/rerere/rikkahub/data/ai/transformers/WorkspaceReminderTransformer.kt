@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import android.util.Log
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
@@ -13,6 +15,10 @@ internal const val MAX_AGENTS_INJECT_CHARS = 4096
 
 /** cwd 级 AGENTS.md 读取字节上限, 防异常大文件整体载入内存; 注入时再按 [MAX_AGENTS_INJECT_CHARS] 截断 */
 private const val MAX_CWD_AGENTS_READ_BYTES = 64L * 1024
+
+private const val MAX_OS_RELEASE_BYTES = 16L * 1024
+private val OS_RELEASE_PATHS = listOf("/etc/os-release", "/usr/lib/os-release")
+private const val MAX_DISTRO_NAME_LENGTH = 80
 
 /** Rootfs 内 workspace files 区挂载点, 会话 cwd 的根 */
 private const val ROOTFS_WORKSPACE_DIR = "/workspace"
@@ -55,7 +61,15 @@ class WorkspaceReminderTransformer(
         // cwd 级项目指令: 无此文件时为 null, 注入文本与原先逐字节一致
         val cwdAgents = readCwdAgentsInstructions(workspaceId, ctx.workspaceCwd)
 
-        val prompt = buildWorkspacePrompt(workspace, ctx.workspaceCwd, envContent, memoryContent, cwdAgents)
+        val prompt = buildWorkspacePrompt(
+            workspace = workspace,
+            cwd = ctx.workspaceCwd,
+            envContent = envContent,
+            memoryContent = memoryContent,
+            cwdAgents = cwdAgents,
+            shell = workspaceRepository.rootfsShell(workspaceId),
+            distro = readDistroName(workspaceId),
+        )
 
         // 追加到第一条 system 消息; 若不存在则插入一条
         val systemIndex = messages.indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -69,6 +83,28 @@ class WorkspaceReminderTransformer(
             listOf(UIMessage.system(prompt).copy(isSynthetic = true)) + messages
         }
     }
+
+    private suspend fun readDistroName(workspaceId: String): String? =
+        OS_RELEASE_PATHS.firstNotNullOfOrNull { path ->
+            readRootfsText(workspaceId, path, MAX_OS_RELEASE_BYTES)?.let(::parseOsReleaseName)
+        }
+
+    // 文件不存在、过大或不可读时返回 null, 不影响提示词的其余部分
+    private suspend fun readRootfsText(workspaceId: String, path: String, maxBytes: Long): String? =
+        try {
+            val size = workspaceRepository.rootfsFileSize(workspaceId, path)
+            require(size <= maxBytes) { "$path exceeds $maxBytes bytes" }
+            val content = ByteArrayOutputStream().use { output ->
+                workspaceRepository.exportRootfsFile(workspaceId, path, output)
+                output.toString(Charsets.UTF_8.name())
+            }
+            content.takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d("WorkspaceReminder", "Skipping workspace file: $path", e)
+            null
+        }
 
     /** 读取会话 cwd 下的 AGENTS.md; 路径非法/不存在/空白/异常一律静默返回 null(取消除外) */
     private suspend fun readCwdAgentsInstructions(
@@ -143,11 +179,22 @@ private fun buildWorkspacePrompt(
     envContent: String? = null,
     memoryContent: String? = null,
     cwdAgents: Pair<String, String>? = null,
+    shell: String = "/bin/bash",
+    distro: String? = null,
 ): String = buildString {
     appendLine("<workspace>")
     appendLine("Linux workspace \"${workspace.name}\" (PRoot sandbox on Android; not Windows — use Unix commands). Env & installed tools auto-refreshed below.")
     appendLine("- cwd: ${cwd ?: "/workspace"} · workspace_* tools resolve relative paths against it (writes outside it require approval).")
+    if (distro != null) {
+        appendLine("- The Rootfs distribution is $distro. Use its native package manager when you need to install missing tools.")
+    }
+    if (shell == "/bin/bash") {
+        appendLine("- `workspace_shell` runs commands with `/bin/bash`.")
+    } else {
+        appendLine("- `workspace_shell` runs commands with `$shell`, a POSIX shell. Bash is not installed, so avoid bash-only syntax such as arrays, here-strings (`<<<`) and brace expansion.")
+    }
     appendLine("- /workspace/.agent/: AGENTS.md (auto env), MEMORY.md (index), notes/, INDEX.md (layout). Skills: /skills/<skill>/SKILL.md; /upload is read-only.")
+    appendLine("- Built-in skills shipped with the app are mounted at `/builtin_skills/<skill-name>/` with the same layout. Treat `/builtin_skills` as READ-ONLY: you may read files and run scripts there, but never modify, overwrite, or delete anything. A skill in `/skills` with the same name overrides the built-in one.")
     appendLine("- Reply with workspace images using ![alt](/workspace/<relative-path>) and file links using [name](/workspace/<relative-path>); use the exact paths workspace tools report (write results carry a ready-to-copy \"markdown\" field), never guess paths.")
     append("</workspace>")
     // 三段文本按优先级共享总预算：cwd 指令最先占额，余量依次给环境探测与记忆索引
@@ -184,4 +231,18 @@ private fun buildWorkspacePrompt(
             append("</workspace_memory>")
         }
     }
+}
+
+/** 从 os-release 内容中取发行版名称, 优先 PRETTY_NAME, 其次 NAME + VERSION_ID */
+internal fun parseOsReleaseName(content: String): String? {
+    val values = content.lineSequence()
+        .map { it.trim() }
+        .filter { !it.startsWith("#") && it.indexOf('=') > 0 }
+        .associate { line ->
+            line.substringBefore('=') to line.substringAfter('=').trim().removeSurrounding("\"").removeSurrounding("'")
+        }
+    val name = values["PRETTY_NAME"]?.takeIf { it.isNotBlank() }
+        ?: listOfNotNull(values["NAME"], values["VERSION_ID"]).joinToString(" ")
+    // 内容来自 Rootfs 内的文件, 拼进系统提示前去掉控制字符并限制长度
+    return name.filterNot { it.isISOControl() }.trim().take(MAX_DISTRO_NAME_LENGTH).ifBlank { null }
 }

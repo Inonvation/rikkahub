@@ -174,6 +174,7 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "RouteActivity"
 private const val ACTION_TRANSLATE = "me.rerere.rikkahub.action.TRANSLATE"
+private const val ACTION_IMAGE_GEN = "me.rerere.rikkahub.action.IMAGE_GEN"
 
 class RouteActivity : ComponentActivity() {
     private val okHttpClient by inject<OkHttpClient>()
@@ -271,6 +272,7 @@ class RouteActivity : ComponentActivity() {
                 }
 
                 ACTION_TRANSLATE -> backStack.add(Screen.Translator)
+                ACTION_IMAGE_GEN -> backStack.add(Screen.ImageGen)
             }
         }
     }
@@ -300,6 +302,11 @@ class RouteActivity : ComponentActivity() {
                 // 顶到栈顶的已是翻译页时不再重复入栈（连续点快捷方式避免叠页）
                 if (navStack?.lastOrNull() != Screen.Translator) {
                     navStack?.add(Screen.Translator)
+                }
+            }
+            ACTION_IMAGE_GEN -> {
+                if (navStack?.lastOrNull() != Screen.ImageGen) {
+                    navStack?.add(Screen.ImageGen)
                 }
             }
         }

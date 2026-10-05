@@ -93,3 +93,36 @@ class WorkspaceReminderTransformerTest {
         assertTrue(cwd + env + mem <= MAX_ENV_TOTAL_CHARS)
     }
 }
+
+class OsReleaseNameTest {
+    @Test
+    fun `os-release should prefer pretty name`() {
+        val content = """
+            ID=alpine
+            NAME="Alpine Linux"
+            PRETTY_NAME="Alpine Linux v3.24"
+        """.trimIndent()
+        assertEquals("Alpine Linux v3.24", parseOsReleaseName(content))
+    }
+
+    @Test
+    fun `os-release should fall back to name and version`() {
+        val content = """
+            NAME="Ubuntu"
+            VERSION_ID="24.04"
+        """.trimIndent()
+        assertEquals("Ubuntu 24.04", parseOsReleaseName(content))
+    }
+
+    @Test
+    fun `os-release without name should return null`() {
+        assertNull(parseOsReleaseName("ID=unknown\nnot a key value line\n"))
+    }
+
+    @Test
+    fun `os-release name should be sanitized and truncated`() {
+        val name = parseOsReleaseName("PRETTY_NAME=\"Distro\u0007 ${"x".repeat(200)}\"")!!
+        assertEquals(80, name.length)
+        assertEquals("Distro x", name.take(8))
+    }
+}

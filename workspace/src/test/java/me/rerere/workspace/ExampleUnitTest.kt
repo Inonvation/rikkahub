@@ -8,6 +8,7 @@ import java.io.File
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.util.zip.GZIPOutputStream
+import org.junit.Assume
 
 class ExampleUnitTest {
     @Test
@@ -59,6 +60,7 @@ class ExampleUnitTest {
 
     @Test
     fun rootfsInstallerDownloadsAndExtractsTarGz() {
+        assumeSymlinkSupported()
         val baseDir = Files.createTempDirectory("workspace-manager-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val installer = RootfsInstaller(manager)
@@ -159,9 +161,10 @@ class ExampleUnitTest {
         val root = "test-workspace"
         manager.ensureWorkspace(root)
 
+        // 用 yes|head 生成超限输出; Windows Git Bash 的 gawk 对 300000 次 printf 的输出量不稳定
         val result = manager.executeCommand(
             root,
-            "awk 'BEGIN { for (i = 0; i < 300000; i++) printf \"a\" }'",
+            "yes a | head -c 300000",
         )
 
         assertEquals(0, result.exitCode)
@@ -280,4 +283,21 @@ class ExampleUnitTest {
         val type: Char = '0',
         val linkName: String = "",
     )
+    /** Windows 未开启开发者模式/无特权时无法创建软链, 依赖软链的断言需要先探测 */
+    private fun assumeSymlinkSupported() {
+        val target = java.nio.file.Files.createTempFile("symlink-probe-target", ".tmp")
+        target.toFile().deleteOnExit()
+        // 链路径本身不能预先存在, 否则 createSymbolicLink 在 Windows 上必败
+        val link = target.resolveSibling(target.fileName.toString() + ".lnk")
+        try {
+            java.nio.file.Files.createSymbolicLink(link, target.fileName)
+            org.junit.Assume.assumeTrue(java.nio.file.Files.isSymbolicLink(link))
+        } catch (e: java.io.IOException) {
+            org.junit.Assume.assumeNoException(e)
+        } finally {
+            java.nio.file.Files.deleteIfExists(link)
+            java.nio.file.Files.deleteIfExists(target)
+        }
+    }
+
 }

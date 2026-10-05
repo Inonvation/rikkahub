@@ -47,4 +47,8 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("freeze_apps")
     data object FreezeApps : LocalToolOption()
+
+    @Serializable
+    @SerialName("chart_display")
+    data object ChartDisplay : LocalToolOption()
 }

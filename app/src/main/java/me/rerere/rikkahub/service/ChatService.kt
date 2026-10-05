@@ -251,6 +251,18 @@ internal fun displayMessagesForChunk(
  * 从源会话创建一个 fork 会话，继承其 folder id 与 workspace cwd，
  * 让镜像分支继续落在同一个目录/工作区内。
  */
+private val forkTitleSuffixRegex = Regex("""\((\d+)\)$""")
+
+internal fun forkConversationTitle(sourceTitle: String, existingTitles: Set<String>): String {
+    // 源标题已带 (N) 后缀时递增序号，避免多次 fork 后叠加成 xxx(1)(1)(1)
+    val suffix = forkTitleSuffixRegex.find(sourceTitle)
+    val baseTitle = suffix?.let { sourceTitle.removeRange(it.range) } ?: sourceTitle
+    val start = suffix?.groupValues?.get(1)?.toIntOrNull()?.plus(1) ?: 1
+    return generateSequence(start) { it + 1 }
+        .map { "$baseTitle($it)" }
+        .first { it !in existingTitles }
+}
+
 internal fun createForkConversation(
     source: Conversation,
     messageNodes: List<MessageNode>,
@@ -260,9 +272,7 @@ internal fun createForkConversation(
     assistantId = source.assistantId,
     // fork 标题取「原会话标题(序号)」：同一助手内从 1 递增到首个未占用标题，
     // 避免镜像分支重名互相覆盖观感（列表按标题展示）。
-    title = generateSequence(1) { it + 1 }
-        .map { "${source.title}($it)" }
-        .first { it !in existingTitles },
+    title = forkConversationTitle(source.title, existingTitles),
     messageNodes = messageNodes,
     customSystemPrompt = source.customSystemPrompt,
     modeInjectionIds = source.modeInjectionIds,
@@ -2501,9 +2511,11 @@ class ChatService(
 
         runCatching {
             val settings = settingsStore.settingsFlow.first()
+            // 找不到快速/标题模型与对应供应商时给出明确错误，而不是静默跳过（用户不知道标题为何没生成）
             val model = settings.findModelById(settings.titleModelId, fallback = settings.fastModelId)
-                ?: return@runCatching
-            val provider = model.findProvider(settings.providers) ?: return@runCatching
+                ?: throw IllegalStateException(context.getString(R.string.error_fast_model_not_found))
+            val provider = model.findProvider(settings.providers)
+                ?: throw IllegalStateException(context.getString(R.string.error_fast_model_provider_not_found))
 
             val providerHandler = providerManager.getProviderByType(provider)
             val result = retryWithPolicy(BACKGROUND_RETRY_POLICY) {

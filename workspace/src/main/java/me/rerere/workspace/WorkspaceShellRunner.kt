@@ -43,8 +43,12 @@ class HostShellRunner : WorkspaceShellRunner {
             }
             .start()
 
-    private fun defaultShell(): String =
-        if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
+    private fun defaultShell(): String = when {
+        File("/system/bin/sh").exists() -> "/system/bin/sh"
+        // Windows 桌面/JVM 测试环境: Git Bash 的 sh.exe 在 PATH 上, 绝对路径 /bin/sh 不存在
+        System.getProperty("os.name", "").lowercase().contains("windows") -> "sh.exe"
+        else -> "/bin/sh"
+    }
 }
 
 // 单个流保留的最大字符数, 防止命令疯狂输出导致 OOM 或撑爆 LLM 上下文

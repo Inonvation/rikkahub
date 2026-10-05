@@ -95,6 +95,9 @@ interface ConversationDAO {
     @Query("SELECT COUNT(*) FROM conversationentity")
     suspend fun countAll(): Int
 
+    @Query("SELECT assistant_id AS assistantId, COUNT(*) AS count FROM conversationentity GROUP BY assistant_id")
+    suspend fun countByAssistant(): List<AssistantConversationCount>
+
     @Query("SELECT COUNT(*) FROM conversationentity WHERE mode = :modeRef")
     suspend fun countByMode(modeRef: String): Int
 
@@ -117,3 +120,5 @@ data class ConversationSyncEntry(
     val isPinned: Boolean,
     val messageCount: Int,
 )
+
+data class AssistantConversationCount(val assistantId: String, val count: Int)

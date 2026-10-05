@@ -277,5 +277,6 @@ object AgentConfigExporter {
         LocalToolOption.DeviceDoctor -> "device_doctor"
         LocalToolOption.StorageCleaner -> "storage_cleaner"
         LocalToolOption.FreezeApps -> "freeze_apps"
+        LocalToolOption.ChartDisplay -> "chart_display"
     }
 }

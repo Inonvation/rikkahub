@@ -90,6 +90,8 @@ import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.message.LocalConversationId
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
+import me.rerere.rikkahub.ui.components.charts.ChartCard
+import me.rerere.rikkahub.ui.components.charts.ChartSpec
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -731,6 +733,13 @@ private fun MessagePartsBlock(
                             }
                         }
                     }
+                }
+            }
+
+            is MessagePartBlock.ChartBlock -> {
+                key(block.index) {
+                    val spec = remember(block.tool.input) { ChartSpec.fromJson(block.tool.inputAsJson()) }
+                    spec?.let { ChartCard(spec = it) }
                 }
             }
 

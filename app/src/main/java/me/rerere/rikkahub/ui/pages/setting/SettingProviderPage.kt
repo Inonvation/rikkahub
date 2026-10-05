@@ -4,6 +4,7 @@ import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
@@ -55,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,9 +72,13 @@ import me.rerere.rikkahub.data.datastore.RECOMMENDED_PROVIDERS
 import me.rerere.rikkahub.data.datastore.generateUniqueProviderName
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.SettingScaffold
+import me.rerere.rikkahub.ui.components.ui.ItemAction
+import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
+import me.rerere.rikkahub.ui.components.ui.longPressReorder
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberHaptic
@@ -113,6 +119,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val context = LocalContext.current
     val navController = LocalNavController.current
     var searchQuery by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<ProviderSetting?>(null) }
     val lazyListState = rememberLazyListState()
 
     val filteredProviders = remember(settings.providers, searchQuery) {
@@ -240,12 +247,31 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             },
                             onClick = {
                                 navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                            },
+                            onDelete = {
+                                deleteTarget = provider
                             }
                         )
                     }
                 }
             }
         }
+    }
+
+    RikkaConfirmDialog(
+        show = deleteTarget != null,
+        title = stringResource(R.string.confirm_delete),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        onConfirm = {
+            deleteTarget?.let { target ->
+                vm.updateSettings(settings.copy(providers = settings.providers.filter { it.id != target.id }))
+            }
+            deleteTarget = null
+        },
+        onDismiss = { deleteTarget = null },
+    ) {
+        Text(stringResource(R.string.setting_provider_page_delete_dialog_text))
     }
 }
 
@@ -649,7 +675,8 @@ private fun ProviderItem(
     modifier: Modifier = Modifier,
     dragModifier: Modifier = Modifier,
     onCopy: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val hapticController = rememberHaptic()
     Card(
@@ -721,6 +748,17 @@ private fun ProviderItem(
                     contentDescription = stringResource(R.string.assistant_page_clone)
                 )
             }
+            ItemActionMenu(
+                actions = listOf(
+                    ItemAction(
+                        text = stringResource(R.string.delete),
+                        icon = HugeIcons.Delete01,
+                        destructive = true,
+                        enabled = !provider.builtIn,
+                        onClick = onDelete,
+                    ),
+                )
+            )
         }
     }
 }

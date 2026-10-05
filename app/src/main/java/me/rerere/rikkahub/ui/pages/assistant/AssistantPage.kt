@@ -92,6 +92,9 @@ import me.rerere.rikkahub.ui.components.ai.ASSISTANT_GROUP_CATEGORY_PREFIX
 import me.rerere.rikkahub.ui.components.ai.ASSISTANT_GROUP_OTHER
 import me.rerere.rikkahub.ui.components.ai.AssistantCollapsibleGroup
 import me.rerere.rikkahub.data.model.effectiveCategory
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun AssistantPage(vm: AssistantVM = koinViewModel()) {
@@ -109,6 +112,9 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
     var collapsedGroups by remember { mutableStateOf(emptySet<String>()) }
     // 操作菜单状态
     var actionSheetAssistant by remember { mutableStateOf<Assistant?>(null) }
+    // 待复制的助手（使用独立记忆时询问是否一并复制记忆）
+    var cloneTarget by remember { mutableStateOf<Assistant?>(null) }
+    var cloneWithMemories by remember { mutableStateOf(false) }
     // 模板选择对话框
     var showTemplateDialog by remember { mutableStateOf(false) }
     // 分类管理弹层
@@ -369,13 +375,58 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
                 actionSheetAssistant = null
             },
             onCopy = {
-                vm.copyAssistant(assistant)
+                // 全局记忆是共享的，复制后的助手本来就能读到，无需询问
+                if (!assistant.useGlobalMemory) {
+                    cloneWithMemories = false
+                    cloneTarget = assistant
+                } else {
+                    vm.copyAssistant(assistant)
+                }
                 actionSheetAssistant = null
             },
             onDelete = {
                 vm.removeAssistant(assistant)
                 actionSheetAssistant = null
             }
+        )
+    }
+
+    // 复制助手：使用独立记忆时可选同时复制记忆
+    cloneTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { cloneTarget = null },
+            title = { Text(stringResource(R.string.assistant_page_clone)) },
+            text = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = cloneWithMemories,
+                            role = Role.Checkbox,
+                            onValueChange = { cloneWithMemories = it },
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = cloneWithMemories, onCheckedChange = null)
+                    Text(stringResource(R.string.assistant_page_clone_with_memories))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.copyAssistant(target, copyMemories = cloneWithMemories)
+                        cloneTarget = null
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cloneTarget = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
         )
     }
 }

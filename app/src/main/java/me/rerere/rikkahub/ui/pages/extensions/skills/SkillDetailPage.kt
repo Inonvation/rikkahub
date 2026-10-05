@@ -65,6 +65,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.FilePen
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Folder
@@ -94,6 +95,7 @@ fun SkillDetailPage(skillName: String) {
 
     val tree by vm.tree.collectAsStateWithLifecycle()
     val meta by vm.meta.collectAsStateWithLifecycle()
+    val readOnly by vm.readOnly.collectAsStateWithLifecycle()
     val sources by vm.sources.collectAsStateWithLifecycle()
     val modifiedFiles by vm.modifiedFiles.collectAsStateWithLifecycle()
     val autoUpdateGloballyEnabled by vm.autoUpdateGloballyEnabled.collectAsStateWithLifecycle()
@@ -132,7 +134,7 @@ fun SkillDetailPage(skillName: String) {
         },
         floatingActionButton = {
             AnimatedVisibility(
-                visible = fabVisible,
+                visible = fabVisible && !readOnly,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
             ) {
@@ -176,6 +178,7 @@ fun SkillDetailPage(skillName: String) {
             FileTree(
                 nodes = tree,
                 depth = 0,
+                readOnly = readOnly,
                 onEdit = { editingFile = it },
                 onDelete = { deleteTarget = it },
             )
@@ -206,6 +209,7 @@ fun SkillDetailPage(skillName: String) {
     editingFile?.let { skillFile ->
         SkillFileEditorDialog(
             skillFile = skillFile,
+            readOnly = readOnly,
             initialContent = remember(skillFile.relativePath) { vm.readFile(skillFile) },
             onDismiss = { editingFile = null },
             onConfirm = { content ->
@@ -252,6 +256,7 @@ fun SkillDetailPage(skillName: String) {
 private fun FileTree(
     nodes: List<SkillFileNode>,
     depth: Int,
+    readOnly: Boolean,
     onEdit: (SkillFile) -> Unit,
     onDelete: (SkillFile) -> Unit,
 ) {
@@ -260,6 +265,7 @@ private fun FileTree(
             is SkillFileNode.FileNode -> FileItem(
                 skillFile = node.skillFile,
                 depth = depth,
+                readOnly = readOnly,
                 onEdit = { onEdit(node.skillFile) },
                 onDelete = { onDelete(node.skillFile) },
             )
@@ -267,6 +273,7 @@ private fun FileTree(
             is SkillFileNode.DirNode -> DirItem(
                 node = node,
                 depth = depth,
+                readOnly = readOnly,
                 onEdit = onEdit,
                 onDelete = onDelete,
             )
@@ -278,6 +285,7 @@ private fun FileTree(
 private fun FileItem(
     skillFile: SkillFile,
     depth: Int,
+    readOnly: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -312,12 +320,12 @@ private fun FileItem(
             )
             IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    imageVector = Lucide.FilePen,
-                    contentDescription = stringResource(R.string.edit),
+                    imageVector = if (readOnly) Lucide.Eye else Lucide.FilePen,
+                    contentDescription = if (readOnly) null else stringResource(R.string.edit),
                     modifier = Modifier.size(16.dp),
                 )
             }
-            if (skillFile.relativePath != "SKILL.md") {
+            if (!readOnly && skillFile.relativePath != "SKILL.md") {
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Lucide.Trash2,
@@ -335,6 +343,7 @@ private fun FileItem(
 private fun DirItem(
     node: SkillFileNode.DirNode,
     depth: Int,
+    readOnly: Boolean,
     onEdit: (SkillFile) -> Unit,
     onDelete: (SkillFile) -> Unit,
 ) {
@@ -378,6 +387,7 @@ private fun DirItem(
                     FileTree(
                         nodes = node.children,
                         depth = depth + 1,
+                        readOnly = readOnly,
                         onEdit = onEdit,
                         onDelete = onDelete,
                     )
@@ -519,6 +529,7 @@ private fun SkillInfoHeader(
 @Composable
 private fun SkillFileEditorDialog(
     skillFile: SkillFile,
+    readOnly: Boolean,
     initialContent: String,
     onDismiss: () -> Unit,
     onConfirm: (content: String) -> Unit,
@@ -558,22 +569,28 @@ private fun SkillFileEditorDialog(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
-                        onClick = { onConfirm(textState.text.toString()) },
-                        enabled = dirty,
-                    ) {
-                        Text(stringResource(R.string.skill_detail_page_save))
+                    if (readOnly) {
+                        // 内置技能只读，仅提供关闭
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                    } else {
+                        TextButton(
+                            onClick = { onConfirm(textState.text.toString()) },
+                            enabled = dirty,
+                        ) {
+                            Text(stringResource(R.string.skill_detail_page_save))
+                        }
                     }
                 }
                 if (isMarkdown) {
                     MarkdownPreviewSwitcher(
                         state = textState,
                         modifier = Modifier.fillMaxSize(),
-                        sourceEditable = true,
+                        sourceEditable = !readOnly,
                     )
                 } else {
                     TextField(
                         state = textState,
+                        readOnly = readOnly,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 8.dp),

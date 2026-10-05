@@ -252,6 +252,12 @@ fun WorkspaceDetailPage(
         val outputStream = context.contentResolver.openOutputStream(uri) ?: return@rememberLauncherForActivityResult
         vm.exportFile(entry, outputStream)
     }
+    // 多选批量导出到用户选择的目录（对齐上游 2.5.4）
+    val directoryExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        vm.exportFilesToDirectory(uri, context.contentResolver)
+    }
     // 工作区备份/恢复: 备份导出 zip, 恢复导入 zip(覆盖前需确认)
     val backupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip"),
@@ -510,24 +516,46 @@ fun WorkspaceDetailPage(
 
             // 多选浮动操作条: 悬浮于 NavigationBar 之上, 不参与布局 → 进出多选 viewport 稳定
             AnimatedVisibility(
-                visible = selecting,
+                visible = selecting || state.exporting,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 20.dp),
                 enter = slideInVertically(initialOffsetY = { it * 2 }),
                 exit = slideOutVertically(targetOffsetY = { it * 2 }),
             ) {
-                SelectActionBar(
-                    selectedCount = selectedPaths.size,
-                    totalCount = state.entries.size,
-                    onSelectAll = { toggleSelectAll() },
-                    onMove = {
-                        moveSources = selectedEntries
-                        showMoveTargetPicker = true
-                    },
-                    onTrash = { batchTrashTargets = selectedEntries },
-                    onDelete = { batchDeleteTargets = selectedEntries },
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // 批量导出进行中: 操作条上方显示进度（对齐上游 2.5.4 多选导出）
+                    if (state.exporting) {
+                        Text(
+                            text = "正在导出 ${state.exportCompleted}/${state.exportTotal}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        LinearProgressIndicator(
+                            progress = {
+                                if (state.exportTotal > 0) {
+                                    state.exportCompleted.toFloat() / state.exportTotal
+                                } else 0f
+                            },
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    SelectActionBar(
+                        selectedCount = selectedPaths.size,
+                        totalCount = state.entries.size,
+                        exporting = state.exporting,
+                        onSelectAll = { toggleSelectAll() },
+                        onMove = {
+                            moveSources = selectedEntries
+                            showMoveTargetPicker = true
+                        },
+                        onExport = {
+                            if (vm.prepareBatchExport(selectedEntries)) directoryExportLauncher.launch(null)
+                        },
+                        onTrash = { batchTrashTargets = selectedEntries },
+                        onDelete = { batchDeleteTargets = selectedEntries },
+                    )
+                }
             }
         }
     }
@@ -554,6 +582,18 @@ fun WorkspaceDetailPage(
                 TextButton(onClick = vm::dismissInstallError) {
                     Text(stringResource(R.string.common_confirm))
                 }
+            },
+        )
+    }
+
+    // 批量导出结果（含逐文件失败原因）
+    state.exportResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = vm::dismissExportResult,
+            title = { Text("导出结果") },
+            text = { Text(result, modifier = Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = {
+                TextButton(onClick = vm::dismissExportResult) { Text(stringResource(R.string.common_confirm)) }
             },
         )
     }
@@ -1939,8 +1979,10 @@ private fun WorkspaceFileCard(
 private fun SelectActionBar(
     selectedCount: Int,
     totalCount: Int,
+    exporting: Boolean,
     onSelectAll: () -> Unit,
     onMove: () -> Unit,
+    onExport: () -> Unit,
     onTrash: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -1964,6 +2006,11 @@ private fun SelectActionBar(
         Tooltip(tooltip = { Text("移动") }) {
             IconButton(onClick = onMove, enabled = selectedCount > 0) {
                 Icon(HugeIcons.Folder01, contentDescription = null)
+            }
+        }
+        Tooltip(tooltip = { Text("导出") }) {
+            IconButton(onClick = onExport, enabled = selectedCount > 0 && !exporting) {
+                Icon(HugeIcons.Download01, contentDescription = null)
             }
         }
         Tooltip(tooltip = { Text("移入回收站") }) {

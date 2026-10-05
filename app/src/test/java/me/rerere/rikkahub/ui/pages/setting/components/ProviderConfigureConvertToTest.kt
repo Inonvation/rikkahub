@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting.components
 
 import me.rerere.ai.provider.BalanceOption
+import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.OPENAI_CODEX_BASE_URL
 import me.rerere.ai.provider.OpenAIAuthType
@@ -53,6 +54,7 @@ class ProviderConfigureConvertToTest {
             name = "My Provider",
             models = listOf(model),
             balanceOption = balanceOption,
+            customHeaders = listOf(CustomHeader("User-Agent", "test-agent")),
             apiKey = "sk-test",
             baseUrl = "https://api.openai.com/v1"
         )
@@ -66,6 +68,7 @@ class ProviderConfigureConvertToTest {
         assertEquals(original.name, google.name)
         assertEquals(original.models, google.models)
         assertEquals(original.balanceOption, google.balanceOption)
+        assertEquals(original.customHeaders, google.customHeaders)
         assertEquals(original.apiKey, google.apiKey)
         assertEquals("https://generativelanguage.googleapis.com/v1beta", google.baseUrl)
     }

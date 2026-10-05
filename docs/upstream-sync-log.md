@@ -374,3 +374,62 @@
 ### 验证
 
 `:ai:compileDebugKotlin`、`:app:compileDebugKotlin` BUILD SUCCESSFUL；`:app:assembleDebug` 打包成功（APK 91.7MB，`lib/arm64-v8a/libquickjs.so` 为 quickjs-kt 产物）。单元测试 5 模块 1272 例全绿（test-results XML 确认零失败），含新增 `VolcengineTTSProviderTest` 8/8、`JavascriptToolTest` 5/5、`CustomJsSearchServiceTest` 4/4、`ChatServiceTest` 13/13、`ModelRegistryTest` 12/12（含 testStep5）。真机验证待装机确认：blur/glass 输入栏切换与观感、火山 TTS 合成、JS 工具与自定义 JS 搜索脚本、置顶/移动助手在生成中的会话上不丢消息、导入旧版本配置文件后 backgroundEffectType 默认 BLUR。
+
+## 2026-10-05 — 第十三次同步（09-20 ~ 10-05 上游 c3d6867c..85af5b91 共约 76 提交；落地 ~40，跳过 9，部分吸收 1）
+
+> 清单范围 `c3d6867cb..85af5b910`（第十二次同步后全部累积）。
+
+### A. 落地（按域分组）
+
+**ai 模块**
+| 提交 | 内容 | 落地方式 |
+|---|---|---|
+| `40426e93`+`94504b5c` | chat completions 关思考传 none / DashScope reasoning 参数 | 干净 cherry-pick |
+| `4391d5a5` | Google 过滤工具参数不兼容的 propertyNames | 干净 |
+| `5ac149b9` | Responses 工具事件缺 item_id 时回退 call_id/output_index | 手工：按本地 `jsonPrimitiveOrNull` 风格移植 resolveToolCallId/itemIdOrCallId/toolCallIdsByOutputIndex，测试文件直接 checkout |
+| `3a9ae690` | Gemini 4 注册 + thinkingLevel | 干净 |
+| `3443dd45` | Claude Sonnet/Opus 5.5 注册，移除 Claude 3.5/3.7 | 手工注册表+测试（删掉自加的错误负向断言） |
+| `2cd62ad2` | Gemini Interactions API（API+解码器+测试+app 配置页） | 干净 |
+| `654a5e1f` | 供应商自定义请求头（ProviderSetting.customHeaders + Request.mergeCustomHeaders + 高级设置 tab） | ai 侧 5 文件冲突语义合并：保留本地 authenticator 统一鉴权/CHATGPT_SUBSCRIPTION 流式聚合/effectiveBaseUrl/configureSessionHeaders 尾链，仅采纳 mergeCustomHeaders 调用；app 侧（SettingProviderDetailPage 高级 tab 等）自动合并成功 |
+| `a6dbb8cd` | Response API 函数工具显式关 strict | 干净 |
+| `4e4bfa62` | imggen 自定义分辨率修复 + grok 判定按 host | 冲突仅 import（本地已有 HttpUrl 导入），正文自动合并 |
+| `85af5b91` | OpenRouter 图片编辑走 input_references + 模型名含斜杠时相册回溯子目录 | 冲突为空 HEAD 块，取 theirs 插入 |
+| `068103dd` | mimo v2.6 注册 | 干净 |
+
+**MCP**
+`8b696c0c`(空名 header 忽略) 干净；`cf79246b`($ref 内联展开→新 `McpToolSchema.kt`，本地旧 private toSchema 删除防重复声明) 手工；`7a53065a`(OAuth localhost 回调) 干净；`4ba5d79f`(元数据缺失回退 origin) 干净；`b8e0fec4`(Client ID Metadata Document) 无冲突；`d21265cb`(MCP SDK → rikkahub fork 0.15.0-rikka.2) 干净。
+
+**app 修复/特性**
+`324b337b`(代码块行号防复制)、`54aa8114`(收藏侧滑) 干净；`b9c0d3b7`(debug 数据恢复页：DAO countByAssistant + Repo countConversationsByAssistant 手工补，DebugPage/VM 补丁 apply 干净)；`70b382f5`(设置读取失败防重置：DataStore 改进程内单例 + ReplaceFileCorruptionHandler 备份损坏文件 + retryWhen 指数退避 + incrementLaunchCount 单 key 原子自增，RikkaHubApp 改调新 API)；`2d5c51bd`(LogPage 剪贴板事务过大) 干净；`21448350`(工作区长按多选**批量导出到目录**：本地 SelectActionBar 增加「导出」动作 + directoryExportLauncher + 进度条/结果弹窗，VM 增 prepareBatchExport/exportFilesToDirectory)；`b2d73a65`(导出不含思考) 干净；`95fed05e`(fork 标题序号递增：forkConversationTitle 提取 + ChatServiceTest 5 断言)；`d5f0039b`(标题模型/供应商缺失时抛明确错误，本地沿用 titleModelId→fastModelId 链)；`282b85f2`(复制助手可选复制独立记忆：MemoryDAO.insertMemories + copyMemories + 本地操作菜单 onCopy 条件弹 AlertDialog)；`53f224b1`(ExpressivePopup) 干净；`7508eee9`(RTL 方向图标) 干净；`158f1f68`(混元配置) 干净；`eaa003ad`(图片生成快捷方式：本地 RouteActivity 双 when 分支均加 ACTION_IMAGE_GEN，含防叠页) 手工；`b2525e7b`(模型列表按供应商折叠+持久化) git apply --3way 后手工保留本地 key 元组防撞修复；`44236d7b`+`426ede84`(依赖：m3 alpha29 / nav3 1.2.0 / coil 3.6.3 / haze 2.0.0 / kotlin 2.4.20 + 玻璃 tint alpha 0.3)。
+
+**82c339c1 统一列表交互（部分吸收，12 页冲突逐页决策）**
+- 采纳：SettingThemePage / QuickMessagesPage(Card onClick+ItemActionMenu) / SettingSpeechPage(整页上游化：rememberReorderableLazyListState+longPressReorder+删除确认，保留本地 SettingsLoadingIndicator) / SettingMcpPage(卡片点击编辑+ItemActionMenu 删除+确认弹窗，保留本地密集样式/工具数 Tag/批量选择) / SettingSearchPage(保留本地 Switch+拖拽 persistNow，菜单换 ItemActionMenu) / SettingProviderPage(保留本地复制按钮+dragModifier，叠加上游删除菜单+确认)
+- 保留本地：AssistantPage(分类分组+ActionSheet 体系覆盖上游过滤芯片) / PromptPage(多选+导出覆盖) / WorkspacePage(长按多选+菜单覆盖) / SkillsPage(本地更丰富菜单+忙碌态) / SettingProviderDetailPage(模型卡整体保留本地 SwipeToDismissBox 设计)
+- AssistantPromptPage 混合：顶部栏保留本地，正则卡换上游 ReorderableColumn+展开态
+- 新组件 ItemActionMenu.kt / ReorderableDrag.kt 随提交进入
+
+**技能**
+`f099cd40`(技能按名称/描述搜索+无结果提示，移植进本地列表)；`3b346748`+`7f17dcc8`(内置技能：BuiltinSkills assets 解压+lastUpdateTime 版本戳、/builtin_skills bind mount、SkillManager listSkills 合并+只读 builtin 标记、SkillsTools XML 转义+1024 限长+转义名接受、详情页只读 UI、skill-creator 资产、BuiltinSkillsTest+SkillsToolsTest 转义用例)；`9f02586d` 跳过（本地 GitHubSkillClient 已字节下载+限流上报）。
+
+**chart_display（00c8d53a）**
+5 个图表组件(ChartCard/Plot/Scale/Spec/Table) 直接 checkout；LocalToolOption/LocalTools 双边合并；ChatMessage 3 处渲染分支插 ChartBlock（本地双大括号风格）；本地独有的 GroupDiscussionPage/SubAgentDetailPage/AgentConfigExporter 各补 when 分支；strings 7 语言按 key 追加并去重。
+
+**mediagen（a26d1d55+2267943a）**
+videogen→mediagen 重构整体采纳：本地 videogen 与上游父版本逐字节一致且 app 无代码引用（依赖为摆设），模块目录替换+gradle 改名零风险；S3 预签名 3 文件干净。`:mediagen` 编译+单测通过。
+
+**workspace（298e2771 Alpine rootfs）**
+workspace 模块：WorkspaceManager 增 isUsableRootfs/rootfsShell(自动 merged)，ProotShellRunner 保留本地 spawn/IllegalStateException 结构改调新 API；app 侧保留本地 AGENTS 两层提示结构，注入 shell/发行版行（readDistroName+parseOsReleaseName 上游原版+os-release 读取助手）；WorkspaceRepository.rootfsShell/WorkspaceTerminalSession 自动合并；测试补 parseOsReleaseName 4 例。
+
+**i18n / locale-tui**
+`6719c301`(5 语言补全 10 key 脚本追加)+`233e095a`(阿拉伯语+locale-tui 术语表，cherry-pick 无冲突)+`598b4efa`(translate-missing) 干净。`9435b8a2`(skills 文档更新+lock 格式重构) 干净；本地 `.agents/skills/gemini-interactions-api/` 为本地文档，从 HEAD 恢复保留（新 lock 不再追踪）。
+
+### B. 跳过（9）
+`6adc0cf1`/`7263dd36`/`6c903feb`/`447bb7e8` 版本 bump ×4（本地独立演进 2.15.0/273）；`42517943` 上游 README/CONTRIBUTING；`280a039c` 全仓 LF 归一化（Windows 工作区噪音大、无功能价值）；`ed3569c7`(编辑器 saved state) 本地已等价实现；`620e38cc`(JsonTree SelectionContainer) 本地已有；`9f02586d`(技能保存/GitHub 字节) 本地已等价；`db1ce811`(SearchPicker MD3) 本地重构覆盖。
+
+### C. 事故与环境适配记录
+1. **reset 事故**：中途误执行 `git reset --hard` 丢失未提交的 30+ 手工编辑 → 依据本日志的操作记录全量重放恢复（22 个干净 cherry-pick 重跑 + 冲突解决脚本化重放），此后分两批 wip checkpoint 兜底。
+2. **Windows 测试环境适配**（本 fork 在 Windows 开发机跑 JVM 测试）：`HostShellRunner.defaultShell()` Windows 回退 `sh.exe`（Git Bash）；`RootfsInstaller.createSymlink` 无特权失败时跳过该条目（JUL 记录）不再中断解压；`ExampleUnitTest`/`RootfsInstallerTest` 软链断言加 `assumeSymlinkSupported()` 探测守卫；输出截断测试生成器 `gawk`→`yes a | head -c 300000`（Windows gawk 大量 printf 输出量不稳）。
+3. **本地语义适配**：InteractionsApiTest 期望值按本地 `cleanupBlankParts`（裁段尾空白行）调整；该清理补丁修复「空正文但带 thought 签名的 Reasoning 被误删」回归（metadata 非空时保留）；SkillsToolsTest 按本地 `enabled_skills` 标签与 `listAllSkills` 签名适配；fork 标题走本地 titleModelId 链。
+
+### 验证
+`assembleDebug` 成功；全模块 `test` 全绿（ai / app / workspace / mediagen / search / speech / common 等，含新增 ModelRegistryTest.testClaude55、ChatServiceTest fork 标题 5 断言、SkillsToolsTest 转义、OsReleaseNameTest 4 例、mediagen 5 provider 测试）。真机待装机确认：玻璃 tint 变透、模型列表折叠持久化、内置技能只读与 /builtin_skills 挂载、chart_display 渲染、自定义请求头生效、OpenRouter 图片编辑、多选批量导出、Arabic 布局。
