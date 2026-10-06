@@ -157,19 +157,9 @@ class GitHubSkillClientTest {
     }
 
     @Test
-    fun refusesOversizedBatchBeforeAnyNetworkCall() {
-        // ppt-master 场景：技能目录塞了 1.2 万+ 模板文件，应在下载前直接拒绝（不发任何请求）
-        val info = GitHubSkillClient.GitHubRepoInfo("owner", "repo", branch = "", path = "")
-        val oversized = (0 until 2001).map { "file-$it.txt" }
-        val result = kotlinx.coroutines.runBlocking {
-            client.downloadFilesByAbsPath(info, oversized)
-        }
-        org.junit.Assert.assertTrue(result is GitHubSkillClient.FetchResult.Failed)
-        org.junit.Assert.assertTrue(
-            (result as GitHubSkillClient.FetchResult.Failed).reason.contains("2000"),
-        )
-
+    fun emptyBatchSucceedsWithoutNetwork() {
         // 空批次直接成功（不触网）
+        val info = GitHubSkillClient.GitHubRepoInfo("owner", "repo", branch = "", path = "")
         val empty = kotlinx.coroutines.runBlocking {
             client.downloadFilesByAbsPath(info, emptyList())
         }

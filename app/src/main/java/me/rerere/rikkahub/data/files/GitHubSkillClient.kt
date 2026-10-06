@@ -61,12 +61,6 @@ class GitHubSkillClient(
 
         /** raw 网络级失败后的冷却时长：期间直接走 contents API，不再逐文件重试超时 */
         private const val RAW_RETRY_COOLDOWN_MS = 2 * 60_000L
-
-        /**
-         * 单个技能目录的文件数上限。常规技能为几十到几百个文件；把巨型资源库
-         * （模板/字体/node_modules）整个塞进技能目录的仓库（万级文件）不应整体装入。
-         */
-        private const val MAX_BATCH_FILES = 2000
     }
 
     /** raw 连通性冷却截止时间（epoch ms）；0 表示可用。仅网络级失败（超时/连不上）触发 */
@@ -215,12 +209,6 @@ class GitHubSkillClient(
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FetchResult {
         if (absPaths.isEmpty()) return FetchResult.Success(emptyMap())
-        if (absPaths.size > MAX_BATCH_FILES) {
-            return FetchResult.Failed(
-                "技能目录包含 ${absPaths.size} 个文件（上限 $MAX_BATCH_FILES），不像常规技能目录，已停止下载。" +
-                    "请确认链接指向具体技能子目录；若仓库本身把大量资源放进技能目录，无法整体导入"
-            )
-        }
         val semaphore = Semaphore(DOWNLOAD_CONCURRENCY)
         val done = AtomicInteger()
         val results = coroutineScope {
