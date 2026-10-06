@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.management.ManagementAuditStore
 import me.rerere.rikkahub.data.management.ManagementRollbackStore
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.MediaCreationService
 import me.rerere.rikkahub.ui.hooks.ChatDraftStore
 import me.rerere.rikkahub.ui.hooks.ChatScrollStore
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
@@ -191,6 +192,18 @@ val appModule = module {
             managementAuditStore = get(),
             managementRollbackStore = get(),
             agentConfigRepository = get(),
+        )
+    }
+
+    single {
+        MediaCreationService(
+            context = get(),
+            appScope = get(),
+            settingsStore = get(),
+            repository = get(),
+            manager = get(),
+            remoteFileStore = get(),
+            okHttpClient = get(),
         )
     }
 

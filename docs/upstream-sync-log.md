@@ -433,3 +433,36 @@ workspace 模块：WorkspaceManager 增 isUsableRootfs/rootfsShell(自动 merged
 
 ### 验证
 `assembleDebug` 成功；全模块 `test` 全绿（ai / app / workspace / mediagen / search / speech / common 等，含新增 ModelRegistryTest.testClaude55、ChatServiceTest fork 标题 5 断言、SkillsToolsTest 转义、OsReleaseNameTest 4 例、mediagen 5 provider 测试）。真机待装机确认：玻璃 tint 变透、模型列表折叠持久化、内置技能只读与 /builtin_skills 挂载、chart_display 渲染、自定义请求头生效、OpenRouter 图片编辑、多选批量导出、Arabic 布局。
+
+## 2026-10-06 — 第十四次同步（10-05~10-06 上游 85af5b91..645a5d88 共 3 提交：搜索选择器/思考选择器 Expressive 重做 + 媒体生成 #1996）
+
+> 清单范围 `85af5b910..645a5d88`。另含独立本地提交 `c067c67a`（移除 GitHub 技能导入 2000 文件上限）。
+
+### A. 落地
+
+**媒体生成 #1996（0450c4c1，65 文件 +9.8k 行）**
+| 部分 | 落地方式 |
+|---|---|
+| mediagen 模块 12 文件 | 本地模块与 85af5b910 逐字节一致 → 从提交直取（OpenRouter 图片/视频新供应商、MediaGenerationCapabilities、ProviderSetting、测试×5） |
+| app 新增 21 文件 | 直取：MediaCreationDAO/Entity、MediaCreationFiles、RemoteFileStore（S3 临时素材+预签名）、MediaCreation 模型/仓库/服务/前台服务、mediacreation 页面 ×7、SettingMediaPage、MediaGenerationProviderConfigure、S3ConfigItems、VideoPlayerDialog、RemoteFileStoreTest、MediaCreationTest、androidTest MediaCreationRepositoryTest |
+| 数据库 | 本地 v51→52 + `AutoMigration(51,52)` + 3 实体/DAO；KSP 导出 `52.json`（上游 26.json 跳过——本地版本号独立演进的既定策略） |
+| 集成点（手工本地化） | PreferencesStore（uploadS3Config + mediaGenerationProviders，沿用本地 decodeOrDefault 风格）；RikkaHubApp（resumeMediaCreations + 通知渠道常量）；RouteActivity（ACTION_IMAGE_GEN→MEDIA_CREATION 重命名并统一含本地 onNewIntent 分支；openNewMediaCreation/mediaCreationDestination；冷启动走 else 分支 + onNewIntent extra 路由双路覆盖；3 个 Screen 与页面入口）；AndroidManifest（action 改名 + MediaCreationForegroundService 声明）；shortcuts.xml（快捷方式转媒体创作，drawable 改名 ic_media_creation）；ChatDrawer（底栏新增「媒体创作」入口，沿用本地 DrawerAction 风格）；SettingPage（设置项）；DI×4；FilesManager（MEDIA_CREATION 常量）；S3Config.withHttpsByDefault；app/build.gradle.kts（media3 exoplayer/ui，catalog 已有条目） |
+| 备份/同步接入（本地化：本地无上游 BackupManager，等价实现落在自研体系） | S3Sync/WebDavSync 的 zip 备份+恢复支持 media_creation（目录结构保留、`.part` 跳过、直接复用 safeResolveWithin 防穿越）；SyncManager 增量同步收集 media_creation（includeChatFiles 门控、`.part` 不上传、isPathEnabled 同步边界）；BackupPreview 媒体文件计数；新增 SyncManagerIntegrationTest 用例（目录保留 + `.part` 跳过） |
+| 字符串 | 7 语言追加 154~156 key + `reasoning_picker_title` 值变更（脚本从上游新旧版本比对生成，零冲突；见 `.git/sync14_strings.py` 方式） |
+| 云同步白名单 | `uploadS3Config`/`mediaGenerationProviders` 有意不入 SettingsSyncCodec 白名单（S3 凭据/API key，与 s3Config 同策略） |
+
+**选择器 Expressive 重做（80c6b07d + 645a5d88）**
+- `PickerHeader/PickerHero/PickerValueLabel` 新组件直取（sheet 头部共享：大标题+随选项变形的 MaterialShapes + 滚动切值标签）。
+- ReasoningPicker：采用上游新 sheet（hero 变形 + 粗轨道滑杆拖拽预览 + 分段触感）；**保留本地 ReasoningButton**（compact/高度变体 + ReasoningIcon）与 `internal label()`（ChatInput 思考 pill 复用）。本地 ReasoningScale 快捷选级被上游新设计取代（如需可回退）。
+- SearchPicker：采用上游两页式设计（模式连接按钮组 + 服务商二级页 + 设置入口；BackHandler 返回上一页）；**保留本地 SearchPickerButton**（服务数角标、compact）；`internal SearchPicker(...)` 保持原签名兼容 FilesPicker 复用（AnimatedContent 内置）；选择器内服务多开关让位（设置页 SettingSearchPage 保有完整增删/启停）。
+- ReasoningLevel 补齐 `MAX(32_000,"max")`（本地历史分歧，随本次对齐上游 Reasoning.kt）；ChatCompletions nvidia 分支 `XHIGH→"max"` 同步为 `XHIGH, MAX→"max"`。
+
+### B. 跳过
+无版本 bump 类提交；上游 `BackupManager.kt/BackupManagerTest.kt` 本体不适用（本地以自研 S3Sync/WebDavSync/SyncManager 体系承接，等价能力已移植）。
+
+### C. 事故与环境记录
+1. **上游网络**：fetch 时代理（Clash Verge，127.0.0.1:19191）未运行、本机无 SSH 密钥 → 经 `ghproxy.net` 镜像 fetch（三个镜像 tip SHA 一致 + `85af5b910` 祖先链校验确认真实历史）；后续代理恢复后正常 `git fetch upstream` 即可对齐。
+2. **工作区在途改动**：`SkillUpdateDiff.kt / SkillUpdateManager.kt / SkillUpdateDiffTest.kt`（11:31 写入，疑似用户/上一会话在途工作）全程未触碰、未提交、排除在检查点与最终提交之外；其代码参与编译与测试且通过。
+
+### 验证
+`:app:compileDebugKotlin` BUILD SUCCESSFUL（KSP 导出 schema 52.json，AutoMigration 51→52 校验通过）；`:mediagen:test` 全绿；`./gradlew test` 全模块全绿（含新增 SyncManagerIntegrationTest 媒体目录用例）；`assembleDebug` 成功（APK 约 91.5MB，app-arm64-v8a-debug.apk）。真机待验：媒体创作全流程（图片/视频、S3 素材上传、后台续跑、通知点击回会话）、搜索/思考选择器新 UI、思考等级 MAX、云同步与 S3/WebDAV 备份含媒体目录且不含 .part。

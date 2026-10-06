@@ -32,6 +32,7 @@ import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillUpdateManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.MediaCreationService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
@@ -52,6 +53,7 @@ private const val TOOL_OUTPUT_RETENTION_MS = 24 * 60 * 60 * 1000L
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val MEDIA_CREATION_NOTIFICATION_CHANNEL_ID = "media_creation"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -112,10 +114,23 @@ class RikkaHubApp : Application() {
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
+        // Resume media generations interrupted by the last process death
+        resumeMediaCreations()
+
         // Increment launch count
         incrementLaunchCount()
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    }
+
+    private fun resumeMediaCreations() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<MediaCreationService>().resumePending()
+            }.onFailure {
+                Log.e(TAG, "resumeMediaCreations failed", it)
+            }
+        }
     }
 
     private fun incrementLaunchCount() {
@@ -340,6 +355,12 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        val mediaCreationChannel = NotificationChannelCompat
+            .Builder(MEDIA_CREATION_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+            .setName(getString(R.string.media_creation_title))
+            .build()
+        notificationManager.createNotificationChannel(mediaCreationChannel)
     }
 
     override fun onTerminate() {

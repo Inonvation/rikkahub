@@ -27,6 +27,8 @@ import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
+import me.rerere.rikkahub.ui.pages.mediacreation.MediaCreationSessionsVM
+import me.rerere.rikkahub.ui.pages.mediacreation.MediaCreationVM
 import me.rerere.rikkahub.ui.pages.recyclebin.RecycleBinVM
 import me.rerere.rikkahub.ui.pages.setting.AgentConfigVM
 import me.rerere.rikkahub.ui.pages.setting.GitHubAuthVM
@@ -117,6 +119,18 @@ val viewModelModule = module {
     }
     viewModelOf(::BackupVM)
     viewModelOf(::ImgGenVM)
+    viewModelOf(::MediaCreationSessionsVM)
+    viewModel<MediaCreationVM> {
+        MediaCreationVM(
+            id = it.get(),
+            context = get(),
+            settingsStore = get(),
+            repository = get(),
+            service = get(),
+            remoteFileStore = get(),
+            appScope = get(),
+        )
+    }
     viewModelOf(::PromptVM)
     viewModelOf(::QuickMessagesVM)
     viewModelOf(::SkillsVM)

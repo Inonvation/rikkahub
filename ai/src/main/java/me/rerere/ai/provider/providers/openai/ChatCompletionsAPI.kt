@@ -394,7 +394,7 @@ class ChatCompletionsAPI(
                         if ("deepseek-v4" in params.model.modelId.lowercase()) {
                             if (level != ReasoningLevel.AUTO) {
                                 val effort = when (level) {
-                                    ReasoningLevel.XHIGH -> "max"
+                                    ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "max"
                                     ReasoningLevel.OFF -> "none"
                                     else -> "high"
                                 }

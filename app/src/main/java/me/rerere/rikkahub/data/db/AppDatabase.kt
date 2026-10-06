@@ -21,6 +21,7 @@ import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.GroupDAO
 import me.rerere.rikkahub.data.db.dao.ManagementAuditDao
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
+import me.rerere.rikkahub.data.db.dao.MediaCreationDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.VocabularyDao
@@ -40,6 +41,9 @@ import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.GroupEntity
 import me.rerere.rikkahub.data.db.entity.ManagementAuditEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationNodeEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationRecordEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationSessionEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
@@ -74,6 +78,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         FavoriteEntity::class,
         WorkspaceEntity::class,
         FolderEntity::class,
+        MediaCreationSessionEntity::class,
+        MediaCreationNodeEntity::class,
+        MediaCreationRecordEntity::class,
         KnowledgeBaseEntity::class,
         KnowledgeDocumentEntity::class,
         KnowledgeChunkEntity::class,
@@ -88,7 +95,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         TranslationRecordEntity::class,
         SolveRecordEntity::class,
     ],
-    version = 51,
+    version = 52,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -114,6 +121,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 48, to = 49),
         AutoMigration(from = 49, to = 50),
         AutoMigration(from = 50, to = 51),
+        AutoMigration(from = 51, to = 52),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -135,6 +143,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun workspaceDao(): WorkspaceDAO
 
     abstract fun folderDao(): FolderDAO
+
+    abstract fun mediaCreationDao(): MediaCreationDAO
 
     abstract fun knowledgeBaseDao(): KnowledgeBaseDao
 

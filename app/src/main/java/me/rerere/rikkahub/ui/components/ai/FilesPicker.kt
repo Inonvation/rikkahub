@@ -460,36 +460,21 @@ internal fun FilesPicker(
             }
         }
 
-        // 网络搜索服务弹层：复用输入栏搜索按钮的同一套配置面板
+        // 网络搜索服务弹层：复用输入栏搜索按钮的同一套配置面板（标题与布局由面板自带）
         if (showSearchSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showSearchSheet = false },
                 sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.7f)
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.search_picker_title),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    )
-                    SearchPicker(
-                        enableSearch = enableSearch,
-                        settings = settings,
-                        model = chatModel,
-                        onUpdateSearchMode = onUpdateSearchMode,
-                        onUpdateSearchService = onUpdateSearchService,
-                        onDismiss = { showSearchSheet = false },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                    )
-                }
+                SearchPicker(
+                    enableSearch = enableSearch,
+                    settings = settings,
+                    model = chatModel,
+                    onUpdateSearchMode = onUpdateSearchMode,
+                    onUpdateSearchService = onUpdateSearchService,
+                    onDismiss = { showSearchSheet = false },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 

@@ -69,6 +69,7 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
 
 import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.ImageToVideo
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.hugeicons.stroke.Camera01
@@ -436,6 +437,11 @@ fun ChatDrawerContent(
                         syncing = false
                     }
                 },
+            )
+            DrawerAction(
+                icon = { Icon(HugeIcons.ImageToVideo, null) },
+                label = { Text(stringResource(R.string.media_creation_title)) },
+                onClick = { navController.navigate(Screen.MediaCreationSessions) },
             )
             DrawerAction(
                 icon = { Icon(HugeIcons.Image02, null) },

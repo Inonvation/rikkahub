@@ -15,6 +15,8 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.providers.openai.CodexSseContentTypeInterceptor
 import me.rerere.common.http.AcceptLanguageBuilder
+import me.rerere.mediagen.provider.MediaGenerationManager
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.openai.OpenAICodexAuthService
@@ -26,6 +28,7 @@ import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.VocabularySettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.files.RemoteFileStore
 import me.rerere.rikkahub.data.management.ManagementAuditStore
 import me.rerere.rikkahub.data.management.ManagementRollbackStore
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -229,6 +232,10 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().folderDao()
+    }
+
+    single {
+        get<AppDatabase>().mediaCreationDao()
     }
 
     single {
@@ -495,6 +502,18 @@ val dataSourceModule = module {
             httpClient = get(),
             database = get()
         )
+    }
+
+    single {
+        RemoteFileStore(
+            settingsStore = get(),
+            httpClient = get(),
+            scope = get<AppScope>()
+        )
+    }
+
+    single {
+        MediaGenerationManager(client = get())
     }
 
     single<Retrofit> {

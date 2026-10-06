@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.sync
 
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.MediaCreationFiles
 import me.rerere.rikkahub.utils.JsonInstant
 import java.io.File
 import java.security.MessageDigest
@@ -683,6 +684,7 @@ class SyncManager(
         }
         if (config.includeChatFiles) {
             collectFolderUnits(FileFolders.UPLOAD, units)
+            collectFolderUnits(FileFolders.MEDIA_CREATION, units, skipPartial = true)
         }
         if (config.includeSkills) {
             collectFolderUnits(FileFolders.SKILLS, units)
@@ -693,9 +695,14 @@ class SyncManager(
         return units
     }
 
-    private fun collectFolderUnits(folder: String, units: MutableMap<String, SyncUnit>) {
+    private fun collectFolderUnits(
+        folder: String,
+        units: MutableMap<String, SyncUnit>,
+        skipPartial: Boolean = false,
+    ) {
         val dir = File(filesRoot, folder)
         walkFiles(dir, prefix = "$folder/").forEach { (rel, file) ->
+            if (skipPartial && file.name.endsWith(MediaCreationFiles.PARTIAL_SUFFIX)) return@forEach
             units[rel] = SyncUnit(rel, UnitKind.FILE, file)
         }
     }
@@ -705,6 +712,7 @@ class SyncManager(
         relPath == "settings.json" -> config.includeSettings
         relPath == DB_PATH || relPath == DB_META_PATH -> databaseEnabled(config)
         relPath.startsWith("upload/") -> config.includeChatFiles
+        relPath.startsWith("media_creation/") -> config.includeChatFiles
         relPath.startsWith("skills/") -> config.includeSkills
         relPath.startsWith("fonts/") -> config.includeFonts
         else -> false

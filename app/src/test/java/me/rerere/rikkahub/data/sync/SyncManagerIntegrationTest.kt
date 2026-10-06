@@ -192,6 +192,35 @@ class SyncManagerIntegrationTest {
     }
 
     @Test
+    fun `media creation files sync with directories kept and partial downloads skipped`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        this@SyncManagerIntegrationTest.scope = scope
+        val store = createStore("media.preferences_pb", scope)
+        val settings = FakeSettingsAccess()
+        val dbFile = File(tmpDir, "rikka_hub.db")
+        dbFile.writeBytes(byteArrayOf(1))
+
+        // 会话目录结构保留；.part 是尚未下载完成的结果文件，不应上传
+        val recordDir = File(filesRoot, "media_creation/session/record").apply { mkdirs() }
+        File(recordDir, "out_0.png").writeText("image")
+        val draftDir = File(filesRoot, "media_creation/session/draft").apply { mkdirs() }
+        File(draftDir, "asset.jpg").writeText("asset")
+        File(draftDir, "big.mp4.part").writeText("half a video")
+
+        val provider = InMemorySyncProvider()
+        val manager = createManager(settings, store, dbFile)
+
+        val result = manager.sync(provider, SyncConfig())
+
+        assertTrue(result.success)
+        assertTrue(result.pushed.contains("media_creation/session/record/out_0.png"))
+        assertTrue(result.pushed.contains("media_creation/session/draft/asset.jpg"))
+        assertFalse(result.pushed.contains("media_creation/session/draft/big.mp4.part"))
+        assertFalse(provider.remoteFiles.containsKey("media_creation/session/draft/big.mp4.part"))
+        assertEquals("image", String(provider.remoteFiles["media_creation/session/record/out_0.png"]!!))
+    }
+
+    @Test
     fun `second sync skips when nothing changed`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         this@SyncManagerIntegrationTest.scope = scope

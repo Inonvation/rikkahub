@@ -17,6 +17,7 @@ data class BackupPreview(
     val uploadFileCount: Int = 0,
     val skillFileCount: Int = 0,
     val fontFileCount: Int = 0,
+    val mediaFileCount: Int = 0,
 )
 
 /**
@@ -48,6 +49,7 @@ object BackupPreviewAnalyzer {
         var uploadFileCount = 0
         var skillFileCount = 0
         var fontFileCount = 0
+        var mediaFileCount = 0
 
         ZipInputStream(FileInputStream(file)).use { zipIn ->
             var entry: ZipEntry?
@@ -59,6 +61,7 @@ object BackupPreviewAnalyzer {
                         name.startsWith("${FileFolders.UPLOAD}/") -> uploadFileCount++
                         name.startsWith("${FileFolders.SKILLS}/") -> skillFileCount++
                         name.startsWith("${FileFolders.FONTS}/") -> fontFileCount++
+                        name.startsWith("${FileFolders.MEDIA_CREATION}/") -> mediaFileCount++
                     }
                 }
                 zipIn.closeEntry()
@@ -71,6 +74,7 @@ object BackupPreviewAnalyzer {
             uploadFileCount = uploadFileCount,
             skillFileCount = skillFileCount,
             fontFileCount = fontFileCount,
+            mediaFileCount = mediaFileCount,
         )
     }
 
@@ -81,6 +85,7 @@ object BackupPreviewAnalyzer {
         if (uploadFileCount > 0) parts.add("上传文件×$uploadFileCount")
         if (skillFileCount > 0) parts.add("技能文件×$skillFileCount")
         if (fontFileCount > 0) parts.add("字体×$fontFileCount")
+        if (mediaFileCount > 0) parts.add("媒体文件×$mediaFileCount")
         return if (parts.isEmpty()) {
             "未检测到可导入内容"
         } else {

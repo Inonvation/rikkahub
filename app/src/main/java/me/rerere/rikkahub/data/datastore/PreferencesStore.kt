@@ -73,6 +73,7 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.model.UserProfileSetting
+import me.rerere.mediagen.provider.MediaGenerationProviderSetting
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.data.sync.SyncConfig
 import me.rerere.rikkahub.ui.theme.CustomTheme
@@ -209,6 +210,10 @@ class SettingsStore(
 
         // S3
         val S3_CONFIG = stringPreferencesKey("s3_config")
+        val UPLOAD_S3_CONFIG = stringPreferencesKey("upload_s3_config")
+
+        // 媒体生成
+        val MEDIA_GENERATION_PROVIDERS = stringPreferencesKey("media_generation_providers")
 
         // TTS
         val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
@@ -373,6 +378,11 @@ class SettingsStore(
                 ),
                 webDavConfig = decodeOrDefault<WebDavConfig>(preferences[WEBDAV_CONFIG], WebDavConfig()),
                 s3Config = decodeOrDefault<S3Config>(preferences[S3_CONFIG], S3Config()),
+                uploadS3Config = decodeOrDefault<S3Config>(preferences[UPLOAD_S3_CONFIG], S3Config()),
+                mediaGenerationProviders = decodeListOrDefault<MediaGenerationProviderSetting>(
+                    preferences[MEDIA_GENERATION_PROVIDERS],
+                    emptyList(),
+                ),
                 ttsProviders = decodeListOrDefault<TTSProviderSetting>(
                     preferences[TTS_PROVIDERS],
                     decodeListOrDefault<TTSProviderSetting>(preferences[TTS_PROVIDERS_LKG], emptyList())
@@ -626,6 +636,8 @@ class SettingsStore(
             preferences[MCP_SERVERS_LKG] = JsonInstant.encodeToString(settings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
             preferences[S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
+            preferences[UPLOAD_S3_CONFIG] = JsonInstant.encodeToString(settings.uploadS3Config)
+            preferences[MEDIA_GENERATION_PROVIDERS] = JsonInstant.encodeToString(settings.mediaGenerationProviders)
             preferences[TTS_PROVIDERS] = JsonInstant.encodeToString(settings.ttsProviders)
             preferences[TTS_PROVIDERS_LKG] = JsonInstant.encodeToString(settings.ttsProviders)
             settings.selectedTTSProviderId?.let {
@@ -1005,6 +1017,9 @@ data class Settings(
     val enableMcpManager: Boolean = true,
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
+    // RemoteFileStore 上传临时素材用的桶，和备份的 s3Config 互不影响；items 字段在这里不使用
+    val uploadS3Config: S3Config = S3Config(),
+    val mediaGenerationProviders: List<MediaGenerationProviderSetting> = emptyList(),
     val ttsProviders: List<TTSProviderSetting> = DEFAULT_TTS_PROVIDERS,
     val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val defaultTTSPlaybackSpeed: Float = 1.0f,

@@ -38,6 +38,7 @@ import me.rerere.hugeicons.stroke.Clapping01
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.GlobalSearch
+import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.ImageUpload
 import me.rerere.hugeicons.stroke.UserGroup
 import me.rerere.hugeicons.stroke.Link01
@@ -160,6 +161,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     onClick = { navController.navigate(Screen.SettingSpeech) },
                     leadingContent = { Icon(HugeIcons.Megaphone01, null) },
                     headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
+                    trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                )
+                item(
+                    onClick = { navController.navigate(Screen.SettingMedia) },
+                    leadingContent = { Icon(HugeIcons.Image02, null) },
+                    headlineContent = { Text(stringResource(R.string.setting_page_media)) },
                     trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
                 item(

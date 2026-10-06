@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.MediaCreationFiles
 import me.rerere.rikkahub.data.files.SkillPaths
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -314,6 +315,26 @@ class WebDavSync(
                     Log.w(TAG, "prepareBackupFile: Fonts folder does not exist or is not a directory")
                 }
             }
+
+            // Backup media creation files（会话目录结构保留；.part 是下载中文件，跳过）
+            if (config.items.contains(WebDavConfig.BackupItem.CHAT_FILES) ||
+                config.items.contains(WebDavConfig.BackupItem.FILES)
+            ) {
+                onProgress?.invoke("正在导出媒体创作…")
+                val mediaFolder = File(context.filesDir, FileFolders.MEDIA_CREATION)
+                if (mediaFolder.exists() && mediaFolder.isDirectory) {
+                    Log.i(TAG, "prepareBackupFile: Backing up media creation files from ${mediaFolder.absolutePath}")
+                    addDirectoryToZip(
+                        zipOut = zipOut,
+                        rootDir = mediaFolder,
+                        currentDir = mediaFolder,
+                        entryPrefix = "${FileFolders.MEDIA_CREATION}/",
+                        skipPartial = true,
+                    )
+                } else {
+                    Log.w(TAG, "prepareBackupFile: Media creation folder does not exist or is not a directory")
+                }
+            }
         }
 
         Log.i(
@@ -460,6 +481,33 @@ class WebDavSync(
                                         "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
                                     )
                                 }
+                            } else if ((config.items.contains(WebDavConfig.BackupItem.FILES) ||
+                                    config.items.contains(WebDavConfig.BackupItem.CHAT_FILES)) &&
+                                zipEntry.name.startsWith("${FileFolders.MEDIA_CREATION}/")
+                            ) {
+                                onProgress?.invoke("正在恢复媒体创作…")
+                                val relative = zipEntry.name.substringAfter("${FileFolders.MEDIA_CREATION}/")
+                                if (relative.isNotEmpty()) {
+                                    val mediaFolder = File(context.filesDir, FileFolders.MEDIA_CREATION).apply { mkdirs() }
+                                    val targetFile = safeResolveWithin(mediaFolder, relative)
+                                    if (targetFile == null) {
+                                        // 恶意/损坏备份的路径穿越条目：跳过，绝不写出目标目录
+                                        Log.w(
+                                            TAG,
+                                            "restoreFromBackupFile: Skipping unsafe media entry ${zipEntry.name} (path traversal)"
+                                        )
+                                        zipIn.closeEntry()
+                                        return@let
+                                    }
+                                    targetFile.parentFile?.mkdirs()
+                                    FileOutputStream(targetFile).use { outputStream ->
+                                        zipIn.copyTo(outputStream)
+                                    }
+                                    Log.i(
+                                        TAG,
+                                        "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
+                                    )
+                                }
                             } else {
                                 Log.i(TAG, "restoreFromBackupFile: Skipping entry ${zipEntry.name}")
                             }
@@ -512,6 +560,7 @@ class WebDavSync(
         rootDir: File,
         currentDir: File,
         entryPrefix: String,
+        skipPartial: Boolean = false,
     ) {
         currentDir.listFiles()?.forEach { file ->
             if (file.isDirectory) {
@@ -520,8 +569,10 @@ class WebDavSync(
                     rootDir = rootDir,
                     currentDir = file,
                     entryPrefix = entryPrefix,
+                    skipPartial = skipPartial,
                 )
             } else if (file.isFile) {
+                if (skipPartial && file.name.endsWith(MediaCreationFiles.PARTIAL_SUFFIX)) return@forEach
                 val relativePath = file.relativeTo(rootDir).invariantSeparatorsPath
                 addFileToZip(zipOut, file, "$entryPrefix$relativePath")
             }

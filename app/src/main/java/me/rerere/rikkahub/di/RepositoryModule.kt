@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.GroupRepository
+import me.rerere.rikkahub.data.repository.MediaCreationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceAsyncTaskRunner
 import me.rerere.rikkahub.data.repository.WorkspaceAutostartRunner
@@ -64,6 +65,10 @@ val repositoryModule = module {
 
     single {
         GenMediaRepository(get())
+    }
+
+    single {
+        MediaCreationRepository(context = get(), database = get(), dao = get(), json = get())
     }
 
     single {
