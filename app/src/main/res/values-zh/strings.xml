@@ -1974,5 +1974,29 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
     <string name="search_picker_model_title">模型搜索</string>
     <string name="search_picker_model_description">模型提供商云端自带搜索</string>
     <string name="search_picker_select_provider">选择搜索服务商</string>
+    <string name="backup_page_chat_files">聊天文件</string>
+    <string name="backup_page_fonts">字体</string>
+    <string name="backup_page_skills">技能</string>
+    <string name="backup_page_sync">同步</string>
+    <string name="chat_drawer_sync">立即同步</string>
+    <string name="chat_drawer_sync_failed">同步失败：%1$s</string>
+    <string name="chat_drawer_sync_skipped">未触发同步（已禁用/离线/正在同步）</string>
+    <string name="chat_drawer_sync_success">同步完成</string>
+    <string name="chat_message_tool_javascript_logs">控制台</string>
+    <string name="chat_message_tool_javascript_result">结果</string>
+    <string name="chat_message_tool_javascript_no_result">无结果</string>
+    <string name="setting_files_page_batch_delete">删除所选</string>
+    <string name="setting_files_page_batch_delete_confirmation">删除选中的 %d 个文件？此操作无法撤销。</string>
+    <string name="setting_files_page_batch_delete_partial">已删除所选文件中的 %d 个</string>
+    <string name="setting_files_page_batch_delete_title">删除所选文件</string>
+    <string name="setting_files_page_exit_selection">退出选择</string>
+    <string name="setting_files_page_folder_fonts">字体</string>
+    <string name="setting_files_page_folder_skills">技能</string>
+    <string name="setting_files_page_select_all">全选</string>
+    <string name="setting_files_page_selected_count">已选择 %d 项</string>
+    <string name="setting_files_page_source_all">全部</string>
+    <string name="setting_files_page_source_avatar">头像</string>
+    <string name="setting_files_page_source_chat">聊天文件</string>
+    <string name="subagent_detail_rerun">重新运行</string>
 </resources>
 
