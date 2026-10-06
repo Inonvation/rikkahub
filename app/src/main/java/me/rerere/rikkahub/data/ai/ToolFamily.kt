@@ -68,6 +68,6 @@ internal fun classifyToolFamily(name: String): ToolFamily = when {
     name.startsWith("eval_") || name.startsWith("get_time") ||
         name.startsWith("clipboard") || name.startsWith("text_to_speech") ||
         name.startsWith("get_screen") || name.startsWith("calendar") ||
-        name.startsWith("javascript") || name.startsWith("html_") -> ToolFamily.LOCAL
+        name.startsWith("javascript") -> ToolFamily.LOCAL
     else -> ToolFamily.OTHER
 }

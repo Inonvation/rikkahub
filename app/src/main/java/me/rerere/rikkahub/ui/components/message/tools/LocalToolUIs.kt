@@ -17,13 +17,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.FileSync
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.common.http.jsonObjectOrNull
 
@@ -108,67 +104,3 @@ object JavascriptToolUI : ToolUIRenderer {
     }
 }
 
-/** html_to_markdown: 输出为纯 Markdown 文本 */
-object HtmlToMarkdownToolUI : ToolUIRenderer {
-    override val toolName: String = "html_to_markdown"
-
-    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.FileSync
-
-    @Composable
-    override fun title(context: ToolUIContext): String =
-        stringResource(R.string.chat_message_tool_html_to_markdown)
-
-    /** 输出可能是纯文本（JsonPrimitive）或 {result: "..."} 的 JSON */
-    private fun markdownText(context: ToolUIContext): String? {
-        val content = context.content ?: return null
-        // 纯字符串输出：JsonPrimitive
-        if (content is JsonPrimitive) {
-            return content.contentOrNull
-        }
-        // JSON 对象输出
-        return content.jsonObjectOrNull?.get("result")?.jsonPrimitive?.contentOrNull
-    }
-
-    override fun hasSummary(context: ToolUIContext): Boolean = markdownText(context) != null
-
-    @Composable
-    override fun Summary(context: ToolUIContext) {
-        val text = markdownText(context) ?: return
-        Text(
-            text = text.take(120).replace("\n", " "),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-
-    @Composable
-    override fun Preview(context: ToolUIContext, onDismissRequest: () -> Unit) {
-        val text = markdownText(context)
-        Column(
-            modifier = Modifier
-                .fillMaxHeight(0.8f)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.chat_message_tool_call_title),
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            if (text != null) {
-                MarkdownBlock(
-                    content = text,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.chat_message_tool_html_to_markdown_no_result),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}

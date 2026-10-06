@@ -141,7 +141,6 @@ object ToolUIRegistry {
         SearchWebToolUI,
         ScrapeWebToolUI,
         JavascriptToolUI,
-        HtmlToMarkdownToolUI,
         GetTimeInfoToolUI,
         ClipboardToolUI,
         TextToSpeechToolUI,

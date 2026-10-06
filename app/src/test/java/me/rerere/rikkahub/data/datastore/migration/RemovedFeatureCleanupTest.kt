@@ -19,14 +19,16 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 /**
- * 「设备能力」移除后的持久化兼容：旧数据里残留的 device_doctor/storage_cleaner/freeze_apps
- * （助手 localTools）与 DEVICE_TOOLS（模式 capabilities）必须被清理掉，
- * 且清理后的数据能用现行序列化器正常解码（助手/自定义模式不丢失）。
+ * 已移除功能的持久化兼容：旧数据里残留的已删除取值必须被清理掉，且清理后的数据能用
+ * 现行序列化器正常解码（助手/自定义模式不丢失）。覆盖两类：
+ * - 「设备能力」：助手 localTools 的 device_doctor/storage_cleaner/freeze_apps、
+ *   模式 capabilities 的 DEVICE_TOOLS
+ * - 「HTML 转 Markdown」工具：助手 localTools 的 html_to_markdown
  *
  * 测试数据的构造方式：先用现行模型编码合法 JSON，再注入已删除的取值——
  * 等价于旧版本落盘的 JSON 形态。
  */
-class RemovedDeviceFeatureCleanupTest {
+class RemovedFeatureCleanupTest {
 
     // ---- assistants ----
 
@@ -40,19 +42,23 @@ class RemovedDeviceFeatureCleanupTest {
                 Assistant(id = tutorId, name = "导师", localTools = listOf(LocalToolOption.Clipboard)),
             )
         )
-        // 旧数据形态：第一个助手的 localTools 里混合了已删除的三个设备工具
+        // 旧数据形态：第一个助手的 localTools 里混合了已删除的工具项
         val raw = withInjectedLocalTools(
             raw = base,
             index = 0,
-            names = listOf("device_doctor", "storage_cleaner", "freeze_apps", "time_info"),
+            names = listOf(
+                "device_doctor", "storage_cleaner", "freeze_apps", "html_to_markdown", "time_info",
+            ),
         )
         assertTrue(raw.contains("device_doctor"))
+        assertTrue(raw.contains("html_to_markdown"))
 
-        val cleaned = RemovedDeviceFeatureCleanup.cleanAssistantsJson(raw)
+        val cleaned = RemovedFeatureCleanup.cleanAssistantsJson(raw)
 
         assertFalse(cleaned.contains("device_doctor"))
         assertFalse(cleaned.contains("storage_cleaner"))
         assertFalse(cleaned.contains("freeze_apps"))
+        assertFalse(cleaned.contains("html_to_markdown"))
         val decoded = JsonInstant.decodeFromString<List<Assistant>>(cleaned)
         assertEquals(2, decoded.size)
         // 助手本体（id/name）与其余本地工具原样保留
@@ -74,13 +80,13 @@ class RemovedDeviceFeatureCleanupTest {
             listOf(LocalToolOption.TimeInfo),
             JsonInstant.decodeFromString<List<Assistant>>(raw).single().localTools
         )
-        assertSame(raw, RemovedDeviceFeatureCleanup.cleanAssistantsJson(raw))
+        assertSame(raw, RemovedFeatureCleanup.cleanAssistantsJson(raw))
     }
 
     @Test
     fun cleanAssistantsJson_withMalformedJson_returnsOriginal() {
         val raw = """{"localTools": ["device_doctor""""
-        assertEquals(raw, RemovedDeviceFeatureCleanup.cleanAssistantsJson(raw))
+        assertEquals(raw, RemovedFeatureCleanup.cleanAssistantsJson(raw))
     }
 
     // ---- customModes ----
@@ -98,7 +104,7 @@ class RemovedDeviceFeatureCleanupTest {
         val raw = withInjectedModeCapability(base, "DEVICE_TOOLS")
         assertTrue(raw.contains("DEVICE_TOOLS"))
 
-        val cleaned = RemovedDeviceFeatureCleanup.cleanCustomModesJson(raw)
+        val cleaned = RemovedFeatureCleanup.cleanCustomModesJson(raw)
 
         assertFalse(cleaned.contains("DEVICE_TOOLS"))
         val decoded = JsonInstant.decodeFromString<List<CustomModeConfig>>(cleaned)
@@ -117,7 +123,7 @@ class RemovedDeviceFeatureCleanupTest {
         val raw = withInjectedModeCapability(base, "DEVICE_TOOLS")
         assertTrue(raw.contains("DEVICE_TOOLS"))
 
-        val cleaned = RemovedDeviceFeatureCleanup.cleanBuiltinModeOverridesJson(raw)
+        val cleaned = RemovedFeatureCleanup.cleanBuiltinModeOverridesJson(raw)
 
         assertFalse(cleaned.contains("DEVICE_TOOLS"))
         val decoded = JsonInstant.decodeFromString<Map<ChatMode, ChatModePolicy>>(cleaned)
@@ -140,17 +146,19 @@ class RemovedDeviceFeatureCleanupTest {
             runCatching { JsonInstant.decodeFromString<List<CustomModeConfig>>(modes) }.isFailure,
         )
 
-        val assistants = withInjectedLocalTools(
-            raw = JsonInstant.encodeToString(
-                listOf(Assistant(name = "日常聊天", localTools = listOf(LocalToolOption.TimeInfo)))
-            ),
-            index = 0,
-            names = listOf("device_doctor"),
-        )
-        assertTrue(
-            "含 device_doctor 的助手 JSON 应无法直接解码",
-            runCatching { JsonInstant.decodeFromString<List<Assistant>>(assistants) }.isFailure,
-        )
+        for (removedTool in listOf("device_doctor", "html_to_markdown")) {
+            val assistants = withInjectedLocalTools(
+                raw = JsonInstant.encodeToString(
+                    listOf(Assistant(name = "日常聊天", localTools = listOf(LocalToolOption.TimeInfo)))
+                ),
+                index = 0,
+                names = listOf(removedTool),
+            )
+            assertTrue(
+                "含 $removedTool 的助手 JSON 应无法直接解码",
+                runCatching { JsonInstant.decodeFromString<List<Assistant>>(assistants) }.isFailure,
+            )
+        }
     }
 
     // ---- SettingsJsonMigrator（备份恢复 / 云同步路径）----
@@ -162,7 +170,7 @@ class RemovedDeviceFeatureCleanupTest {
                 listOf(Assistant(name = "日常聊天", localTools = listOf(LocalToolOption.TimeInfo)))
             ),
             index = 0,
-            names = listOf("device_doctor", "storage_cleaner", "freeze_apps", "time_info"),
+            names = listOf("device_doctor", "freeze_apps", "html_to_markdown", "time_info"),
         )
         val customModes = withInjectedModeCapability(
             raw = researchModeJson(),
@@ -188,6 +196,7 @@ class RemovedDeviceFeatureCleanupTest {
 
         assertFalse(migrated.contains("DEVICE_TOOLS"))
         assertFalse(migrated.contains("device_doctor"))
+        assertFalse(migrated.contains("html_to_markdown"))
         val root = JsonInstant.parseToJsonElement(migrated).jsonObject
         val decodedAssistants = JsonInstant.decodeFromString<List<Assistant>>(root.getValue("assistants").toString())
         assertEquals(listOf(LocalToolOption.TimeInfo), decodedAssistants.single().localTools)

@@ -267,7 +267,6 @@ object AgentConfigExporter {
 
     private fun LocalToolOption.serialName(): String = when (this) {
         LocalToolOption.JavascriptEngine -> "javascript_engine"
-        LocalToolOption.HtmlToMarkdown -> "html_to_markdown"
         LocalToolOption.TimeInfo -> "time_info"
         LocalToolOption.Clipboard -> "clipboard"
         LocalToolOption.Tts -> "tts"

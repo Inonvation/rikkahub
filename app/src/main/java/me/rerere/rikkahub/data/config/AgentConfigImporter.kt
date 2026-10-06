@@ -374,7 +374,6 @@ object AgentConfigImporter {
     private fun parseLocalTools(values: List<String>): List<LocalToolOption> = values.mapNotNull { v ->
         when (v.lowercase()) {
             "javascript_engine" -> LocalToolOption.JavascriptEngine
-            "html_to_markdown" -> LocalToolOption.HtmlToMarkdown
             "time_info" -> LocalToolOption.TimeInfo
             "clipboard" -> LocalToolOption.Clipboard
             "tts" -> LocalToolOption.Tts

@@ -4,9 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 验证 HTML→Markdown 转换的健壮性，重点覆盖列表（历史上 :scope 选择器报错）。
+ * 验证 HTML→Markdown 转换（scrape_web 抓取后的自动转换复用）的健壮性，
+ * 重点覆盖列表（历史上 :scope 选择器报错）。
  */
-class HtmlToMarkdownToolTest {
+class HtmlToMarkdownTest {
 
     @Test
     fun `ul list converts to markdown bullets`() {

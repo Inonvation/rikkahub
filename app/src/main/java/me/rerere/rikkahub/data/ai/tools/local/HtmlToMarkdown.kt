@@ -1,13 +1,5 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import me.rerere.ai.core.InputSchema
-import me.rerere.ai.core.Tool
-import me.rerere.ai.ui.UIMessagePart
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -31,35 +23,8 @@ private val IGNORED_TAGS = setOf(
     "svg", "canvas", "video", "audio", "source",
 )
 
-internal fun buildHtmlToMarkdownTool(): Tool = Tool(
-    name = "html_to_markdown",
-    description = """
-        Convert HTML source code to clean Markdown text.
-        Useful for reading scraped web pages or raw HTML more efficiently.
-        Returns the converted Markdown only; the original HTML is not preserved.
-        Input larger than 512KB is truncated before conversion.
-    """.trimIndent().replace("\n", " "),
-    parameters = {
-        InputSchema.Obj(
-            properties = buildJsonObject {
-                put("html", buildJsonObject {
-                    put("type", "string")
-                    put("description", "The raw HTML source code to convert")
-                })
-            },
-            required = listOf("html")
-        )
-    },
-    execute = {
-        val html = it.jsonObject["html"]?.jsonPrimitive?.contentOrNull ?: return@Tool listOf(
-            UIMessagePart.Text("""{"error": "html argument is missing"}""")
-        )
-        listOf(UIMessagePart.Text(convertHtmlToMarkdown(html)))
-    }
-)
-
 /**
- * 把 HTML 源码转成干净的 Markdown。供 html_to_markdown 工具与 scrape_web 自动转换复用。
+ * 把 HTML 源码转成干净的 Markdown。供 scrape_web 抓取网页后的自动转换复用。
  * 解析失败时返回 "Conversion error: ..." 而非抛异常。
  */
 internal fun convertHtmlToMarkdown(html: String): String {

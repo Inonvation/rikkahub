@@ -1,41 +1,55 @@
 package me.rerere.rikkahub.data.datastore.migration
 
 import android.util.Log
+import androidx.datastore.preferences.core.MutablePreferences
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.utils.JsonInstant
 
-private const val TAG = "RemovedDeviceFeature"
+private const val TAG = "RemovedFeature"
 
 /**
- * 「设备能力」功能已整体移除（设备工具族 / ChatMode 的 DEVICE_TOOLS 能力 / 助手「本地工具」中的
- * 设备诊断、存储清理、冻结应用开关）。
+ * 已移除功能的遗留取值清理（清单单一来源）。
  *
- * 已保存的数据里可能残留下列取值，删除对应枚举/密封类条目后会导致整条数据解码失败
+ * 目前覆盖：
+ * 1. 「设备能力」功能（设备工具族 / ChatMode 的 DEVICE_TOOLS 能力 / 助手本地工具中的
+ *    设备诊断、存储清理、冻结应用开关）；
+ * 2. 「HTML 转 Markdown」本地工具（`html_to_markdown`）。
+ *
+ * 已保存的数据里可能残留这些取值，删除对应枚举/密封类条目后会导致整条数据解码失败
  * （助手被逐条隔离丢弃、自定义模式整表回退为空），因此在读取/恢复前先做一次 JSON 级清理：
  *
- * - 助手 JSON（`List<Assistant>`）：过滤 `localTools` 中的 `device_doctor`/`storage_cleaner`/`freeze_apps`
- * - `customModes`（`List<CustomModeConfig>`）：过滤 `policy.capabilities` 中的 `DEVICE_TOOLS`
+ * - 助手 JSON（`List<Assistant>`）：过滤 `localTools` 中的已移除工具名
+ * - `customModes`（`List<CustomModeConfig>`）：过滤 `policy.capabilities` 中的已移除能力名
  * - `builtinModeOverrides`（`Map<ChatMode, ChatModePolicy>`）：同上
  *
  * 只做取值过滤，不做类型解码，因此对坏数据天然安全；未命中时原样返回（快速路径零开销）。
  */
-internal object RemovedDeviceFeatureCleanup {
+internal object RemovedFeatureCleanup {
 
     /** 已移除的 ChatMode 能力名（模式 capabilities 内） */
-    private const val REMOVED_CAPABILITY = "DEVICE_TOOLS"
+    private val REMOVED_CAPABILITIES = setOf("DEVICE_TOOLS")
 
     /** 已移除的助手本地工具名（Assistant.localTools 内） */
-    private val REMOVED_LOCAL_TOOLS = setOf("device_doctor", "storage_cleaner", "freeze_apps")
+    private val REMOVED_LOCAL_TOOLS = setOf(
+        // 设备能力
+        "device_doctor",
+        "storage_cleaner",
+        "freeze_apps",
+        // HTML 转 Markdown 工具
+        "html_to_markdown",
+    )
 
     fun containsRemovedValues(raw: String?): Boolean {
         if (raw.isNullOrBlank()) return false
-        return raw.contains(REMOVED_CAPABILITY) || REMOVED_LOCAL_TOOLS.any { raw.contains(it) }
+        return REMOVED_CAPABILITIES.any { raw.contains(it) } ||
+            REMOVED_LOCAL_TOOLS.any { raw.contains(it) }
     }
 
-    // ---- 字符串级（DataStore V9 迁移用）----
+    // ---- 字符串级（DataStore 迁移用）----
 
     /** assistants JSON（`List<Assistant>`）：过滤每个助手的 localTools。 */
     fun cleanAssistantsJson(raw: String): String = cleanJson(raw, ::cleanAssistants)
@@ -133,9 +147,32 @@ internal object RemovedDeviceFeatureCleanup {
         val capabilities = policy["capabilities"] as? JsonArray ?: return policy
         val filtered = capabilities.filterNot { element ->
             val primitive = element as? JsonPrimitive ?: return@filterNot false
-            primitive.isString && primitive.content == REMOVED_CAPABILITY
+            primitive.isString && primitive.content in REMOVED_CAPABILITIES
         }
         if (filtered.size == capabilities.size) return policy
         return JsonObject(policy.toMutableMap().apply { this["capabilities"] = JsonArray(filtered) })
+    }
+}
+
+/**
+ * 一次性清理 DataStore 中的遗留取值（[PreferenceStoreV9Migration]/[PreferenceStoreV10Migration] 共用）。
+ * 每个 key 独立容错：坏数据原样保留，交给现有幂等解码兜底；未命中时不做任何写入。
+ */
+internal fun MutablePreferences.cleanRemovedFeatureValues() {
+    this[SettingsStore.ASSISTANTS]?.let { raw ->
+        val cleaned = RemovedFeatureCleanup.cleanAssistantsJson(raw)
+        if (cleaned != raw) this[SettingsStore.ASSISTANTS] = cleaned
+    }
+    this[SettingsStore.ASSISTANTS_LKG]?.let { raw ->
+        val cleaned = RemovedFeatureCleanup.cleanAssistantsJson(raw)
+        if (cleaned != raw) this[SettingsStore.ASSISTANTS_LKG] = cleaned
+    }
+    this[SettingsStore.CUSTOM_MODES]?.let { raw ->
+        val cleaned = RemovedFeatureCleanup.cleanCustomModesJson(raw)
+        if (cleaned != raw) this[SettingsStore.CUSTOM_MODES] = cleaned
+    }
+    this[SettingsStore.BUILTIN_MODE_OVERRIDES]?.let { raw ->
+        val cleaned = RemovedFeatureCleanup.cleanBuiltinModeOverridesJson(raw)
+        if (cleaned != raw) this[SettingsStore.BUILTIN_MODE_OVERRIDES] = cleaned
     }
 }

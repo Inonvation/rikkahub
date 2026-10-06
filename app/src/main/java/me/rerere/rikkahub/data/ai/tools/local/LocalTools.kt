@@ -14,8 +14,6 @@ class LocalTools(
 ) {
     val javascriptTool by lazy { buildJavascriptTool() }
 
-    val htmlToMarkdownTool by lazy { buildHtmlToMarkdownTool() }
-
     val timeTool by lazy { buildTimeInfoTool() }
 
     val clipboardTool by lazy { buildClipboardTool(context) }
@@ -39,9 +37,6 @@ class LocalTools(
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)
-        }
-        if (options.contains(LocalToolOption.HtmlToMarkdown)) {
-            tools.add(htmlToMarkdownTool)
         }
         if (options.contains(LocalToolOption.TimeInfo)) {
             tools.add(timeTool)

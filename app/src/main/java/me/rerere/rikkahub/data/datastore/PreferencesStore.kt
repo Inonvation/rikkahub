@@ -59,6 +59,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV6Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV7Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV8Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV9Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV10Migration
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.effectiveCategory
 import me.rerere.rikkahub.data.model.ChatMode
@@ -130,7 +131,8 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
             PreferenceStoreV6Migration(),
             PreferenceStoreV7Migration(),
             PreferenceStoreV8Migration(),
-            PreferenceStoreV9Migration()
+            PreferenceStoreV9Migration(),
+            PreferenceStoreV10Migration()
         ),
         produceFile = { file },
     )
@@ -143,7 +145,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
-        const val CURRENT_DATA_VERSION = 9
+        const val CURRENT_DATA_VERSION = 10
 
         val ENABLE_HAPTIC_FEEDBACK = booleanPreferencesKey("enable_haptic_feedback")
 

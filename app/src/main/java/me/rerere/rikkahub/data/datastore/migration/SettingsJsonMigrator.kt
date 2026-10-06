@@ -89,17 +89,17 @@ object SettingsJsonMigrator {
                 root["providers"] = JsonInstant.parseToJsonElement(migrated)
             }
 
-            // V9: 移除已删除的「设备能力」遗留取值（capabilities 中的 DEVICE_TOOLS、
-            // 助手 localTools 中的 device_doctor/storage_cleaner/freeze_apps）
-            if (RemovedDeviceFeatureCleanup.containsRemovedValues(settingsJson)) {
+            // V9/V10: 移除已删除功能的遗留取值（模式 capabilities 中的 DEVICE_TOOLS、
+            // 助手 localTools 中的 device_doctor/storage_cleaner/freeze_apps/html_to_markdown）
+            if (RemovedFeatureCleanup.containsRemovedValues(settingsJson)) {
                 root["assistants"]?.let {
-                    root["assistants"] = RemovedDeviceFeatureCleanup.cleanAssistants(it)
+                    root["assistants"] = RemovedFeatureCleanup.cleanAssistants(it)
                 }
                 root["customModes"]?.let {
-                    root["customModes"] = RemovedDeviceFeatureCleanup.cleanCustomModes(it)
+                    root["customModes"] = RemovedFeatureCleanup.cleanCustomModes(it)
                 }
                 root["builtinModeOverrides"]?.let {
-                    root["builtinModeOverrides"] = RemovedDeviceFeatureCleanup.cleanBuiltinModeOverrides(it)
+                    root["builtinModeOverrides"] = RemovedFeatureCleanup.cleanBuiltinModeOverrides(it)
                 }
             }
 
