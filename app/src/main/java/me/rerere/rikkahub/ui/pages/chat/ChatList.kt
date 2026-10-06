@@ -117,7 +117,6 @@ import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexesCached
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.ui.components.ai.CompressedHistoryCard
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.message.PresetMessagesIntro
 import me.rerere.rikkahub.ui.components.message.warmMessageExtractions
@@ -747,13 +746,6 @@ private fun ChatListNormal(
                     }
             }
 
-            conversation.compressedHistory
-                ?.takeIf { it.summaryText.isNotBlank() }
-                ?.let { history ->
-                    item(key = "CompressedHistorySummary") {
-                        CompressedHistoryCard(summary = history.summaryText)
-                    }
-                }
             // 常驻（不随 loading 显隐）：生成结束不再插入新 item，避免 LazyColumn 锚点重排跳动
             if (assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
                 item(key = "ConversationSystemPrompt") {

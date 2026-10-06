@@ -466,3 +466,58 @@ workspace 模块：WorkspaceManager 增 isUsableRootfs/rootfsShell(自动 merged
 
 ### 验证
 `:app:compileDebugKotlin` BUILD SUCCESSFUL（KSP 导出 schema 52.json，AutoMigration 51→52 校验通过）；`:mediagen:test` 全绿；`./gradlew test` 全模块全绿（含新增 SyncManagerIntegrationTest 媒体目录用例）；`assembleDebug` 成功（APK 约 91.5MB，app-arm64-v8a-debug.apk）。真机待验：媒体创作全流程（图片/视频、S3 素材上传、后台续跑、通知点击回会话）、搜索/思考选择器新 UI、思考等级 MAX、云同步与 S3/WebDAV 备份含媒体目录且不含 .part。
+
+## 2026-10-06 — 第十五次同步（上游 `bf614d89a`：压缩上下文改为插入摘要检查点）
+
+> 目标提交：`bf614d89a feat(chat): 压缩上下文改为插入摘要检查点，不再删除历史消息`（21 文件 +424/−44）。
+> 触发原因：本地压缩实现（上下文快照 `CompressedHistory`）实测不佳，用户要求改用上游逻辑。
+
+### A. 设计差异与结论
+
+| 维度 | 本地旧实现（快照） | 上游新实现（检查点） |
+|---|---|---|
+| 存储 | `Conversation.compressedHistory`（摘要消息 + 保留尾部 + `lastOriginalMessageId`），落 `conversationentity.compressed_json` | 在 `messageNodes` 里插入一条 `UIMessage.isContextCheckpoint=true` 的 USER 摘要消息 |
+| 请求组装 | `effectiveMessages()` = 快照 + 压缩后新增 | `effectiveMessages()` = 从最后一个检查点起的 `messageNodes` |
+| 条数限制 | `limitContext` 纯按条数阶梯截断 | `limitContext` 先取最后检查点，条数限制只作用于其后 |
+| UI | `CompressedHistoryCard` 常驻卡片（`summaryText`） | 检查点渲染为可展开分隔线（`ChatMessageContextCheckpoint`） |
+| 撤销 | 无（快照被覆盖） | 删除摘要消息即恢复完整历史 |
+
+**结论：整体采用上游逻辑**，并保留本地两处更优实现（见 C）。上游把摘要做成**真实节点**，因此请求/显示/编辑/删除全部复用既有消息管线，去掉了本地快照机制的一整条旁路。
+
+### B. 落地清单
+
+**ai 模块**
+- `UIMessage.isContextCheckpoint` 新字段（可序列化、`ignoreUnknownKeys` 兼容旧数据）。
+- `limitContext` 拆为「取最后检查点 + `limitMessageCount`」两层；检查点恒保留，条数限制只作用于其后。
+- 测试：`MessageContextLimitTest` +3（检查点起点/截断保留检查点/检查点前不占额度）、`UIMessageSerializationTest` +2（标记往返、旧数据缺省为普通消息）。
+
+**app 模块**
+- `Conversation`：删 `compressedHistory` 与 `CompressedHistory` 类；`effectiveMessages()` 改为按**节点下标**取最后一个检查点起（`lastContextCheckpointIndex`，含 `MessageNode.currentMessageOrNull` 防御兜底）。
+- `ChatService`：
+  - 新增纯函数 `insertContextCheckpoint` / `compressCutIndex`（节点口径 token 预算切点）/ `countPresetPrefixNodes`。
+  - `compressConversation` 重写：生成中拒绝（`chat_page_compress_blocked_generating`）、待处理工具拒绝（`chat_page_compress_pending_tools`）、上一份摘要不截断地并入、摘要生成后**按节点 ID 插入最新会话态**（`chat_page_compress_conversation_changed` 兜底）、`/compact` 分支传 `insideGenerationJob=true` 跳过自检。
+  - `editMessage`：摘要**原地改写**（不新建分支，否则丢检查点标记）。
+  - 全量移除 `compressedHistory = null` 的 11 处快照失效点。
+- `ContextComposition.hasStaleCalibrationAnchor()`：改判「最后一条 usage 锚点在检查点**之前**」（原为压缩点含之前）。
+- 存储：`ConversationEntity` 删 `compressed_json` 列；`ConversationRepository` 双向映射与同步合并分支同步清理。
+- **DB 迁移 52→53**：`ALTER TABLE conversationentity DROP COLUMN compressed_json`。**刻意不用重建表**——`message_node` 以 `ON DELETE CASCADE` 引用本表，重建中的 `DROP TABLE` 会级联删空全部消息；运行时 requery SQLite 3.50 支持 DROP COLUMN。已用真实 schema 52 DDL 本地模拟：无 FK 违规、会话/消息行保留、`index_ConversationEntity_group_id` 保留、列集合与 `53.json` 一致。
+- UI：新增 `ChatMessageContextCheckpoint.kt`（可展开分隔线 + 编辑/删除）；`ChatMessage` 前置检查点分支；删 `CompressedHistoryCard.kt` 与 `ChatList` 卡片项；`CompressContextDialog` 移除「将重置所有消息」警告。
+- 字符串：7 语言删 `chat_page_compress_warning`/`chat_page_compress_summary_*`，增 `chat_page_compress_checkpoint_title/_hint`、`_blocked_generating`、`_conversation_changed`、`_pending_tools`。
+
+**web / web-ui**
+- `WebDto.MessageDto.isContextCheckpoint` + `toDto()`。
+- `dto.ts`/`message.ts` 类型、`chat-message.tsx` 检查点组件（`Package`/`ChevronUp/Down`，删除二次确认）、`en-US`/`zh-CN` 3 个 key。
+
+### C. 有意偏离上游（保留本地更优项）
+1. **分块摘要保留本地实现**：上游仍是固定 256 条递归二分 + `summaryAsText(2000)`；本地保留 `splitByCharBudget`（96k 字符预算）与 `serializeForSummary`（含工具入参/结果，摘要质量更高）。仅按上游语义补「上一份摘要不截断」（`textLimit=Int.MAX_VALUE`）。
+2. **保留 `compressCutIndex` 的 token 预算保留窗口**：上游按 `keepRecentMessages` 条数；本地沿用 `keepRecentTokens` 预算口径与 `defaultKeepRecentTokens`（弹窗/自动压缩/`/compact` 三入口一致）。
+
+### D. 验证
+- `:ai:compileDebugKotlin` / `:app:compileDebugKotlin` BUILD SUCCESSFUL（KSP 导出 `53.json`）。
+- `:ai:test` 全绿（新增 5 检查点用例）；`:app:testDebugUnitTest` **967 tests / 0 failures / 0 errors**（`ChatServiceTest` 16、`ContextCompositionTest` 20、`ContextCheckpointTest` 4 全绿）。
+- `web-ui` `pnpm run build` 成功（`typecheck` 仅剩 `tool-part.tsx` 2 处**改动前既存**错误，与本次无关）。
+- 迁移正确性以 sqlite3 对真实 52 schema 模拟（见 B）。
+
+### E. 环境记录
+- 工作区存在**无关在途改动**（`ToolFamily.kt`、`HtmlToMarkdownTool→HtmlToMarkdown` 重命名、`RemovedDeviceFeatureCleanup→RemovedFeatureCleanup`、`PreferencesStore`/`SettingsJsonMigrator`/`SkillUpdate*`/`LocalToolUIs`/`ToolUI`/`AssistantLocalToolPage`/`AgentConfig*` 等，属 `46862e42` 之后的在途清理）。全程未触碰、未提交；其代码参与编译与测试且通过。
+- 真机待验：压缩后原消息保留 + 分隔线可展开、编辑摘要原地生效、删除摘要恢复完整历史、再次压缩只覆盖上一检查点之后、生成中/待处理工具时拒绝并提示、顶栏占用压缩后刷新、旧会话升级到 v53 后数据完好。

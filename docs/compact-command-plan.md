@@ -4,6 +4,8 @@
 >
 > 结论先行：**本项目压缩管线已完成约 80%**（分块摘要、快照、非破坏性 UI、自动压缩、Codex 式提示词均已存在），真正的缺口是 ①`/compact` 命令入口、②工具调用结果没有进入摘要器输入、③（可选）无 LLM 成本的旧工具结果修剪层。
 
+> **⚠️ 设计已变更（2026-10-06，见 `upstream-sync-log.md` 第十五次同步）**：本文档下方描述的是**旧的「上下文快照」设计**（`Conversation.compressedHistory` + `effectiveMessages()` 拼接 + `CompressedHistoryCard`），该机制已**整体移除**，改用上游 `bf614d89a` 的**「插入摘要检查点」**逻辑：压缩不删除历史，只在切点插入一条 `UIMessage.isContextCheckpoint=true` 的摘要消息，`effectiveMessages()` 从最后一个检查点起取，`limitContext` 只对检查点之后的消息限流，删除摘要即撤销压缩。数据库 52→53 迁移删除 `compressed_json` 列。下文表格中的「压缩快照 / 快照失效 / CompressedHistoryCard」等条目已不再适用；`/compact` 命令、`serializeForSummary`、`splitByCharBudget`、token 预算保留窗口、Codex 式提示词等仍有效。
+
 ## 实施状态（2026-08-28）
 
 **已落地**（P0 全部 + P1 摘要质量 + P2 弹窗默认值，`:app:compileDebugKotlin` 与 `:ai`/`:app` 全量单测通过）：

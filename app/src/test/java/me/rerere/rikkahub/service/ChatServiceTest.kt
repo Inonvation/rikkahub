@@ -8,7 +8,7 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.model.CompressedHistory
+import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
@@ -158,32 +158,29 @@ class ChatServiceTest {
     }
 
     @Test
-    fun `effective messages mark compressed summaries synthetic keep originals untouched`() {
-        val kept = UIMessage(
-            id = Uuid.random(),
-            role = MessageRole.USER,
-            parts = listOf(UIMessagePart.Text("kept original")),
-        )
-        val summary = UIMessage(
-            id = Uuid.random(),
-            role = MessageRole.USER,
-            parts = listOf(UIMessagePart.Text("compressed summary")),
-        )
-        val conversation = Conversation(
+    fun `context checkpoint is inserted after the anchor node without touching other nodes`() {
+        val nodes = List(4) { UIMessage.user("message $it").toMessageNode() }
+        val source = Conversation(assistantId = Uuid.random(), messageNodes = nodes)
+
+        val result = insertContextCheckpoint(source, afterNodeId = nodes[1].id, summary = "summary")!!
+
+        assertEquals(nodes.subList(0, 2), result.messageNodes.subList(0, 2))
+        assertEquals(nodes.subList(2, 4), result.messageNodes.subList(3, 5))
+        val checkpoint = result.messageNodes[2].currentMessage
+        assertTrue(checkpoint.isContextCheckpoint)
+        assertEquals("summary", checkpoint.toText())
+        // 只有检查点之后的消息会继续发送给模型
+        assertEquals(result.currentMessages.subList(2, 5), result.currentMessages.limitContext(0))
+    }
+
+    @Test
+    fun `context checkpoint is not inserted when the anchor node is gone`() {
+        val source = Conversation(
             assistantId = Uuid.random(),
-            messageNodes = listOf(kept.toMessageNode()),
-            compressedHistory = CompressedHistory(
-                messages = listOf(summary, kept),
-                lastOriginalMessageId = kept.id,
-            ),
+            messageNodes = listOf(UIMessage.user("message").toMessageNode()),
         )
 
-        val result = conversation.effectiveMessages()
-
-        // 摘要（id 不在 currentMessages 中）标合成 → displayMessagesForChunk 不追加进显示列表；
-        // 保留的原始消息不受影响
-        assertTrue(result[0].isSynthetic)
-        assertFalse(result[1].isSynthetic)
+        assertNull(insertContextCheckpoint(source, afterNodeId = Uuid.random(), summary = "summary"))
     }
 
     @Test
@@ -201,42 +198,52 @@ class ChatServiceTest {
     }
 
     @Test
-    fun `split compress scope keeps tail within token budget`() {
+    fun `compress cut index keeps tail within token budget`() {
         // 每条消息 40 个 ASCII 字符 → 估算 10 token
-        fun msg() = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("m".repeat(40))))
+        fun node() = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("m".repeat(40)))).toMessageNode()
 
-        val messages = (0 until 10).map { msg() }
+        val nodes = List(10) { node() }
 
-        // 预算 25：尾部 2 条（10+10）落在窗口内，第 3 条会超预算 → 摘要前 8 条
-        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentTokens = 25)!!
-        assertEquals(messages.take(8), toCompress)
-        assertEquals(messages.drop(8), toKeep)
+        // 预算 25：尾部 2 条（10+10）落在窗口内，第 3 条会超预算 → 切点在 8（摘要前 8 条）
+        assertEquals(8, compressCutIndex(nodes, startIndex = 0, keepRecentTokens = 25))
 
         // 预算 0（非法/极小）：仍保留最后一条，保证当前轮上下文连续
-        val (allButLast, last) = splitCompressScope(messages, keepRecentTokens = 0)!!
-        assertEquals(messages.dropLast(1), allButLast)
-        assertEquals(messages.takeLast(1), last)
+        assertEquals(9, compressCutIndex(nodes, startIndex = 0, keepRecentTokens = 0))
 
         // 全部消息都落在保留窗口内 → null（无需压缩）
-        assertNull(splitCompressScope(messages, keepRecentTokens = 10_000))
+        assertNull(compressCutIndex(nodes, startIndex = 0, keepRecentTokens = 10_000))
 
-        // 空会话 → null
-        assertNull(splitCompressScope(emptyList(), keepRecentTokens = 100))
+        // 起点即末尾（无可摘要内容）→ null
+        assertNull(compressCutIndex(nodes, startIndex = nodes.lastIndex, keepRecentTokens = 100))
     }
 
     @Test
-    fun `split compress scope keeps oversized last message`() {
+    fun `compress cut index keeps oversized last message and skips the covered prefix`() {
         // 单条 2000 字符 → 估算 500 token，远超预算 100：依旧保留该条，其余进摘要
-        val oversized = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("x".repeat(2000))))
-        val small = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("y".repeat(40))))
-        val messages = listOf(small, small, oversized)
+        val oversized = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("x".repeat(2000)))).toMessageNode()
+        val small = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("y".repeat(40)))).toMessageNode()
+        val nodes = listOf(small, small, oversized)
 
-        val (toCompress, toKeep) = splitCompressScope(messages, keepRecentTokens = 100)!!
-        assertEquals(listOf(small, small), toCompress)
-        assertEquals(listOf(oversized), toKeep)
+        assertEquals(2, compressCutIndex(nodes, startIndex = 0, keepRecentTokens = 100))
 
         // 会话只有一条消息：窗口覆盖全部 → null
-        assertNull(splitCompressScope(listOf(oversized), keepRecentTokens = 100))
+        assertNull(compressCutIndex(listOf(oversized), startIndex = 0, keepRecentTokens = 100))
+
+        // 起点之前的消息（预设开场展示 / 已被上一检查点覆盖的历史）不参与切分
+        val withCoveredPrefix = listOf(oversized, oversized) + nodes
+        assertEquals(4, compressCutIndex(withCoveredPrefix, startIndex = 2, keepRecentTokens = 100))
+    }
+
+    @Test
+    fun `preset prefix nodes are counted by message id alignment`() {
+        val preset = UIMessage.user("opening")
+        val real = UIMessage.user("real")
+        val nodes = listOf(preset, real).map { it.toMessageNode() }
+
+        assertEquals(1, countPresetPrefixNodes(nodes, listOf(preset)))
+        assertEquals(0, countPresetPrefixNodes(nodes, emptyList()))
+        // 内容相同但 id 已变（用户编辑过）→ 不再算预设
+        assertEquals(0, countPresetPrefixNodes(nodes, listOf(UIMessage.user("opening"))))
     }
 
     @Test

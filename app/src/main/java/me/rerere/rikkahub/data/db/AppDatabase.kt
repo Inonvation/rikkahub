@@ -64,6 +64,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_43_44
 import me.rerere.rikkahub.data.db.migrations.Migration_44_45
 import me.rerere.rikkahub.data.db.migrations.Migration_45_46
 import me.rerere.rikkahub.data.db.migrations.Migration_46_47
+import me.rerere.rikkahub.data.db.migrations.Migration_52_53
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -95,7 +96,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         TranslationRecordEntity::class,
         SolveRecordEntity::class,
     ],
-    version = 52,
+    version = 53,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

@@ -45,8 +45,6 @@ data class Conversation(
     // 所属 AI 群组（多会话）。null = 非群组会话。
     // 群组会话的配置在 Group.config，discussion 字段已废弃（迁移后恒为 null）
     val groupId: Uuid? = null,
-    /** 压缩后的有效上下文快照；UI 仍显示完整 messageNodes，AI 请求优先使用 effectiveMessages() */
-    val compressedHistory: CompressedHistory? = null,
     @Transient
     val newConversation: Boolean = false
 ) {
@@ -74,24 +72,19 @@ data class Conversation(
             }
         }
 
-    /** AI 请求使用的消息：有压缩快照时用“摘要 + 保留消息 + 压缩后新增消息”，否则用完整历史。 */
+    /**
+     * AI 请求使用的消息：从最后一个压缩检查点开始取。
+     *
+     * 压缩不删除历史——检查点之前的消息仍原样保留在 [messageNodes] 里供用户查看，
+     * 但不再发送给模型，由检查点里的摘要代替（删除摘要即可撤销压缩）。
+     * 条数限制（`limitContext`）在请求装配时另行套用，只作用于检查点之后的消息。
+     */
     fun effectiveMessages(): List<UIMessage> {
-        val compressed = compressedHistory ?: return currentMessages
-        // 压缩摘要消息（id 不在 currentMessages 中的快照条目）打上 isSynthetic：该标记是
-        // @Transient 不落库，这里按结构还原。displayMessagesForChunk 据此不把摘要追加进
-        // 显示列表；steering 轮边界注入的真实用户引导（同样不在显示列表）因非合成得以放行。
-        val currentIds = currentMessages.mapTo(HashSet()) { it.id }
-        val result = compressed.messages.map { m ->
-            if (m.id in currentIds) m else m.copy(isSynthetic = true)
-        }.toMutableList()
-        val lastOriginalMessageId = compressed.lastOriginalMessageId
-        if (lastOriginalMessageId != null) {
-            val index = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }
-            if (index >= 0) {
-                result += currentMessages.drop(index + 1)
-            }
-        }
-        return result
+        // 按节点下标（而非 currentMessages 下标）定位：currentMessages 会跳过 selectIndex
+        // 越界的异常节点，用它的下标回切 messageNodes 会错位。
+        val checkpointIndex = messageNodes.lastContextCheckpointIndex()
+        val nodes = if (checkpointIndex <= 0) messageNodes else messageNodes.drop(checkpointIndex)
+        return nodes.mapNotNull { node -> node.currentMessageOrNull }
     }
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
@@ -158,14 +151,6 @@ data class Conversation(
     }
 }
 
-/** 压缩后的上下文快照：摘要消息 + 保留的最近消息，lastOriginalMessageId 标记压缩时的最后一条原消息。 */
-@Serializable
-data class CompressedHistory(
-    val messages: List<UIMessage> = emptyList(),
-    val lastOriginalMessageId: Uuid? = null,
-    val summaryText: String = "",
-)
-
 @Serializable
 data class MessageNode(
     val id: Uuid = Uuid.random(),
@@ -179,6 +164,10 @@ data class MessageNode(
     } else {
         messages[selectIndex]
     }
+
+    /** [currentMessage] 的安全版本：selectIndex 越界（数据损坏）时返回 null 而不抛异常。 */
+    val currentMessageOrNull: UIMessage?
+        get() = messages.getOrNull(selectIndex)
 
     val role get() = messages.firstOrNull()?.role ?: MessageRole.USER
 
@@ -196,6 +185,14 @@ fun UIMessage.toMessageNode(): MessageNode {
         selectIndex = 0
     )
 }
+
+/**
+ * 最后一个压缩检查点在节点列表中的下标；没有检查点时返回 -1。
+ *
+ * 检查点是它之前全部历史的摘要：组装请求时从这里开始取，之前的消息只留给用户查看。
+ */
+fun List<MessageNode>.lastContextCheckpointIndex(): Int =
+    indexOfLast { node -> node.currentMessageOrNull?.isContextCheckpoint == true }
 
 /**
  * 递归展开所有 parts，包括工具调用结果中的嵌套 parts。

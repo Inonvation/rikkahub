@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.dropPresetMessages
+import me.rerere.rikkahub.data.model.lastContextCheckpointIndex
 
 /**
  * 附件型 part（图片/视频/音频/文档）的占位 token 估算。
@@ -160,21 +161,22 @@ fun Conversation.hasRealMessages(presetMessages: List<UIMessage>): Boolean =
     effectiveMessages().dropPresetMessages(presetMessages).isNotEmpty()
 
 /**
- * 校准锚点是否已过时：压缩后、且最后一条带 usage 的消息仍在压缩点（含）之前，
- * 说明最近的 provider 实测输入量来自压缩前的旧请求——用它校准会把压缩后写入的
- * 新构成估算重新拉回压缩前的占用（虚高）。待压缩点之后出现新生成（锚点消息在
- * 压缩点之后）恢复校准。
+ * 校准锚点是否已过时：压缩后、且最后一条带 usage 的消息仍在检查点（不含）之前——
+ * 即锚点落在已被摘要覆盖的历史里，说明最近的 provider 实测输入量来自压缩前的旧请求，
+ * 用它校准会把压缩后写入的新构成估算重新拉回压缩前的占用（虚高）。检查点之后
+ * 出现新生成（锚点消息在检查点之后）恢复校准。
  *
- * 无压缩、无锚点或锚点无法定位时返回 false（保持旧行为可校准）。
+ * 无检查点、无锚点或锚点无法定位时返回 false（保持旧行为可校准）。
  * 顶栏圆圈与浮窗构成共用此判定（computeTokenStats / ContextStatusPanel）。
  */
 fun Conversation.hasStaleCalibrationAnchor(): Boolean {
-    val compressed = compressedHistory ?: return false
-    val lastOriginalMessageId = compressed.lastOriginalMessageId ?: return false
-    val anchorIndex = currentMessages.indexOfLast { it.hasRealPromptAnchor() }
-    val compressIndex = currentMessages.indexOfFirst { it.id == lastOriginalMessageId }
-    if (anchorIndex < 0 || compressIndex < 0) return false
-    return anchorIndex <= compressIndex
+    val checkpointIndex = messageNodes.lastContextCheckpointIndex()
+    if (checkpointIndex < 0) return false
+    val anchorIndex = messageNodes.indexOfLast { node ->
+        node.currentMessageOrNull?.hasRealPromptAnchor() == true
+    }
+    if (anchorIndex < 0) return false
+    return anchorIndex < checkpointIndex
 }
 
 /**

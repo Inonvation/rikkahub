@@ -126,7 +126,6 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.model.CompressedHistory
 import me.rerere.rikkahub.data.model.dropPresetMessages
 import me.rerere.rikkahub.data.model.ChatModePolicy
 import me.rerere.rikkahub.data.model.MessageNode
@@ -139,6 +138,7 @@ import me.rerere.knowledge.tool.EmbeddingConfig
 import me.rerere.knowledge.tool.KnowledgeSearchTool
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.data.model.lastContextCheckpointIndex
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.GroupRepository
@@ -304,26 +304,61 @@ internal fun parseCompactCommand(text: String?): String? {
 }
 
 /**
- * 压缩范围切分（Codex 式 token 预算保留窗口）：从尾部贪心纳入最近消息，累计估算
- * token 不超过 [keepRecentTokens]；始终保留最后一条（当前轮上下文连续性，单条超预算
- * 也保留）。返回「待摘要 + 保留尾部」；返回 null 表示无需压缩（全部消息都落在
- * 保留窗口内，语义上无事可做）。
+ * 节点列表开头的预设消息（开场展示）条数：它们只作 UI 展示，不入摘要也不进请求。
+ * 判定与 `dropPresetMessages` 同款：按消息 id 逐条对齐前缀，任一失配即停止。
  */
-internal fun splitCompressScope(
-    allMessages: List<UIMessage>,
+internal fun countPresetPrefixNodes(
+    nodes: List<MessageNode>,
+    presetMessages: List<UIMessage>,
+): Int = presetMessages.indices.takeWhile { index ->
+    nodes.getOrNull(index)?.currentMessageOrNull?.id == presetMessages[index].id
+}.size
+
+/**
+ * 压缩切点（节点口径）：从尾部按 token 预算贪心纳入最近消息（Codex 式保留窗口），
+ * 累计估算不超过 [keepRecentTokens]；始终保留最后一条（当前轮上下文连续性，单条超预算
+ * 也保留）。[startIndex] 之前的内容不参与（预设开场展示、已被上一检查点覆盖的历史）。
+ *
+ * 返回保留窗口起点 = 待摘要区间的结束下标（切点），检查点插在 `nodes[cutIndex - 1]` 之后；
+ * 返回 null 表示无需压缩（待摘要区为空，或全部落在保留窗口内）。
+ */
+internal fun compressCutIndex(
+    nodes: List<MessageNode>,
+    startIndex: Int,
     keepRecentTokens: Int,
-): Pair<List<UIMessage>, List<UIMessage>>? {
-    if (allMessages.isEmpty()) return null
-    var keepStart = allMessages.lastIndex
-    var accumulated = allMessages[keepStart].estimateTokens()
-    while (keepStart > 0) {
-        val tokens = allMessages[keepStart - 1].estimateTokens()
+): Int? {
+    if (startIndex > nodes.lastIndex) return null
+    var keepStart = nodes.lastIndex
+    var accumulated = nodes[keepStart].currentMessageOrNull?.estimateTokens() ?: 0
+    while (keepStart > startIndex) {
+        val tokens = nodes[keepStart - 1].currentMessageOrNull?.estimateTokens() ?: 0
         if (accumulated + tokens > keepRecentTokens) break
         accumulated += tokens
         keepStart -= 1
     }
-    if (keepStart == 0) return null
-    return allMessages.take(keepStart) to allMessages.drop(keepStart)
+    if (keepStart == startIndex) return null
+    return keepStart
+}
+
+/**
+ * 在 [afterNodeId] 节点之后插入压缩检查点；该节点已不存在时返回 null。
+ *
+ * 压缩不删除历史：原消息、分支与附件原样保留，只在切点插入一条带
+ * `isContextCheckpoint` 标记的摘要消息；组装请求时从最后一个检查点开始取，
+ * 摘要固定保留，条数限制只作用于它之后的消息。删除摘要即可撤销压缩。
+ */
+internal fun insertContextCheckpoint(
+    conversation: Conversation,
+    afterNodeId: Uuid,
+    summary: String,
+): Conversation? {
+    val nodes = conversation.messageNodes
+    val index = nodes.indexOfFirst { it.id == afterNodeId }
+    if (index == -1) return null
+    val checkpoint = UIMessage.user(summary).copy(isContextCheckpoint = true).toMessageNode()
+    return conversation.copy(
+        messageNodes = nodes.subList(0, index + 1) + checkpoint + nodes.subList(index + 1, nodes.size),
+    )
 }
 
 /**
@@ -685,7 +720,6 @@ class ChatService(
                 conversationId,
                 conversation.copy(
                     messageNodes = updatedNodes,
-                    compressedHistory = null,
                 )
             )
         }
@@ -763,7 +797,6 @@ class ChatService(
                 conversationId,
                 conversation.copy(
                     messageNodes = updatedNodes,
-                    compressedHistory = null,
                 )
             )
         }
@@ -1250,6 +1283,9 @@ class ChatService(
                             conversation = session.state.value,
                             additionalPrompt = compactInstruction,
                             targetTokens = (compactContextTokenLimit / 2).coerceAtLeast(1),
+                            // 本分支就跑在生成 job 里，isGenerating 恒为 true；
+                            // 期间没有并发生成循环回写消息，插入检查点是安全的。
+                            insideGenerationJob = true,
                         ).fold(
                             onSuccess = { compressed ->
                                 if (!compressed) {
@@ -1578,7 +1614,6 @@ class ChatService(
                     val indexAt = conversation.messageNodes.indexOf(node)
                     val newConversation = conversation.copy(
                         messageNodes = conversation.messageNodes.subList(0, indexAt + 1),
-                        compressedHistory = null,
                     )
                     saveConversation(conversationId, newConversation)
                     handleMessageComplete(conversationId)
@@ -1602,7 +1637,6 @@ class ChatService(
                         // 与 USER 分支的 subList 截断保持一致，避免「A1' 不知道 U2 → U2→A2 悬空」的语义错乱。
                         val newConversation = conversation.copy(
                             messageNodes = conversation.messageNodes.subList(0, nodeIndex),
-                            compressedHistory = null,
                         )
                         saveConversation(conversationId, newConversation)
                         handleMessageComplete(conversationId)
@@ -1666,7 +1700,6 @@ class ChatService(
                     }
                     val updatedConversation = conversation.copy(
                         messageNodes = updatedNodes,
-                        compressedHistory = null,
                     )
                     saveConversation(conversationId, updatedConversation)
 
@@ -1755,7 +1788,6 @@ class ChatService(
                     }
                     val updatedConversation = conversation.copy(
                         messageNodes = updatedNodes,
-                        compressedHistory = null,
                     )
                     saveConversation(conversationId, updatedConversation)
 
@@ -2456,7 +2488,6 @@ class ChatService(
             conversationId,
             conversation.copy(
                 messageNodes = messagesNodes,
-                compressedHistory = null,
             )
         )
     }
@@ -2658,19 +2689,33 @@ class ChatService(
     /**
      * 压缩对话历史。
      *
-     * 返回 `Result<Boolean>`：true = 已生成新压缩快照；false = 无需压缩（会话比保留窗口还短、
+     * 压缩不删除历史：原消息、分支和附件原样保留，只在切点插入一条带
+     * `isContextCheckpoint` 标记的摘要消息；组装请求时从最后一个检查点开始取，
+     * 摘要固定保留，上下文条数限制只作用于它之后的消息（见 `limitContext`）。
+     * 删除摘要即可撤销压缩。
+     *
+     * 返回 `Result<Boolean>`：true = 已插入新检查点；false = 无需压缩（会话比保留窗口还短、
      * 或没有可摘要内容）——调用方（/compact 命令）据此给友好提示，不当作错误。
      *
      * @param keepRecentTokens 保留窗口 token 预算（从尾部自适应累计，至少保留最后一条）；
      *   null = 按 [defaultKeepRecentTokens] 从 [targetTokens] 推导
+     * @param insideGenerationJob 调用方本身就是该会话的生成任务（/compact 分支）：
+     *   生成循环不会与本次插入并发，跳过「生成中拒绝」检查；其余入口（弹窗/自动压缩）
+     *   保持默认，生成中拒绝——生成循环按下标回写消息，期间插入节点会让回复写到错误的节点上。
      */
     suspend fun compressConversation(
         conversationId: Uuid,
         conversation: Conversation,
         additionalPrompt: String,
         targetTokens: Int,
-        keepRecentTokens: Int? = null
+        keepRecentTokens: Int? = null,
+        insideGenerationJob: Boolean = false,
     ): Result<Boolean> = runCatching {
+        val session = getOrCreateSession(conversationId)
+        if (!insideGenerationJob) {
+            check(!session.isGenerating) { context.getString(R.string.chat_page_compress_blocked_generating) }
+        }
+
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getAssistantById(conversation.assistantId)
         val model = settings.findModelById(settings.compressModelId)
@@ -2681,28 +2726,47 @@ class ChatService(
 
         val providerHandler = providerManager.getProviderByType(provider)
 
-        // 压缩同样剔除预设消息（开场展示不入上下文，也不进摘要）
-        val allMessages = conversation.effectiveMessages()
-            .dropPresetMessages(assistant?.presetMessages.orEmpty())
-
-        val (messagesToCompress, messagesToKeep) = splitCompressScope(
-            allMessages,
-            keepRecentTokens ?: defaultKeepRecentTokens(targetTokens),
+        val nodes = conversation.messageNodes
+        // 上一个检查点之前的消息已被它的摘要覆盖，只压缩它之后、保留区之前的部分；
+        // 没有检查点时从预设消息（开场展示，不入摘要）之后开始。
+        val checkpointIndex = nodes.lastContextCheckpointIndex()
+        val startIndex = if (checkpointIndex >= 0) {
+            checkpointIndex
+        } else {
+            countPresetPrefixNodes(nodes, assistant?.presetMessages.orEmpty())
+        }
+        val cutIndex = compressCutIndex(
+            nodes = nodes,
+            startIndex = startIndex,
+            keepRecentTokens = keepRecentTokens ?: defaultKeepRecentTokens(targetTokens),
         )
             // 会话比保留窗口还短：保留窗口已覆盖全部消息，没有可摘要的内容，按「无需压缩」处理
             ?: return@runCatching false
+
+        // 上一份摘要一并交给模型，新摘要才能覆盖完整历史。
+        val messagesToCompress = nodes.subList(startIndex, cutIndex).mapNotNull { it.currentMessageOrNull }
         if (messagesToCompress.isEmpty()) return@runCatching false
+        // 生成循环只从最后一条消息恢复工具调用，待处理的工具被压到检查点之前就再也不会执行。
+        check(messagesToCompress.none { message ->
+            message.getTools().any { it.isPending || it.canResumeExecution }
+        }) { context.getString(R.string.chat_page_compress_pending_tools) }
 
         // serializeForSummary 含工具调用入参/结果预览（上下文占用的大头），单条消息体积不可预估
         // （agent 会话一条消息可含整轮工具结果），按字符预算切块替代旧的固定 256 条切块，
         // 避免产出压爆压缩模型窗口的超长块。摘要预算 = 目标 − 保留窗口实际占用，按字符占比
         // 分配给各块（Codex 式全局预算），保证压缩后消息总占用 ≈ targetTokens 而不是 N × target。
         val serializedChunks = splitByCharBudget(
-            items = messagesToCompress.map { it.serializeForSummary() },
+            items = messagesToCompress.map { message ->
+                // 上一份摘要是更早历史的唯一来源，不能截断。
+                message.serializeForSummary(
+                    textLimit = if (message.isContextCheckpoint) Int.MAX_VALUE else 4_000
+                )
+            },
             budget = COMPRESS_CHUNK_CHAR_BUDGET,
         )
         val totalChars = serializedChunks.sumOf { chunk -> chunk.sumOf(String::length) }
-        val keptTokens = messagesToKeep.sumOf { it.estimateTokens() }
+        val keptTokens = nodes.subList(cutIndex, nodes.size)
+            .sumOf { it.currentMessageOrNull?.estimateTokens() ?: 0 }
         val summaryBudget = (targetTokens - keptTokens).coerceAtLeast(1024)
         val compressedSummaries = coroutineScope {
             serializedChunks.map { chunk ->
@@ -2727,22 +2791,21 @@ class ChatService(
                 .awaitAll()
         }
 
-        // 只替换 AI 请求用的上下文快照，messageNodes 保留完整历史用于展示。
-        // 摘要消息的 isSynthetic 标记由 Conversation.effectiveMessages() 按结构统一还原。
-        val compressedContextMessages = buildList {
-            compressedSummaries.forEach { summary ->
-                add(UIMessage.user(summary))
+        // 原消息原样保留，只在切点插入摘要。摘要生成期间对话可能已变化，
+        // 因此按节点定位插入到最新状态，而不是用调用时的快照整体覆盖。
+        val newConversation = synchronized(session) {
+            if (!insideGenerationJob) {
+                check(!session.isGenerating) { context.getString(R.string.chat_page_compress_blocked_generating) }
             }
-            addAll(messagesToKeep)
+            val updated = insertContextCheckpoint(
+                conversation = session.state.value,
+                afterNodeId = nodes[cutIndex - 1].id,
+                summary = compressedSummaries.joinToString("\n\n"),
+            ) ?: throw IllegalStateException(
+                context.getString(R.string.chat_page_compress_conversation_changed)
+            )
+            updated.copy(chatSuggestions = emptyList()).also { updateConversation(conversationId, it) }
         }
-        val newConversation = conversation.copy(
-            compressedHistory = CompressedHistory(
-                messages = compressedContextMessages,
-                lastOriginalMessageId = conversation.currentMessages.lastOrNull()?.id,
-                summaryText = compressedSummaries.joinToString("\n\n"),
-            ),
-            chatSuggestions = emptyList(),
-        )
 
         // 顶栏上下文占用立即反映压缩后构成：保留旧快照的 system/工具 token（压缩不改变
         // 工具装配），消息 token 换成压缩后 effectiveMessages 的估算——否则顶栏/浮窗停留在
@@ -3054,6 +3117,15 @@ class ChatService(
             }
             edited = true
 
+            if (node.messages.first { it.id == messageId }.isContextCheckpoint) {
+                // 摘要原地改写：新建分支会丢掉检查点标记，删除摘要时还会露出旧版本。
+                return@map node.copy(
+                    messages = node.messages.map { message ->
+                        if (message.id == messageId) message.copy(parts = processedParts) else message
+                    }
+                )
+            }
+
             node.copy(
                 messages = node.messages + UIMessage(
                     role = node.role,
@@ -3069,7 +3141,6 @@ class ChatService(
             conversationId,
             currentConversation.copy(
                 messageNodes = updatedNodes,
-                compressedHistory = null,
             )
         )
     }
@@ -3140,7 +3211,6 @@ class ChatService(
             conversationId,
             currentConversation.copy(
                 messageNodes = updatedNodes,
-                compressedHistory = null,
             )
         )
     }
@@ -3200,7 +3270,6 @@ class ChatService(
 
         return conversation.copy(
             messageNodes = updatedNodes,
-            compressedHistory = null,
         )
     }
 
