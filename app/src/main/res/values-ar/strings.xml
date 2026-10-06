@@ -289,7 +289,6 @@
   <string name="chat_message_tool_search_web">بحث في الويب: %1$s</string>
   <string name="chat_message_tool_submit">إرسال</string>
   <string name="chat_page_cancel">إلغاء</string>
-  <string name="chat_page_check_fast_model_settings">تحقق من إعدادات النموذج السريع</string>
   <string name="chat_page_clear_all_errors">مسح الكل</string>
   <string name="chat_page_compress_additional_prompt">تعليمات إضافية (اختياري)</string>
   <string name="chat_page_compress_additional_prompt_hint">حدد ما يجب الحفاظ عليه أو التركيز عليه</string>
@@ -827,8 +826,6 @@
   <string name="setting_display_page_show_thinking_content_title">إظهار محتوى التفكير</string>
   <string name="setting_display_page_show_token_usage_desc">عرض استخدام Token وعدد الرسائل</string>
   <string name="setting_display_page_show_token_usage_title">إظهار إحصاءات Token والسياق</string>
-  <string name="setting_display_page_show_updates_desc">ما إذا كان سيتم عرض إشعارات تحديث التطبيق</string>
-  <string name="setting_display_page_show_updates_title">إظهار التحديثات</string>
   <string name="setting_display_page_show_user_avatar_desc">تحديد ما إذا كان سيتم عرض صورة المستخدم الرمزية في رسائل الدردشة</string>
   <string name="setting_display_page_show_user_avatar_title">إظهار صورة المستخدم الرمزية</string>
   <string name="setting_display_page_skip_crop_image_desc">تخطي واجهة الاقتصاص بعد استيراد الصور أو التقاطها</string>
@@ -977,8 +974,6 @@
   <string name="setting_page_preferences_general">عام</string>
   <string name="setting_page_preferences_general_desc">سلوك التفاعل، التمرير، إعدادات الإدخال</string>
   <string name="setting_page_preferences_network">الشبكة</string>
-  <string name="setting_page_preferences_network_auto_retry">إعادة المحاولة التلقائية</string>
-  <string name="setting_page_preferences_network_auto_retry_desc">إعادة محاولة طلبات النموذج حتى 3 مرات عند حدوث أخطاء الشبكة.</string>
   <string name="setting_page_preferences_network_desc">إعدادات User-Agent وطلبات الشبكة</string>
   <string name="setting_page_preferences_network_proxy">الوكيل</string>
   <string name="setting_page_preferences_network_proxy_desc">يدعم عناوين URL لوكيل HTTP و SOCKS5. اتركه فارغًا لاستخدام إعدادات النظام.</string>
@@ -1309,11 +1304,6 @@
   <string name="translator_page_translate">ترجم</string>
   <string name="tts">TTS</string>
   <string name="unpin_chat">إلغاء تثبيت الدردشة</string>
-  <string name="update_card_check_failed">فشل التحقق من التحديث</string>
-  <string name="update_card_close">إغلاق</string>
-  <string name="update_card_downloading">جارٍ التنزيل، يرجى التحقق من شريط الحالة لمتابعة التقدم</string>
-  <string name="update_card_new_version_found">تم العثور على إصدار جديد %s</string>
-  <string name="update_card_unknown_error">خطأ غير معروف</string>
   <string name="upload_file">رفع ملف</string>
   <string name="use_web_search">البحث في الويب</string>
   <string name="user_default_name">المستخدم</string>
