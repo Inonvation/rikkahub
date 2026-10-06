@@ -107,7 +107,7 @@ internal fun FilesPicker(
     /** 网络搜索状态/服务更新：与输入栏搜索按钮共用同一组回调 */
     enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
-    onUpdateSearchService: (Int) -> Unit,
+    onUpdateSearchSelection: (index: Int, enabledServiceIds: List<Uuid>) -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
     showCompressDialog: Boolean,
@@ -471,7 +471,7 @@ internal fun FilesPicker(
                     settings = settings,
                     model = chatModel,
                     onUpdateSearchMode = onUpdateSearchMode,
-                    onUpdateSearchService = onUpdateSearchService,
+                    onUpdateSearchSelection = onUpdateSearchSelection,
                     onDismiss = { showSearchSheet = false },
                     modifier = Modifier.fillMaxWidth(),
                 )

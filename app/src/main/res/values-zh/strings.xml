@@ -1969,5 +1969,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
     <string name="search_picker_off">关闭</string>
     <string name="search_picker_status_off">已关闭</string>
     <string name="search_picker_off_description">模型只根据已有知识回答，不会访问网络。</string>
+    <string name="search_picker_local_title">本地搜索</string>
+    <string name="search_picker_local_description">接入各种三方搜索提供商</string>
+    <string name="search_picker_model_title">模型搜索</string>
+    <string name="search_picker_model_description">模型提供商云端自带搜索</string>
+    <string name="search_picker_select_provider">选择搜索服务商</string>
 </resources>
 

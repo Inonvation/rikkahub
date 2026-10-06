@@ -1024,10 +1024,11 @@ private fun ChatPageContent(
                 )
             )
         }
-        val updateSearchService: (Int) -> Unit = { index ->
+        val updateSearchSelection: (Int, List<Uuid>) -> Unit = { index, enabledServiceIds ->
             vm.updateSettings(
                 setting.copy(
-                    searchServiceSelected = index
+                    searchServiceSelected = index,
+                    enabledSearchServiceIds = enabledServiceIds,
                 )
             )
         }
@@ -1186,7 +1187,7 @@ private fun ChatPageContent(
                 vm = vm,
                 enableSearch = enableWebSearch,
                 onUpdateSearchMode = updateSearchMode,
-                onUpdateSearchService = updateSearchService,
+                onUpdateSearchSelection = updateSearchSelection,
                 onDismiss = { showFilesSheet = false },
             )
         }
@@ -1263,10 +1264,10 @@ private fun ChatFilesPickerSheet(
     conversation: Conversation,
     assistant: Assistant,
     vm: ChatVM,
-    /** 网络搜索状态与服务更新：与输入栏搜索按钮共用同一组逻辑（ChatPage 顶层提取的 updateSearchMode/updateSearchService） */
+    /** 网络搜索状态与服务更新：与输入栏搜索按钮共用同一组逻辑（ChatPage 顶层提取的 updateSearchMode/updateSearchSelection） */
     enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
-    onUpdateSearchService: (Int) -> Unit,
+    onUpdateSearchSelection: (index: Int, enabledServiceIds: List<Uuid>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1435,7 +1436,7 @@ private fun ChatFilesPickerSheet(
             },
             enableSearch = enableSearch,
             onUpdateSearchMode = onUpdateSearchMode,
-            onUpdateSearchService = onUpdateSearchService,
+            onUpdateSearchSelection = onUpdateSearchSelection,
             onUpdateAssistant = {
                 vm.updateSettings(
                     setting.copy(

@@ -40,9 +40,9 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -83,7 +83,9 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.setting.SearchAbilityTagLine
+import kotlin.uuid.Uuid
 
 enum class SearchMode {
     OFF,
@@ -99,7 +101,7 @@ fun SearchPickerButton(
     settings: Settings,
     modifier: Modifier = Modifier,
     onUpdateSearchMode: (SearchMode) -> Unit,
-    onUpdateSearchService: (Int) -> Unit,
+    onUpdateSearchSelection: (index: Int, enabledServiceIds: List<Uuid>) -> Unit,
     model: Model?,
     compact: Boolean = false,
 ) {
@@ -168,7 +170,7 @@ fun SearchPickerButton(
                 settings = settings,
                 model = model,
                 onUpdateSearchMode = onUpdateSearchMode,
-                onUpdateSearchService = onUpdateSearchService,
+                onUpdateSearchSelection = onUpdateSearchSelection,
                 onDismiss = { showSearchPicker = false },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -183,7 +185,7 @@ internal fun SearchPicker(
     model: Model?,
     modifier: Modifier = Modifier,
     onUpdateSearchMode: (SearchMode) -> Unit,
-    onUpdateSearchService: (Int) -> Unit,
+    onUpdateSearchSelection: (index: Int, enabledServiceIds: List<Uuid>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var selectingProvider by remember { mutableStateOf(false) }
@@ -208,10 +210,7 @@ internal fun SearchPicker(
         if (selecting) {
             SearchProviderPicker(
                 settings = settings,
-                onUpdateSearchService = { index ->
-                    onUpdateSearchService(index)
-                    selectingProvider = false
-                },
+                onUpdateSearchSelection = onUpdateSearchSelection,
                 onBack = { selectingProvider = false }
             )
         } else {
@@ -256,8 +255,6 @@ private fun SearchPickerMain(
         add(SearchMode.LOCAL)
         if (showModelSearch) add(SearchMode.BUILT_IN)
     }
-
-    val currentService = settings.searchServices.getOrNull(settings.searchServiceSelected)
 
     Column(
         modifier = Modifier
@@ -386,31 +383,41 @@ private fun SearchPickerMain(
             enter = expandVertically(MaterialTheme.motionScheme.fastSpatialSpec()) + fadeIn(),
             exit = shrinkVertically(MaterialTheme.motionScheme.fastSpatialSpec()) + fadeOut(),
         ) {
-            SegmentedListItem(
-                onClick = onSelectProvider,
-                shapes = ListItemDefaults.segmentedShapes(index = 0, count = 1),
-                modifier = Modifier.padding(top = 16.dp),
-                leadingContent = {
-                    if (currentService != null) {
-                        AutoAIIcon(
-                            name = currentService.displayName,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    } else {
-                        Icon(HugeIcons.GlobalSearch, contentDescription = null)
+            // 展示全部已启用的服务商（多开），末行进入选择/管理
+            val enabledServices =
+                settings.searchServices.filter { it.id in settings.enabledSearchServiceIds }
+            Column(modifier = Modifier.padding(top = 16.dp)) {
+                enabledServices.forEachIndexed { index, service ->
+                    SegmentedListItem(
+                        onClick = onSelectProvider,
+                        shapes = ListItemDefaults.segmentedShapes(
+                            index = index,
+                            count = enabledServices.size + 1,
+                        ),
+                        leadingContent = {
+                            AutoAIIcon(
+                                name = service.displayName,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        },
+                        supportingContent = { SearchAbilityTagLine(options = service) },
+                    ) {
+                        Text(service.displayName)
                     }
-                },
-                supportingContent = currentService?.let {
-                    { SearchAbilityTagLine(options = it) }
-                },
-                trailingContent = {
-                    Icon(HugeIcons.ArrowRight01, contentDescription = null)
-                },
-            ) {
-                Text(
-                    text = currentService?.displayName
-                        ?: stringResource(R.string.search_picker_select_provider)
-                )
+                }
+                SegmentedListItem(
+                    onClick = onSelectProvider,
+                    shapes = ListItemDefaults.segmentedShapes(
+                        index = enabledServices.size,
+                        count = enabledServices.size + 1,
+                    ),
+                    leadingContent = { Icon(HugeIcons.GlobalSearch, contentDescription = null) },
+                    trailingContent = {
+                        Icon(HugeIcons.ArrowRight01, contentDescription = null)
+                    },
+                ) {
+                    Text(stringResource(R.string.search_picker_select_provider))
+                }
             }
         }
     }
@@ -456,10 +463,32 @@ private fun SheetHeader(
 @Composable
 private fun SearchProviderPicker(
     settings: Settings,
-    onUpdateSearchService: (Int) -> Unit,
+    onUpdateSearchSelection: (index: Int, enabledServiceIds: List<Uuid>) -> Unit,
     onBack: () -> Unit,
 ) {
     val services = settings.searchServices
+    val toaster = LocalToaster.current
+    val atLeastOneMsg = stringResource(R.string.setting_page_search_at_least_one)
+    // 主服务商索引（越界兜底），切换启用时保持不变
+    val primaryIndex = settings.searchServiceSelected.coerceIn(0, (services.size - 1).coerceAtLeast(0))
+
+    // 开关：切换该服务商是否启用（多选）；点击行：设为主服务商。一次原子写入，避免竞态覆盖
+    fun toggleEnabled(serviceId: Uuid, checked: Boolean) {
+        val current = settings.enabledSearchServiceIds
+        val newIds = if (checked) {
+            if (serviceId in current) current else current + serviceId
+        } else {
+            // 至少保留一个启用的服务商；静默拒绝时提示用户
+            if (current.size <= 1) {
+                toaster.show(atLeastOneMsg)
+                current
+            } else {
+                current - serviceId
+            }
+        }
+        onUpdateSearchSelection(primaryIndex, newIds)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -475,17 +504,17 @@ private fun SearchProviderPicker(
             },
         )
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .selectableGroup(),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
             itemsIndexed(services) { index, service ->
-                val selected = settings.searchServiceSelected == index
+                val enabled = service.id in settings.enabledSearchServiceIds
+                val isPrimary = settings.searchServiceSelected == index
                 SegmentedListItem(
-                    selected = selected,
-                    onClick = { onUpdateSearchService(index) },
+                    selected = enabled,
+                    // 点击行：设为主服务商（启用状态由右侧开关控制）
+                    onClick = { onUpdateSearchSelection(index, settings.enabledSearchServiceIds) },
                     shapes = ListItemDefaults.segmentedShapes(index = index, count = services.size),
                     leadingContent = {
                         AutoAIIcon(
@@ -494,10 +523,26 @@ private fun SearchProviderPicker(
                         )
                     },
                     supportingContent = {
-                        SearchAbilityTagLine(options = service)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SearchAbilityTagLine(options = service)
+                            // 主服务商标注
+                            if (isPrimary) {
+                                Text(
+                                    text = stringResource(R.string.search_picker_primary),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                     },
                     trailingContent = {
-                        RadioButton(selected = selected, onClick = null)
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { toggleEnabled(service.id, it) },
+                        )
                     },
                 ) {
                     Text(service.displayName)
