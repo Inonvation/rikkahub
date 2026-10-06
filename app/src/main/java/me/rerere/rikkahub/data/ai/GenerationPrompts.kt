@@ -31,7 +31,7 @@ import java.time.ZoneOffset
  * 见 WireTool.kt），使用策略/格式规范/清单一律走 systemPrompt（不裁剪、按内容去重、
  * 逐字节稳定）。新增工具时先读 docs/ai-experience-optimization-plan.md。
  */
-internal const val PROMPT_REVISION = "2026-09-18-v1"
+internal const val PROMPT_REVISION = "2026-10-06-v1"
 
 /** 身份兜底：助手提示词与用户资料均为空时的最小身份行（稳定不变，保缓存前缀）。 */
 internal const val BASE_IDENTITY_PROMPT =

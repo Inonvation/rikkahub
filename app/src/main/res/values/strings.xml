@@ -1066,7 +1066,6 @@
   <string name="setting_page_console_nav_search">搜索服务</string>
   <string name="setting_page_console_nav_mcp">MCP 服务器</string>
   <string name="setting_page_console_nav_files">文件</string>
-  <string name="setting_page_console_nav_device_audit">设备审计</string>
   <string name="setting_page_console_nav_stats">使用统计</string>
   <string name="management_page_config_manifest">导出清单</string>
   <string name="management_page_config_providers">提供商配置</string>
@@ -1125,7 +1124,6 @@
   <string name="setting_page_console_footer_limit_desc">超出上限的指标收进 +N 菜单，避免挤占一行排版</string>
   <string name="setting_page_trusted_folders">信任文件夹</string>
   <string name="setting_page_study_tools">学习工具</string>
-  <string name="setting_page_device_capability">设备能力</string>
   <string name="setting_mode_page_title">默认模式</string>
   <string name="setting_mode_page_group_intro">模式说明</string>
   <string name="setting_mode_page_new_mode_title">新建模式</string>

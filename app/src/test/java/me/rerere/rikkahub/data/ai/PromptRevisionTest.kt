@@ -57,6 +57,6 @@ class PromptRevisionTest {
             ASSISTANT_ADMIN_SYSTEM_PROMPT,
         )
 
-        assertEquals("PROMPT_REVISION 未随稳定提示词片段同步升级", "58513989da0e7f52", fingerprint)
+        assertEquals("PROMPT_REVISION 未随稳定提示词片段同步升级", "b63355ef488eb275", fingerprint)
     }
 }

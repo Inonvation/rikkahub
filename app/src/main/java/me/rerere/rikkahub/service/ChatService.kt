@@ -84,7 +84,6 @@ import me.rerere.rikkahub.data.ai.estimateFallbackComposition
 import me.rerere.rikkahub.data.ai.estimateTokens
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
-import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
 import me.rerere.rikkahub.data.ai.tools.isSubAgentPlaceholder
 import me.rerere.rikkahub.data.ai.tools.subAgentResultPayload
 import me.rerere.rikkahub.data.ai.tools.SubAgentCommands
@@ -392,7 +391,6 @@ class ChatService(
     private val templateTransformer: TemplateTransformer,
     private val providerManager: ProviderManager,
     private val localTools: LocalTools,
-    private val deviceTools: DeviceTools,
     val mcpManager: McpManager,
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
@@ -430,7 +428,6 @@ class ChatService(
         subAgentRunner = subAgentRunner,
         studyTools = studyTools,
         localTools = localTools,
-        deviceTools = deviceTools,
         conversationRepo = conversationRepo,
         workspaceRepository = workspaceRepository,
         trustedFolderRepository = trustedFolderRepository,
@@ -1870,7 +1867,7 @@ class ChatService(
                 conversation.effectiveMessages()
             }.dropPresetMessages(assistant.presetMessages)
             // 工具装配：注册表按 effective 策略过滤条目（模式 ∩ 助手 ∩ 全局可用性已在
-            // withAvailability 折叠）；各工厂内部的就绪检查（MCP 连接状态/Shizuku/rootfs）保留为运行时兜底。
+            // withAvailability 折叠）；各工厂内部的就绪检查（MCP 连接状态/rootfs）保留为运行时兜底。
             val chatTools = try {
                 chatToolRegistry.assemble(
                     ChatToolRegistry.Request(
@@ -1936,7 +1933,7 @@ class ChatService(
                 },
                 outputTransformers = outputTransformers,
                 // 工具装配：只看 effective 策略（模式 ∩ 助手 ∩ 全局可用性已在 withAvailability 折叠）；
-                // 各工厂内部的就绪检查（MCP 连接状态/Shizuku/rootfs）保留为运行时兜底。
+                // 各工厂内部的就绪检查（MCP 连接状态/rootfs）保留为运行时兜底。
                 tools = chatTools,
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新

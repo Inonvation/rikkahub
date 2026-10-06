@@ -18,7 +18,6 @@ import me.rerere.hugeicons.stroke.Bot
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -29,7 +28,7 @@ import org.koin.androidx.compose.koinViewModel
 
 /**
  * 扩展管理二级页：聚合工作区、知识库、快捷消息、提示词、技能、Agent 动作、
- * 学习工具、信任文件夹、设备能力 9 个入口，逐条跳转到现有页面。
+ * 学习工具、信任文件夹 8 个入口，逐条跳转到现有页面。
  */
 @Composable
 fun SettingExtensionsPage(vm: SettingVM = koinViewModel()) {
@@ -90,12 +89,6 @@ fun SettingExtensionsPage(vm: SettingVM = koinViewModel()) {
                     onClick = { navController.navigate(Screen.TrustedFolders) },
                     leadingContent = { Icon(HugeIcons.Folder01, null) },
                     headlineContent = { Text(stringResource(R.string.setting_page_trusted_folders)) },
-                    trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                )
-                item(
-                    onClick = { navController.navigate(Screen.SettingDevice) },
-                    leadingContent = { Icon(HugeIcons.SmartPhone01, null) },
-                    headlineContent = { Text(stringResource(R.string.setting_page_device_capability)) },
                     trailingContent = { Icon(HugeIcons.ArrowRight01, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }

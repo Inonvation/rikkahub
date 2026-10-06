@@ -381,9 +381,6 @@ object AgentConfigImporter {
             "ask_user" -> LocalToolOption.AskUser
             "screen_time" -> LocalToolOption.ScreenTime
             "calendar" -> LocalToolOption.Calendar
-            "device_doctor" -> LocalToolOption.DeviceDoctor
-            "storage_cleaner" -> LocalToolOption.StorageCleaner
-            "freeze_apps" -> LocalToolOption.FreezeApps
             else -> null
         }
     }

@@ -274,9 +274,6 @@ object AgentConfigExporter {
         LocalToolOption.AskUser -> "ask_user"
         LocalToolOption.ScreenTime -> "screen_time"
         LocalToolOption.Calendar -> "calendar"
-        LocalToolOption.DeviceDoctor -> "device_doctor"
-        LocalToolOption.StorageCleaner -> "storage_cleaner"
-        LocalToolOption.FreezeApps -> "freeze_apps"
         LocalToolOption.ChartDisplay -> "chart_display"
     }
 }

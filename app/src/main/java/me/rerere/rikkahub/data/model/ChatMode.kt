@@ -41,7 +41,6 @@ enum class ChatMode {
                 Capability.SKILL_USE +
                 Capability.WORKSPACE + Capability.TRUSTED_FOLDER +
                 Capability.SKILL_ADMIN + Capability.MCP_ADMIN + Capability.CREATIVE_TOOLS +
-                Capability.DEVICE_TOOLS +
                 Capability.PROVIDER_ADMIN + Capability.ASSISTANT_ADMIN +
                 Capability.SETTINGS_ADMIN + Capability.DATA_ADMIN
         )
@@ -73,7 +72,7 @@ fun ChatModePolicy.restrictedCapabilities(settings: Settings): Set<Capability> {
  *
  * 门控公式：effective = policy.allows(family) && settings.globalEnabled(family)
  *           && assistant.optIn(family) && runtime.ready(family)。
- * 这里折叠前三层；L4 运行时就绪中「工具工厂能自行判空」的部分（MCP 连接状态、Shizuku、
+ * 这里折叠前三层；L4 运行时就绪中「工具工厂能自行判空」的部分（MCP 连接状态、
  * 工作区 rootfs）仍由各工具工厂兜底，此处只裁决声明级可用性。
  *
  * 「能用」与「能管理」分离：MCP_USE 只看助手是否绑定了服务器（optIn），
@@ -173,9 +172,6 @@ enum class Capability(val managementOnly: Boolean = false) {
     /** 学习工具（生词/笔记/错题/知识卡/测验） */
     STUDY,
 
-    /** 设备工具族（诊断/存储/冻结，依赖 Shizuku） */
-    DEVICE_TOOLS,
-
     /** 历史对话引用/会话搜索 */
     HISTORY,
 
@@ -251,7 +247,6 @@ data class ChatModePolicy(
     val allowSubAgent: Boolean get() = Capability.SUBAGENT in capabilities
     val allowQuestionSolver: Boolean get() = Capability.QUESTION_SOLVER in capabilities
     val allowStudy: Boolean get() = Capability.STUDY in capabilities
-    val allowDeviceTools: Boolean get() = Capability.DEVICE_TOOLS in capabilities
     val allowHistory: Boolean get() = Capability.HISTORY in capabilities
     val allowKnowledge: Boolean get() = Capability.KNOWLEDGE in capabilities
     val includePromptInjection: Boolean get() = Capability.PROMPT_INJECTION in capabilities

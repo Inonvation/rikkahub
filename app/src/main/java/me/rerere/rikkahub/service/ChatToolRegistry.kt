@@ -30,7 +30,6 @@ import me.rerere.rikkahub.data.ai.tools.createTrustedFolderTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceAdminTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.ai.tools.createQuestionSolverTools
-import me.rerere.rikkahub.data.ai.tools.device.DeviceTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.subagent.SubAgentRunner
 import me.rerere.rikkahub.data.config.AgentConfigRepository
@@ -69,7 +68,7 @@ fun interface KnowledgeToolFactory {
  * 三条约定（改动前先读懂）：
  * 1. 下游只看 effective 策略——模式白名单 ∩ 助手/全局/运行时可用性已在
  *    [ChatModePolicy.withAvailability] 折叠，本表只按能力集合过滤条目，不做二次门控；
- * 2. 各工厂内部的就绪检查（MCP 连接状态/Shizuku/rootfs/绑定项目存在性）保留为 L4 运行时兜底；
+ * 2. 各工厂内部的就绪检查（MCP 连接状态/rootfs/绑定项目存在性）保留为 L4 运行时兜底；
  * 3. 条目书写顺序不影响 provider 收到的 tools 数组——GenerationHandler 发送前统一 canonicalToolOrder()，
  *    排列只由能力集合决定。
  *
@@ -84,7 +83,6 @@ class ChatToolRegistry(
     private val subAgentRunner: SubAgentRunner,
     private val studyTools: StudyTools,
     private val localTools: LocalTools,
-    private val deviceTools: DeviceTools,
     private val conversationRepo: ConversationRepository,
     private val workspaceRepository: WorkspaceRepository,
     private val trustedFolderRepository: TrustedFolderRepository,
@@ -139,10 +137,6 @@ class ChatToolRegistry(
         },
         Entry(setOf(Capability.LOCAL_TOOLS)) { req ->
             localTools.getTools(req.assistant.localTools)
-        },
-        Entry(setOf(Capability.DEVICE_TOOLS)) { _ ->
-            // Shizuku 未就绪时工厂返回空列表（L4 兜底）
-            deviceTools.getAllTools()
         },
         Entry(setOf(Capability.HISTORY)) { req ->
             createConversationTools(conversationRepo, req.assistant.id)

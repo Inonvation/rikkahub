@@ -263,7 +263,6 @@ class ChatModeTest {
         assertFalse(Capability.SKILL_ADMIN in policy.capabilities)
         assertFalse(Capability.MCP_ADMIN in policy.capabilities)
         assertFalse(Capability.CREATIVE_TOOLS in policy.capabilities)
-        assertFalse(Capability.DEVICE_TOOLS in policy.capabilities)
         assertEquals(AgentBehaviorProfile.LEGACY, policy.behaviorProfile)
     }
 
@@ -281,7 +280,7 @@ class ChatModeTest {
             Capability.SKILL_USE, Capability.SKILL_ADMIN,
             Capability.WORKSPACE, Capability.TRUSTED_FOLDER,
             Capability.SEARCH, Capability.MEMORY, Capability.HISTORY,
-            Capability.KNOWLEDGE, Capability.STUDY, Capability.DEVICE_TOOLS,
+            Capability.KNOWLEDGE, Capability.STUDY,
             Capability.SUBAGENT,
         )) {
             assertFalse("$family should be restricted for an empty assistant", family in effective.capabilities)

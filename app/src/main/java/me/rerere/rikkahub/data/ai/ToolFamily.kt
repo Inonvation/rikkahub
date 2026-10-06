@@ -27,7 +27,7 @@ enum class ToolFamily(val metricLabel: String, val displayLabel: String) {
     SUBAGENT("subagent", "subagents"),
     SKILL("skill", "skills"),
     MANAGEMENT("management", "management"),
-    /** 本地/设备工具（时间/剪贴板/JS/HTML/TTS/屏幕/日历/`eval_*` 等） */
+    /** 本地工具（时间/剪贴板/JS/HTML/TTS/屏幕/日历/`eval_*` 等） */
     LOCAL("local", "local device"),
     /** 未归类（未知工具名的兜底，避免误并入 LOCAL） */
     OTHER("other", "other"),
@@ -64,7 +64,7 @@ internal fun classifyToolFamily(name: String): ToolFamily = when {
         name.startsWith("conversation_admin_") || name.startsWith("audit_") ||
         name.startsWith("mode_") || name.startsWith("skill_admin_") ||
         name == "env_inspect" || name == "app_logs" -> ToolFamily.MANAGEMENT
-    // 本地/设备工具
+    // 本地工具
     name.startsWith("eval_") || name.startsWith("get_time") ||
         name.startsWith("clipboard") || name.startsWith("text_to_speech") ||
         name.startsWith("get_screen") || name.startsWith("calendar") ||

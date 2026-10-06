@@ -89,6 +89,20 @@ object SettingsJsonMigrator {
                 root["providers"] = JsonInstant.parseToJsonElement(migrated)
             }
 
+            // V9: 移除已删除的「设备能力」遗留取值（capabilities 中的 DEVICE_TOOLS、
+            // 助手 localTools 中的 device_doctor/storage_cleaner/freeze_apps）
+            if (RemovedDeviceFeatureCleanup.containsRemovedValues(settingsJson)) {
+                root["assistants"]?.let {
+                    root["assistants"] = RemovedDeviceFeatureCleanup.cleanAssistants(it)
+                }
+                root["customModes"]?.let {
+                    root["customModes"] = RemovedDeviceFeatureCleanup.cleanCustomModes(it)
+                }
+                root["builtinModeOverrides"]?.let {
+                    root["builtinModeOverrides"] = RemovedDeviceFeatureCleanup.cleanBuiltinModeOverrides(it)
+                }
+            }
+
             JsonInstant.encodeToString(JsonObject(root))
         }.onFailure {
             Log.e(TAG, "migrate: Failed to migrate settings JSON, using original", it)

@@ -37,7 +37,6 @@ import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.rikkahub.data.shizuku.ShizukuService
 import me.rerere.workspace.WorkspaceManager
 import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
@@ -74,9 +73,6 @@ class RikkaHubApp : Application() {
 
         // 打开 app 即执行工作区自启动脚本/服务（普通脚本跑一遍, *.service.sh 常驻到 app 退出）
         bootWorkspaceAutostart()
-
-        // Init Shizuku (device capability layer)
-        ShizukuService.initialize(this)
 
         // 应用待恢复的 DB（必须在任何 get<AppDatabase>() 之前同步完成）
         applyPendingDbRestore()
