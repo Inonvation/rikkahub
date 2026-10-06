@@ -326,13 +326,24 @@ class SkillUpdateManager(
         }
 
         val manifest = source.fileHashes
-        val changes = SkillUpdateDiff.computeChangeSet(manifest, remote)
+        // 旧记录无 per-file 清单（安装早于清单特性）：以本地磁盘为差异基线（磁盘 blob SHA
+        // 与 trees API 同源可比），仅与远端不一致的文件进入下载集，不再退化为全量下载。
+        val legacyDiskShas = if (manifest.isEmpty()) {
+            SkillContentHash.computeDirBlobShas(skillDir).orEmpty()
+        } else null
+        val changes = if (legacyDiskShas != null) {
+            SkillUpdateDiff.computeChangeSetFromDisk(legacyDiskShas, remote)
+        } else {
+            SkillUpdateDiff.computeChangeSet(manifest, remote)
+        }
         if (changes.isEmpty()) {
-            // 内容实际一致：只刷新 SHA/ETag 记录，不重写文件
+            // 内容实际一致：只刷新 SHA/ETag 记录，不重写文件；旧记录顺带补上清单，
+            // 此后走精确增量比对与本地改动检测
             mutateLocked(skillName) {
                 it?.copy(
                     commitSha = headInfo?.sha ?: it.commitSha,
                     etag = headInfo?.etag ?: it.etag,
+                    fileHashes = if (manifest.isEmpty()) remote else it.fileHashes,
                     lastCheckedAt = System.currentTimeMillis(),
                     updateAvailable = false,
                     remoteSha = null,
@@ -344,7 +355,7 @@ class SkillUpdateManager(
         }
 
         // 本地磁盘逐文件 blob SHA：判断哪些变更文件会覆盖用户改动 + 哪些本地文件要保留
-        val diskShas = SkillContentHash.computeDirBlobShas(skillDir) ?: emptyMap()
+        val diskShas = legacyDiskShas ?: SkillContentHash.computeDirBlobShas(skillDir).orEmpty()
         val localState = SkillUpdateDiff.computeLocalState(manifest, diskShas)
 
         val toWritePaths = changes.filterNot { it is FileChange.Removed }.map { it.path }

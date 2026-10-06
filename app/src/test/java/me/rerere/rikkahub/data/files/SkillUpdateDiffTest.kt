@@ -41,9 +41,44 @@ class SkillUpdateDiffTest {
 
     @Test
     fun changeSetWithEmptyManifestDegradesToFullDownload() {
-        // 旧注册表（无清单）：全部远端文件记为 Added → 自然退化为全量下载
+        // computeChangeSet 本身的语义：空清单 → 全部远端文件记为 Added。
+        // 实际更新链路上，无清单旧记录改走 computeChangeSetFromDisk（磁盘基线），不再全量下载
         val remote = mapOf("SKILL.md" to "a", "assets/x" to "b")
         val changes = SkillUpdateDiff.computeChangeSet(emptyMap(), remote)
+        assertEquals(2, changes.size)
+        assertTrue(changes.all { it is FileChange.Added })
+    }
+
+    @Test
+    fun diskBaselineChangeSetOnlyDownloadsDivergentFiles() {
+        // 旧记录无清单：以磁盘为基线，仅远端有而磁盘缺失或不一致的文件需要下载
+        val disk = mapOf(
+            "SKILL.md" to "sha-same",
+            "assets/a.png" to "sha-old",
+            "notes/user.txt" to "sha-user", // 用户新增：磁盘独有
+        )
+        val remote = mapOf(
+            "SKILL.md" to "sha-same", // 一致：不下载
+            "assets/a.png" to "sha-new", // 上游已改：下载
+            "refs/new.md" to "sha-added", // 上游新增：下载
+        )
+        val changes = SkillUpdateDiff.computeChangeSetFromDisk(disk, remote)
+        assertEquals(
+            listOf(
+                FileChange.Modified("assets/a.png"),
+                FileChange.Added("refs/new.md"),
+            ),
+            changes,
+        )
+        // 磁盘独有文件绝不能判 Removed（无法区分用户新增/上游删除，保守保留）
+        assertTrue(changes.none { it is FileChange.Removed })
+    }
+
+    @Test
+    fun diskBaselineEmptyDiskStillFullDownload() {
+        // 磁盘缺失/为空时没有可用基线：仍全量下载
+        val remote = mapOf("SKILL.md" to "a", "assets/x" to "b")
+        val changes = SkillUpdateDiff.computeChangeSetFromDisk(emptyMap(), remote)
         assertEquals(2, changes.size)
         assertTrue(changes.all { it is FileChange.Added })
     }

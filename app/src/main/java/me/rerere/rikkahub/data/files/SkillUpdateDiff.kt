@@ -37,7 +37,8 @@ object SkillUpdateDiff {
 
     /**
      * 远端相对安装版本的变更集。manifest 为空（旧记录/首次登记失败）时
-     * 全部远端文件记为 Added —— 自然退化为全量下载，无需单独的兼容路径。
+     * 全部远端文件记为 Added —— 调用方对无清单的旧记录应改用
+     * [computeChangeSetFromDisk] 以磁盘为基线，避免退化为全量下载。
      */
     fun computeChangeSet(
         manifest: Map<String, String>,
@@ -56,6 +57,20 @@ object SkillUpdateDiff {
         }
         return changes.sortedBy { it.path }
     }
+
+    /**
+     * 无清单旧记录（安装早于 per-file 清单特性）的变更集：以本地磁盘为基线 ——
+     * 磁盘 blob SHA 与 trees API 的 blob SHA 同源，只有「远端有而磁盘缺失或不一致」
+     * 的文件需要下载（[FileChange.Added]/[FileChange.Modified]）。
+     *
+     * 磁盘独有文件无法区分「用户新增」与「上游已删除」，一律不判 Removed（保守保留），
+     * 与旧版全量下载路径的保留语义一致；一次更新/核对后清单即补全，此后走
+     * [computeChangeSet] 的精确比对。
+     */
+    fun computeChangeSetFromDisk(
+        disk: Map<String, String>,
+        remote: Map<String, String>,
+    ): List<FileChange> = computeChangeSet(disk, remote).filterNot { it is FileChange.Removed }
 
     /** 清单 vs 本地磁盘：找出被改动的 tracked 文件与用户新增的文件。 */
     fun computeLocalState(
